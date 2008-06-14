@@ -5,23 +5,23 @@
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n);
+use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v);
 use Getopt::Std;
 use Fcntl;
 use File::stat;
 use IO::Seekable;
 
 # Parse options
-if (! getopts("tnd:fo:p:e:l")) {
-        print "Usage: get_iplayer [-l] [-t] [-d <days to parse from site>] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
+if (! getopts("tnvd:fo:p:e:l")) {
+        print "Usage: get_iplayer [-l] [-t] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
         print "       -l          show long programme descriptions\n";
         print "       -t          test only - no download\n";
         print "       -f          flush cache\n";
-        print "       -d <days>   number of days of programmes to populate the cache with\n";
         print "       -e <secs>   cache expiry in seconds\n";
         print "       -o <dir>    Download output directory\n";
         print "       -p <url>    Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
         print "       -n          Do not perform XOR conversion\n";
+        print "       -v          verbose\n";
         exit 1;
 }
 
@@ -34,7 +34,6 @@ if (! -d $download_dir ) {
 }
 
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-my $days = $opt_d || 7;
 
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix = 'http://www.bbc.co.uk/programmes';
@@ -43,7 +42,7 @@ my %ua = (
   safari => "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
 );
 
-my (%links, %daymonth, %slot, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
+my (%links, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
 my $now = time();
 my $cachefile = '/tmp/iplayer.cache';
 my $webfile = $download_dir.'/index.html';
@@ -76,7 +75,7 @@ get_links();
 my $count = 1;
 for (sort keys %links) {
         my $desc = "- $descriptions{$_}" if $opt_l;
-	print "$count: $_ - $episodes{$_} - $daymonth{$_} $slot{$_} $desc\n" if ! $download;
+	print "$count: $_ - $episodes{$_} $desc\n" if ! $download;
 	$streams{$count} = $links{$_};
 	$prog_index{$_} = $count;
 	$count++;
@@ -89,7 +88,7 @@ if ($download_regex) {
 	print "Download Matches:\n";
 	for (@matches) {
 	        my $desc = "- $descriptions{$_}" if $opt_l;
-		print "$prog_index{$_}: $_ - $episodes{$_} - $daymonth{$_} $slot{$_} $desc\n";
+		print "$prog_index{$_}: $_ - $episodes{$_} $desc\n";
 		$download .= "$prog_index{$_},";
 	}
 }
@@ -112,19 +111,18 @@ if ($download) {
 exit 0;
 
 
-sub get_links_for_date {
-	my ($day, $month, $slot) = @_;
+sub get_links_all {
 	my $pageno = 1;
 	my $pid;
 	my @page;
-	print "Results for $day / $month / $slot:\n";
 	# Loop while we still get stream links
 	do {
 		@page = ();
-		my @html = `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null`;
+		my @html = `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
 
 		# Get the complete URL
-		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b009gn1m.shtml?filter=txdate%3A13-03&amp;filter=txslot%3Aafternoon&amp;start=1&amp;scope=iplayerlast7days&amp;version_pid=b009gmpz">In The Night Garden</a>
+		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
+		#        <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;scope=iplayeratoz&amp;start=33&amp;version_pid=b00c3kcd">
 		# We just need this in the form of /iplayer/page/item/b009gn1m.shtml|<progname>
 		# s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">([^<]+)<\/a>/$1|$2/g for @page;
 
@@ -141,12 +139,16 @@ sub get_links_for_date {
 		# parse @html array for episode info
 		for (my $i=0; $i<$#html; $i++) {
 			my $block;
-			# If this is a version_pid line
+			# If this is a version_pid line (i.e. one with anchor text in it)
 			if ( $html[$i] =~ /version_pid=\w+">[^<]+<\/a>/ ) {
+				# Need version_pid & url (note these are different pids)
 				# Get url
 				my $url = $html[$i];
+				my $pid = $html[$i];
 				$url =~ s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">[^<]+<\/a>/$1/g;
+				$pid =~ s/^.*href=\".*\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1/g;
 				chomp($url);
+				chomp($pid);
 				# get next 40 lines into a single string
 				for (my $j=1; $j<=40; $j++) {
 					$block .= $html[$i+$j];
@@ -159,27 +161,23 @@ sub get_links_for_date {
 				$progdata =~ s/\s*$//g;
                                 $progdata =~ s/\s*\|/|/g;
                                 $progdata =~ s/\|\s*/|/g;
-				print "url|title|episode|desc = '$url|$progdata'\n";
-				push @page, "$url|$progdata";
+				print "url|pid|title|episode|desc = '$url|$pid|$progdata'\n";
+				push @page, "$url|$pid|$progdata";
 			}
 		}
 
 
 		for (@page) {
-			my ($url, $progname, $episode, $desc) = split /\|/;
+			my ($url, $pid, $progname, $episode, $desc) = split /\|/;
 			#$url = $url_download_prefix.$url;
 			# Get the pid for duplicate detection
-			$pid = $url;
-			$pid =~ s/^.*\/(\w+)\.shtml/$1/g;
 			# Duplicate detection
 			if ( not defined $pids{$pid} ) {
 				$links{"$progname ($pid)"} = $url;
 				# Other hashes for categorisation
-				$daymonth{"$progname ($pid)"} = $day."/".$month;
-				$slot{"$progname ($pid)"} = $slot;
 				# Used to detect duplicates
 				$urls{$url} = "$progname ($pid)";
-				$pids{$pid} = "$progname/$episode/$day/$month/$slot";
+				$pids{$pid} = $pid;
 				$episodes{"$progname ($pid)"} = $episode;
 				$descriptions{"$progname ($pid)"} = $desc;
                                 print "  $progname - $episode - $desc\n";
@@ -196,6 +194,9 @@ sub get_links_for_date {
 }
 
 
+
+
+
 sub get_links {
 	my @cache;
 
@@ -208,18 +209,13 @@ sub get_links {
 	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
 	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
 
-		# Get last $days of listings
-		for (my $i=$days; $i>=0; $i--) {
-			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
-			for my $s qw(morning afternoon evening) {
-				get_links_for_date($d,$m,$s);
-			}
-		}
+		# Use A-Z,0-9 searchine '*' instead - less pages
+		get_links_all();
 
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort keys %links) {
-				print CACHE "$_|$links{$_}|$episodes{$_}|$descriptions{$_}|$daymonth{$_}|$slot{$_}\n";
+				print CACHE "$_|$links{$_}|$episodes{$_}|$descriptions{$_}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file
@@ -234,10 +230,8 @@ sub get_links {
 		for (@cache) {
 			# Populate %links from cache
 			chomp();
-			my ($progname, $url, $episode, $desc, $dm, $s) = split /\|/;
+			my ($progname, $url, $episode, $desc) = split /\|/;
                         $links{$progname} = $url;
-			$daymonth{$progname} = $dm;
-			$slot{$progname} = $s;
 			$urls{$url} = $progname;
 			$episodes{$progname} = $episode;
 			$descriptions{$progname} = $desc;
@@ -255,7 +249,7 @@ sub get_links {
             $title =~ s/^(.*)\s*\(.*$/$1/g;
             print HTML "<tr>
               <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg\"></a></td>
-              <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$episodes{$_}</td> <td>$daymonth{$_} $slot{$_}</td>
+              <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$episodes{$_}</td>
             </tr>
             <tr>
               <td colspan=4>$descriptions{$_}</td>
@@ -344,7 +338,7 @@ sub iphone_req {
   my $path = $url->path . ($url->query ? "?" . $url->query : "");
   my $host = $url->host;
 
-  ####print "--> $path\n";
+  print "--> $path\n" if $opt_v;
 
   my $req = <<EOF;
 GET $path HTTP/1.1\r
@@ -447,7 +441,7 @@ sub iplayer_decoder {
 	print FILE $buffer;
 
 	printf "\r%0.2f%%", $i/$length*100.0;
-	#printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset;
+	printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset if $opt_v;
   }
 
   # Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
