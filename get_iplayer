@@ -1,20 +1,43 @@
 #!/usr/bin/perl
 #
-# Lists and downloads BBC iplayer mp4 streams
+# get_iplayer
 #
+# Lists and downloads BBC iplayer mov streams
+#
+# Author: P Lewis
+# Email: iplayer (at sign) linuxcentre.net
+# License: GPLv3 (see LICENSE.txt)
+# Date: March 12th 2008
+#
+# Supports: 
+# * Downloading Mov streams from BBC Iplayer site - 20080312
+# * XOR decoding of downloaded files - 20080609
+# * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
+# * Caching of Index (default 24hrs)
+# * Creation of a basic html index file
+# * De-duplication of programme index
+# * HTTP Proxy support (now using curl for all downloads - yes - ugly shell invokation for now) - 20080609
+# * Regex search on programme name capability (makes it useful to run this from crontab)
+# * Tested on Linux (Fedora6/7/8/9)
+#
+# Requires:
+# * curl
+# * perl 5.8
+
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v);
+use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w);
 use Getopt::Std;
 use Fcntl;
 use File::stat;
 use IO::Seekable;
+my $DEBUG = 0;
 
 # Parse options
-if (! getopts("tnvdfo:p:e:l")) {
+if (! getopts("twnvdfo:p:e:l")) {
         print "Usage: get_iplayer [-l] [-t] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
-        print "       -l          show long programme descriptions\n";
+        print "       -l          show/search long programme descriptions\n";
         print "       -t          test only - no download\n";
         print "       -f          flush cache\n";
         print "       -e <secs>   cache expiry in seconds\n";
@@ -22,12 +45,10 @@ if (! getopts("tnvdfo:p:e:l")) {
         print "       -p <url>    Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
         print "       -n          Do not perform XOR decoding\n";
         print "       -d <file>   Perform XOR decoding on specified existing file\n";
+        print "       -w          keep whitespace in filenames\n";
         print "       -v          verbose\n";
         exit 1;
 }
-
-my $download = join ',', @ARGV;
-my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
 
 # XOR Decode-only mode
 if ($opt_d) {
@@ -41,12 +62,24 @@ if ($opt_d) {
 	exit 0;
 }
 
+# Put remaining non-option cmdline into $download
+my $download = join ',', @ARGV;
+my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
 # Check for valid dload dir
 if (! -d $download_dir ) {
   die ("ERROR: $download_dir does not exist\n");
 }
 
+# Web proxy
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
+print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+my $curl = "curl";
+$curl .= ' -#' if ! $opt_v;
+$curl .= ' -v' if $DEBUG;
+$curl .= " -x $proxy_url" if $proxy_url;
+# Set web proxy env vars
+$ENV{HTTP_PROXY} = $proxy_url if $proxy_url;
+$ENV{http_proxy} = $proxy_url if $proxy_url;
 
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix = 'http://www.bbc.co.uk/programmes';
@@ -60,28 +93,24 @@ my $now = time();
 my $cachefile = '/tmp/iplayer.cache';
 my $webfile = $download_dir.'/index.html';
 my $cache_secs = $opt_e || 86000;
-my ( $videourl, $video_id, $cookie, $title, $full, @vers, $prev_url );
 
 # Flush cache if required
 unlink ($cachefile) if $opt_f;
 
-# Assume the argv is a regex statement if it doesnt contain just numbers/commas
-# See if a URL conaining a PID is specified e.g. b00?????
+# Assume the argv is a regex statement if it doesn't contain just numbers/commas
+# See if a URL/URI containing a PID is specified e.g. b0??????
 my $download_regex;
-if ($download !~ /^[\d,]+$/) {
+if ($download && $download !~ /^[\d,]+$/) {
     $download_regex = $ARGV[0];
     # if we have a pid...
-    if ($download =~ /^.*b00[a-z,0-9]{5}.*$/) {
-      $download_regex =~ s/^.*(b00[a-z,0-9]{5}).*$/$1/g;
+    if ($download =~ /^.*b0[a-z,0-9]{6}.*$/) {
+      $download_regex =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
     }
     print "Seaching for programme names containing: '$download_regex'\n";
 }
 
-# Set web proxy env var if required
-$ENV{HTTP_PROXY} = $proxy_url if $proxy_url;
-$ENV{http_proxy} = $proxy_url if $proxy_url;
 
-# Get straem links from BBC iplayer site or from cache
+# Get stream links from BBC iplayer site or from cache
 get_links();
 
 # Print list of streams
@@ -97,7 +126,20 @@ for (sort keys %links) {
 # Get matching programmes
 if ($download_regex) {
 	$download = '';
-	my @matches = sort grep /$download_regex/i, keys %links;
+	my @matches;
+
+	# Search prognames and episode name
+	push @matches, sort grep /$download_regex/i, keys %links;
+
+	# Also search long descriptions if -l is specified
+	if ($opt_l) {
+		for (keys %links) {
+			if ( $descriptions{$_} =~ /$download_regex/i ) {
+				push @matches, $_;
+			}
+		}
+	}
+
 	print "Download Matches:\n";
 	for (@matches) {
 	        my $desc = "- $descriptions{$_}" if $opt_l;
@@ -111,13 +153,9 @@ if ($download) {
 	my @dl = split /[\s,]+/, $download;
 	for (@dl) {
 		chomp();
-		# Reset globals between dloads
-		$videourl = $video_id =	$cookie = $title = $full = $prev_url = '';
-		@vers = ();
                 if (! $opt_t) {
-		  print "Attempting to Download '$urls{$streams{$_}}': ";
-		  download_stream( $streams{$_} );
-		  download_stream_curl( $streams{$_} );
+		  print "INFO: Attempting to Download '$urls{$streams{$_}}':\n";
+		  download_stream_curl( $streams{$_}, "$urls{$streams{$_}}-$episodes{$urls{$streams{$_}}}" );
                 }
 	} 
 }
@@ -129,17 +167,18 @@ sub get_links_all {
 	my $pageno = 1;
 	my $pid;
 	my @page;
+
+	print "INFO: Getting Index page.\n";
+
 	# Loop while we still get stream links
 	do {
 		@page = ();
-		my @html = `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
+		print "DEBUG: $curl -A \"$ua{safari}\" \"http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz\" 2>/dev/null\n" if $DEBUG;
+		print "." if ! $opt_v;
+		my @html = `$curl -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
-		#        <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;scope=iplayeratoz&amp;start=33&amp;version_pid=b00c3kcd">
-		# We just need this in the form of /iplayer/page/item/b009gn1m.shtml|<progname>
-		# s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">([^<]+)<\/a>/$1|$2/g for @page;
-
                 # Get Episode info: Info follows for upto 40 lines after matched line, e.g.
 		#                                       <div class="resultSynopsis">
 		#                <p class="title">
@@ -175,7 +214,7 @@ sub get_links_all {
 				$progdata =~ s/\s*$//g;
                                 $progdata =~ s/\s*\|/|/g;
                                 $progdata =~ s/\|\s*/|/g;
-				print "url|pid|title|episode|desc = '$url|$pid|$progdata'\n";
+				print "url|pid|title|episode|desc = '$url|$pid|$progdata'\n" if $opt_v;
 				push @page, "$url|$pid|$progdata";
 			}
 		}
@@ -192,12 +231,13 @@ sub get_links_all {
 				# Used to detect duplicates
 				$urls{$url} = "$progname ($pid)";
 				$pids{$pid} = $pid;
+				#$prognames{$pid} = $progname;
 				$episodes{"$progname ($pid)"} = $episode;
 				$descriptions{"$progname ($pid)"} = $desc;
-                                print "  $progname - $episode - $desc\n";
+                                print "  $progname - $episode - $desc\n" if $opt_v;
 				# Link Validation here...
 			} else {
-				#print "WARNING: removing duplicate stream link for \"$progname ($episode)\" / $pids{$pid}\n";
+				print "WARNING: removing duplicate stream link for \"$progname ($episode)\" / $pid\n" if $opt_v;
 			}
 
 		}
@@ -206,9 +246,6 @@ sub get_links_all {
 	} while ($#page >= 0);
 	print "\n";
 }
-
-
-
 
 
 sub get_links {
@@ -232,7 +269,7 @@ sub get_links {
 				print CACHE "$_|$links{$_}|$episodes{$_}|$descriptions{$_}\n";
 			}
 			close (CACHE);
-			# Make sure anyone can read/write file
+			# Make sure anyone can read/write file (security risk here!!)
 			`chmod 777 $cachefile`;
 		} else {
 			print "Couldn't open cache file for writing\n";
@@ -280,129 +317,34 @@ sub get_links {
 }
 
 
-# Usage: download_stream (<pid>|<url>)
-
-sub download_stream {
+# Usage: download_stream_curl (<url>|<filename_prefix>)
+sub download_stream_curl {
 
 	my $id = shift;
 	$id = $1 if $id =~ /\/(b.*?)\.shtml/;
 	my $page = "http://www.bbc.co.uk/iplayer/page/item/$id.shtml";
 
-	my $sock = iphone_req($page, "safari", "");
+	my $file = shift;
+	# Remove spaces and brackets and change to underscores
+	$file =~ s/[\s\\\/\(\)]/_/g if ! $opt_w;
+	$file = "${download_dir}/${file}.mov";
 	
-	while(<$sock>) {
-	  print if $ENV{DEBUG};
-	  
-	  if(/Location: (.*)/) {
-	    $videourl = $1;
-	    $sock = iphone_req($1, "coremedia", "Range: bytes=0-1\r\n");
-	  } elsif(/Set-Cookie: (BBC-UID.*?);/i) {
-	    $cookie = $1;
-
-	    my $text = join "", <$sock>; # keepalive causes a pause here
-
-	    @vers = ($text =~ /iplayer.versions.*?Original.*?'(\w+)/s);
-	    push @vers, $text =~ /iplayer.versions(?:.*?pid\s*:\s*'(\w+)')+/sg;
-
-	    if(@vers) {
-	      $video_id = shift @vers;
-
-	      if($text =~ m!<p class="heading">([^<]+)</p>(?:.*?<h2>(.*?)</h2>)?!s) {
-	        $title = "$1" . ($2 ? " - $2" : "");
-	        $title =~ s/[^-A-Z0-9 ']/ /ig;
-	        $title =~ s/(?:^\s+|\s+$)//g;
-	        $title =~ s/\s{2,}/ /g;
-	      } else {
-	        $title = $video_id;
-	      }
-
-	      $sock = iphone_req("$url_download_prefix/$video_id?" . int(rand 1e6) . "%20", "coremedia", "Range: bytes=0-1\r\n");
-	    } else {
-	      print "ERROR: video id not found\n";
-	      return 1;
-	    }
-	  } elsif(!$full && /^Content-Range: .*\/(\d+)\r?$/) {
-	    $full = $1;
-	    $sock = iphone_req($videourl, "coremedia", "Range: bytes=0-$1\r\n");
-	  } elsif(/^\r?$/) {
-	    if(!$full) {
-	      if(@vers) { # try another version (maybe signed still available?)
-	        $video_id = shift @vers;
-	        $sock = iphone_req("$url_download_prefix/$video_id?" . int(rand 1e6) . "%20", "coremedia", "Range: bytes=0-1\r\n");
-	      } else {
-	        print  "ERROR: Didn't find anything to download!\n";
-                return 2;
-  	      }
-	    } else {
-	      save_to_file($sock, $full);
-	      return 0;
-	    }
-	  }
-	}
-	return 0;
-}
-
-
-sub iphone_req {
-  my($url, $ua, $add) = @_;
-  my $type = $prev_url ? "new_abs" : "new";
-  $url = URI->$type($url, $prev_url) unless ref $url;
-  $prev_url = $url;
-
-  my $path = $url->path . ($url->query ? "?" . $url->query : "");
-  my $host = $url->host;
-
-  print "--> $path\n" if $opt_v;
-
-  my $req = <<EOF;
-GET $path HTTP/1.1\r
-Accept: */*\r
-Accept-Language: en\r
-Accept-Encoding: gzip, deflate\r
-Cookie: $cookie\r
-User-Agent: $ua{$ua}\r
-Connection: keep-alive\r
-${add}Host: $host\r
-\r
-EOF
-  my $sock = IO::Socket::INET->new("$host:80") or die $!;
-  print $sock $req;
-  return $sock;
-}
-
-
-sub save_to_file {
-  my($sock, $full) = @_;
-
-  my $file = "$download_dir/$title.mp4";
-  # Remove spaces and change to underscores
-  $file =~ s/\s/_/g;
-  if ( -f $file ) {
-  	print "ERROR: File already exists - skipping....\n";
+	if ( -f $file ) {
+		print "ERROR: File $file already exists - skipping....\n";
 		return 0;
-  }
-  printf "\nSaving to $file (%0.1fMB)\n", $full/(1<<20);
+	} else {
+		print "Attempting to Download $file from $page\n";
+		print ("$curl -b cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' \$( $curl -i -c cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-1' \$( $curl -i -A '$ua{safari}' -c cookies.txt $page | grep 'pid       :' | cut -d\\' -f2 | sed 's/\\([0-9a-z]\\)/http:\\/\\/www.bbc.co.uk\\/mediaselector\\/3\\/auth\\/iplayer_streaming_http_mp4\\/\\1/' ) | grep Location | cut -d: -f2,3 )") if $DEBUG;
+		my $ret = system("$curl -b cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' \$( $curl -i -c cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-1' \$( $curl -i -A '$ua{safari}' -c cookies.txt $page | grep 'pid       :' | cut -d\\' -f2 | sed 's/\\([0-9a-z]\\)/http:\\/\\/www.bbc.co.uk\\/mediaselector\\/3\\/auth\\/iplayer_streaming_http_mp4\\/\\1/' ) | grep Location | cut -d: -f2,3 )");
+		if ($ret) {
+			print "ERROR: Failed to Download $file from $page. Skipping...\n";
+			return 1;
+		}
+	}
+	# XOR Decode if required
+	iplayer_decoder($file) if ! $opt_n;
 
-  open my $fh, ">$file" or die $!;
-  binmode $fh;
-  binmode $sock;
-  my $buf;
-  my($s,$p);
-
-  $|++;
-  my $start = time;
-  while($s=read $sock, $buf, 1<<16) {
-    $p+=$s;
-    printf "\r%0.2f%% (%0.2f KiB/s)",
-			($p/$full) * 100, $p / ((time - $start) || 1) / 1024;
-    print $fh $buf or die "HMM!";
-  }
-  print "\n";
-
-  # Decode if required
-  iplayer_decoder($file) if ! $opt_n;
-
-  return 0;
+	return 0;
 }
 
 
@@ -474,7 +416,8 @@ sub iplayer_decoder {
   close FILE || die "Closing: $!";
 }
 
-# Build XOR pattern
+
+# Build XOR pattern (there has gotta be a more efficient way of doing this)
 sub create_xor_string {
 	my $count = shift;
 
@@ -487,5 +430,3 @@ sub create_xor_string {
 	}
 	return $ret; 
 }
-
-exit 0;
