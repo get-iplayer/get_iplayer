@@ -7,8 +7,8 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 10th 2008
-# Version: 0.13
+# Date: June 11th 2008
+# Version: 0.14
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -21,11 +21,16 @@
 # * HTTP Proxy support - 20080610
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description capability (-l) - 20080610
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.14:
+# * Not using curl anymore - seems to fail through some firewalls mysteriously and will not work on Ubuntu
+# * Using LWP for all http requests
+# * Fixed indexing sort bug
 #
 # Requires:
-# * curl
 # * perl 5.8
+# * perl LWP
 
 use strict;
 use URI;
@@ -35,7 +40,12 @@ use Getopt::Std;
 use Fcntl;
 use File::stat;
 use IO::Seekable;
+use LWP::UserAgent;
+#use LWP::Debug qw(+);
+use HTTP::Cookies;
+use HTTP::Headers;
 my $DEBUG = 0;
+$|=1;
 
 sub usage {
 	print "Usage:\n";
@@ -89,12 +99,6 @@ my (%links, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
 my $proxy_opt;
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
 print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
-$proxy_opt = "-x $proxy_url" if $proxy_url;
-
-# curl options
-my $curl = "curl";
-$curl .= ' -#' if ! $opt_v;
-$curl .= ' -v' if $DEBUG;
 
 # XOR Decode-only mode
 if ($opt_d) {
@@ -162,7 +166,7 @@ exit 0 if $opt_t;
 # Do the downloads based on list of index numbers
 for (@download_list) {
         my $prog = $urls{$streams{$_}};
-        download_stream_curl( $links{$prog}, "${prog}-$episodes{$prog}" );
+        download_stream_lwp( $links{$prog}, "${prog}-$episodes{$prog}" );
 }
 
 exit 0;
@@ -195,16 +199,28 @@ sub get_links_all {
 	my $pageno = 1;
 	my $pid;
 	my @page;
-
-	print "INFO: Getting Index page.\n";
+	print "INFO: Getting Index page\n";
+	# Setup User agent
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout([10]);
+	$ua->proxy( ['http'] => $proxy_url );
+	$ua->agent( $ua{safari} );
 
 	# Loop while we still get stream links
 	my $count = 1;
 	do {
 		@page = ();
-		print "DEBUG: $curl $proxy_opt -A \"$ua{safari}\" \"${search_page_prefix}${pageno}\" 2>/dev/null\n" if $DEBUG;
-		print "." if ! $opt_v;
-		my @html = `$curl $proxy_opt -A "$ua{safari}" "${search_page_prefix}${pageno}" 2>/dev/null`;
+		print "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
+
+		# Get index pages
+		my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
+		my @html = split /\n/, $res->content;
+		if ( ! $res->is_success ) {
+			print "ERROR: Failed to get programme index page ${pageno} from iplayer site\n";
+			exit 2;
+		} else {
+			print ".";
+		}
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
@@ -303,7 +319,7 @@ sub get_links {
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
-			`chmod 777 $cachefile`;
+			chmod 0777, $cachefile;
 		} else {
 			print "Couldn't open cache file for writing\n";
 		}
@@ -353,8 +369,8 @@ sub get_links {
 }
 
 
-# Usage: download_stream_curl (<url>|<filename_prefix>)
-sub download_stream_curl {
+# Usage: download_stream_lwp (<url>|<filename_prefix>)
+sub download_stream_lwp {
 
 	my $id = shift;
 	my $file = shift;
@@ -364,40 +380,94 @@ sub download_stream_curl {
 
 	# Remove spaces and brackets and change to underscores
 	$file =~ s/[\\\/]/_/g;
-	$file =~ s/[\s\(\)]/_/g if ! $opt_w;
+	$file =~ s/\s/_/g if ! $opt_w;
+	$file =~ s/[\(\)]//g if ! $opt_w;
 	$file = "${download_dir}/${file}.mov";
-	
+		
 	if ( -f $file ) {
 		print "ERROR: File $file already exists - skipping....\n";
 		return 0;
 	} else {
-		print "Attempting to Download $file from $page\n";
+		print "INFO: Attempting to Download $file\n";
+		print "INFO: Stage 1 URL = $page\n" if $opt_v;
+		print "\rGetting iplayer programme page        " if ! $opt_v;
+
+		# Setup user agent
+		# Switch off automatic redirects
+		my $ua = LWP::UserAgent->new( requests_redirectable => [ 'POST' ] );
+		# 30 second request timeout
+		$ua->timeout([30]);
+		$ua->proxy( ['http'] => $proxy_url );
+		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 0 ) );
 		
+
 		# Stage 1: get PID and set cookie
-		chomp( my $pid_1 = (grep /pid       :/, `$curl $proxy_opt -i -A '$ua{safari}' -c $cookiejar "$page"`)[0] );
-		if ($?) {
+		$ua->agent( $ua{safari} );
+		# send request
+		my $res = $ua->request( HTTP::Request->new( GET => $page ) );
+		# Extract pid and type (i.e. Signed, Original, etc)
+		chomp( my ($type, $pid_1) = (grep /(type|pid )      :/, (split /\n/, $res->content) )[0,1] );
+		if ( ! $res->is_success ) {
 			print "ERROR: Failed to get programme ID from iplayer site\n";
 			return 1;
 		}
 		# Extract pid from e.g.: "    pid       : 'b00c0rmy',"
 		$pid_1 =~ s/^.*\'(b0[a-z,0-9]{6})\'.*$/$1/g;
+		$type =~ s/^.*type\s+:(.+)\s*$/$1/g;
 		my $url_1 = "${url_download_prefix}/$pid_1";
-		print "INFO: Stage 1 PID = $pid_1\nINFO: Stage 1 URL = $url_1\n" if $opt_v;
-		
+		print "INFO: Stage 2 Type = $type\n" if $opt_v;
+		print "INFO: Stage 2 URL = $url_1\n" if $opt_v;
+		print "\rGetting iplayer download URL         " if ! $opt_v;
+
+
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		# Cannot get proxying working here if redirect is cached
-		chomp( my $url_2 = (grep /Location/, `$curl $proxy_opt -i -c $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-1' "$url_1"`)[0] );
-		if ($?) {
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $ua{coremedia},
+			'Accept'	=> '*/*',
+			'Range'		=> 'bytes=0-1',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		my $url_2 = $res->header("location");
+		if ( ! $res->is_redirect ) {
 			print "ERROR: Failed to get redirect from iplayer site\n";
 			return 2;
 		}
-		print "INFO: Stage 2 URL = $url_2\n" if $opt_v;
 		# Extract redirection Location URL
 		$url_2 =~ s/^Location: (.*)$/$1/g;
-		
+		print "INFO: Stage 3 URL = $url_2\n" if $opt_v;
+
+
 		# Stage 3: Download File
-		my $ret = system("$curl $proxy_opt -b $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-' -o \"$file\" \"$url_2\"");
-		if ($ret) {
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $ua{coremedia},
+			'Accept'	=> '*/*',
+			'Range'		=> 'bytes=0-',
+		);
+		my $req = HTTP::Request->new ('GET', $url_2, $h);
+		# Set time to use for download rate calculation
+		my $now = time();
+		# Define callback sub that gets called during download request
+		# This sub actually writes to the open output file and reports on progress
+		my $callback = sub { 
+			my ($data, $res, undef) = @_;
+			print FILE $data;
+			my $size = stat($file)->size;
+			printf( "%8.3f MB %10.3f kbps %5.2f%%   \r", ($size/1024.0/1024.0), $size / (stat($file)->mtime - $now + 0.01) / 1024.0, (100.0*$size/$res->header("Content-Length")) );
+		};
+		if ( ! open(FILE, "> $file") ) {
+			print("ERROR: Cannot write to $file\n");
+			return 4;
+		}
+		# send request (turn off autoflush o/wise we have too many terminal updates)
+		$|=0;
+		print "\r                              \r";
+		my $res = $ua->request($req, $callback);
+		$|=1;
+		close FILE;
+		if (! $res->is_success) {
 			print "ERROR: Failed to Download $file\n";
 			unlink $cookiejar;
 			return 3;
@@ -411,17 +481,26 @@ sub download_stream_curl {
 }
 
 
+
 # In-place modification of an iplayer file to do that dodgy xor stuff
 #
 # Usage: iplayer_decode <filename>
 #
 sub iplayer_decoder {
+
   chomp( my $file = shift );
+  if (! -f $file) {
+	print "ERROR: File $file does not exist - no decoding performed\n";
+  	return 1;
+  }
+
   my $length =  stat($file)->size;
-  print "$file length = $length\n";
+  #print "$file length = $length\n";
 
-  open (FILE, "+<$file") || die "can't update $file: $!";
-
+  if (! open (FILE, "+<$file") ) {
+  	print "ERROR: Can't update $file: $!";
+  	return 1;
+  }
   my $buffer;
 
   # Use preferred blocksize
