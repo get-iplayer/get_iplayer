@@ -1,32 +1,29 @@
 #!/usr/bin/perl
 #
-# Gets BBC iplayer links
+# Lists and downloads BBC iplayer mp4 streams
 #
-# curl "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A12-03&filter=txslot%3Amorning&start=1&scope=iplayerlast7days" 2>/dev/null | grep 'version_pid=' | perl -p -e 's|^.*version_pid=(.+)\">([\w ]+)<\/a>$|http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/$1\|$2|g' | grep -v 7days
-#
-# download an specific mpeg4 file:
-#  curl --cookie-jar /tmp/xxx -vLA 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)' --proxy http://localhost:13128 http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/b008q01d
 use strict;
-#use LWP::UserAgent;
+use URI;
+use IO::Socket;
 
-my $download_script = './iplayer_dl';
-my $ask = 0;
 my $download = join ',', @ARGV;
-my $download_dir = './nfs/video/TV/iplayer';
-#my $download_dir = '.';
-my $VALIDATE = 0; # Use with caution - will generate loadsof web requests
-#my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/';
-my $url_download_prefix = 'http://www.bbc.co.uk';
-#my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)';
-my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420+ (KHTML, like Gecko) Version/3.0 Mobile/1A543a Safari/419.3';
-my $qt_user_agent = 'Apple iPhone v1.1.3 CoreMedia v1.0.0.4A93';
-my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || 'http://localhost:13128';
-#my $proxy_url = '';
-my $cache_secs = 86000;
-my $file = '/tmp/iplayer.cache';
+my $download_dir = "$ENV{HOME}/nfs/video/TV/iplayer";
+#my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || 'http://localhost:13128';
+my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
+my $days = 7;
+
+my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
+my %ua = (
+  coremedia => "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
+  safari => "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
+);
+
 my (%links, %daymonth, %slot, %filenames, %urls, %streams, %prog_index, %pids);
 my $now = time();
-my $days = 7;
+my $cachefile = '/tmp/iplayer.cache';
+my $cache_secs = 86000;
+my ( $videourl, $video_id, $cookie, $title, $full, @vers, $prev_url );
+
 
 # Assume the argv is a regex statement if it doesnt contain just numbers/commas
 my $download_regex;
@@ -76,72 +73,11 @@ if ($download) {
 	my @dl = split /[\s,]+/, $download;
 	for (@dl) {
 		chomp();
-		if ( ! -f "$download_dir/$filenames{$streams{$_}}.mov" ) {
-			print "Downloading ITEM=$_ FILE=$filenames{$streams{$_}}.mov\n"; # URL=$streams{$_}\n";
-			#print "curl --cookie-jar /tmp/xxx -LA \"$qt_user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}\n";
-			system("$download_script \"$streams{$_}\" $download_dir/$filenames{$streams{$_}}");
-#			system("curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}");
-#			download_stream( $streams{$_} );
-#			download_stream( 'http://www.bbc.co.uk/iplayer/page/item/b0094zhm.shtml?order=aztitle%3Aalphabetical' );
-#			download_stream('b0094zby');
-		} else {
-			print "ERROR: Already downloaded ITEM=$_ FILE=$filenames{$streams{$_}}\n"; # URL=$streams{$_}\n";
-		}
+		# Reset globals between dloads
+		$videourl = $video_id =	$cookie = $title = $full = $prev_url = '';
+		@vers = ();
+		download_stream( $streams{$_} );
 	} 
-}
-
-
-
-#sub download_stream {
-#	my $pid = shift;
-#	my $content;
-#	my $ua = new LWP::UserAgent;
-#
-#	my $random = int(rand(10000000));
-#	#selector = "http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/#{ pid }?#{r}"
-#	my $url = $url_download_prefix.$pid.'?'.$random;
-#
-#	# Various enhancement possibilities:
-#	# $ua->max_size(100000);  # 100k byte limit
-#	# $ua->timeout(3);        # 3 sec timeout is default
-#	# $ua->proxy(['http'], 'http://myproxy.mycorp.com/');  # set proxy
-#	# $ua->env_proxy()        # load proxy info from environment variables
-#	# $ua->no_proxy('localhost', 'mycorp.com');   # No proxy for local machines
-#
-#	$ua->agent($qt_user_agent);
-#
-#	my $req = new HTTP::Request GET => $url;
-#	$req->header('Range' => 'bytes=0-1');
-#	my $res = $ua->request($req);
-# 
-#	if ($res->is_success) {
-#		$content = $res->content;
-#		my $headers = $res->headers_as_string;
-#		print "\n$headers\n\n###############################################\n$content\n";
-#	} else {
-#		die "Could not get content";
-#	}
-#}
-
-
-# Ask user which stream to play
-if ($ask) {
-	do {
-		print "Which stream do you wish to download? ";
-		# Get answer from stdin
-		chomp( my $selection = <> );
-		# Return theplay if it exists in the %streams hash
-		if ( defined $streams{$selection} ) {
-			print "Playing...\n";
-			if ( system("mplayer -user-agent \"$user_agent\" -cookies-file /tmp/xxx -cookies -cache 4096 $streams{$selection}") != 0 ) {
-				print "ERROR: Stream could not be played...\n";
-			}
-		} elsif ( $selection == '0' ) {
-			exit 0; 
-		} else {
-			print "Invalid selection\n";
-		}
-	} while (1);
 }
 
 exit 0;
@@ -156,19 +92,19 @@ sub get_links_for_date {
 	# Loop while we still get stream links
 	do {
 		print ".";
-		chomp( @page = grep /version_pid=\w+">[^<]+<\/a>/, `curl $proxy_url -A "$user_agent" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null` );
+		chomp( @page = grep /version_pid=\w+">[^<]+<\/a>/, `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null` );
 
-
-		### Get the complate URL now...
+		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b009gn1m.shtml?filter=txdate%3A13-03&amp;filter=txslot%3Aafternoon&amp;start=1&amp;scope=iplayerlast7days&amp;version_pid=b009gmpz">In The Night Garden</a>
-		s/^.*href=\"(.*version_pid=\w+)">([^<]+)<\/a>/$1|$2/g for @page;
+		# We just need this in the form of /iplayer/page/item/b009gn1m.shtml|<progname>
+		s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">([^<]+)<\/a>/$1|$2/g for @page;
 
 		for (@page) {
 			my ($url, $progname) = split /\|/;
-			$url = $url_download_prefix.$url;
+			#$url = $url_download_prefix.$url;
 			# Get the pid for duplicate detection
 			$pid = $url;
-			$pid =~ s/^.*version_pid=//g;
+			$pid =~ s/^.*\/(\w+)\.shtml/$1/g;
 			# Duplicate detection
 			if ( not defined $pids{$pid} ) {
 				$links{"$progname ($day/$month)"} = $url;
@@ -178,16 +114,7 @@ sub get_links_for_date {
 				# Used to detect duplicates
 				$urls{$url} = "$progname ($day/$month)";
 				$pids{$pid} = "$progname/$day/$month/$slot";
-				
-				# Validate link if required
-				if ($VALIDATE) {
-					print "INFO: Validating stream link for $_\n";
-					`curl $proxy_url -A "$user_agent" -m 2 -I $links{"$progname ($day/$month)"} 2>&1 | grep statuscode=not_available >/dev/null 2>&1`;
-					if (! $?) {
-						delete $links{"$progname ($day/$month)"};
-						print "WARNING: removing invalid stream link for \"$progname ($day/$month)\"\n";
-					}
-				}
+				# Link Validation here...
 			} else {
 				print "WARNING: removing duplicate stream link for \"$progname ($day/$month)\" PID=$pid / $pids{$pid}\n";
 			}
@@ -199,17 +126,18 @@ sub get_links_for_date {
 	print "\n";
 }
 
+
 sub get_links {
 	my @cache;
 
 	# Open cache file (need to verify we can even read this)
-	if ( open(CACHE, "< $file") ) {
+	if ( open(CACHE, "< $cachefile") ) {
 		@cache = <CACHE>;
 		close (CACHE);
 	}
 
 	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
-	if ( ($cache[0] =~ /^0$/) || (! -f $file) || ($now >= ((stat($file))[9] + $cache_secs)) ) {
+	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ((stat($cachefile))[9] + $cache_secs)) ) {
 
 		# Get last $days of listings
 		for (my $i=$days; $i>=0; $i--) {
@@ -220,13 +148,13 @@ sub get_links {
 		}
 
 		# Open cache file for writing
-		if ( open(CACHE, "> $file") ) {
+		if ( open(CACHE, "> $cachefile") ) {
 			for (sort keys %links) {
 				print CACHE "$_|$links{$_}|$daymonth{$_}|$slot{$_}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file
-			`chmod 777 $file`;
+			`chmod 777 $cachefile`;
 		} else {
 			print "Couldn't open cache file for writing\n";
 		}
@@ -247,6 +175,7 @@ sub get_links {
 	return 0;
 }
 
+
 sub gen_html() {
 	my $webfile = shift;
 	if ( open(HTML, "> $webfile") ) {
@@ -261,6 +190,7 @@ sub gen_html() {
 	}
 }
 
+
 sub gen_fxd() {
 	my $fxdfile = shift;
 	if ( open(HTML, "> $fxdfile") ) {
@@ -274,6 +204,7 @@ sub gen_fxd() {
 		print "Couldn't open fxd file $fxdfile for writing\n";
 	}
 }
+
 
 sub gen_fxd_categorised() {
 	my $fxdfile = shift;
@@ -296,4 +227,124 @@ sub gen_fxd_categorised() {
 	} else {
 		print "Couldn't open fxd file $fxdfile for writing\n";
 	}
+}
+
+
+# Usage: download_stream (<pid>|<url>)
+
+sub download_stream {
+
+	my $id = shift;
+	$id = $1 if $id =~ /\/(b.*?)\.shtml/;
+	my $page = "http://www.bbc.co.uk/iplayer/page/item/$id.shtml";
+
+	my $sock = iphone_req($page, "safari", "");
+	
+	while(<$sock>) {
+	  print if $ENV{DEBUG};
+	  
+	  if(/Location: (.*)/) {
+	    $videourl = $1;
+	    $sock = iphone_req($1, "coremedia", "Range: bytes=0-1\r\n");
+	  } elsif(/Set-Cookie: (BBC-UID.*?);/i) {
+	    $cookie = $1;
+
+	    my $text = join "", <$sock>; # keepalive causes a pause here
+
+	    @vers = ($text =~ /iplayer.versions.*?Original.*?'(\w+)/s);
+	    push @vers, $text =~ /iplayer.versions(?:.*?pid\s*:\s*'(\w+)')+/sg;
+
+	    if(@vers) {
+	      $video_id = shift @vers;
+
+	      if($text =~ m!<p class="heading">([^<]+)</p>(?:.*?<h2>(.*?)</h2>)?!s) {
+	        $title = "$1" . ($2 ? " - $2" : "");
+	        $title =~ s/[^-A-Z0-9 ']/ /ig;
+	        $title =~ s/(?:^\s+|\s+$)//g;
+	        $title =~ s/\s{2,}/ /g;
+	      } else {
+	        $title = $video_id;
+	      }
+
+	      $sock = iphone_req("$url_download_prefix/$video_id?" . int(rand 1e6) . "%20", "coremedia", "Range: bytes=0-1\r\n");
+	    } else {
+	      print "ERROR: video id not found\n";
+	      return 1;
+	    }
+	  } elsif(!$full && /^Content-Range: .*\/(\d+)\r?$/) {
+	    $full = $1;
+	    $sock = iphone_req($videourl, "coremedia", "Range: bytes=0-$1\r\n");
+	  } elsif(/^\r?$/) {
+	    if(!$full) {
+	      if(@vers) { # try another version (maybe signed still available?)
+	        $video_id = shift @vers;
+	        $sock = iphone_req("$url_download_prefix/$video_id?" . int(rand 1e6) . "%20", "coremedia", "Range: bytes=0-1\r\n");
+	      } else {
+	        print  "ERROR: Didn't find anything to download!\n";
+                return 2;
+  	      }
+	    } else {
+	      save_to_file($sock, $full);
+	      return 0;
+	    }
+	  }
+	}
+	return 0;
+}
+
+
+sub iphone_req {
+  my($url, $ua, $add) = @_;
+  my $type = $prev_url ? "new_abs" : "new";
+  $url = URI->$type($url, $prev_url) unless ref $url;
+  $prev_url = $url;
+
+  my $path = $url->path . ($url->query ? "?" . $url->query : "");
+  my $host = $url->host;
+
+  print "--> $path\n";
+
+  my $req = <<EOF;
+GET $path HTTP/1.1\r
+Accept: */*\r
+Accept-Language: en\r
+Accept-Encoding: gzip, deflate\r
+Cookie: $cookie\r
+User-Agent: $ua{$ua}\r
+Connection: keep-alive\r
+${add}Host: $host\r
+\r
+EOF
+  my $sock = IO::Socket::INET->new("$host:80") or die $!;
+  print $sock $req;
+  return $sock;
+}
+
+
+sub save_to_file {
+  my($sock, $full) = @_;
+
+  my $file = "$download_dir/$title.mp4";
+  if ( -f $file ) {
+  	print "ERROR: File already exists - skipping....\n";
+		return 0;
+  }
+  printf "\nSaving to $file (%0.1fMB)\n", $full/(1<<20);
+
+  open my $fh, ">$file" or die $!;
+  binmode $fh;
+  binmode $sock;
+  my $buf;
+  my($s,$p);
+
+  $|++;
+  my $start = time;
+  while($s=read $sock, $buf, 1<<16) {
+    $p+=$s;
+    printf "\r%0.2f%% (%0.2f KiB/s)",
+			($p/$full) * 100, $p / ((time - $start) || 1) / 1024;
+    print $fh $buf or die "HMM!";
+  }
+  print "\n";
+  return 0;
 }
