@@ -5,12 +5,19 @@
 use strict;
 use URI;
 use IO::Socket;
+use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e);
+use Getopt::Std;
+
+# Parse options
+if (! getopts("td:fo:p:e:")) {
+        print "Usage: get_iplayer [-t] [-d <days to parse from site>] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index>\n";
+        exit 1;
+}
 
 my $download = join ',', @ARGV;
-my $download_dir = "$ENV{HOME}/nfs/video/TV/iplayer";
-#my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || 'http://localhost:13128';
-my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-my $days = 7;
+my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
+my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
+my $days = $opt_d || 7;
 
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my %ua = (
@@ -18,12 +25,14 @@ my %ua = (
   safari => "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
 );
 
-my (%links, %daymonth, %slot, %filenames, %urls, %streams, %prog_index, %pids);
+my (%links, %daymonth, %slot, %urls, %streams, %prog_index, %pids, %episodes);
 my $now = time();
 my $cachefile = '/tmp/iplayer.cache';
-my $cache_secs = 86000;
+my $cache_secs = $opt_e || 86000;
 my ( $videourl, $video_id, $cookie, $title, $full, @vers, $prev_url );
 
+# Flush cache if required
+unlink ($cachefile) if $opt_f;
 
 # Assume the argv is a regex statement if it doesnt contain just numbers/commas
 my $download_regex;
@@ -41,21 +50,11 @@ get_links();
 # Print list of streams
 my $count = 1;
 for (sort keys %links) {
-#	print "$count: $_ $daymonth{$_} $slot{$_} = $links{$_}\n";
-	print "$count: $_ $daymonth{$_} $slot{$_}\n" if ! $download;
+	print "$count: $_ - $episodes{$_} - $daymonth{$_} $slot{$_}\n" if ! $download;
 	$streams{$count} = $links{$_};
 	$prog_index{$_} = $count;
-	# Munge program name to create a filename
-	$filenames{$links{$_}} = "$_";
-	$filenames{$links{$_}} =~ s/\s/_/g;
-	$filenames{$links{$_}} =~ s/[\(\)']//g;
-	$filenames{$links{$_}} =~ s/\//-/g;
 	$count++;
 }
-
-# Generate ugly html index
-gen_html("iplayer.html");
-#gen_fxd_categorised("iplayer.fxd");
 
 # Get matching programmes
 if ($download_regex) {
@@ -63,7 +62,7 @@ if ($download_regex) {
 	my @matches = sort grep /$download_regex/, keys %links;
 	print "Download Matches:\n";
 	for (@matches) {
-		print "$prog_index{$_}: $_ $daymonth{$_} $slot{$_}\n";
+		print "$prog_index{$_}: $_ $episodes{$_} $daymonth{$_} $slot{$_}\n";
 		$download .= "$prog_index{$_},";
 	}
 }
@@ -76,7 +75,8 @@ if ($download) {
 		# Reset globals between dloads
 		$videourl = $video_id =	$cookie = $title = $full = $prev_url = '';
 		@vers = ();
-		download_stream( $streams{$_} );
+		print "Attempting to Download '$urls{$streams{$_}}': ";
+		download_stream( $streams{$_} ) if ! $opt_t;
 	} 
 }
 
@@ -88,35 +88,71 @@ sub get_links_for_date {
 	my $pageno = 1;
 	my $pid;
 	my @page;
-	print "Results for $day / $month / $slot:";
+	print "Results for $day / $month / $slot:\n";
 	# Loop while we still get stream links
 	do {
-		print ".";
-		chomp( @page = grep /version_pid=\w+">[^<]+<\/a>/, `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null` );
+		@page = ();
+		my @html = `curl $proxy_url -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null`;
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b009gn1m.shtml?filter=txdate%3A13-03&amp;filter=txslot%3Aafternoon&amp;start=1&amp;scope=iplayerlast7days&amp;version_pid=b009gmpz">In The Night Garden</a>
 		# We just need this in the form of /iplayer/page/item/b009gn1m.shtml|<progname>
-		s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">([^<]+)<\/a>/$1|$2/g for @page;
+		# s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">([^<]+)<\/a>/$1|$2/g for @page;
+
+                # Get Episode info: Info follows for upto 40 lines after matched line, e.g.
+		#                                       <div class="resultSynopsis">
+		#                <p class="title">
+		#                        <strong>Stake Out</strong>
+		#                        <span class="divider">|</span>
+		#                        Episode 7
+		#                </p>
+		#                <p class="description">Children's hidden camera game show that finds out how well kids know their mates. The Prince of Askabar visits Edinb
+		#        </div>
+
+		# parse @html array for episode info
+		for (my $i=0; $i<$#html; $i++) {
+			my $block;
+			# If this is a version_pid line
+			if ( $html[$i] =~ /version_pid=\w+">[^<]+<\/a>/ ) {
+				# Get url
+				my $url = $html[$i];
+				$url =~ s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">[^<]+<\/a>/$1/g;
+				chomp($url);
+				# get next 40 lines into a single string
+				for (my $j=1; $j<=40; $j++) {
+					$block .= $html[$i+$j];
+					chomp($block);
+				}
+				$i += 40;
+				my $episode = $block;
+				$episode =~ s!^.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*$!$1|$2!g;
+				$episode =~ s!\s*$!!g;
+				#print "title|episode|url = '$episode|$url'\n";
+				push @page, "$url|$episode";
+			}
+		}
+
 
 		for (@page) {
-			my ($url, $progname) = split /\|/;
+			my ($url, $progname, $episode) = split /\|/;
 			#$url = $url_download_prefix.$url;
 			# Get the pid for duplicate detection
 			$pid = $url;
 			$pid =~ s/^.*\/(\w+)\.shtml/$1/g;
 			# Duplicate detection
 			if ( not defined $pids{$pid} ) {
-				$links{"$progname ($day/$month)"} = $url;
+				$links{"$progname ($pid)"} = $url;
 				# Other hashes for categorisation
-				$daymonth{"$progname ($day/$month)"} = $day."/".$month;
-				$slot{"$progname ($day/$month)"} = $slot;
+				$daymonth{"$progname ($pid)"} = $day."/".$month;
+				$slot{"$progname ($pid)"} = $slot;
 				# Used to detect duplicates
-				$urls{$url} = "$progname ($day/$month)";
-				$pids{$pid} = "$progname/$day/$month/$slot";
+				$urls{$url} = "$progname ($pid)";
+				$pids{$pid} = "$progname/$episode/$day/$month/$slot";
+				$episodes{"$progname ($pid)"} = "$episode";
+                                print "  $progname - $episode\n";
 				# Link Validation here...
 			} else {
-				print "WARNING: removing duplicate stream link for \"$progname ($day/$month)\" PID=$pid / $pids{$pid}\n";
+				#print "WARNING: removing duplicate stream link for \"$progname ($episode)\" / $pids{$pid}\n";
 			}
 
 		}
@@ -150,7 +186,7 @@ sub get_links {
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort keys %links) {
-				print CACHE "$_|$links{$_}|$daymonth{$_}|$slot{$_}\n";
+				print CACHE "$_|$links{$_}|$episodes{$_}|$daymonth{$_}|$slot{$_}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file
@@ -164,69 +200,16 @@ sub get_links {
 		for (@cache) {
 			# Populate %links from cache
 			chomp();
-			my ($progname, $url, $dm, $s) = split /\|/;
+			my ($progname, $url, $episode, $dm, $s) = split /\|/;
                         $links{$progname} = $url;
 			$daymonth{$progname} = $dm;
 			$slot{$progname} = $s;
 			$urls{$url} = $progname;
+			$episodes{$progname} = $episode;
 		}
 	}
 
 	return 0;
-}
-
-
-sub gen_html() {
-	my $webfile = shift;
-	if ( open(HTML, "> $webfile") ) {
-		print HTML '<html><head></head><body>';
-		for (sort keys %links) {
-			print HTML "<a href=\"$links{$_}\">$prog_index{$_} : $_ $daymonth{$_} $slot{$_}</a><br>\n";
-		}
-		print HTML '</body>';
-		close (HTML);
-	} else {
-		print "Couldn't open html file $webfile for writing\n";
-	}
-}
-
-
-sub gen_fxd() {
-	my $fxdfile = shift;
-	if ( open(HTML, "> $fxdfile") ) {
-		print HTML '<?xml version="1.0" ?><freevo>';
-		for (sort keys %links) {
-			print HTML "<movie title=\"$_\"><video><url id=\"p1\">$links{$_}<playlist/></url></video><info><description>$_</description></info></movie>\n";
-		}
-		print HTML '</freevo>';
-		close (HTML);
-	} else {
-		print "Couldn't open fxd file $fxdfile for writing\n";
-	}
-}
-
-
-sub gen_fxd_categorised() {
-	my $fxdfile = shift;
-	if ( open(HTML, "> $fxdfile") ) {
-		print HTML '<?xml version="1.0" ?>'."\n<freevo>\n";
-
-		# Get last $days of listings
-		for (my $i=$days; $i>=0; $i--) {
-			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
-			print HTML "\t<container title=\"$d\/$m\" type=\"video\">\n";
-			for (sort keys %links) {
-				if ( $daymonth{$_} =~ /^$d\/$m$/ ) {
-					print HTML "\t\t<movie title=\"$_ $slot{$_}\"><video><url id=\"p1\">$links{$_}<playlist/></url></video><info><description>$_ $slot{$_}</description></info></movie>\n";
-				}
-			}
-			print HTML "\t</container>\n";
-		}
-		print HTML '</freevo>';
-		close (HTML);
-	} else {
-		print "Couldn't open fxd file $fxdfile for writing\n";
-	}
 }
 
 
@@ -302,7 +285,7 @@ sub iphone_req {
   my $path = $url->path . ($url->query ? "?" . $url->query : "");
   my $host = $url->host;
 
-  print "--> $path\n";
+  ####print "--> $path\n";
 
   my $req = <<EOF;
 GET $path HTTP/1.1\r
@@ -325,6 +308,8 @@ sub save_to_file {
   my($sock, $full) = @_;
 
   my $file = "$download_dir/$title.mp4";
+  # Remove spaces and change to underscores
+  $file =~ s/\s/_/g;
   if ( -f $file ) {
   	print "ERROR: File already exists - skipping....\n";
 		return 0;
