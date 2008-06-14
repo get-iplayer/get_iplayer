@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 10th 2008
-# Version: 0.12
+# Version: 0.13
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -297,8 +297,9 @@ sub get_links {
 
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
-			for (sort keys %links) {
-				print CACHE "$_|$links{$_}|$episodes{$_}|$descriptions{$_}\n";
+			for (sort {$a <=> $b} keys %streams) {
+				my $prog = $urls{$streams{$_}};
+				print CACHE "$_|$prog|$links{$prog}|$episodes{$prog}|$descriptions{$prog}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -310,18 +311,16 @@ sub get_links {
 
 	# Else read from cache
 	} else {
-		my $count = 1;
 		for (@cache) {
 			# Populate %links from cache
 			chomp();
-			my ($progname, $url, $episode, $desc) = split /\|/;
+			my ($count, $progname, $url, $episode, $desc) = split /\|/;
 			$links{$progname} = $url;
 			$streams{$count} = $url;
 			$prog_index{$progname} = $count;
 			$urls{$url} = $progname;
 			$episodes{$progname} = $episode;
 			$descriptions{$progname} = $desc;
-			$count++;
 		}
 	}
 
