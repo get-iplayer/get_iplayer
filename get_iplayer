@@ -5,29 +5,48 @@
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e);
+use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n);
 use Getopt::Std;
+use Fcntl;
+use File::stat;
+use IO::Seekable;
 
 # Parse options
-if (! getopts("td:fo:p:e:")) {
-        print "Usage: get_iplayer [-t] [-d <days to parse from site>] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index>\n";
+if (! getopts("tnd:fo:p:e:l")) {
+        print "Usage: get_iplayer [-l] [-t] [-d <days to parse from site>] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
+        print "       -l          show long programme descriptions\n";
+        print "       -t          test only - no download\n";
+        print "       -f          flush cache\n";
+        print "       -d <days>   number of days of programmes to populate the cache with\n";
+        print "       -e <secs>   cache expiry in seconds\n";
+        print "       -o <dir>    Download output directory\n";
+        print "       -p <url>    Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
+        print "       -n          Do not perform XOR conversion\n";
         exit 1;
 }
 
 my $download = join ',', @ARGV;
 my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
+
+# Check for valid dload dir
+if (! -d $download_dir ) {
+  die ("ERROR: $download_dir does not exist\n");
+}
+
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
 my $days = $opt_d || 7;
 
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
+my $prog_page_prefix = 'http://www.bbc.co.uk/programmes';
 my %ua = (
   coremedia => "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
   safari => "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
 );
 
-my (%links, %daymonth, %slot, %urls, %streams, %prog_index, %pids, %episodes);
+my (%links, %daymonth, %slot, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
 my $now = time();
 my $cachefile = '/tmp/iplayer.cache';
+my $webfile = $download_dir.'/index.html';
 my $cache_secs = $opt_e || 86000;
 my ( $videourl, $video_id, $cookie, $title, $full, @vers, $prev_url );
 
@@ -35,9 +54,15 @@ my ( $videourl, $video_id, $cookie, $title, $full, @vers, $prev_url );
 unlink ($cachefile) if $opt_f;
 
 # Assume the argv is a regex statement if it doesnt contain just numbers/commas
+# See if a URL conaining a PID is specified e.g. b00?????
 my $download_regex;
 if ($download !~ /^[\d,]+$/) {
-	$download_regex = $ARGV[0];
+    $download_regex = $ARGV[0];
+    # if we have a pid...
+    if ($download =~ /^.*b00[a-z,0-9]{5}.*$/) {
+      $download_regex =~ s/^.*(b00[a-z,0-9]{5}).*$/$1/g;
+    }
+    print "Seaching for programme names containing: '$download_regex'\n";
 }
 
 # Set web proxy env var if required
@@ -50,7 +75,8 @@ get_links();
 # Print list of streams
 my $count = 1;
 for (sort keys %links) {
-	print "$count: $_ - $episodes{$_} - $daymonth{$_} $slot{$_}\n" if ! $download;
+        my $desc = "- $descriptions{$_}" if $opt_l;
+	print "$count: $_ - $episodes{$_} - $daymonth{$_} $slot{$_} $desc\n" if ! $download;
 	$streams{$count} = $links{$_};
 	$prog_index{$_} = $count;
 	$count++;
@@ -59,10 +85,11 @@ for (sort keys %links) {
 # Get matching programmes
 if ($download_regex) {
 	$download = '';
-	my @matches = sort grep /$download_regex/, keys %links;
+	my @matches = sort grep /$download_regex/i, keys %links;
 	print "Download Matches:\n";
 	for (@matches) {
-		print "$prog_index{$_}: $_ $episodes{$_} $daymonth{$_} $slot{$_}\n";
+	        my $desc = "- $descriptions{$_}" if $opt_l;
+		print "$prog_index{$_}: $_ - $episodes{$_} - $daymonth{$_} $slot{$_} $desc\n";
 		$download .= "$prog_index{$_},";
 	}
 }
@@ -75,8 +102,10 @@ if ($download) {
 		# Reset globals between dloads
 		$videourl = $video_id =	$cookie = $title = $full = $prev_url = '';
 		@vers = ();
-		print "Attempting to Download '$urls{$streams{$_}}': ";
-		download_stream( $streams{$_} ) if ! $opt_t;
+                if (! $opt_t) {
+		  print "Attempting to Download '$urls{$streams{$_}}': ";
+		  download_stream( $streams{$_} );
+                }
 	} 
 }
 
@@ -124,17 +153,20 @@ sub get_links_for_date {
 					chomp($block);
 				}
 				$i += 40;
-				my $episode = $block;
-				$episode =~ s!^.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*$!$1|$2!g;
-				$episode =~ s!\s*$!!g;
-				#print "title|episode|url = '$episode|$url'\n";
-				push @page, "$url|$episode";
+				my $progdata = $block;
+				$progdata =~ s!^.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3!g;
+                                # Remove unwanted whitespace
+				$progdata =~ s/\s*$//g;
+                                $progdata =~ s/\s*\|/|/g;
+                                $progdata =~ s/\|\s*/|/g;
+				print "url|title|episode|desc = '$url|$progdata'\n";
+				push @page, "$url|$progdata";
 			}
 		}
 
 
 		for (@page) {
-			my ($url, $progname, $episode) = split /\|/;
+			my ($url, $progname, $episode, $desc) = split /\|/;
 			#$url = $url_download_prefix.$url;
 			# Get the pid for duplicate detection
 			$pid = $url;
@@ -148,8 +180,9 @@ sub get_links_for_date {
 				# Used to detect duplicates
 				$urls{$url} = "$progname ($pid)";
 				$pids{$pid} = "$progname/$episode/$day/$month/$slot";
-				$episodes{"$progname ($pid)"} = "$episode";
-                                print "  $progname - $episode\n";
+				$episodes{"$progname ($pid)"} = $episode;
+				$descriptions{"$progname ($pid)"} = $desc;
+                                print "  $progname - $episode - $desc\n";
 				# Link Validation here...
 			} else {
 				#print "WARNING: removing duplicate stream link for \"$progname ($episode)\" / $pids{$pid}\n";
@@ -173,7 +206,7 @@ sub get_links {
 	}
 
 	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
-	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ((stat($cachefile))[9] + $cache_secs)) ) {
+	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
 
 		# Get last $days of listings
 		for (my $i=$days; $i>=0; $i--) {
@@ -186,7 +219,7 @@ sub get_links {
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort keys %links) {
-				print CACHE "$_|$links{$_}|$episodes{$_}|$daymonth{$_}|$slot{$_}\n";
+				print CACHE "$_|$links{$_}|$episodes{$_}|$descriptions{$_}|$daymonth{$_}|$slot{$_}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file
@@ -195,20 +228,46 @@ sub get_links {
 			print "Couldn't open cache file for writing\n";
 		}
 
+
 	# Else read from cache
 	} else {
 		for (@cache) {
 			# Populate %links from cache
 			chomp();
-			my ($progname, $url, $episode, $dm, $s) = split /\|/;
+			my ($progname, $url, $episode, $desc, $dm, $s) = split /\|/;
                         $links{$progname} = $url;
 			$daymonth{$progname} = $dm;
 			$slot{$progname} = $s;
 			$urls{$url} = $progname;
 			$episodes{$progname} = $episode;
+			$descriptions{$progname} = $desc;
 		}
 	}
 
+        # Create local web page
+	if ( open(HTML, "> $webfile") ) {
+	  print HTML '<html><head></head><body><table border=1>';
+          for (sort keys %links) {
+            # Extract pid from progname
+            my $pid = $_;
+            $pid =~ s/^.*\((b00.....)\).*$/$1/g;
+            my $title = $_;
+            $title =~ s/^(.*)\s*\(.*$/$1/g;
+            print HTML "<tr>
+              <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg\"></a></td>
+              <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$episodes{$_}</td> <td>$daymonth{$_} $slot{$_}</td>
+            </tr>
+            <tr>
+              <td colspan=4>$descriptions{$_}</td>
+            </tr>
+            \n";
+          }
+          print HTML '</table></body>';
+          close (HTML);
+        } else {
+	  print "Couldn't open html file $webfile for writing\n";
+        }
+        
 	return 0;
 }
 
@@ -331,5 +390,94 @@ sub save_to_file {
     print $fh $buf or die "HMM!";
   }
   print "\n";
+
+  # Decode if required
+  iplayer_decoder($file) if ! $opt_n;
+
   return 0;
 }
+
+
+# In-place modification of an iplayer file to do that dodgy xor stuff
+#
+# Usage: iplayer_decode <filename>
+#
+sub iplayer_decoder {
+  chomp( my $file = shift );
+  my $length =  stat($file)->size;
+  print "$file length = $length\n";
+
+  open (FILE, "+<$file") || die "can't update $file: $!";
+
+  my $buffer;
+
+  # Use preferred blocksize
+  my $recsize = stat($file)->blksize;
+
+  # Create long string of '0x3c53's
+  my $xor = create_xor_string($recsize/2, 0x3c, 0x53);
+
+  # Offsets
+  my $start_offset = 0x2800;
+  my $end_offset = 0x400 + 2;
+
+  # Put file ptr in correct place
+  seek(FILE, $start_offset, SEEK_SET);
+
+  print "INFO: Only XORing $recsize bytes from $start_offset\n";
+
+  # Do the xoring
+  for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
+
+	# Make sure we don't touch last 0x402 bytes
+	if ( $i > ($length - $end_offset - $recsize) ) {
+		$recsize = $length - $end_offset - $i;
+		$xor = create_xor_string($recsize/2, 0x3c, 0x53);
+		print "\nINFO: Only XORing $recsize bytes from $i\n";
+	}
+
+	read(FILE, $buffer, $recsize) == $recsize
+		|| die "\nReading: $!";
+
+	# Do the XOR
+	$buffer = $buffer ^ $xor;
+
+	# Rewind $buffer bytes then rewrite xor'ed data
+	seek(FILE, -1 * $recsize, SEEK_CUR);
+	print FILE $buffer;
+
+	printf "\r%0.2f%%", $i/$length*100.0;
+	#printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset;
+  }
+
+  # Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
+  my $xor = create_xor_string(1, 0x53, 0x3c);
+  print "\nINFO: XORing 2 bytes from ".($length - $end_offset)."\n";
+  seek(FILE, $length - $end_offset, SEEK_SET);
+  read(FILE, $buffer, 2) == 2 || die "Reading: $!";
+
+  # Do the XOR using 0x53,0x3c
+  $buffer = $buffer ^ $xor;
+
+  # Rewind $buffer bytes then rewrite xor'ed data
+  seek(FILE, -2, SEEK_CUR);
+  print FILE $buffer;
+
+  close FILE || die "Closing: $!";
+}
+
+# Build XOR pattern
+sub create_xor_string {
+	my $count = shift;
+
+	my $pattern;
+	$pattern .= chr($_) for @_;
+
+	my $ret;
+	for (my $i = 0; $i<$count; $i++) { 
+		$ret .= $pattern;
+	}
+	return $ret; 
+}
+
+exit 0;
