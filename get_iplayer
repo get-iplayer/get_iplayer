@@ -1,0 +1,206 @@
+#!/usr/bin/perl
+#
+# Gets BBC iplayer links
+#
+# curl "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A12-03&filter=txslot%3Amorning&start=1&scope=iplayerlast7days" 2>/dev/null | grep 'version_pid=' | perl -p -e 's|^.*version_pid=(.+)\">([\w ]+)<\/a>$|http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/$1\|$2|g' | grep -v 7days
+#
+# download an specific mpeg4 file:
+#  curl --cookie-jar /tmp/xxx -vLA 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)' --proxy http://localhost:13128 http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/b008q01d
+use strict;
+
+my $VALIDATE = 1; # Use with caution - will generate loadsof web requests
+my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/';
+my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)';
+my $proxy_url = 'http://localhost:13128';
+my $cache_secs = 86400;
+my $file = '/tmp/iplayer.cache';
+my (%links, %daymonth, %slot);
+my $now = time();
+my $days = 2;
+
+# Set web proxy env var if required
+$ENV{HTTP_PROXY} = $proxy_url if $proxy_url;
+$ENV{http_proxy} = $proxy_url if $proxy_url;
+
+# Get straem links from BBC iplayer site or from cache
+get_links();
+
+# Generate ugly html index
+gen_html("iplayer.html");
+gen_fxd_categorised("iplayer.fxd");
+
+# Print list of streams
+my $count = 1;
+my %streams;
+for (sort keys %links) {
+	print "$count: $_ $daymonth{$_} $slot{$_} = $links{$_}\n";
+	$streams{$count} = $links{$_};
+	$count++;
+}
+
+# Ask user which stream to play
+do {
+	print "Which stream do you wish to download? ";
+	# Get answer from stdin
+	chomp( my $selection = <> );
+	# Return theplay if it exists in the %streams hash
+	if ( defined $streams{$selection} ) {
+		print "Playing...\n";
+		if ( system("mplayer -user-agent \"$user_agent\" -cookies-file /tmp/xxx -cookies -cache 4096 $streams{$selection}") != 0 ) {
+			print "ERROR: Stream could not be played...\n";
+		}
+	} elsif ( $selection == '0' ) {
+		exit 0; 
+	} else {
+		print "Invalid selection\n";
+	}
+} while (1);
+
+exit 0;
+
+
+sub get_links_for_date {
+	my ($day, $month, $slot) = @_;
+	my $pageno = 1;
+	my @page;
+	print "Results for $day / $month / $slot:";
+	# Loop while we still get stream links
+	do {
+		print ".";
+		chomp( @page = grep /version_pid=\w+">[^<]+<\/a>/, `curl $proxy_url -A "$user_agent" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null` );
+		s/^.*version_pid=(\w+)">([^<]+)<\/a>/$1|$2/g for @page;
+		for (@page) {
+			my ($url, $progname) = split /\|/;
+			$links{"$progname ($day/$month)"} = $url_download_prefix.$url;
+			# Other hashes for categorisation
+			$daymonth{"$progname ($day/$month)"} = $day."/".$month;
+			$slot{"$progname ($day/$month)"} = $slot;
+
+			# Validate link if required
+			if ($VALIDATE) {
+				print "INFO: Validating stream link for $_\n";
+				`curl $proxy_url -A "$user_agent" -m 2 -I $links{"$progname ($day/$month)"} 2>&1 | grep statuscode=not_available >/dev/null 2>&1`;
+				if (! $?) {
+					delete $links{"$progname ($day/$month)"};
+					print "WARNING: removing invalid stream link for \"$progname ($day/$month)\"\n";
+				}
+			}
+
+		}
+		# Next page
+		$pageno++;
+	} while ($#page >= 0);
+	print "\n";
+}
+
+sub get_links {
+	my @cache;
+
+	# Open cache file (need to verify we can even read this)
+	if ( open(CACHE, "< $file") ) {
+		@cache = <CACHE>;
+		close (CACHE);
+	}
+
+	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
+	if ( ($cache[0] =~ /^0$/) || (! -f $file) || ($now >= ((stat($file))[9] + $cache_secs)) ) {
+
+		# Get last $days of listings
+		for (my $i=0; $i<$days; $i++) {
+			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
+			for my $s qw(morning afternoon evening) {
+				get_links_for_date($d,$m,$s);
+			}
+		}
+
+		# Open cache file for writing
+		if ( open(CACHE, "> $file") ) {
+			for (sort keys %links) {
+				print CACHE "$_|$links{$_}|$daymonth{$_}|$slot{$_}\n";
+			}
+			close (CACHE);
+		} else {
+			print "Couldn't open cache file for writing\n";
+		}
+
+	# Else read from cache
+	} else {
+		for (@cache) {
+			# Populate %links from cache
+			chomp();
+			my ($progname, $url, $dm, $s) = split /\|/;
+                        $links{$progname} = $url;
+			$daymonth{$progname} = $dm;
+			$slot{$progname} = $s;
+		}
+	}
+
+	return 0;
+}
+
+sub gen_html() {
+	my $webfile = shift;
+	if ( open(HTML, "> $webfile") ) {
+		print HTML '<html><head></head><body>';
+		for (sort keys %links) {
+			print HTML "<a href=\"$links{$_}\">$_ $daymonth{$_} $slot{$_}</a><br>\n";
+		}
+		print HTML '</body>';
+		close (HTML);
+	} else {
+		print "Couldn't open html file $webfile for writing\n";
+	}
+}
+
+#<?xml version="1.0" ?>
+#<freevo>
+#  <movie title="Video Streaming">
+#   <video>
+#     <url id="p1">
+#       http://IPofYourDesktopPC:1234
+#       <playlist/>
+#     </url>
+#   </video>
+#   <info>
+#     <description>udp video-streaming using vlc or vls</description>
+#   </info>
+#  </movie>
+#</freevo>
+
+
+sub gen_fxd() {
+	my $fxdfile = shift;
+	if ( open(HTML, "> $fxdfile") ) {
+		print HTML '<?xml version="1.0" ?><freevo>';
+		for (sort keys %links) {
+			print HTML "<movie title=\"$_\"><video><url id=\"p1\">$links{$_}<playlist/></url></video><info><description>$_</description></info></movie>\n";
+		}
+		print HTML '</freevo>';
+		close (HTML);
+	} else {
+		print "Couldn't open fxd file $fxdfile for writing\n";
+	}
+}
+
+sub gen_fxd_categorised() {
+	my $fxdfile = shift;
+	if ( open(HTML, "> $fxdfile") ) {
+		print HTML '<?xml version="1.0" ?>'."\n<freevo>\n";
+
+		# Get last $days of listings
+		for (my $i=0; $i<$days; $i++) {
+			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
+			print HTML "\t<container title=\"$d\/$m\" type=\"video\">\n";
+			for (sort keys %links) {
+				if ( $daymonth{$_} =~ /^$d\/$m$/ ) {
+					print HTML "\t\t<movie title=\"$_ $slot{$_}\"><video><url id=\"p1\">$links{$_}<playlist/></url></video><info><description>$_ $slot{$_}</description></info></movie>\n";
+				}
+			}
+			print HTML "\t</container>\n";
+		}
+		print HTML '</freevo>';
+		close (HTML);
+	} else {
+		print "Couldn't open fxd file $fxdfile for writing\n";
+	}
+}
