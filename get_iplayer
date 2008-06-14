@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 12th 2008
-# Version: 0.16
+# Version: 0.17
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -22,6 +22,10 @@
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.17 - 20080612:
+# * Non-UK error detection
+# * Not available error detection
 #
 # Changes 0.16 - 20080612:
 # * Fixed HTML output links 
@@ -335,7 +339,7 @@ sub get_links {
 			# Make sure anyone can read/write file (security risk here!!)
 			chmod 0777, $cachefile;
 		} else {
-			print "Couldn't open cache file for writing\n";
+			print "WARNING: Couldn't open cache file for writing\n";
 		}
 
 
@@ -412,14 +416,19 @@ sub download_stream_lwp {
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
 	if ( ! $res->is_success ) {
-		print "ERROR: Failed to get programme ID from iplayer site\n";
-		return 1;
+		print "\rERROR: Failed to get programme ID from iplayer site\n\n";
+		return 7;
 	}
-	# Extract Long Name
-	# E.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
 	my @content = split /\n/, $res->content;
+	# Non-UK detection
+	if ( grep /only available to play in the UK/i, @content ) {
+		print "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
+		exit 3;
+	}
+	# Extract Long Name, e.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
 	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
 	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
+
 	# Extract pid and type (i.e. Signed, Original, etc)
 	chomp( my @type_pid = grep /(type|pid )      :/, @content );
 	# Remove tags
@@ -429,6 +438,9 @@ sub download_stream_lwp {
 	my %pid_types;
 	$pid_types{$types{$_}}=$_ for keys %types;
 	$prog{$pid}{type} = $pid_types{$pid};
+	# List types available
+	print "INFO: Types available: ", join(', ', %pid_types), "\n" if $opt_v;
+	# Create url
 	my $url_1 = "${url_download_prefix}/$pid";
 	# Create a filename
 	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} - $pid_types{$pid}";
@@ -447,8 +459,8 @@ sub download_stream_lwp {
 
 	$file = "${download_dir}/${file}.mov";
 	if ( -f $file ) {
-		print "ERROR: File $file already exists - skipping\n\n";
-		return 0;
+		print "ERROR: File already exists\n\n";
+		return 1;
 	} else {
 
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
@@ -464,11 +476,16 @@ sub download_stream_lwp {
 		# Get resulting Location header (i.e. redirect URL)
 		my $url_2 = $res->header("location");
 		if ( ! $res->is_redirect ) {
-			print "ERROR: Failed to get redirect from iplayer site\n";
+			print "ERROR: Failed to get redirect from iplayer site\n\n";
 			return 2;
 		}
 		# Extract redirection Location URL
 		$url_2 =~ s/^Location: (.*)$/$1/g;
+		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
+		if ( $url_2 =~ /statuscode=404/ ) {
+			print "\rERROR: Programme is not yet ready for download\n\n";
+			return 3;
+		}
 		print "INFO: Stage 3 URL = $url_2\n" if $opt_v;
 
 
@@ -490,7 +507,7 @@ sub download_stream_lwp {
 			printf( "%8.2f MB / %.2f MB %4.0f kbps %5.1f%%   \r", $size/1024.0/1024.0, $res->header("Content-Length")/1024.0/1024.0, $size / (stat($file)->mtime - $now + 0.01) / 1024.0, 100.0*$size/$res->header("Content-Length") );
 		};
 		if ( ! open(FILE, "> $file") ) {
-			print("ERROR: Cannot write to $file\n");
+			print("ERROR: Cannot write to $file\n\n");
 			return 4;
 		}
 		# send request (turn off autoflush o/wise we have too many terminal updates)
@@ -500,10 +517,10 @@ sub download_stream_lwp {
 		#$|=1;
 		close FILE;
 		if (! $res->is_success) {
-			print "ERROR: Failed to Download $file\n";
+			print "ERROR: Failed to Download file\n\n";
 			unlink $file;
 			unlink $cookiejar;
-			return 3;
+			return 5;
 		} else {
 			print "INFO: Downloaded $file\n";
 		}
