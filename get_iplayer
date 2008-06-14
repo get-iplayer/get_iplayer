@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 10th 2008
-# Version: 0.11
+# Version: 0.12
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -30,28 +30,71 @@
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w);
+use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w);
 use Getopt::Std;
 use Fcntl;
 use File::stat;
 use IO::Seekable;
 my $DEBUG = 0;
 
-# Parse options
-if (! getopts("twnvdfo:p:e:l")) {
-        print "Usage: get_iplayer [-l] [-t] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
-        print "       -l          show/search long programme descriptions\n";
-        print "       -t          test only - no download\n";
-        print "       -f          flush cache\n";
-        print "       -e <secs>   cache expiry in seconds\n";
-        print "       -o <dir>    Download output directory\n";
-        print "       -p <url>    Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
-        print "       -n          Do not perform XOR decoding\n";
-        print "       -d <file>   Perform XOR decoding on specified existing file\n";
-        print "       -w          keep whitespace in filenames\n";
-        print "       -v          verbose\n";
-        exit 1;
+sub usage {
+	print "Usage:\n";
+	print "  Download files:        get_iplayer [-l] [-t] [-f] [-n] [-w] [-v] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
+	print "  Decode Existing Files: get_iplayer [-v] -d <files to decode>\n";
+	print "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
+	print "Options:\n";
+	print "       -l        show/search long programme descriptions\n";
+	print "       -t        test only - no download\n";
+	print "       -f        flush cache\n";
+	print "       -e <secs> cache expiry in seconds\n";
+	print "       -o <dir>  Download output directory\n";
+	print "       -p <url>  Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
+	print "       -n        Do not perform XOR decoding\n";
+	print "       -d        Perform XOR decoding on specified existing files\n";
+	print "       -w        keep whitespace in filenames\n";
+	print "       -v        verbose\n";
+	print "       -h        help\n";
+	exit 1;
 }
+
+# Parse options
+usage() if (! getopts("htwnvdfo:p:e:l")) || $opt_h;
+
+# Options
+my $download_dir 	= $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
+my $webfile 		= $download_dir.'/iplayer.html';
+my $cookiejar		= "/tmp/iplayer_cookie_$$";
+my $cachefile		= '/tmp/iplayer.cache';
+my $cache_secs 		= $opt_e || 86000;
+
+my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
+my $prog_page_prefix	= 'http://www.bbc.co.uk/programmes';
+my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
+my %ua = (
+  	coremedia	=> "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
+  	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
+);
+
+# Structures:
+#  $links		{'<PROGNAME> (<PID>)'} 	=> <URL>
+#  $episodes		{'<PROGNAME> (<PID>)'} 	=> <EPISODE>
+#  $descriptions	{'<PROGNAME> (<PID>)'} 	=> <DESCRIPTION>
+#  $prog_index		{'<PROGNAME> (<PID>)'} 	=> <INDEX>
+#  $streams		{<INDEX>} 		=> <URL>
+#  $urls		{<URL>} 		=> '<PROGNAME> (<PID>)'
+#  $pids		{<PID>} 		=> 1
+my (%links, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
+
+# Web proxy
+my $proxy_opt;
+my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
+print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+$proxy_opt = "-x $proxy_url" if $proxy_url;
+
+# curl options
+my $curl = "curl";
+$curl .= ' -#' if ! $opt_v;
+$curl .= ' -v' if $DEBUG;
 
 # XOR Decode-only mode
 if ($opt_d) {
@@ -65,71 +108,71 @@ if ($opt_d) {
 	exit 0;
 }
 
-# Put remaining non-option cmdline into $download
-my $download = join ',', @ARGV;
-my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
 # Check for valid dload dir
 if (! -d $download_dir ) {
-  die ("ERROR: $download_dir does not exist\n");
+	die ("ERROR: $download_dir does not exist\n");
 }
-
-# Web proxy
-my $proxy_opt;
-my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
-$proxy_opt = "-x $proxy_url" if $proxy_url;
-
-# curl options
-my $curl = "curl";
-$curl .= ' -#' if ! $opt_v;
-$curl .= ' -v' if $DEBUG;
-my $cookiejar = "/tmp/iplayer_cookie_$$";
-
-my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
-my $prog_page_prefix = 'http://www.bbc.co.uk/programmes';
-my %ua = (
-  coremedia => "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
-  safari => "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
-);
-
-my (%links, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
-my $now = time();
-my $cachefile = '/tmp/iplayer.cache';
-my $webfile = $download_dir.'/iplayer.html';
-my $cache_secs = $opt_e || 86000;
 
 # Flush cache if required
 unlink ($cachefile) if $opt_f;
 
-# Assume the argv is a regex statement if it doesn't contain just numbers/commas
-# See if a URL/URI containing a PID is specified e.g. b0??????
-my $download_regex;
-if ($download && $download !~ /^[\d,]+$/) {
-    $download_regex = $ARGV[0];
-    # if we have a pid...
-    if ($download =~ /^.*b0[a-z,0-9]{6}.*$/) {
-      $download_regex =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-    }
-    print "Seaching for programme names containing: '$download_regex'\n";
-}
-
-
-# Get stream links from BBC iplayer site or from cache
+# Get stream links from BBC iplayer site or from cache (also populates all hashes)
 get_links();
 
-# Print list of streams
-my $count = 1;
-for (sort keys %links) {
-        my $desc = "- $descriptions{$_}" if $opt_l;
-	print "$count: $_ - $episodes{$_} $desc\n" if ! $download;
-	$streams{$count} = $links{$_};
-	$prog_index{$_} = $count;
-	$count++;
+# Print list of streams if we're not downloading anything
+if ( ! $ARGV[0] ) {
+        for (sort { $a <=> $b } keys %streams) {
+                my $prog = $urls{$streams{$_}};
+                my $desc = "- $descriptions{$prog}" if $opt_l;
+                print "$_: $prog - $episodes{$prog} $desc\n";
+        }
+        exit 0;
 }
 
-# Get matching programmes
-if ($download_regex) {
-	$download = '';
+# Parse remaining args
+my @download_list;
+for ( @ARGV ) {
+        chomp();
+        # If Numerical value
+        if ( /^[\d]+$/ ) {
+                push @download_list, $_;
+
+        # If PID then find matching programmes with this PID
+        } elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
+                s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+                push @download_list, get_regex_matches( $1 );
+
+        # Else assume this is a programme name regex
+        } else {
+                push @download_list, get_regex_matches( $_ );
+        }
+}
+
+# Display list for download
+print "Download List:\n" if @download_list;
+for (@download_list) {
+        my $prog = $urls{$streams{$_}};
+        my $desc = "- $descriptions{$prog}" if $opt_l;
+        print "$_: $prog - $episodes{$prog} $desc\n";
+}
+
+# Exit here if test only mode
+exit 0 if $opt_t;
+
+# Do the downloads based on list of index numbers
+for (@download_list) {
+        my $prog = $urls{$streams{$_}};
+        download_stream_curl( $links{$prog}, "${prog}-$episodes{$prog}" );
+}
+
+exit 0;
+
+
+# Get matching programmes using supplied regex
+sub get_regex_matches {
+
+	my $download_regex = shift;
+	my @download_list;
 	my @matches;
 
 	# Search prognames and episode name
@@ -138,33 +181,14 @@ if ($download_regex) {
 	# Also search long descriptions if -l is specified
 	if ($opt_l) {
 		for (keys %links) {
-			if ( $descriptions{$_} =~ /$download_regex/i ) {
-				push @matches, $_;
-			}
+			push @matches, $_ if $descriptions{$_} =~ /$download_regex/i;
 		}
 	}
 
-	print "Download Matches:\n";
-	for (@matches) {
-	        my $desc = "- $descriptions{$_}" if $opt_l;
-		print "$prog_index{$_}: $_ - $episodes{$_} $desc\n";
-		$download .= "$prog_index{$_},";
-	}
-}
+	push @download_list, $prog_index{$_} for @matches;
 
-# Do the downloads
-if ($download) {
-	my @dl = split /[\s,]+/, $download;
-	for (@dl) {
-		chomp();
-                if (! $opt_t) {
-		  print "INFO: Attempting to Download '$urls{$streams{$_}}':\n";
-		  download_stream_curl( $streams{$_}, "$urls{$streams{$_}}-$episodes{$urls{$streams{$_}}}" );
-                }
-	} 
+	return @download_list;
 }
-
-exit 0;
 
 
 sub get_links_all {
@@ -175,15 +199,16 @@ sub get_links_all {
 	print "INFO: Getting Index page.\n";
 
 	# Loop while we still get stream links
+	my $count = 1;
 	do {
 		@page = ();
-		print "DEBUG: $curl $proxy_opt -A \"$ua{safari}\" \"http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz\" 2>/dev/null\n" if $DEBUG;
+		print "DEBUG: $curl $proxy_opt -A \"$ua{safari}\" \"${search_page_prefix}${pageno}\" 2>/dev/null\n" if $DEBUG;
 		print "." if ! $opt_v;
-		my @html = `$curl $proxy_opt -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
+		my @html = `$curl $proxy_opt -A "$ua{safari}" "${search_page_prefix}${pageno}" 2>/dev/null`;
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
-                # Get Episode info: Info follows for upto 40 lines after matched line, e.g.
+		# Get Episode info: Info follows for upto 40 lines after matched line, e.g.
 		#                                       <div class="resultSynopsis">
 		#                <p class="title">
 		#                        <strong>Stake Out</strong>
@@ -214,15 +239,14 @@ sub get_links_all {
 				$i += 40;
 				my $progdata = $block;
 				$progdata =~ s!^.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3!g;
-                                # Remove unwanted whitespace
+				# Remove unwanted whitespace
 				$progdata =~ s/\s*$//g;
-                                $progdata =~ s/\s*\|/|/g;
-                                $progdata =~ s/\|\s*/|/g;
+				$progdata =~ s/\s*\|/|/g;
+				$progdata =~ s/\|\s*/|/g;
 				print "url|pid|title|episode|desc = '$url|$pid|$progdata'\n" if $opt_v;
 				push @page, "$url|$pid|$progdata";
 			}
 		}
-
 
 		for (@page) {
 			my ($url, $pid, $progname, $episode, $desc) = split /\|/;
@@ -230,14 +254,17 @@ sub get_links_all {
 			# Get the pid for duplicate detection
 			# Duplicate detection
 			if ( not defined $pids{$pid} ) {
-				$links{"$progname ($pid)"} = $url;
-				# Other hashes for categorisation
 				# Used to detect duplicates
+				$pids{$pid} = 1;
+				# Other hashes for categorisation
+				$links{"$progname ($pid)"} = $url;
+				$streams{$count} = $url;
+				$prog_index{"$progname ($pid)"} = $count;
 				$urls{$url} = "$progname ($pid)";
-				$pids{$pid} = $pid;
 				$episodes{"$progname ($pid)"} = $episode;
 				$descriptions{"$progname ($pid)"} = $desc;
-                                print "  $progname - $episode - $desc\n" if $opt_v;
+				print "  $progname - $episode - $desc\n" if $opt_v;
+				$count++;
 				# Link Validation here...
 			} else {
 				print "WARNING: removing duplicate stream link for \"$progname ($episode)\" / $pid\n" if $opt_v;
@@ -248,11 +275,13 @@ sub get_links_all {
 		$pageno++;
 	} while ($#page >= 0);
 	print "\n";
+	return 0;
 }
 
 
 sub get_links {
 	my @cache;
+	my $now = time();
 
 	# Open cache file (need to verify we can even read this)
 	if ( open(CACHE, "< $cachefile") ) {
@@ -281,41 +310,46 @@ sub get_links {
 
 	# Else read from cache
 	} else {
+		my $count = 1;
 		for (@cache) {
 			# Populate %links from cache
 			chomp();
 			my ($progname, $url, $episode, $desc) = split /\|/;
-                        $links{$progname} = $url;
+			$links{$progname} = $url;
+			$streams{$count} = $url;
+			$prog_index{$progname} = $count;
 			$urls{$url} = $progname;
 			$episodes{$progname} = $episode;
 			$descriptions{$progname} = $desc;
+			$count++;
 		}
 	}
 
-        # Create local web page
+	# Create local web page
 	if ( open(HTML, "> $webfile") ) {
 	  print HTML '<html><head></head><body><table border=1>';
-          for (sort keys %links) {
-            # Extract pid from progname
-            my $pid = $_;
-            $pid =~ s/^.*\((b00.....)\).*$/$1/g;
-            my $title = $_;
-            $title =~ s/^(.*)\s*\(.*$/$1/g;
-            print HTML "<tr>
-              <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg\"></a></td>
-              <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$episodes{$_}</td>
-            </tr>
-            <tr>
-              <td colspan=4>$descriptions{$_}</td>
-            </tr>
-            \n";
-          }
-          print HTML '</table></body>';
-          close (HTML);
-        } else {
+	  for (sort keys %links) {
+	    # Extract pid from progname
+	    my $pid = $_;
+	    $pid =~ s/^.*\((b00.....)\).*$/$1/g;
+	    my $title = $_;
+	    $title =~ s/^(.*)\s*\(.*$/$1/g;
+	    print HTML "<tr>
+	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg\"></a></td>
+	      <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$episodes{$_}</td>
+	    </tr>
+	    <tr>
+	      <td colspan=4>$descriptions{$_}</td>
+	    </tr>
+	    \n";
+	  }
+	  print HTML '</table></body>';
+	  close (HTML);
+	} else {
 	  print "Couldn't open html file $webfile for writing\n";
-        }
-        
+	}
+	
+
 	return 0;
 }
 
@@ -324,10 +358,11 @@ sub get_links {
 sub download_stream_curl {
 
 	my $id = shift;
+	my $file = shift;
+
 	$id = $1 if $id =~ /\/(b.*?)\.shtml/;
 	my $page = "http://www.bbc.co.uk/iplayer/page/item/$id.shtml";
 
-	my $file = shift;
 	# Remove spaces and brackets and change to underscores
 	$file =~ s/[\\\/]/_/g;
 	$file =~ s/[\s\(\)]/_/g if ! $opt_w;
@@ -340,9 +375,9 @@ sub download_stream_curl {
 		print "Attempting to Download $file from $page\n";
 		
 		# Stage 1: get PID and set cookie
-		chomp( my $pid_1 = (grep /pid       :/, `$curl $proxy_opt -i -A '$ua{safari}' -c $cookiejar $page`)[0] );
+		chomp( my $pid_1 = (grep /pid       :/, `$curl $proxy_opt -i -A '$ua{safari}' -c $cookiejar "$page"`)[0] );
 		if ($?) {
-			print "ERROR: Failed to get programme ID from iplayer site. Skipping...\n";
+			print "ERROR: Failed to get programme ID from iplayer site\n";
 			return 1;
 		}
 		# Extract pid from e.g.: "    pid       : 'b00c0rmy',"
@@ -352,9 +387,9 @@ sub download_stream_curl {
 		
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 		# Cannot get proxying working here if redirect is cached
-		chomp( my $url_2 = (grep /Location/, `$curl $proxy_opt -i -c $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-1' $url_1`)[0] );
+		chomp( my $url_2 = (grep /Location/, `$curl $proxy_opt -i -c $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-1' "$url_1"`)[0] );
 		if ($?) {
-			print "ERROR: Failed to get redirect from iplayer site. Skipping...\n";
+			print "ERROR: Failed to get redirect from iplayer site\n";
 			return 2;
 		}
 		print "INFO: Stage 2 URL = $url_2\n" if $opt_v;
@@ -362,9 +397,9 @@ sub download_stream_curl {
 		$url_2 =~ s/^Location: (.*)$/$1/g;
 		
 		# Stage 3: Download File
-		my $ret = system("$curl $proxy_opt -b $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' $url_2");
+		my $ret = system("$curl $proxy_opt -b $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-' -o \"$file\" \"$url_2\"");
 		if ($ret) {
-			print "ERROR: Failed to Download $file. Skipping...\n";
+			print "ERROR: Failed to Download $file\n";
 			unlink $cookiejar;
 			return 3;
 		}
