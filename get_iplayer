@@ -12,7 +12,7 @@ use File::stat;
 use IO::Seekable;
 
 # Parse options
-if (! getopts("tnvd:fo:p:e:l")) {
+if (! getopts("tnvdfo:p:e:l")) {
         print "Usage: get_iplayer [-l] [-t] [-e <cache expiry secs>] [-f] [-o <output dir>] [-p <proxy_url>] -- <regex|index|pid>\n";
         print "       -l          show long programme descriptions\n";
         print "       -t          test only - no download\n";
@@ -20,13 +20,26 @@ if (! getopts("tnvd:fo:p:e:l")) {
         print "       -e <secs>   cache expiry in seconds\n";
         print "       -o <dir>    Download output directory\n";
         print "       -p <url>    Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
-        print "       -n          Do not perform XOR conversion\n";
+        print "       -n          Do not perform XOR decoding\n";
+        print "       -d <file>   Perform XOR decoding on specified existing file\n";
         print "       -v          verbose\n";
         exit 1;
 }
 
 my $download = join ',', @ARGV;
 my $download_dir = $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
+
+# XOR Decode-only mode
+if ($opt_d) {
+	for my $file (@ARGV) {
+		if ( -f $file ) {
+			iplayer_decoder($file);
+		} else {
+			print "ERROR: Cannot find $file\n";
+		}
+	}
+	exit 0;
+}
 
 # Check for valid dload dir
 if (! -d $download_dir ) {
@@ -104,6 +117,7 @@ if ($download) {
                 if (! $opt_t) {
 		  print "Attempting to Download '$urls{$streams{$_}}': ";
 		  download_stream( $streams{$_} );
+		  download_stream_curl( $streams{$_} );
                 }
 	} 
 }
