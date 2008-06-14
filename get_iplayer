@@ -7,8 +7,8 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 11th 2008
-# Version: 0.15
+# Date: June 12th 2008
+# Version: 0.16
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -22,6 +22,13 @@
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.16 - 20080612:
+# * Fixed HTML output links 
+# * Sanitized data structures
+# * Now parses days/hours left
+# * Fixed XOR % completion calculation
+# * Reads IPLAYER_OUTDIR environment
 #
 # Changes 0.15 - 20080611:
 # * Fixed duplicate programme removal
@@ -61,14 +68,14 @@ sub usage {
 	print "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
 	print "Options:\n";
 	print "       -l        show/search long programme descriptions\n";
-	print "       -t        test only - no download\n";
+	print "       -t        test only - no download (will show programme type)\n";
 	print "       -f        flush cache\n";
 	print "       -e <secs> cache expiry in seconds\n";
 	print "       -o <dir>  Download output directory\n";
 	print "       -p <url>  Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
 	print "       -n        Do not perform XOR decoding\n";
 	print "       -d        Perform XOR decoding on specified existing files\n";
-	print "       -w        keep whitespace in filenames\n";
+	print "       -w        keep whitespace (and escape chars) in filenames\n";
 	print "       -v        verbose\n";
 	print "       -h        help\n";
 	exit 1;
@@ -78,7 +85,7 @@ sub usage {
 usage() if (! getopts("htwnvdfo:p:e:l")) || $opt_h;
 
 # Options
-my $download_dir 	= $opt_o || "$ENV{HOME}/nfs/video/TV/iplayer";
+my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.';
 my $webfile 		= $download_dir.'/iplayer.html';
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
@@ -92,19 +99,22 @@ my %ua = (
   	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
 );
 
-# Structures:
-#  $progpid_url		{'<PROGNAME> (<PID>)'} 	=> <URL>
-#  $progpid_episode	{'<PROGNAME> (<PID>)'} 	=> <EPISODE>
-#  $progpid_desc	{'<PROGNAME> (<PID>)'} 	=> <DESCRIPTION>
-#  $progpid_index	{'<PROGNAME> (<PID>)'} 	=> <INDEX>
-#  $index_url		{<INDEX>} 		=> <URL>
-#  $index_progpid	{<INDEX>}		=> '<PROGNAME> (<PID>)'
-#  $pid_prog		{<PID>} 		=> <PROGNAME>
-#  $pid_episode         {<PID>}                 => <EPISODE>
-my (%progpid_url, %index_url, %progpid_index, %index_progpid, %pid_prog, %pid_episode, %progpid_episode, %progpid_desc);
+# Programme data structure
+# $prog{$pid} = {
+#	'index'		=> <index number>,
+#	'name'		=> <programme short name>,
+#	'urlpid'	=> <pid from the URL>,
+#	'episode'	=> <Episode info>,
+#	'desc'		=> <Long Description>,
+#	'available'	=> <No. of days/hours left>,
+#	'longname'	=> <Long name (only parsed in stage 1)>,
+#	'type'		=> <Programme type i.e. Original/Signed (only parsed in stage 1)>,
+#};
+my %prog;
+# Hash to obtain pid given an index
+my %index_pid;
 
 # Web proxy
-my $proxy_opt;
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
 print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
 
@@ -121,9 +131,7 @@ if ($opt_d) {
 }
 
 # Check for valid dload dir
-if (! -d $download_dir ) {
-	die ("ERROR: $download_dir does not exist\n");
-}
+die ("ERROR: $download_dir does not exist\n") if ! -d $download_dir;
 
 # Flush cache if required
 unlink ($cachefile) if $opt_f;
@@ -131,13 +139,9 @@ unlink ($cachefile) if $opt_f;
 # Get stream links from BBC iplayer site or from cache (also populates all hashes)
 get_links();
 
-# Print list of streams if we're not downloading anything
+# Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
-        for (sort { $a <=> $b } keys %index_url) {
-                my $prog = $index_progpid{$_};
-                my $desc = "- $progpid_desc{$prog}" if $opt_l;
-                print "$_: $prog - $progpid_episode{$prog} $desc\n";
-        }
+	list_progs( sort { $a <=> $b } keys %index_pid );
         exit 0;
 }
 
@@ -162,22 +166,24 @@ for ( @ARGV ) {
 
 # Display list for download
 print "Download List:\n" if @download_list;
-for (@download_list) {
-	my $prog = $index_progpid{$_};
-	my $desc = "- $progpid_desc{$prog}" if $opt_l;
-	print "$_: $prog - $progpid_episode{$prog} $desc\n";
-}
+list_progs( @download_list );
 
 # Do the downloads based on list of index numbers
-for (@download_list) {
-        my $prog = $index_progpid{$_};
-        my $pid = $index_progpid{$_};
-        $pid =~ s/^.*(b00.....).*$/$1/g;
-	download_stream_lwp( $pid, $progpid_url{$prog} );
-}
+download_stream_lwp( $index_pid{$_} ) for (@download_list);
 
 exit 0;
 
+
+# Lists progs given an array of index numbers
+sub list_progs {
+	for (@_) {
+		my $pid = $index_pid{$_};
+		my $desc = "- $prog{$pid}{desc}" if $opt_l;
+		print "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available})\n";	
+	}
+	print "\n";
+	return 0;
+}
 
 # Get matching programme index numbers using supplied regex
 sub get_regex_matches {
@@ -185,12 +191,13 @@ sub get_regex_matches {
 	my $download_regex = shift;
 	my @download_list;
 	
-	# Search prognames/pids
-	for (keys %index_progpid) {
-		push @download_list, $_ if $index_progpid{$_} =~ /$download_regex/i;
+	for (keys %index_pid) {
+		my $pid = $index_pid{$_};
+		# Search prognames/pids
+		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i;
 		# Also search long descriptions and episode data if -l is specified
-		push @download_list, $_ if $opt_l && ( $progpid_desc{$index_progpid{$_}} =~ /$download_regex/i 
-			|| $progpid_episode{$index_progpid{$_}} =~ /$download_regex/i );
+		push @download_list, $_ if $opt_l && ( $prog{$pid}{desc} =~ /$download_regex/i 
+			|| $prog{$pid}{episode} =~ /$download_regex/i );
 	}
 	return sort {$a <=> $b} @download_list;
 }
@@ -208,7 +215,7 @@ sub get_links_all {
 	$ua->agent( $ua{safari} );
 
 	# Loop while we still get stream links
-	my $count = 1;
+	my $index = 1;
 	do {
 		@page = ();
 		print "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
@@ -226,6 +233,14 @@ sub get_links_all {
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
 		# Get Episode info: Info follows for upto 40 lines after matched line, e.g.
+		# ........
+		#		<span class="available">
+		#		
+		#			16 hours left
+		#		
+		#		</span>
+		#	</p>
+		# .........
 		#                                       <div class="resultSynopsis">
 		#                <p class="title">
 		#                        <strong>Stake Out</strong>
@@ -242,12 +257,11 @@ sub get_links_all {
 			if ( $html[$i] =~ /version_pid=\w+">[^<]+<\/a>/ ) {
 				# Need version_pid & url (note these are different pids)
 				# Get url
-				my $url = $html[$i];
-				my $pid = $html[$i];
-				$url =~ s/^.*href=\"(.*\.shtml)\?.*version_pid=\w+">[^<]+<\/a>/$1/g;
+				chomp( my $urlpid = $html[$i] );
+				chomp( my $pid = $html[$i] );
+				# Extract the URLPID and PID
+				$urlpid =~ s/^.*href=\".*(b0.{6})\.shtml\?.*version_pid=\w+">[^<]+<\/a>/$1/g;
 				$pid =~ s/^.*href=\".*\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1/g;
-				chomp($url);
-				chomp($pid);
 				# get next 40 lines into a single string
 				for (my $j=1; $j<=40; $j++) {
 					$block .= $html[$i+$j];
@@ -255,39 +269,37 @@ sub get_links_all {
 				}
 				$i += 40;
 				my $progdata = $block;
-				$progdata =~ s!^.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3!g;
+				$progdata =~ s!^.*<span class=\"available\">\s*([\w ]+)\s*</span>.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3|$4!g;
 				# Remove unwanted whitespace
 				$progdata =~ s/\s*$//g;
 				$progdata =~ s/\s*\|/|/g;
 				$progdata =~ s/\|\s*/|/g;
-				print "url|pid|title|episode|desc = '$url|$pid|$progdata'\n" if $opt_v;
-				push @page, "$url|$pid|$progdata";
+				print "urlpid|pid|available|prog|episode|desc = '$urlpid|$pid|$progdata'\n" if $opt_v;
+				push @page, "$urlpid|$pid|$progdata";
 			}
 		}
-
 		for (@page) {
-			my ($url, $pid, $prog, $episode, $desc) = split /\|/;
-			#$url = $url_download_prefix.$url;
-			# Get the pid for duplicate detection
+			my ($urlpid, $pid, $available, $name, $episode, $desc) = split /\|/;
 			# Duplicate detection
-			if ( not defined $pid_prog{$pid} ) {
-				# Other hashes for categorisation
-				# Also used to detect duplicates
-				$pid_prog{$pid} 			= $prog;
-				$pid_episode{$pid}			= $episode;
-				$progpid_url{"$prog ($pid)"}		= $url;
-				$index_url{$count}			= $url;
-				$progpid_index{"$prog ($pid)"}	 	= $count;
-				$index_progpid{$count}			= "$prog ($pid)";
-				$progpid_episode{"$prog ($pid)"} 	= $episode;
-				$progpid_desc{"$prog ($pid)"} 		= $desc;
-				print "  $prog ($pid) - $episode - $desc\n" if $opt_v;
-				$count++;
-				# Link Validation here...
-			} else {
-				print "WARNING: removing duplicate stream link for \"$prog ($pid) - $episode\"\n" if $opt_v;
-			}
+			if ( not defined $prog{$pid}{name} ) {
+				# Create data structure with prog data
+				$prog{$pid} = {
+					'index'		=> $index,
+					'name'		=> $name,
+					'urlpid'	=> $urlpid,
+					'episode'	=> $episode,
+					'desc'		=> $desc,
+					'available'	=> $available,
+					'longname'	=> undef,
+					'type'		=> undef,
+				};
+				$index_pid{$index}	= $pid;
 
+				print "  $name ($pid) - $episode - $desc\n" if $opt_v;
+				$index++;
+			} else {
+				print "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt_v;
+			}
 		}
 		# Next page
 		$pageno++;
@@ -315,9 +327,9 @@ sub get_links {
 
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
-			for (sort {$a <=> $b} keys %index_url) {
-				my $prog = $index_progpid{$_};
-				print CACHE "$_|$prog|$progpid_url{$prog}|$progpid_episode{$prog}|$progpid_desc{$prog}\n";
+			for (sort {$a <=> $b} keys %index_pid) {
+				my $pid = $index_pid{$_};
+				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{urlpid}|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{desc}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -330,40 +342,37 @@ sub get_links {
 	# Else read from cache
 	} else {
 		for (@cache) {
-			# Populate %progpid_url from cache
+			# Populate %prog from cache
 			chomp();
-			my ($count, $progpid, $url, $episode, $desc) = split /\|/;
-			# Extract short prog name and pid from $progpid
-			my $pid = $progpid;
-			my $prog = $progpid;
-			$pid =~ s/^.*(b0......).*$/$1/g;
-			$prog =~ s/^(.*) \(b0......\).*$/$1/g;
-			$progpid_url{$progpid} 		= $url;
-			$index_url{$count} 		= $url;
-			$progpid_index{$progpid}	= $count;
-			$index_progpid{$count}		= $progpid;
-			$progpid_episode{$progpid}	= $episode;
-			$progpid_desc{$progpid} 	= $desc;
-			$pid_prog{$pid}			= $prog;
-			$pid_episode{$pid}		= $episode;
+			my ($index, $name, $pid, $urlpid, $available, $episode, $desc) = split /\|/;
+			# Create data structure with prog data
+			$prog{$pid} = {
+				'index'		=> $index,
+				'name'		=> $name,
+				'urlpid'	=> $urlpid,
+				'episode'	=> $episode,
+				'desc'		=> $desc,
+				'available'	=> $available,
+				'longname'	=> undef,
+				'type'		=> undef,
+			};
+			$index_pid{$index}	= $pid;
 		}
 	}
 
 	# Create local web page
 	if ( open(HTML, "> $webfile") ) {
 	  print HTML '<html><head></head><body><table border=1>';
-	  for (sort keys %progpid_url) {
-	    # Extract pid from progpid
-	    my $pid = $_;
-	    $pid =~ s/^.*\((b00.....)\).*$/$1/g;
-	    my $title = $_;
-	    $title =~ s/^(.*)\s*\(.*$/$1/g;
+	  for (sort {$a <=> $b} keys %index_pid) {
+            my $pid = $index_pid{$_};
+	    my $urlpid = $prog{$pid}{urlpid};
+	    my $name = $prog{$pid}{name};
 	    print HTML "<tr>
-	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg\"></a></td>
-	      <td><a href=\"${prog_page_prefix}/${pid}.html\">${title}</a></td> <td>$progpid_episode{$_}</td>
+	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${urlpid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${urlpid}_150_84.jpg\"></a></td>
+	      <td>$_</td><td><a href=\"${prog_page_prefix}/${urlpid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
 	    </tr>
 	    <tr>
-	      <td colspan=4>$progpid_desc{$_}</td>
+	      <td colspan=4>$prog{$pid}{desc}</td>
 	    </tr>
 	    \n";
 	  }
@@ -378,21 +387,19 @@ sub get_links {
 }
 
 
-# Usage: download_stream_lwp (<pid>,<url>)
+# Usage: download_stream_lwp (<pid>)
 sub download_stream_lwp {
 	my $pid = shift;
-	my $id = shift;
-
-	# Create a full URL from the one specified
-	$id = $1 if $id =~ /\/(b.*?)\.shtml/;
-	my $page = "http://www.bbc.co.uk/iplayer/page/item/$id.shtml";
-	print "INFO: Attempting to Download: $pid_prog{$pid} - $pid_episode{$pid}\n";
+	
+	# Create a full URL from the PID specified
+	my $page = "http://www.bbc.co.uk/iplayer/page/item/".$prog{$pid}{urlpid}.".shtml";
+	print "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
 
 	print "INFO: Stage 1 URL = $page\n" if $opt_v;
 	print "\rGetting iplayer programme page        " if ! $opt_v;
 	# Switch off automatic redirects
-	my $ua = LWP::UserAgent->new( requests_redirectable => [ 'POST' ] );
+	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
 	# 30 second request timeout
 	$ua->timeout([30]);
@@ -408,37 +415,43 @@ sub download_stream_lwp {
 		print "ERROR: Failed to get programme ID from iplayer site\n";
 		return 1;
 	}
+	# Extract Long Name
+	# E.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
+	my @content = split /\n/, $res->content;
+	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
+	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
 	# Extract pid and type (i.e. Signed, Original, etc)
-	chomp( my @type_pid = grep /(type|pid )      :/, (split /\n/, $res->content) );
+	chomp( my @type_pid = grep /(type|pid )      :/, @content );
 	# Remove tags
-	s/^.*'(.+)'.*$/$1/g for @type_pid;		
+	s/^.*'(.+)'.*$/$1/g for @type_pid;
 	# Get hash of pid => type
 	my %types = @type_pid;
 	my %pid_types;
 	$pid_types{$types{$_}}=$_ for keys %types;
+	$prog{$pid}{type} = $pid_types{$pid};
 	my $url_1 = "${url_download_prefix}/$pid";
-	print "INFO: Stage 2 Type = $pid_types{$pid}\n" if $opt_v;
-	print "INFO: Stage 2 URL = $url_1\n" if $opt_v;
-	print "\rINFO: Type = $pid_types{$pid}           \n\n" if ! $opt_v;
-
-
-
-	# Remove spaces and brackets and change to underscores
-	my $file = "$pid_prog{$pid} - $pid_episode{$pid} - $pid_types{$pid}";
+	# Create a filename
+	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} - $pid_types{$pid}";
+	# Replace slashes with _ regardless
 	$file =~ s/[\\\/]/_/g;
+	# Sanitize by default
 	$file =~ s/\s/_/g if ! $opt_w;
-	$file =~ s/[\(\)]//g if ! $opt_w;
+	$file =~ s/[^\w_-]//gi if ! $opt_w;
+
+	print "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt_v;
+	print "INFO: Stage 2 URL = $url_1\n" if $opt_v;
+	print "\rINFO: File name = $file.mov                 \n";
+
+	# Skip from here if we are only testing downloads
+	return 0 if $opt_t;
+
 	$file = "${download_dir}/${file}.mov";
 	if ( -f $file ) {
-		print "ERROR: File $file already exists - skipping....\n";
+		print "ERROR: File $file already exists - skipping\n\n";
 		return 0;
 	} else {
 
-
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		print "INFO: Stage 2 Filename = $file\n" if $opt_v;
-		# Skip from here if we are only testing downloads
-		return 0 if $opt_t;
 		print "\rGetting iplayer download URL         " if ! $opt_v;
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $ua{coremedia},
@@ -474,17 +487,17 @@ sub download_stream_lwp {
 			my ($data, $res, undef) = @_;
 			print FILE $data;
 			my $size = stat($file)->size;
-			printf( "%8.3f MB %10.3f kbps %5.2f%%   \r", ($size/1024.0/1024.0), $size / (stat($file)->mtime - $now + 0.01) / 1024.0, (100.0*$size/$res->header("Content-Length")) );
+			printf( "%8.2f MB / %.2f MB %4.0f kbps %5.1f%%   \r", $size/1024.0/1024.0, $res->header("Content-Length")/1024.0/1024.0, $size / (stat($file)->mtime - $now + 0.01) / 1024.0, 100.0*$size/$res->header("Content-Length") );
 		};
 		if ( ! open(FILE, "> $file") ) {
 			print("ERROR: Cannot write to $file\n");
 			return 4;
 		}
 		# send request (turn off autoflush o/wise we have too many terminal updates)
-		$|=0;
+		#$|=0;
 		print "\r                              \r";
 		my $res = $ua->request($req, $callback);
-		$|=1;
+		#$|=1;
 		close FILE;
 		if (! $res->is_success) {
 			print "ERROR: Failed to Download $file\n";
@@ -560,8 +573,8 @@ sub iplayer_decoder {
 	seek(FILE, -1 * $recsize, SEEK_CUR);
 	print FILE $buffer;
 
-	printf "\r%0.2f%%", $i/$length*100.0;
-	printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset if $opt_v;
+	printf "\r%0.2f%%", ($i+$recsize)/($length-$end_offset)*100.0;
+	printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", ($i+$recsize)/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset if $opt_v;
   }
 
   # Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
