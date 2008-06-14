@@ -7,18 +7,21 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: March 12th 2008
+# Date: June 10th 2008
+# Version: 0.11
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
-# * XOR decoding of downloaded files - 20080609
+# * Automatic XOR decoding of files - 20080609
+# * XOR decoding of previously downloaded files - 20080609
 # * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
 # * Caching of Index (default 24hrs)
 # * Creation of a basic html index file
 # * De-duplication of programme index
-# * HTTP Proxy support (now using curl for all downloads - yes - ugly shell invokation for now) - 20080609
+# * HTTP Proxy support - 20080610
 # * Regex search on programme name capability (makes it useful to run this from crontab)
-# * Tested on Linux (Fedora6/7/8/9)
+# * Regex search on long programme description capability (-l) - 20080610
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5)
 #
 # Requires:
 # * curl
@@ -71,15 +74,16 @@ if (! -d $download_dir ) {
 }
 
 # Web proxy
+my $proxy_opt;
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
 print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+$proxy_opt = "-x $proxy_url" if $proxy_url;
+
+# curl options
 my $curl = "curl";
 $curl .= ' -#' if ! $opt_v;
 $curl .= ' -v' if $DEBUG;
-$curl .= " -x $proxy_url" if $proxy_url;
-# Set web proxy env vars
-$ENV{HTTP_PROXY} = $proxy_url if $proxy_url;
-$ENV{http_proxy} = $proxy_url if $proxy_url;
+my $cookiejar = "/tmp/iplayer_cookie_$$";
 
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix = 'http://www.bbc.co.uk/programmes';
@@ -91,7 +95,7 @@ my %ua = (
 my (%links, %urls, %streams, %prog_index, %pids, %episodes, %descriptions);
 my $now = time();
 my $cachefile = '/tmp/iplayer.cache';
-my $webfile = $download_dir.'/index.html';
+my $webfile = $download_dir.'/iplayer.html';
 my $cache_secs = $opt_e || 86000;
 
 # Flush cache if required
@@ -173,9 +177,9 @@ sub get_links_all {
 	# Loop while we still get stream links
 	do {
 		@page = ();
-		print "DEBUG: $curl -A \"$ua{safari}\" \"http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz\" 2>/dev/null\n" if $DEBUG;
+		print "DEBUG: $curl $proxy_opt -A \"$ua{safari}\" \"http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz\" 2>/dev/null\n" if $DEBUG;
 		print "." if ! $opt_v;
-		my @html = `$curl -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
+		my @html = `$curl $proxy_opt -A "$ua{safari}" "http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=${pageno}&scope=iplayeratoz" 2>/dev/null`;
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
@@ -231,7 +235,6 @@ sub get_links_all {
 				# Used to detect duplicates
 				$urls{$url} = "$progname ($pid)";
 				$pids{$pid} = $pid;
-				#$prognames{$pid} = $progname;
 				$episodes{"$progname ($pid)"} = $episode;
 				$descriptions{"$progname ($pid)"} = $desc;
                                 print "  $progname - $episode - $desc\n" if $opt_v;
@@ -326,7 +329,8 @@ sub download_stream_curl {
 
 	my $file = shift;
 	# Remove spaces and brackets and change to underscores
-	$file =~ s/[\s\\\/\(\)]/_/g if ! $opt_w;
+	$file =~ s/[\\\/]/_/g;
+	$file =~ s/[\s\(\)]/_/g if ! $opt_w;
 	$file = "${download_dir}/${file}.mov";
 	
 	if ( -f $file ) {
@@ -334,13 +338,38 @@ sub download_stream_curl {
 		return 0;
 	} else {
 		print "Attempting to Download $file from $page\n";
-		print ("$curl -b cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' \$( $curl -i -c cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-1' \$( $curl -i -A '$ua{safari}' -c cookies.txt $page | grep 'pid       :' | cut -d\\' -f2 | sed 's/\\([0-9a-z]\\)/http:\\/\\/www.bbc.co.uk\\/mediaselector\\/3\\/auth\\/iplayer_streaming_http_mp4\\/\\1/' ) | grep Location | cut -d: -f2,3 )") if $DEBUG;
-		my $ret = system("$curl -b cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' \$( $curl -i -c cookies.txt -A '$ua{coremedia}' -H 'Range: bytes=0-1' \$( $curl -i -A '$ua{safari}' -c cookies.txt $page | grep 'pid       :' | cut -d\\' -f2 | sed 's/\\([0-9a-z]\\)/http:\\/\\/www.bbc.co.uk\\/mediaselector\\/3\\/auth\\/iplayer_streaming_http_mp4\\/\\1/' ) | grep Location | cut -d: -f2,3 )");
-		if ($ret) {
-			print "ERROR: Failed to Download $file from $page. Skipping...\n";
+		
+		# Stage 1: get PID and set cookie
+		chomp( my $pid_1 = (grep /pid       :/, `$curl $proxy_opt -i -A '$ua{safari}' -c $cookiejar $page`)[0] );
+		if ($?) {
+			print "ERROR: Failed to get programme ID from iplayer site. Skipping...\n";
 			return 1;
 		}
+		# Extract pid from e.g.: "    pid       : 'b00c0rmy',"
+		$pid_1 =~ s/^.*\'(b0[a-z,0-9]{6})\'.*$/$1/g;
+		my $url_1 = "${url_download_prefix}/$pid_1";
+		print "INFO: Stage 1 PID = $pid_1\nINFO: Stage 1 URL = $url_1\n" if $opt_v;
+		
+		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
+		# Cannot get proxying working here if redirect is cached
+		chomp( my $url_2 = (grep /Location/, `$curl $proxy_opt -i -c $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-1' $url_1`)[0] );
+		if ($?) {
+			print "ERROR: Failed to get redirect from iplayer site. Skipping...\n";
+			return 2;
+		}
+		print "INFO: Stage 2 URL = $url_2\n" if $opt_v;
+		# Extract redirection Location URL
+		$url_2 =~ s/^Location: (.*)$/$1/g;
+		
+		# Stage 3: Download File
+		my $ret = system("$curl $proxy_opt -b $cookiejar -A '$ua{coremedia}' -H 'Range: bytes=0-' -o '$file' $url_2");
+		if ($ret) {
+			print "ERROR: Failed to Download $file. Skipping...\n";
+			unlink $cookiejar;
+			return 3;
+		}
 	}
+
 	# XOR Decode if required
 	iplayer_decoder($file) if ! $opt_n;
 
