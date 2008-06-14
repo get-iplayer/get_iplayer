@@ -7,8 +7,8 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 12th 2008
-# Version: 0.17
+# Date: June 13th 2008
+# Version: 0.18
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -22,6 +22,10 @@
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.18 - 20080613:
+# * Auto detection of byte-swapping
+# * Auto detection of XOR sequence
 #
 # Changes 0.17 - 20080612:
 # * Non-UK error detection
@@ -72,13 +76,13 @@ sub usage {
 	print "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
 	print "Options:\n";
 	print "       -l        show/search long programme descriptions\n";
+	print "       -d        Perform XOR decoding/byte-swapping on specified existing files\n";
 	print "       -t        test only - no download (will show programme type)\n";
 	print "       -f        flush cache\n";
 	print "       -e <secs> cache expiry in seconds\n";
 	print "       -o <dir>  Download output directory\n";
 	print "       -p <url>  Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
-	print "       -n        Do not perform XOR decoding\n";
-	print "       -d        Perform XOR decoding on specified existing files\n";
+	print "       -n        Do not perform XOR decoding/byte-swapping after downloading\n";
 	print "       -w        keep whitespace (and escape chars) in filenames\n";
 	print "       -v        verbose\n";
 	print "       -h        help\n";
@@ -210,7 +214,8 @@ sub get_regex_matches {
 sub get_links_all {
 	my $pageno = 1;
 	my $pid;
-	my @page;
+	my @html;
+	my $valid = 1;
 	print "INFO: Getting Index page\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
@@ -221,12 +226,13 @@ sub get_links_all {
 	# Loop while we still get stream links
 	my $index = 1;
 	do {
-		@page = ();
 		print "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
 
 		# Get index pages
 		my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
-		my @html = split /\n/, $res->content;
+		@html = split /\n/, $res->content;
+		# Set valid flag if we have progdata in this page
+		$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
 		if ( ! $res->is_success ) {
 			print "ERROR: Failed to get programme index page ${pageno} from iplayer site\n";
 			exit 2;
@@ -255,59 +261,49 @@ sub get_links_all {
 		#        </div>
 
 		# parse @html array for episode info
-		for (my $i=0; $i<$#html; $i++) {
-			my $block;
-			# If this is a version_pid line (i.e. one with anchor text in it)
-			if ( $html[$i] =~ /version_pid=\w+">[^<]+<\/a>/ ) {
+		while (@html) {
+			my $progdata;
+			chomp( my $line = shift @html );
+			# If this line has a version_pid line (i.e. one with anchor text in it)
+			if ( $line =~ /version_pid=\w+">[^<]+<\/a>/ ) {
 				# Need version_pid & url (note these are different pids)
-				# Get url
-				chomp( my $urlpid = $html[$i] );
-				chomp( my $pid = $html[$i] );
-				# Extract the URLPID and PID
-				$urlpid =~ s/^.*href=\".*(b0.{6})\.shtml\?.*version_pid=\w+">[^<]+<\/a>/$1/g;
-				$pid =~ s/^.*href=\".*\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1/g;
+				# Get url and extract the URLPID and PID
+				$line =~ s/^.*href=\".*(b0.{6})\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1 $2/;
+				my $urlpid = $1;
+				my $pid = $2;
 				# get next 40 lines into a single string
-				for (my $j=1; $j<=40; $j++) {
-					$block .= $html[$i+$j];
-					chomp($block);
-				}
-				$i += 40;
-				my $progdata = $block;
+				$progdata = '';
+				$progdata .= shift @html for (1..40);
+				# Extract prog data
 				$progdata =~ s!^.*<span class=\"available\">\s*([\w ]+)\s*</span>.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3|$4!g;
 				# Remove unwanted whitespace
 				$progdata =~ s/\s*$//g;
 				$progdata =~ s/\s*\|/|/g;
 				$progdata =~ s/\|\s*/|/g;
 				print "urlpid|pid|available|prog|episode|desc = '$urlpid|$pid|$progdata'\n" if $opt_v;
-				push @page, "$urlpid|$pid|$progdata";
-			}
-		}
-		for (@page) {
-			my ($urlpid, $pid, $available, $name, $episode, $desc) = split /\|/;
-			# Duplicate detection
-			if ( not defined $prog{$pid}{name} ) {
-				# Create data structure with prog data
-				$prog{$pid} = {
-					'index'		=> $index,
-					'name'		=> $name,
-					'urlpid'	=> $urlpid,
-					'episode'	=> $episode,
-					'desc'		=> $desc,
-					'available'	=> $available,
-					'longname'	=> undef,
-					'type'		=> undef,
-				};
-				$index_pid{$index}	= $pid;
-
-				print "  $name ($pid) - $episode - $desc\n" if $opt_v;
-				$index++;
-			} else {
-				print "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt_v;
+				my ($urlpid, $pid, $available, $name, $episode, $desc) = split /\|/, "$urlpid|$pid|$progdata";;
+				# Duplicate detection
+				if ( not defined $prog{$pid}{name} ) {
+					# Create data structure with prog data
+					$prog{$pid} = {
+						'index'		=> $index,
+						'name'		=> $name,
+						'urlpid'	=> $urlpid,
+						'episode'	=> $episode,
+						'desc'		=> $desc,
+						'available'	=> $available,
+					};
+					$index_pid{$index}	= $pid;
+					print "  $name ($pid) - $episode - $desc\n" if $opt_v;
+					$index++;
+				} else {
+					print "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt_v;
+				}
 			}
 		}
 		# Next page
 		$pageno++;
-	} while ($#page >= 0);
+	} while ($valid);
 	print "\n";
 	return 0;
 }
@@ -357,8 +353,6 @@ sub get_links {
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'available'	=> $available,
-				'longname'	=> undef,
-				'type'		=> undef,
 			};
 			$index_pid{$index}	= $pid;
 		}
@@ -386,7 +380,6 @@ sub get_links {
 	  print "Couldn't open html file $webfile for writing\n";
 	}
 	
-
 	return 0;
 }
 
@@ -537,6 +530,9 @@ sub download_stream_lwp {
 #
 # Usage: iplayer_decode <filename>
 #
+# * Modifies 2MB blksize bytes at a time for speed
+# * This process is NON reversible
+#
 sub iplayer_decoder {
 
   chomp( my $file = shift );
@@ -545,83 +541,236 @@ sub iplayer_decoder {
   	return 1;
   }
 
-  my $length =  stat($file)->size;
-  #print "$file length = $length\n";
-
   if (! open (FILE, "+<$file") ) {
   	print "ERROR: Can't update $file: $!";
   	return 1;
   }
-  my $buffer;
-
-  # Use preferred blocksize (OK read in 1024 blocks - its faster!)
-  my $recsize = stat($file)->blksize * 1024;
-
-  # Create long string of '0x3c53's
-  my $xor = create_xor_string($recsize/2, 0x3c, 0x53);
-
-  # Offsets
-  my $start_offset = 0x2800;
-  my $end_offset = 0x400 + 2;
-
-  # Put file ptr in correct place
-  seek(FILE, $start_offset, SEEK_SET);
 
 
-  # Do the xoring
-  print "INFO: Only XORing $recsize bytes from $start_offset\n" if $opt_v;
-  print "INFO: XOR Decoding\n" if ! $opt_v;
-  for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
+  # Open file
+  open (FILE, "+<$file") || die "ERROR: Can't write to file $file: $!";
 
-	# Make sure we don't touch last 0x402 bytes
-	if ( $i > ($length - $end_offset - $recsize) ) {
-		$recsize = $length - $end_offset - $i;
-		$xor = create_xor_string($recsize/2, 0x3c, 0x53);
-		print "\nINFO: Only XORing $recsize bytes from $i\n" if $opt_v;
-	}
+  # Get mdat box end start
+  my $mdat_start = 0x1c;
+  my $mdat_end_offset_chars = get_block( $mdat_start, 4 );
+  my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
+  print "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
+  print "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
 
-	read(FILE, $buffer, $recsize) == $recsize
-		|| die "\nReading: $!";
 
-	# Do the XOR
-	$buffer = $buffer ^ $xor;
+  # The MOOV box starts one byte after MDAT box ends
+  my $moov_start = $mdat_start + $mdat_end_offset + 1;
+  # Read start+3 + 4 bytes to get 'moov' text
+  my $moov_start_chars = get_block( $moov_start + 3, 4 );
+  print "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt_v;
 
-	# Rewind $buffer bytes then rewrite xor'ed data
-	seek(FILE, -1 * $recsize, SEEK_CUR);
-	print FILE $buffer;
+  my $moov_zeroes_chars;
+  # see if we need any decoding
+  if ( $moov_start_chars !~ /moov/ ) {
 
-	printf "\r%0.2f%%", ($i+$recsize)/($length-$end_offset)*100.0;
-	printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", ($i+$recsize)/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset if $opt_v;
+    # determine XOR pattern from zeroes area
+    # Get the zero byte section in the MOOV box
+    my $moov_zeroes_start = $mdat_start + $mdat_end_offset + 0x3D;
+    # Read start+ 0x3d + 2 bytes to get '00 00'
+    $moov_zeroes_chars = get_block( $moov_zeroes_start, 2 );
+    print "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt_v;
+    
+    # Extract the two hex bytes from the pattern
+    my $pattern = get_hex($moov_zeroes_chars);
+    $pattern =~ s/ //g;
+    $pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
+    # Use swapped pattern
+    my $byte1 = hex $2;
+    my $byte2 = hex $1;
+    print "DEBUG: $pattern = $byte1 + $byte2\n" if $opt_v;
+    # Create long string of byte pairs
+    my $xor_test = create_pattern_string(2, $byte1, $byte2);
+    # XOR this 'moov' string
+    my $buffer = $moov_start_chars ^ $xor_test;
+    print "INFO: Swap Test (after XOR on 'moov') BYTES: $buffer, HEX: ".get_hex($buffer)."\n" if $opt_v;
+
+    # if we get 'moov' then no byte-swapping is required
+    if ( $buffer =~ /moov/ ) {
+      print "INFO: Swapping bytes not required\n";
+    } else {
+      print "INFO: Swapping bytes required\n";
+      print "INFO: Will perform byte-swapping\n";
+      process_file($file, 'swap');
+      ### swap XOR bytes1/2 here???
+
+    }
+
+    # Do XORing if required
+    # Get XOR pattern from this
+    my $pattern = get_hex($moov_zeroes_chars);
+    $pattern =~ s/ //g;
+    if ( $pattern =~ /0000/ ) {
+	print "INFO: No XOR required\n";
+    } else {
+	print "INFO: XOR with '0x$pattern' required\n";
+	print "INFO: Will perform XOR using 0x${pattern}\n";
+	process_file($file, 'xor', $pattern);
+    }
+
+  } else {
+    print "INFO: No XOR or Byte swapping required\n";
   }
 
-  # Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
-  my $xor = create_xor_string(1, 0x53, 0x3c);
-  print "\nINFO: XORing 2 bytes from ".($length - $end_offset)."\n" if $opt_v;
-  seek(FILE, $length - $end_offset, SEEK_SET);
-  read(FILE, $buffer, 2) == 2 || die "Reading: $!";
 
-  # Do the XOR using 0x53,0x3c
-  $buffer = $buffer ^ $xor;
 
-  # Rewind $buffer bytes then rewrite xor'ed data
-  seek(FILE, -2, SEEK_CUR);
-  print FILE $buffer;
-  print "\n";
+
   close FILE || die "Closing: $!";
   return 0;
 }
 
 
-# Build XOR pattern (there has gotta be a more efficient way of doing this)
-sub create_xor_string {
+
+# process_file(<file>, 'xor', <pattern>)
+# process_file(<file>, 'swap)
+sub process_file {
+	my $file = shift;
+	my $recsize = 4096 * 512;
+	# Offsets
+	my $start_offset = 0x2800;
+	my $end_offset = 0x400 + 2;
+	print "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt_v;
+	my $buffer;
+	my $do_xor;
+	my $do_swap;
+	my $opt = shift;
+	my ($ooff, $ffoo);
+	my ($byte1, $byte2, $xor);
+
+	# XOR setup
+	if ($opt =~ /xor/i) {
+		$do_xor = 1;
+		# Extract the two hex bytes from the pattern
+		my $pattern = shift;
+		$pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
+		$byte1 = hex $1;
+		$byte2 = hex $2;
+		# Create long string of byte pairs
+		$xor = create_pattern_string($recsize/2, $byte1, $byte2);
+
+	# Swap setup
+	} else {
+		$do_swap = 1;
+		# Create long string of '00FF's
+		$ooff = create_pattern_string($recsize/2, 0x00, 0xff);
+		# Create long string of 'FF00's
+		$ffoo = create_pattern_string($recsize/2, 0xff, 0x00);
+	}
+
+	print "INFO: ($opt) Only processing $recsize bytes from $start_offset\n";
+
+	my $length =  stat($file)->size;
+	print "$file length = $length\n" if $opt_v;
+
+	# Put file ptr in correct place
+	seek(FILE, $start_offset, SEEK_SET);
+
+	# Do the xoring
+	for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
+
+		# Make sure we don't touch last 0x402 bytes
+		if ( $i > ($length - $end_offset - $recsize) ) {
+			$recsize = $length - $end_offset - $i;
+			$xor = create_pattern_string($recsize/2, $byte1, $byte2);
+			print "\nINFO: ($opt) Only processing $recsize bytes from $i\n";
+		}
+
+		read(FILE, $buffer, $recsize) == $recsize
+			|| die "\nReading: $!";
+
+		# Do the XOR
+		$buffer = $buffer ^ $xor if $do_xor;
+	
+		# Do the byte swapping
+		if ($do_swap) {
+			# AND buffer with 0xFF00 pattern
+	                my $a = $buffer & $ffoo;
+	                # AND buffer with 0x00FF pattern
+	                my $b = $buffer & $ooff;
+	                # Right-shift bufferA one byte
+	                chop($a);
+	                my $c = "\0".$a;
+	                # Left-shift bufferB one byte
+	                my $d = substr($b, 1)."\0";
+	                # OR buffers together
+			$buffer = $c | $d;
+		}
+		# Rewind $buffer bytes then rewrite xor'ed data
+		seek(FILE, -1 * $recsize, SEEK_CUR);
+		print FILE $buffer;
+
+		printf "\r%0.2f%%", $i/$length*100.0 if ! $opt_v;
+		printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset  if $opt_v;
+	}
+
+	# Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
+	my $xor = create_pattern_string(1, $byte2, $byte1);
+	print "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n";
+	seek(FILE, $length - $end_offset, SEEK_SET);
+	read(FILE, $buffer, 2) == 2 || die "Reading: $!";
+
+	# Do the XOR using reverse
+	$buffer = $buffer ^ $xor if $do_xor;
+
+	# Rewind $buffer bytes then rewrite xor'ed data
+	seek(FILE, -2, SEEK_CUR);
+	print FILE $buffer;
+}
+
+
+
+# Build XOR/Mask pattern
+sub create_pattern_string {
 	my $count = shift;
 
-	my $pattern;
-	$pattern .= chr($_) for @_;
+	my $pat;
+	$pat .= chr($_) for @_;
+	print "Pattern = $pat\n" if $opt_v;
 
 	my $ret;
 	for (my $i = 0; $i<$count; $i++) { 
-		$ret .= $pattern;
+		$ret .= $pat;
 	}
 	return $ret; 
 }
+
+# Returns arbitrary block of data from open FILE
+sub get_block {
+	my $start = shift;
+	my $len = shift;
+	my $buf;
+	# Seek to start offset
+	seek(FILE, $start, SEEK_SET);
+	# Read bytes
+	read(FILE, $buf, $len) == $len || die "\nReading: $!";
+	return $buf;
+}
+
+# Converts a string of chars to it's HEX representation
+sub get_hex {
+        my $buf = shift;
+        my $ret;
+        for (my $i=0; $i<length($buf); $i++) {
+                $ret .= " ".sprintf("%02lx", ord substr($buf, $i, 1) );
+        }
+	print "DEBUG: HEX string value = $ret\n" if $opt_v;
+        return $ret;
+}
+
+# Converts a string of chars to it's MSB decimal value
+sub bytestring_to_int {
+	# Reverse to LSB order
+        my $buf = reverse shift;
+        my $dec;
+        for (my $i=0; $i<length($buf); $i++) {
+		# Multiply byte value by 256^$i then accumulate
+                $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
+        }
+	print "DEBUG: Decimal value = $dec\n" if $opt_v;
+        return $dec;
+}
+
