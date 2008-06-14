@@ -7,18 +7,26 @@
 # download an specific mpeg4 file:
 #  curl --cookie-jar /tmp/xxx -vLA 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)' --proxy http://localhost:13128 http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/b008q01d
 use strict;
+#use LWP::UserAgent;
+
+my $download_script = './iplayer_dl';
 my $ask = 0;
 my $download = join ',', @ARGV;
 my $download_dir = './nfs/video/TV/iplayer';
+#my $download_dir = '.';
 my $VALIDATE = 0; # Use with caution - will generate loadsof web requests
-my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/';
-my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)';
-my $proxy_url = 'http://localhost:13128';
+#my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/';
+my $url_download_prefix = 'http://www.bbc.co.uk';
+#my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)';
+my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420+ (KHTML, like Gecko) Version/3.0 Mobile/1A543a Safari/419.3';
+my $qt_user_agent = 'Apple iPhone v1.1.3 CoreMedia v1.0.0.4A93';
+my $proxy_url = $ENV{HTTP_PROXY} || $ENV{http_proxy} || 'http://localhost:13128';
+#my $proxy_url = '';
 my $cache_secs = 86000;
 my $file = '/tmp/iplayer.cache';
-my (%links, %daymonth, %slot, %filenames, %urls, %streams, %prog_index);
+my (%links, %daymonth, %slot, %filenames, %urls, %streams, %prog_index, %pids);
 my $now = time();
-my $days = 8;
+my $days = 7;
 
 # Assume the argv is a regex statement if it doesnt contain just numbers/commas
 my $download_regex;
@@ -33,17 +41,17 @@ $ENV{http_proxy} = $proxy_url if $proxy_url;
 # Get straem links from BBC iplayer site or from cache
 get_links();
 
-
 # Print list of streams
 my $count = 1;
 for (sort keys %links) {
-	print "$count: $_ $daymonth{$_} $slot{$_} = $links{$_}\n";
+#	print "$count: $_ $daymonth{$_} $slot{$_} = $links{$_}\n";
+	print "$count: $_ $daymonth{$_} $slot{$_}\n" if ! $download;
 	$streams{$count} = $links{$_};
 	$prog_index{$_} = $count;
 	# Munge program name to create a filename
-	$filenames{$links{$_}} = "$_.avi";
+	$filenames{$links{$_}} = "$_";
 	$filenames{$links{$_}} =~ s/\s/_/g;
-	$filenames{$links{$_}} =~ s/[\(\)]//g;
+	$filenames{$links{$_}} =~ s/[\(\)']//g;
 	$filenames{$links{$_}} =~ s/\//-/g;
 	$count++;
 }
@@ -56,7 +64,9 @@ gen_html("iplayer.html");
 if ($download_regex) {
 	$download = '';
 	my @matches = sort grep /$download_regex/, keys %links;
+	print "Download Matches:\n";
 	for (@matches) {
+		print "$prog_index{$_}: $_ $daymonth{$_} $slot{$_}\n";
 		$download .= "$prog_index{$_},";
 	}
 }
@@ -66,15 +76,53 @@ if ($download) {
 	my @dl = split /[\s,]+/, $download;
 	for (@dl) {
 		chomp();
-		if ( ! -f "$download_dir/$filenames{$streams{$_}}" ) {
-			print "Downloading ITEM=$_ FILE=$filenames{$streams{$_}} URL=$streams{$_}\n";
-			print "curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}\n";
-			system("curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}");
+		if ( ! -f "$download_dir/$filenames{$streams{$_}}.mov" ) {
+			print "Downloading ITEM=$_ FILE=$filenames{$streams{$_}}.mov\n"; # URL=$streams{$_}\n";
+			#print "curl --cookie-jar /tmp/xxx -LA \"$qt_user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}\n";
+			system("$download_script \"$streams{$_}\" $download_dir/$filenames{$streams{$_}}");
+#			system("curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}");
+#			download_stream( $streams{$_} );
+#			download_stream( 'http://www.bbc.co.uk/iplayer/page/item/b0094zhm.shtml?order=aztitle%3Aalphabetical' );
+#			download_stream('b0094zby');
 		} else {
-			print "ERROR: Already downloaded ITEM=$_ FILE=$filenames{$streams{$_}} URL=$streams{$_}\n";
+			print "ERROR: Already downloaded ITEM=$_ FILE=$filenames{$streams{$_}}\n"; # URL=$streams{$_}\n";
 		}
 	} 
 }
+
+
+
+#sub download_stream {
+#	my $pid = shift;
+#	my $content;
+#	my $ua = new LWP::UserAgent;
+#
+#	my $random = int(rand(10000000));
+#	#selector = "http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/#{ pid }?#{r}"
+#	my $url = $url_download_prefix.$pid.'?'.$random;
+#
+#	# Various enhancement possibilities:
+#	# $ua->max_size(100000);  # 100k byte limit
+#	# $ua->timeout(3);        # 3 sec timeout is default
+#	# $ua->proxy(['http'], 'http://myproxy.mycorp.com/');  # set proxy
+#	# $ua->env_proxy()        # load proxy info from environment variables
+#	# $ua->no_proxy('localhost', 'mycorp.com');   # No proxy for local machines
+#
+#	$ua->agent($qt_user_agent);
+#
+#	my $req = new HTTP::Request GET => $url;
+#	$req->header('Range' => 'bytes=0-1');
+#	my $res = $ua->request($req);
+# 
+#	if ($res->is_success) {
+#		$content = $res->content;
+#		my $headers = $res->headers_as_string;
+#		print "\n$headers\n\n###############################################\n$content\n";
+#	} else {
+#		die "Could not get content";
+#	}
+#}
+
 
 # Ask user which stream to play
 if ($ask) {
@@ -102,23 +150,34 @@ exit 0;
 sub get_links_for_date {
 	my ($day, $month, $slot) = @_;
 	my $pageno = 1;
+	my $pid;
 	my @page;
 	print "Results for $day / $month / $slot:";
 	# Loop while we still get stream links
 	do {
 		print ".";
 		chomp( @page = grep /version_pid=\w+">[^<]+<\/a>/, `curl $proxy_url -A "$user_agent" "http://www.bbc.co.uk/iplayer/last7days/?filter=txdate%3A${day}-${month}&filter=txslot%3A${slot}&start=${pageno}&scope=iplayerlast7days" 2>/dev/null` );
-		s/^.*version_pid=(\w+)">([^<]+)<\/a>/$1|$2/g for @page;
+
+
+		### Get the complate URL now...
+		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b009gn1m.shtml?filter=txdate%3A13-03&amp;filter=txslot%3Aafternoon&amp;start=1&amp;scope=iplayerlast7days&amp;version_pid=b009gmpz">In The Night Garden</a>
+		s/^.*href=\"(.*version_pid=\w+)">([^<]+)<\/a>/$1|$2/g for @page;
+
 		for (@page) {
 			my ($url, $progname) = split /\|/;
+			$url = $url_download_prefix.$url;
+			# Get the pid for duplicate detection
+			$pid = $url;
+			$pid =~ s/^.*version_pid=//g;
 			# Duplicate detection
-			if ( not defined $urls{$url_download_prefix.$url} ) {
-				$links{"$progname ($day/$month)"} = $url_download_prefix.$url;
+			if ( not defined $pids{$pid} ) {
+				$links{"$progname ($day/$month)"} = $url;
 				# Other hashes for categorisation
 				$daymonth{"$progname ($day/$month)"} = $day."/".$month;
 				$slot{"$progname ($day/$month)"} = $slot;
 				# Used to detect duplicates
-				$urls{$url_download_prefix.$url} = "$progname ($day/$month)";
+				$urls{$url} = "$progname ($day/$month)";
+				$pids{$pid} = "$progname/$day/$month/$slot";
 				
 				# Validate link if required
 				if ($VALIDATE) {
@@ -130,7 +189,7 @@ sub get_links_for_date {
 					}
 				}
 			} else {
-				print "WARNING: removing duplicate stream link for \"$progname ($day/$month)\"\n";
+				print "WARNING: removing duplicate stream link for \"$progname ($day/$month)\" PID=$pid / $pids{$pid}\n";
 			}
 
 		}
@@ -153,7 +212,7 @@ sub get_links {
 	if ( ($cache[0] =~ /^0$/) || (! -f $file) || ($now >= ((stat($file))[9] + $cache_secs)) ) {
 
 		# Get last $days of listings
-		for (my $i=0; $i<$days; $i++) {
+		for (my $i=$days; $i>=0; $i--) {
 			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
 			for my $s qw(morning afternoon evening) {
 				get_links_for_date($d,$m,$s);
@@ -222,7 +281,7 @@ sub gen_fxd_categorised() {
 		print HTML '<?xml version="1.0" ?>'."\n<freevo>\n";
 
 		# Get last $days of listings
-		for (my $i=0; $i<$days; $i++) {
+		for (my $i=$days; $i>=0; $i--) {
 			chomp( my ($d, $m) = split /\s+/, `date +'%d %m' -d "$i days ago"` );
 			print HTML "\t<container title=\"$d\/$m\" type=\"video\">\n";
 			for (sort keys %links) {
