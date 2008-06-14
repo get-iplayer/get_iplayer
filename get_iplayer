@@ -7,16 +7,24 @@
 # download an specific mpeg4 file:
 #  curl --cookie-jar /tmp/xxx -vLA 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)' --proxy http://localhost:13128 http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/b008q01d
 use strict;
-
-my $VALIDATE = 1; # Use with caution - will generate loadsof web requests
+my $ask = 0;
+my $download = join ',', @ARGV;
+my $download_dir = './nfs/video/TV/iplayer';
+my $VALIDATE = 0; # Use with caution - will generate loadsof web requests
 my $url_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4/';
 my $user_agent = 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en)';
 my $proxy_url = 'http://localhost:13128';
-my $cache_secs = 86400;
+my $cache_secs = 86000;
 my $file = '/tmp/iplayer.cache';
-my (%links, %daymonth, %slot);
+my (%links, %daymonth, %slot, %filenames, %urls, %streams, %prog_index);
 my $now = time();
-my $days = 2;
+my $days = 8;
+
+# Assume the argv is a regex statement if it doesnt contain just numbers/commas
+my $download_regex;
+if ($download !~ /^[\d,]+$/) {
+	$download_regex = $ARGV[0];
+}
 
 # Set web proxy env var if required
 $ENV{HTTP_PROXY} = $proxy_url if $proxy_url;
@@ -25,36 +33,68 @@ $ENV{http_proxy} = $proxy_url if $proxy_url;
 # Get straem links from BBC iplayer site or from cache
 get_links();
 
-# Generate ugly html index
-gen_html("iplayer.html");
-gen_fxd_categorised("iplayer.fxd");
 
 # Print list of streams
 my $count = 1;
-my %streams;
 for (sort keys %links) {
 	print "$count: $_ $daymonth{$_} $slot{$_} = $links{$_}\n";
 	$streams{$count} = $links{$_};
+	$prog_index{$_} = $count;
+	# Munge program name to create a filename
+	$filenames{$links{$_}} = "$_.avi";
+	$filenames{$links{$_}} =~ s/\s/_/g;
+	$filenames{$links{$_}} =~ s/[\(\)]//g;
+	$filenames{$links{$_}} =~ s/\//-/g;
 	$count++;
 }
 
-# Ask user which stream to play
-do {
-	print "Which stream do you wish to download? ";
-	# Get answer from stdin
-	chomp( my $selection = <> );
-	# Return theplay if it exists in the %streams hash
-	if ( defined $streams{$selection} ) {
-		print "Playing...\n";
-		if ( system("mplayer -user-agent \"$user_agent\" -cookies-file /tmp/xxx -cookies -cache 4096 $streams{$selection}") != 0 ) {
-			print "ERROR: Stream could not be played...\n";
-		}
-	} elsif ( $selection == '0' ) {
-		exit 0; 
-	} else {
-		print "Invalid selection\n";
+# Generate ugly html index
+gen_html("iplayer.html");
+#gen_fxd_categorised("iplayer.fxd");
+
+# Get matching programmes
+if ($download_regex) {
+	$download = '';
+	my @matches = sort grep /$download_regex/, keys %links;
+	for (@matches) {
+		$download .= "$prog_index{$_},";
 	}
-} while (1);
+}
+
+# Do the downloads
+if ($download) {
+	my @dl = split /[\s,]+/, $download;
+	for (@dl) {
+		chomp();
+		if ( ! -f "$download_dir/$filenames{$streams{$_}}" ) {
+			print "Downloading ITEM=$_ FILE=$filenames{$streams{$_}} URL=$streams{$_}\n";
+			print "curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}\n";
+			system("curl --cookie-jar /tmp/xxx -LA \"$user_agent\" $streams{$_} -o $download_dir/$filenames{$streams{$_}}");
+		} else {
+			print "ERROR: Already downloaded ITEM=$_ FILE=$filenames{$streams{$_}} URL=$streams{$_}\n";
+		}
+	} 
+}
+
+# Ask user which stream to play
+if ($ask) {
+	do {
+		print "Which stream do you wish to download? ";
+		# Get answer from stdin
+		chomp( my $selection = <> );
+		# Return theplay if it exists in the %streams hash
+		if ( defined $streams{$selection} ) {
+			print "Playing...\n";
+			if ( system("mplayer -user-agent \"$user_agent\" -cookies-file /tmp/xxx -cookies -cache 4096 $streams{$selection}") != 0 ) {
+				print "ERROR: Stream could not be played...\n";
+			}
+		} elsif ( $selection == '0' ) {
+			exit 0; 
+		} else {
+			print "Invalid selection\n";
+		}
+	} while (1);
+}
 
 exit 0;
 
@@ -71,19 +111,26 @@ sub get_links_for_date {
 		s/^.*version_pid=(\w+)">([^<]+)<\/a>/$1|$2/g for @page;
 		for (@page) {
 			my ($url, $progname) = split /\|/;
-			$links{"$progname ($day/$month)"} = $url_download_prefix.$url;
-			# Other hashes for categorisation
-			$daymonth{"$progname ($day/$month)"} = $day."/".$month;
-			$slot{"$progname ($day/$month)"} = $slot;
-
-			# Validate link if required
-			if ($VALIDATE) {
-				print "INFO: Validating stream link for $_\n";
-				`curl $proxy_url -A "$user_agent" -m 2 -I $links{"$progname ($day/$month)"} 2>&1 | grep statuscode=not_available >/dev/null 2>&1`;
-				if (! $?) {
-					delete $links{"$progname ($day/$month)"};
-					print "WARNING: removing invalid stream link for \"$progname ($day/$month)\"\n";
+			# Duplicate detection
+			if ( not defined $urls{$url_download_prefix.$url} ) {
+				$links{"$progname ($day/$month)"} = $url_download_prefix.$url;
+				# Other hashes for categorisation
+				$daymonth{"$progname ($day/$month)"} = $day."/".$month;
+				$slot{"$progname ($day/$month)"} = $slot;
+				# Used to detect duplicates
+				$urls{$url_download_prefix.$url} = "$progname ($day/$month)";
+				
+				# Validate link if required
+				if ($VALIDATE) {
+					print "INFO: Validating stream link for $_\n";
+					`curl $proxy_url -A "$user_agent" -m 2 -I $links{"$progname ($day/$month)"} 2>&1 | grep statuscode=not_available >/dev/null 2>&1`;
+					if (! $?) {
+						delete $links{"$progname ($day/$month)"};
+						print "WARNING: removing invalid stream link for \"$progname ($day/$month)\"\n";
+					}
 				}
+			} else {
+				print "WARNING: removing duplicate stream link for \"$progname ($day/$month)\"\n";
 			}
 
 		}
@@ -119,6 +166,8 @@ sub get_links {
 				print CACHE "$_|$links{$_}|$daymonth{$_}|$slot{$_}\n";
 			}
 			close (CACHE);
+			# Make sure anyone can read/write file
+			`chmod 777 $file`;
 		} else {
 			print "Couldn't open cache file for writing\n";
 		}
@@ -132,6 +181,7 @@ sub get_links {
                         $links{$progname} = $url;
 			$daymonth{$progname} = $dm;
 			$slot{$progname} = $s;
+			$urls{$url} = $progname;
 		}
 	}
 
@@ -143,7 +193,7 @@ sub gen_html() {
 	if ( open(HTML, "> $webfile") ) {
 		print HTML '<html><head></head><body>';
 		for (sort keys %links) {
-			print HTML "<a href=\"$links{$_}\">$_ $daymonth{$_} $slot{$_}</a><br>\n";
+			print HTML "<a href=\"$links{$_}\">$prog_index{$_} : $_ $daymonth{$_} $slot{$_}</a><br>\n";
 		}
 		print HTML '</body>';
 		close (HTML);
@@ -151,22 +201,6 @@ sub gen_html() {
 		print "Couldn't open html file $webfile for writing\n";
 	}
 }
-
-#<?xml version="1.0" ?>
-#<freevo>
-#  <movie title="Video Streaming">
-#   <video>
-#     <url id="p1">
-#       http://IPofYourDesktopPC:1234
-#       <playlist/>
-#     </url>
-#   </video>
-#   <info>
-#     <description>udp video-streaming using vlc or vls</description>
-#   </info>
-#  </movie>
-#</freevo>
-
 
 sub gen_fxd() {
 	my $fxdfile = shift;
