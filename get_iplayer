@@ -7,8 +7,8 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 13th 2008
-# Version: 0.18
+# Date: June 15th 2008
+# Version: 0.19
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -21,7 +21,15 @@
 # * HTTP Proxy support - 20080610
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
+# * Restarting downloads of incomplete files
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.19 - 20080614:
+# * Fixed PID searching
+# * Now supports restarting downloads of incomplete files
+# * Fixed swap detection bug where moov atom started on even byte offset
+# * Remaining time added
+# * Fixed kbps (not misreported kBps anymore)
 #
 # Changes 0.18 - 20080613:
 # * Auto detection of byte-swapping
@@ -61,6 +69,7 @@ use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_
 use Getopt::Std;
 use Fcntl;
 use File::stat;
+use File::Copy;
 use IO::Seekable;
 use LWP::UserAgent;
 #use LWP::Debug qw(+);
@@ -202,7 +211,7 @@ sub get_regex_matches {
 	for (keys %index_pid) {
 		my $pid = $index_pid{$_};
 		# Search prognames/pids
-		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i;
+		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i || $pid =~ /$download_regex/i || $prog{$pid}{urlpid} =~ /$download_regex/i;
 		# Also search long descriptions and episode data if -l is specified
 		push @download_list, $_ if $opt_l && ( $prog{$pid}{desc} =~ /$download_regex/i 
 			|| $prog{$pid}{episode} =~ /$download_regex/i );
@@ -450,8 +459,9 @@ sub download_stream_lwp {
 	# Skip from here if we are only testing downloads
 	return 0 if $opt_t;
 
-	$file = "${download_dir}/${file}.mov";
-	if ( -f $file ) {
+	my $file_done = "${download_dir}/${file}.mov";
+	$file = "${file_done}.part";
+	if ( -f $file_done ) {
 		print "ERROR: File already exists\n\n";
 		return 1;
 	} else {
@@ -483,10 +493,17 @@ sub download_stream_lwp {
 
 
 		# Stage 3: Download File
+		# Open output file for appending/writing
+		if ( ! open(FILE, ">> $file") ) {
+			print("ERROR: Cannot write or append to $file\n\n");
+			return 4;
+		}
+                # Determine offset for continuation dowload
+		my $orig_length = stat($file)->size;
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $ua{coremedia},
 			'Accept'	=> '*/*',
-			'Range'		=> 'bytes=0-',
+			'Range'		=> 'bytes='.$orig_length.'-',
 		);
 		my $req = HTTP::Request->new ('GET', $url_2, $h);
 		# Set time to use for download rate calculation
@@ -496,30 +513,36 @@ sub download_stream_lwp {
 		my $callback = sub { 
 			my ($data, $res, undef) = @_;
 			print FILE $data;
-			my $size = stat($file)->size;
-			printf( "%8.2f MB / %.2f MB %4.0f kbps %5.1f%%   \r", $size/1024.0/1024.0, $res->header("Content-Length")/1024.0/1024.0, $size / (stat($file)->mtime - $now + 0.01) / 1024.0, 100.0*$size/$res->header("Content-Length") );
+			my $size = stat($file)->size - $orig_length;
+			printf( "%8.2f MB / %.2f MB %5.0f kbps %5.1f%% %5.0f s remaining        \r", 
+                                ($size + $orig_length) / 1024.0 / 1024.0, 
+                                ($res->header("Content-Length") + $orig_length) / 1024.0 / 1024.0,
+                                ($size * 8.0) / (stat($file)->mtime - $now + 0.01) / 1024.0,
+                                100.0 * ($size + $orig_length) / ($orig_length + $res->header("Content-Length")),
+                                ($res->header("Content-Length") - $size) * ( stat($file)->mtime - $now ) / ( $size + 1000 )
+                        );
 		};
-		if ( ! open(FILE, "> $file") ) {
-			print("ERROR: Cannot write to $file\n\n");
-			return 4;
-		}
-		# send request (turn off autoflush o/wise we have too many terminal updates)
-		#$|=0;
+		# send request
+		print "\nINFO: Continuing download from byte $orig_length\n" if $orig_length;
 		print "\r                              \r";
 		my $res = $ua->request($req, $callback);
-		#$|=1;
 		close FILE;
+                # If we don't require any more bytes (previously fully downloaded) then skip
+                print "Content-Length = ".$res->header("Content-Length")."\n";
 		if (! $res->is_success) {
 			print "ERROR: Failed to Download file\n\n";
-			unlink $file;
+			# If this really was a failure from http then the dload is prob corrupted
+                        unlink $file;
 			unlink $cookiejar;
 			return 5;
 		} else {
-			print "INFO: Downloaded $file\n";
+			print "INFO: Downloaded $file_done (".$res->header("Content-Length")." bytes)\n";
+			# Moving file into place as complete
+                        move($file, $file_done);
 		}
 	}
 	# XOR Decode if required
-	iplayer_decoder($file) if ! $opt_n;
+	iplayer_decoder($file_done) if ! $opt_n;
 
 	return 0;
 }
@@ -559,32 +582,29 @@ sub iplayer_decoder {
 
 
   # The MOOV box starts one byte after MDAT box ends
-  my $moov_start = $mdat_start + $mdat_end_offset + 1;
-  # Read start+3 + 4 bytes to get 'moov' text
-  my $moov_start_chars = get_block( $moov_start + 3, 4 );
+  my $moov_start = $mdat_start + $mdat_end_offset;
+  # Read start+4 + 4 bytes to get 'moov' text
+  my $moov_start_chars = get_block( $moov_start + 4, 4 );
   print "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt_v;
 
-  my $moov_zeroes_chars;
   # see if we need any decoding
   if ( $moov_start_chars !~ /moov/ ) {
 
-    # determine XOR pattern from zeroes area
-    # Get the zero byte section in the MOOV box
-    my $moov_zeroes_start = $mdat_start + $mdat_end_offset + 0x3D;
-    # Read start+ 0x3d + 2 bytes to get '00 00'
-    $moov_zeroes_chars = get_block( $moov_zeroes_start, 2 );
-    print "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt_v;
-    
-    # Extract the two hex bytes from the pattern
-    my $pattern = get_hex($moov_zeroes_chars);
-    $pattern =~ s/ //g;
+    # Get xor pattern
+    my $pattern = get_xor_pattern( $moov_start );
     $pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
-    # Use swapped pattern
-    my $byte1 = hex $2;
-    my $byte2 = hex $1;
-    print "DEBUG: $pattern = $byte1 + $byte2\n" if $opt_v;
+    my $byte1 = hex $1;
+    my $byte2 = hex $2;
+
     # Create long string of byte pairs
     my $xor_test = create_pattern_string(2, $byte1, $byte2);
+    # We need a different xor pattern if we have an odd offset
+    if ( odd($moov_start) ) {
+      $xor_test = create_pattern_string(2, $byte2, $byte1);
+    } else {
+      $xor_test = create_pattern_string(2, $byte1, $byte2);
+    }
+
     # XOR this 'moov' string
     my $buffer = $moov_start_chars ^ $xor_test;
     print "INFO: Swap Test (after XOR on 'moov') BYTES: $buffer, HEX: ".get_hex($buffer)."\n" if $opt_v;
@@ -596,14 +616,11 @@ sub iplayer_decoder {
       print "INFO: Swapping bytes required\n";
       print "INFO: Will perform byte-swapping\n";
       process_file($file, 'swap');
-      ### swap XOR bytes1/2 here???
-
     }
 
     # Do XORing if required
     # Get XOR pattern from this
-    my $pattern = get_hex($moov_zeroes_chars);
-    $pattern =~ s/ //g;
+    my $pattern = get_xor_pattern( $moov_start );
     if ( $pattern =~ /0000/ ) {
 	print "INFO: No XOR required\n";
     } else {
@@ -611,6 +628,11 @@ sub iplayer_decoder {
 	print "INFO: Will perform XOR using 0x${pattern}\n";
 	process_file($file, 'xor', $pattern);
     }
+
+
+
+
+
 
   } else {
     print "INFO: No XOR or Byte swapping required\n";
@@ -624,6 +646,31 @@ sub iplayer_decoder {
 }
 
 
+# Get XOR pattern from moov_start_offset
+sub get_xor_pattern {
+    my $moov_start = shift;
+    my $moov_zeroes_chars;
+    
+    # determine XOR pattern from zeroes area
+    # Get the zero byte section in the MOOV box
+    my $moov_zeroes_start = $moov_start + 0x3D;
+    # Add one to this number to make it even to get the correct xor sequence
+    if ( odd( $moov_zeroes_start ) ) {
+      $moov_zeroes_start++;
+      print "DEBUG: making moov_zeroes_start offset even" if $opt_v;
+    }
+    # Read start+ 0x3d + 2 bytes to get '00 00'
+    $moov_zeroes_chars = get_block( $moov_zeroes_start, 2 );
+    print "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt_v;
+
+    # Extract the two hex bytes from the pattern
+    my $pattern = get_hex($moov_zeroes_chars);
+    $pattern =~ s/ //g;
+    print "DEBUG: XOR pattern = $pattern\n" if $opt_v;
+    return $pattern;
+    # Use swapped pattern
+}
+
 
 # process_file(<file>, 'xor', <pattern>)
 # process_file(<file>, 'swap)
@@ -631,6 +678,7 @@ sub process_file {
 	my $file = shift;
 	my $recsize = 4096 * 512;
 	# Offsets
+	# Start offset MUST be even
 	my $start_offset = 0x2800;
 	my $end_offset = 0x400 + 2;
 	print "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt_v;
@@ -774,3 +822,7 @@ sub bytestring_to_int {
         return $dec;
 }
 
+sub odd() {
+    return 1 if ( ($_[0]/2.0) != int($_[0]/2.0) );
+    return 0;
+}
