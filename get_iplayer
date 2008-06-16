@@ -7,8 +7,8 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 15th 2008
-# Version: 0.21
+# Date: June 16th 2008
+# Version: 0.22
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -23,6 +23,9 @@
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Restarting downloads of incomplete files
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.22 - 20080616:
+# * Detect null Content-Length header upon download - doesn't replace a partially d/loaded file if there is a failure
 #
 # Changes 0.21 - 20080616:
 # * Added binmode for Windows file writing - fixes bug where windows would not decode properly
@@ -98,7 +101,7 @@ sub usage {
 	print "       -e <secs> cache expiry in seconds\n";
 	print "       -o <dir>  Download output directory\n";
 	print "       -s        Downloaded files into Programme name subdirectory\n";
-	print "       -p <url>  Web proxy URL spec (only used for parsing iplayer site - not downloads)\n";
+	print "       -p <url>  Web proxy URL spec\n";
 	print "       -n        Do not perform XOR decoding/byte-swapping after downloading\n";
 	print "       -w        keep whitespace (and escape chars) in filenames\n";
 	print "       -v        verbose\n";
@@ -535,6 +538,8 @@ sub download_stream_lwp {
 		# This sub actually writes to the open output file and reports on progress
 		my $callback = sub { 
 			my ($data, $res, undef) = @_;
+			# Don't write the output to the file if there is no content-length header
+                        return 0 if ( ! $res->header("Content-Length") );
 			print FILE $data;
 			my $size = stat($file)->size - $orig_length;
 			my @time = gmtime( ($res->header("Content-Length") - $size) * ( stat($file)->mtime - $now ) / ( $size + 1000 ) );
@@ -552,11 +557,9 @@ sub download_stream_lwp {
 		my $res = $ua->request($req, $callback);
 		close FILE;
                 # If we don't require any more bytes (previously fully downloaded) then skip
-                print "Content-Length = ".$res->header("Content-Length")."\n";
-		if (! $res->is_success) {
+                print "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt_v;
+		if ( (! $res->is_success) || (! $res->header("Content-Length")) ) {
 			print "ERROR: Failed to Download file\n\n";
-			# If this really was a failure from http then the dload is prob corrupted
-                        unlink $file;
 			unlink $cookiejar;
 			return 5;
 		} else {
