@@ -597,11 +597,24 @@ sub iplayer_decoder {
   my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
   print "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
   print "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
-
-
   # The MOOV box starts one byte after MDAT box ends
   my $moov_start = $mdat_start + $mdat_end_offset;
-  # Read start+4 + 4 bytes to get 'moov' text
+
+  # Some file content sanity checking
+  # Get 'mdat' atom name - it it desn't contain 'mdat' then this is not a quicktime file
+  if ( get_block( $mdat_start + 4, 4 ) !~ /mdat/ ) {
+    print "ERROR: file is not a valid quicktime/mov file (no 'mdat' atom)\n";
+    close FILE;
+    return 2;
+
+  # Get 'moov' atom start offset and ensure it is not > file length
+  } elsif ( $moov_start > stat($file)->size ) {
+    print "ERROR: quicktime/mov file is not fully downloaded or truncated (no 'moov' atom)\n";
+    close FILE;
+    return 3;
+  }
+
+  # Read start+4 + 4 bytes from $moov_start to get 'moov' text
   my $moov_start_chars = get_block( $moov_start + 4, 4 );
   print "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt_v;
 
@@ -631,8 +644,7 @@ sub iplayer_decoder {
     if ( $buffer =~ /moov/ ) {
       print "INFO: Swapping bytes not required\n";
     } else {
-      print "INFO: Swapping bytes required\n";
-      print "INFO: Will perform byte-swapping\n";
+      print "INFO: Swapping bytes\n";
       process_file($file, 'swap');
     }
 
@@ -642,21 +654,21 @@ sub iplayer_decoder {
     if ( $pattern =~ /0000/ ) {
 	print "INFO: No XOR required\n";
     } else {
-	print "INFO: XOR with '0x$pattern' required\n";
-	print "INFO: Will perform XOR using 0x${pattern}\n";
+	print "INFO: XOR with '0x$pattern'\n";
 	process_file($file, 'xor', $pattern);
     }
 
-
-
-
-
+    # recheck that XOR/swap was successful by checking for 'moov' string
+    $moov_start_chars = get_block( $moov_start + 4, 4 );
+    if ( $moov_start_chars =~ /moov/ ) {
+        print "INFO: Decoding Successful\n";
+    } else {
+        print "ERROR: Decoding Failed, moov = '$moov_start_chars', HEX: ".get_hex($moov_start_chars)."\n";
+    }
 
   } else {
     print "INFO: No XOR or Byte swapping required\n";
   }
-
-
 
 
   close FILE || die "Closing: $!";
@@ -686,24 +698,22 @@ sub get_xor_pattern {
     $pattern =~ s/ //g;
     print "DEBUG: XOR pattern = $pattern\n" if $opt_v;
     return $pattern;
-    # Use swapped pattern
 }
 
 
 # process_file(<file>, 'xor', <pattern>)
 # process_file(<file>, 'swap)
 sub process_file {
-	my $file = shift;
+	my ($file, $opt, $pattern) = @_;
 	my $recsize = 4096 * 512;
 	# Offsets
-	# Start offset MUST be even
+	# Start offset *MUST* be even
 	my $start_offset = 0x2800;
 	my $end_offset = 0x400 + 2;
 	print "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt_v;
 	my $buffer;
 	my $do_xor;
 	my $do_swap;
-	my $opt = shift;
 	my ($ooff, $ffoo);
 	my ($byte1, $byte2, $xor);
 
@@ -711,7 +721,6 @@ sub process_file {
 	if ($opt =~ /xor/i) {
 		$do_xor = 1;
 		# Extract the two hex bytes from the pattern
-		my $pattern = shift;
 		$pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
 		$byte1 = hex $1;
 		$byte2 = hex $2;
@@ -727,7 +736,7 @@ sub process_file {
 		$ffoo = create_pattern_string($recsize/2, 0xff, 0x00);
 	}
 
-	print "INFO: ($opt) Only processing $recsize bytes from $start_offset\n";
+	print "INFO: ($opt) Only processing $recsize bytes from $start_offset\n" if $opt_v;
 
 	my $length =  stat($file)->size;
 	print "$file length = $length\n" if $opt_v;
@@ -738,11 +747,11 @@ sub process_file {
 	# Do the xoring
 	for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
 
-		# Make sure we don't touch last 0x402 bytes
+		# Make sure we don't touch last $recsize bytes of file
 		if ( $i > ($length - $end_offset - $recsize) ) {
 			$recsize = $length - $end_offset - $i;
 			$xor = create_pattern_string($recsize/2, $byte1, $byte2);
-			print "\nINFO: ($opt) Only processing $recsize bytes from $i\n";
+			print "\nINFO: ($opt) Only processing $recsize bytes from $i\n" if $opt_v;
 		}
 
 		read(FILE, $buffer, $recsize) == $recsize
@@ -775,7 +784,7 @@ sub process_file {
 
 	# Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
 	my $xor = create_pattern_string(1, $byte2, $byte1);
-	print "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n";
+	print "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n" if $opt_v;
 	seek(FILE, $length - $end_offset, SEEK_SET);
 	read(FILE, $buffer, 2) == 2 || die "Reading: $!";
 
@@ -785,6 +794,7 @@ sub process_file {
 	# Rewind $buffer bytes then rewrite xor'ed data
 	seek(FILE, -2, SEEK_CUR);
 	print FILE $buffer;
+	print "\r";
 }
 
 
