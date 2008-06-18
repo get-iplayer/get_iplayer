@@ -8,11 +8,12 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 18th 2008
-# Version: 0.24
+# Version: 0.25
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
 # * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
+# * Re-jigs the mov file so that it can be streamed and start faster on some players - 20080618
 # * XOR decoding of files (if required - now deprecated) - 20080609
 # * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
@@ -24,6 +25,11 @@
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Restarting downloads of incomplete files (maybe broken for now)
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.25 - 20080618:
+# * Automatically re-arrange the atoms so that file can be streamed and start faster (used method from qt-faststart.c, v0.1 by Mike Melanson, melanson@pcisys.net)
+# * Option -x allows STDOUT streaming during download (see usage)
+# * All messages now go to STDERR
 #
 # Changes 0.24 - 20080618:
 # * Now supports downloading of *unencrypted* streams from BBC Iplayer site - no more XOR nonsense
@@ -84,7 +90,7 @@
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w $opt_s);
+use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w $opt_s $opt_x);
 use Getopt::Std;
 use Fcntl;
 use File::stat;
@@ -98,27 +104,29 @@ my $DEBUG = 0;
 $|=1;
 
 sub usage {
-	print "Usage:\n";
-	print "  Download files:        get_iplayer [-l] [-t] [-f] [-w] [-v] [-s] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
-	print "  Decode Existing Files: get_iplayer [-v] -d <files to decode>\n";
-	print "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
-	print "Options:\n";
-	print "       -l        show/search long programme descriptions\n";
-	print "       -d        Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
-	print "       -t        test only - no download (will show programme type)\n";
-	print "       -f        flush cache\n";
-	print "       -e <secs> cache expiry in seconds\n";
-	print "       -o <dir>  Download output directory\n";
-	print "       -s        Downloaded files into Programme name subdirectory\n";
-	print "       -p <url>  Web proxy URL spec\n";
-	print "       -w        keep whitespace (and escape chars) in filenames\n";
-	print "       -v        verbose\n";
-	print "       -h        help\n";
+	print STDERR "Usage:\n";
+	print STDERR "  Download files:        get_iplayer [-l] [-t] [-f] [-w] [-v] [-s] [-x] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
+	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
+	print STDERR "  Decode Existing Files: get_iplayer [-v] -d <files to decode>\n";
+	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
+	print STDERR "Options:\n";
+	print STDERR "       -l        show/search long programme descriptions\n";
+	print STDERR "       -f        flush cache\n";
+	print STDERR "       -o <dir>  Download output directory\n";
+	print STDERR "       -s        Downloaded files into Programme name subdirectory\n";
+	print STDERR "       -p <url>  Web proxy URL spec\n";
+	print STDERR "       -x        stream to STDOUT (so you can pipe output to a player)\n";
+	print STDERR "       -e <secs> cache expiry in seconds\n";
+	print STDERR "       -t        test only - no download (will show programme type)\n";
+	print STDERR "       -d        Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
+	print STDERR "       -w        keep whitespace (and escape chars) in filenames\n";
+	print STDERR "       -v        verbose\n";
+	print STDERR "       -h        help\n";
 	exit 1;
 }
 
 # Parse options
-usage() if (! getopts("htwnvdfso:p:e:l")) || $opt_h;
+usage() if (! getopts("htwnvdfso:p:e:lx")) || $opt_h;
 
 # Options
 my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.';
@@ -153,7 +161,7 @@ my $now;
 
 # Web proxy
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-print "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+print STDERR "INFO: Using Proxy $proxy_url\n" if $proxy_url;
 
 # XOR Decode-only mode
 if ($opt_d) {
@@ -161,7 +169,7 @@ if ($opt_d) {
 		if ( -f $file ) {
 			iplayer_decoder($file);
 		} else {
-			print "ERROR: Cannot find $file\n";
+			print STDERR "ERROR: Cannot find $file\n";
 		}
 	}
 	exit 0;
@@ -202,7 +210,7 @@ for ( @ARGV ) {
 }
 
 # Display list for download
-print "Download List:\n" if @download_list;
+print STDERR "Download List:\n" if @download_list;
 list_progs( @download_list );
 
 # Do the downloads based on list of index numbers
@@ -216,9 +224,9 @@ sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
 		my $desc = "- $prog{$pid}{desc}" if $opt_l;
-		print "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available})\n";	
+		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available})\n";	
 	}
-	print "\n";
+	print STDERR "\n";
 	return 0;
 }
 
@@ -245,7 +253,7 @@ sub get_links_all {
 	my $pid;
 	my @html;
 	my $valid = 1;
-	print "INFO: Getting Index page\n";
+	print STDERR "INFO: Getting Index page\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([10]);
@@ -255,7 +263,7 @@ sub get_links_all {
 	# Loop while we still get stream links
 	my $index = 1;
 	do {
-		print "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
+		print STDERR "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
 
 		# Get index pages
 		my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
@@ -263,10 +271,10 @@ sub get_links_all {
 		# Set valid flag if we have progdata in this page
 		$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
 		if ( ! $res->is_success ) {
-			print "ERROR: Failed to get programme index page ${pageno} from iplayer site\n";
+			print STDERR "ERROR: Failed to get programme index page ${pageno} from iplayer site\n";
 			exit 2;
 		} else {
-			print ".";
+			print STDERR ".";
 		}
 
 		# Get the complete URL
@@ -309,7 +317,7 @@ sub get_links_all {
 				$progdata =~ s/\s*$//g;
 				$progdata =~ s/\s*\|/|/g;
 				$progdata =~ s/\|\s*/|/g;
-				print "urlpid|pid|available|prog|episode|desc = '$urlpid|$pid|$progdata'\n" if $opt_v;
+				print STDERR "urlpid|pid|available|prog|episode|desc = '$urlpid|$pid|$progdata'\n" if $opt_v;
 				my ($urlpid, $pid, $available, $name, $episode, $desc) = split /\|/, "$urlpid|$pid|$progdata";;
 				# Duplicate detection
 				if ( not defined $prog{$pid}{name} ) {
@@ -323,17 +331,17 @@ sub get_links_all {
 						'available'	=> $available,
 					};
 					$index_pid{$index}	= $pid;
-					print "  $name ($pid) - $episode - $desc\n" if $opt_v;
+					print STDERR "  $name ($pid) - $episode - $desc\n" if $opt_v;
 					$index++;
 				} else {
-					print "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt_v;
+					print STDERR "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt_v;
 				}
 			}
 		}
 		# Next page
 		$pageno++;
 	} while ($valid);
-	print "\n";
+	print STDERR "\n";
 	return 0;
 }
 
@@ -364,7 +372,7 @@ sub get_links {
 			# Make sure anyone can read/write file (security risk here!!)
 			chmod 0777, $cachefile;
 		} else {
-			print "WARNING: Couldn't open cache file for writing\n";
+			print STDERR "WARNING: Couldn't open cache file for writing\n";
 		}
 
 
@@ -406,7 +414,7 @@ sub get_links {
 	  print HTML '</table></body>';
 	  close (HTML);
 	} else {
-	  print "Couldn't open html file $webfile for writing\n";
+	  print STDERR "Couldn't open html file $webfile for writing\n";
 	}
 	
 	return 0;
@@ -419,11 +427,11 @@ sub download_stream_lwp {
 	
 	# Create a full URL from the PID specified
 	my $page = "http://www.bbc.co.uk/iplayer/page/item/".$prog{$pid}{urlpid}.".shtml";
-	print "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
+	print STDERR "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
 
-	print "INFO: Stage 1 URL = $page\n" if $opt_v;
-	print "\rGetting iplayer programme page        " if ! $opt_v;
+	print STDERR "INFO: Stage 1 URL = $page\n" if $opt_v;
+	print STDERR "\rGetting iplayer programme page        " if ! $opt_v;
 	# Switch off automatic redirects
 	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
@@ -437,13 +445,13 @@ sub download_stream_lwp {
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
 	if ( ! $res->is_success ) {
-		print "\rERROR: Failed to get programme ID from iplayer site\n\n";
+		print STDERR "\rERROR: Failed to get programme ID from iplayer site\n\n";
 		return 7;
 	}
 	my @content = split /\n/, $res->content;
 	# Non-UK detection
 	if ( grep /only available to play in the UK/i, @content ) {
-		print "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
+		print STDERR "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
 		exit 3;
 	}
 	# Extract Long Name, e.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
@@ -460,7 +468,7 @@ sub download_stream_lwp {
 	$pid_types{$types{$_}}=$_ for keys %types;
 	$prog{$pid}{type} = $pid_types{$pid};
 	# List types available
-	print "INFO: Types available: ", join(', ', %pid_types), "\n" if $opt_v;
+	print STDERR "INFO: Types available: ", join(', ', %pid_types), "\n" if $opt_v;
 	# Create url
 	my $url_1 = "${url_download_prefix}/$pid";
 	# Create a filename
@@ -477,11 +485,11 @@ sub download_stream_lwp {
         #</script>
         chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
         $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
-        print "Web bug#1: $url_1b\n" if $opt_v;	  
+        print STDERR "Web bug#1: $url_1b\n" if $opt_v;	  
 
-	print "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt_v;
-	print "INFO: Stage 2 URL = $url_1\n" if $opt_v;
-	print "\rINFO: File name = $file.mov                 \n";
+	print STDERR "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt_v;
+	print STDERR "INFO: Stage 2 URL = $url_1\n" if $opt_v;
+	print STDERR "\rINFO: File name = $file.mov                 \n";
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt_t;
@@ -499,15 +507,17 @@ sub download_stream_lwp {
 
 	my $file_done = "${download_dir}/${file}.mov";
 	$file = "${file_done}.part";
-
+	# undef $file if we're streaming to STDOUT
+	undef $file if $opt_x;
+	 
 	if ( -f $file_done ) {
-		print "ERROR: File already exists\n\n";
+		print STDERR "ERROR: File already exists\n\n";
 		return 1;
 	} else {
 
 	        # Stage 1b - get o.gif web bug to whitelist cookie
 	        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
-		print "INFO: Getting iplayer web bug             \r";
+		print STDERR "INFO: Getting iplayer web bug             \r";
 		my $h = new HTTP::Headers(
 		#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
 		#Accept: */*
@@ -526,7 +536,7 @@ sub download_stream_lwp {
 		my $res = $ua->request($req);
 		# Get resulting Location header (i.e. redirect URL)
 		if ( ! $res->is_success ) {
-			print "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
+			print STDERR "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
 			return 2;
 		}
 
@@ -534,7 +544,7 @@ sub download_stream_lwp {
 
 	        # Stage 1c - get o.gif framework web bug to whitelist cookie
 	        my $url_1c = 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?90927';
-		print "INFO: Getting iplayer 2nd web bug             \r";
+		print STDERR "INFO: Getting iplayer 2nd web bug             \r";
 		my $h = new HTTP::Headers(
                 #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
                 #Accept: */*
@@ -553,14 +563,14 @@ sub download_stream_lwp {
 		my $res = $ua->request($req);
 		# Get resulting Location header (i.e. redirect URL)
 		if ( ! $res->is_success ) {
-			print "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
+			print STDERR "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
 			return 2;
 		}
 
 
 
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		print "\rGetting iplayer download URL         " if ! $opt_v;
+		print STDERR "\rGetting iplayer download URL         " if ! $opt_v;
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $ua{coremedia},
 			'Accept'	=> '*/*',
@@ -572,17 +582,17 @@ sub download_stream_lwp {
 		# Get resulting Location header (i.e. redirect URL)
 		my $url_2 = $res->header("location");
 		if ( ! $res->is_redirect ) {
-			print "ERROR: Failed to get redirect from iplayer site\n\n";
+			print STDERR "ERROR: Failed to get redirect from iplayer site\n\n";
 			return 2;
 		}
 		# Extract redirection Location URL
 		$url_2 =~ s/^Location: (.*)$/$1/g;
 		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 		if ( $url_2 =~ /statuscode=404/ ) {
-			print "\rERROR: Programme is not yet ready for download\n\n";
+			print STDERR "\rERROR: Programme is not yet ready for download\n\n";
 			return 3;
 		}
-		print "INFO: Stage 3 URL = $url_2\n" if $opt_v;
+		print STDERR "INFO: Stage 3 URL = $url_2\n" if $opt_v;
 
 
 
@@ -598,83 +608,117 @@ sub download_stream_lwp {
 		# e.g. Content-Range: bytes 0-1/181338136
 		my $file_len = $res->header("Content-Range");
                 $file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
-		print "INFO: Download File Length $file_len\n" if $opt_v;
+		print STDERR "INFO: Download File Length $file_len\n" if $opt_v;
 
-		# Get mdat header etc
-		my $buffer = download_block(undef, $url_2, $ua, 0, 50);
-		# Get into file (lazy me!)
-		download_block($file, $url_2, $ua, 0, 512, $file_len);
+		# Get ftyp+wide header etc
+		my $mdat_start = 0x1c;
+		my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
+		# Get bytes upto (but not including) mdat atom start -> $header
+		my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
 
 		# Detemine moov start
-		# Get mdat box end start
-		my $mdat_start = 0x1c;
 		# Get mdat_end_offset_chars from downloaded block
 		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
 		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-		print "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
-		print "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
+		print STDERR "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
+		print STDERR "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
 		# The MOOV box starts one byte after MDAT box ends
 		my $moov_start = $mdat_start + $mdat_end_offset;
 
-		# get moov chunk into memory (might rearrange this in the file later...)
+		# get moov chunk into memory
 		my $moovdata = download_block(undef, $url_2, $ua, $moov_start, (${file_len}-1), $file_len );
+		
+		# Change all the chunk offsets in moov->stco atoms and add moovsize to them all
+		# get moov atom length
+		my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
+		# Nasty but quicker to scan for 'stco'
+		for (my $i = 0; $i < $moov_length - 4; $i++) {
+		  my $chars = substr($moovdata, $i, 4);
+		  # If we have found and stco atom
+		  if ( $chars eq 'stco' ) {
+		    # determine length of atom (4 bytes preceding stco)
+		    my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
+		    print STDERR "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt_v;
 
-		# Download mdat in 32MB blocks (??)
+		    # loop through all chunk offsets in this atom and add offset (== moov atom length)
+                   for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
+                      my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+		      #print STDERR "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',  $chunk_offset + $moov_length = ";
+                      $chunk_offset += $moov_length;
+                      # write back bytes into $moovdata
+		      substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
+		      substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
+		      substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
+		      substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
+                      #$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+		      #print STDERR "$chunk_offset\n";
+                    }
+
+		    # skip over this whole atom now it is processed
+		    $i += $stco_len;
+		  }
+		}
+
+		## scan 2nd level atoms in moov atom until we get stco atom(s)
+		# We can skip first 8 bytes (moov atom header)
+		#my $i = 8;
+		#while( $i < $moov_length - 4 ) {
+		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
+		#  my $atom_name = substr($moovdata, $i+4, 4);
+		#  print STDERR "Parsing atom: $atom_name, length: $atom_len\n";
+		#  # Increment $i by atom_len to get next atom
+		#  $i += $atom_len;
+		#}
+
+		
+		# write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
+		my $fh = open_file_append($file);
+                print STDERR "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt_v;
+                print $fh $moovdata;
+                print $fh $header;
+
+
+		# Download mdat in 32MB blocks
 		$now = time();
-		for ( my $s = 513; $s < ${moov_start}-1; $s+= 0x2000000 ) {
+		my $chunk_size = 0x2000000;
+		for ( my $s = $mdat_start; $s < ${moov_start}-1; $s+= $chunk_size ) {
 		  # get mdat chunk into file
 		  my $retcode;
 		  my $e;
-		  # Gert block end offset
-		  if ( ($s + 0x2000000 - 1) > (${moov_start}-1) ) {
+		  # Get block end offset
+		  if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
 		    $e = $moov_start - 1;
                   } else {
-                    $e = $s + 0x2000000 - 1;
+                    $e = $s + $chunk_size - 1;
                   }
                   # Get block from URL ansd append to $file
-                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len ) ) {
-                    print("ERROR: Could not download block $s - $e from $file\n\n");
+                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
+                    print STDERR "ERROR: Could not download block $s - $e from $file\n\n";
                     return 9;
                   }
 		}
 
 		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
-  		if ( ! open(FILE, ">> $file") ) {
-			print("ERROR: Cannot write or append to $file\n\n");
-			return 4;
-                }
-                # Fix for binary - needed for Windows
-                binmode FILE;
-                print("INFO: Appending moov atom to $file\n") if $opt_v;
-                print FILE $moovdata;
-                close FILE;
-
-		print "INFO: Downloaded $file_done\n";
-		# Moving file into place as complete
-                move($file, $file_done);
+		print STDERR "INFO: Downloaded $file_done\n";
+		# Moving file into place as complete (if not stdout)
+                move($file, $file_done) if ! $opt_x;
         }
 	return 0;
 }
 
 
-# Usage download_block($file, $url_2, $ua, $start, $end, $file_len);
+# Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
+#  ensure filehandle $fh is open in append mode
 # or, $content = download_block(undef, $url_2, $ua, $start, $end, $file_len);
 sub download_block {
 
-                my ($file, $url_2, $ua, $start, $end, $file_len) = @_;
+                my ($file, $url_2, $ua, $start, $end, $file_len, $fh) = @_;
                 my $orig_length;
                 # If this is an 'append to file' mode call
-  		if ( $file ) {
+  		if ( $file && $fh ) {
     		  # Stage 3b: Download File
-    		  # Open output file for appending/writing
-  		  if ( ! open(FILE, ">> $file") ) {
-			print("ERROR: Cannot write or append to $file\n\n");
-			return 4;
-                  }
-                  # Fix for binary - needed for Windows
-                  binmode FILE;
                   $orig_length = stat($file)->size;
-                  print("INFO: Appending to $file\n") if $opt_v;
+                  print STDERR "INFO: Appending to $file\n" if $opt_v;
                 }
 
                 # Determine offset for continuation download
@@ -691,40 +735,41 @@ sub download_block {
 			my ($data, $res, undef) = @_;
 			# Don't write the output to the file if there is no content-length header
                         return 0 if ( ! $res->header("Content-Length") );
-			print FILE $data;
+			print $fh $data;
+			# return if $file not specified (i.e. streaming to stdout)
+			return if ! $file;
 			# current file zise
 			my $size = stat($file)->size;
 			# download rates in bytes per second
 			my $rate = $size / (stat($file)->mtime - $now + 0.01);
 			# time remaining
 			my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
-			printf( "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining         \r", 
+			printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining         \r", 
                                 $size / 1024.0 / 1024.0, 
                                 $file_len / 1024.0 / 1024.0,
                                 $rate * 8.0 / 1024.0,
                                 100.0 * $size / $file_len,
                                 @time[2,1,0],
-                        );
+                        ;
 		};
 		# send request
-		print "\nINFO: Downloading range ${start}-${end}\n" if $opt_v;
-		print "\r                              \r";
+		print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt_v;
+		print STDERR "\r                              \r";
 		my $res;
-		if ($file) {
+		if ($fh) {
   		  $res = $ua->request($req, $callback);
-  		  close FILE;
                 } else {
                   $res = $ua->request($req);
                 }
                 # If we don't require any more bytes (previously fully downloaded) then skip
-                print "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt_v;
+                print STDERR "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt_v;
 		if ( (! $res->is_success) || (! $res->header("Content-Length")) ) {
-			print "ERROR: Failed to Download block\n\n";
+			print STDERR "ERROR: Failed to Download block\n\n";
 			unlink $cookiejar;
 			return 5;
 		} 
 
-		if ($file) {
+		if ($fh) {
 		  return 0;
                 } else {
                   return $res->content;
@@ -747,53 +792,50 @@ sub iplayer_decoder {
 
   chomp( my $file = shift );
   if (! -f $file) {
-	print "ERROR: File $file does not exist - no decoding performed\n";
+	print STDERR "ERROR: File $file does not exist - no decoding performed\n";
   	return 1;
   }
 
-  if (! open (FILE, "+<$file") ) {
-  	print "ERROR: Can't update $file: $!";
+  if (! open (RWFILE, "+<$file") ) {
+  	print STDERR "ERROR: Can't update $file: $!";
   	return 1;
   }
-
-
-  # Open file
-  open (FILE, "+<$file") || die "ERROR: Can't write to file $file: $!";
   # For windows to read/write in binary mode
-  binmode FILE;
+  binmode RWFILE;
+  my $fh = *RWFILE;
   
   # Get mdat box end start
   my $mdat_start = 0x1c;
-  my $mdat_end_offset_chars = get_block( $mdat_start, 4 );
+  my $mdat_end_offset_chars = get_block( $fh, $mdat_start, 4 );
   my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-  print "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
-  print "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
+  print STDERR "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
+  print STDERR "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
   # The MOOV box starts one byte after MDAT box ends
   my $moov_start = $mdat_start + $mdat_end_offset;
 
   # Some file content sanity checking
   # Get 'mdat' atom name - it it desn't contain 'mdat' then this is not a quicktime file
-  if ( get_block( $mdat_start + 4, 4 ) !~ /mdat/ ) {
-    print "ERROR: file is not a valid quicktime/mov file (no 'mdat' atom)\n";
-    close FILE;
+  if ( get_block( $fh, $mdat_start + 4, 4 ) !~ /mdat/ ) {
+    print STDERR "ERROR: file is not a valid quicktime/mov file (no 'mdat' atom)\n";
+    close $fh;
     return 2;
 
   # Get 'moov' atom start offset and ensure it is not > file length
   } elsif ( $moov_start > stat($file)->size ) {
-    print "ERROR: quicktime/mov file is not fully downloaded or truncated (no 'moov' atom)\n";
-    close FILE;
+    print STDERR "ERROR: quicktime/mov file is not fully downloaded or truncated (no 'moov' atom)\n";
+    close $fh;
     return 3;
   }
 
   # Read start+4 + 4 bytes from $moov_start to get 'moov' text
-  my $moov_start_chars = get_block( $moov_start + 4, 4 );
-  print "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt_v;
+  my $moov_start_chars = get_block( $fh, $moov_start + 4, 4 );
+  print STDERR "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt_v;
 
   # see if we need any decoding
   if ( $moov_start_chars !~ /moov/ ) {
 
     # Get xor pattern
-    my $pattern = get_xor_pattern( $moov_start );
+    my $pattern = get_xor_pattern( $fh, $moov_start );
     $pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
     my $byte1 = hex $1;
     my $byte2 = hex $2;
@@ -809,46 +851,47 @@ sub iplayer_decoder {
 
     # XOR this 'moov' string
     my $buffer = $moov_start_chars ^ $xor_test;
-    print "INFO: Swap Test (after XOR on 'moov') BYTES: $buffer, HEX: ".get_hex($buffer)."\n" if $opt_v;
+    print STDERR "INFO: Swap Test (after XOR on 'moov') BYTES: $buffer, HEX: ".get_hex($buffer)."\n" if $opt_v;
 
     # if we get 'moov' then no byte-swapping is required
     if ( $buffer =~ /moov/ ) {
-      print "INFO: Swapping bytes not required\n";
+      print STDERR "INFO: Swapping bytes not required\n";
     } else {
-      print "INFO: Swapping bytes\n";
-      process_file($file, 'swap');
+      print STDERR "INFO: Swapping bytes\n";
+      process_file($file, $fh, 'swap');
     }
 
     # Do XORing if required
     # Get XOR pattern from this
-    my $pattern = get_xor_pattern( $moov_start );
+    my $pattern = get_xor_pattern( $fh, $moov_start );
     if ( $pattern =~ /0000/ ) {
-	print "INFO: No XOR required\n";
+	print STDERR "INFO: No XOR required\n";
     } else {
-	print "INFO: XOR with '0x$pattern'\n";
-	process_file($file, 'xor', $pattern);
+	print STDERR "INFO: XOR with '0x$pattern'\n";
+	process_file($file, $fh, 'xor', $pattern);
     }
 
     # recheck that XOR/swap was successful by checking for 'moov' string
-    $moov_start_chars = get_block( $moov_start + 4, 4 );
+    $moov_start_chars = get_block( $fh, $moov_start + 4, 4 );
     if ( $moov_start_chars =~ /moov/ ) {
-        print "INFO: Decoding Successful\n";
+        print STDERR "INFO: Decoding Successful\n";
     } else {
-        print "ERROR: Decoding Failed, moov = '$moov_start_chars', HEX: ".get_hex($moov_start_chars)."\n";
+        print STDERR "ERROR: Decoding Failed, moov = '$moov_start_chars', HEX: ".get_hex($moov_start_chars)."\n";
     }
 
   } else {
-    print "INFO: No XOR or Byte swapping required\n";
+    print STDERR "INFO: No XOR or Byte swapping required\n";
   }
 
 
-  close FILE || die "Closing: $!";
+  close $fh || die "Closing: $!";
   return 0;
 }
 
 
 # Get XOR pattern from moov_start_offset
 sub get_xor_pattern {
+    my $fh = shift;
     my $moov_start = shift;
     my $moov_zeroes_chars;
     
@@ -858,16 +901,16 @@ sub get_xor_pattern {
     # Add one to this number to make it even to get the correct xor sequence
     if ( odd( $moov_zeroes_start ) ) {
       $moov_zeroes_start++;
-      print "DEBUG: making moov_zeroes_start offset even" if $opt_v;
+      print STDERR "DEBUG: making moov_zeroes_start offset even" if $opt_v;
     }
     # Read start+ 0x3d + 2 bytes to get '00 00'
-    $moov_zeroes_chars = get_block( $moov_zeroes_start, 2 );
-    print "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt_v;
+    $moov_zeroes_chars = get_block( $fh, $moov_zeroes_start, 2 );
+    print STDERR "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt_v;
 
     # Extract the two hex bytes from the pattern
     my $pattern = get_hex($moov_zeroes_chars);
     $pattern =~ s/ //g;
-    print "DEBUG: XOR pattern = $pattern\n" if $opt_v;
+    print STDERR "DEBUG: XOR pattern = $pattern\n" if $opt_v;
     return $pattern;
 }
 
@@ -875,13 +918,13 @@ sub get_xor_pattern {
 # process_file(<file>, 'xor', <pattern>)
 # process_file(<file>, 'swap)
 sub process_file {
-	my ($file, $opt, $pattern) = @_;
+	my ($file, $fh, $opt, $pattern) = @_;
 	my $recsize = 4096 * 512;
 	# Offsets
 	# Start offset *MUST* be even
 	my $start_offset = 0x2800;
 	my $end_offset = 0x400 + 2;
-	print "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt_v;
+	print STDERR "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt_v;
 	my $buffer;
 	my $do_xor;
 	my $do_swap;
@@ -907,13 +950,13 @@ sub process_file {
 		$ffoo = create_pattern_string($recsize/2, 0xff, 0x00);
 	}
 
-	print "INFO: ($opt) Only processing $recsize bytes from $start_offset\n" if $opt_v;
+	print STDERR "INFO: ($opt) Only processing $recsize bytes from $start_offset\n" if $opt_v;
 
 	my $length =  stat($file)->size;
-	print "$file length = $length\n" if $opt_v;
+	print STDERR "$file length = $length\n" if $opt_v;
 
 	# Put file ptr in correct place
-	seek(FILE, $start_offset, SEEK_SET);
+	seek($fh, $start_offset, SEEK_SET);
 
 	# Do the xoring
 	for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
@@ -922,10 +965,10 @@ sub process_file {
 		if ( $i > ($length - $end_offset - $recsize) ) {
 			$recsize = $length - $end_offset - $i;
 			$xor = create_pattern_string($recsize/2, $byte1, $byte2);
-			print "\nINFO: ($opt) Only processing $recsize bytes from $i\n" if $opt_v;
+			print STDERR "\nINFO: ($opt) Only processing $recsize bytes from $i\n" if $opt_v;
 		}
 
-		read(FILE, $buffer, $recsize) == $recsize
+		read($fh, $buffer, $recsize) == $recsize
 			|| die "\nReading: $!";
 
 		# Do the XOR
@@ -946,26 +989,26 @@ sub process_file {
 			$buffer = $c | $d;
 		}
 		# Rewind $buffer bytes then rewrite xor'ed data
-		seek(FILE, -1 * $recsize, SEEK_CUR);
-		print FILE $buffer;
+		seek($fh, -1 * $recsize, SEEK_CUR);
+		print $fh $buffer;
 
-		printf "\r%0.2f%%", $i/$length*100.0 if ! $opt_v;
-		printf "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset  if $opt_v;
+		printf STDERR "\r%0.2f%%", $i/$length*100.0 if ! $opt_v;
+		printf STDERR "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset  if $opt_v;
 	}
 
 	# Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
 	my $xor = create_pattern_string(1, $byte2, $byte1);
-	print "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n" if $opt_v;
-	seek(FILE, $length - $end_offset, SEEK_SET);
-	read(FILE, $buffer, 2) == 2 || die "Reading: $!";
+	print STDERR "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n" if $opt_v;
+	seek($fh, $length - $end_offset, SEEK_SET);
+	read($fh, $buffer, 2) == 2 || die "Reading: $!";
 
 	# Do the XOR using reverse
 	$buffer = $buffer ^ $xor if $do_xor;
 
 	# Rewind $buffer bytes then rewrite xor'ed data
-	seek(FILE, -2, SEEK_CUR);
-	print FILE $buffer;
-	print "\r";
+	seek($fh, -2, SEEK_CUR);
+	print $fh $buffer;
+	print STDERR "\r";
 }
 
 
@@ -976,7 +1019,7 @@ sub create_pattern_string {
 
 	my $pat;
 	$pat .= chr($_) for @_;
-	print "Pattern = $pat\n" if $opt_v;
+	print STDERR "Pattern = $pat\n" if $opt_v;
 
 	my $ret;
 	for (my $i = 0; $i<$count; $i++) { 
@@ -985,15 +1028,16 @@ sub create_pattern_string {
 	return $ret; 
 }
 
-# Returns arbitrary block of data from open FILE
+# Returns arbitrary block of data from open file $fh
 sub get_block {
+        my $fh = shift;
 	my $start = shift;
 	my $len = shift;
 	my $buf;
 	# Seek to start offset
-	seek(FILE, $start, SEEK_SET);
+	seek($fh, $start, SEEK_SET);
 	# Read bytes
-	read(FILE, $buf, $len) == $len || die "\nReading: $!";
+	read($fh, $buf, $len) == $len || die "\nReading: $!";
 	return $buf;
 }
 
@@ -1004,7 +1048,7 @@ sub get_hex {
         for (my $i=0; $i<length($buf); $i++) {
                 $ret .= " ".sprintf("%02lx", ord substr($buf, $i, 1) );
         }
-	print "DEBUG: HEX string value = $ret\n" if $opt_v;
+	print STDERR "DEBUG: HEX string value = $ret\n" if $opt_v;
         return $ret;
 }
 
@@ -1017,11 +1061,30 @@ sub bytestring_to_int {
 		# Multiply byte value by 256^$i then accumulate
                 $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
         }
-	print "DEBUG: Decimal value = $dec\n" if $opt_v;
+#	print STDERR "DEBUG: Decimal value = $dec\n" if $opt_v;
         return $dec;
 }
 
 sub odd() {
     return 1 if ( ($_[0]/2.0) != int($_[0]/2.0) );
     return 0;
+}
+
+
+# Usage: $fh = open_file_append($filename);
+sub open_file_append {
+  local *FH;
+  my $file = shift;
+  if ($file) {
+    if ( ! open(FH, ">> $file") ) {
+      print STDERR "ERROR: Cannot write or append to $file\n\n";
+      exit 1;
+    }
+  # if no filename is specified use stdout
+  } else {
+    return *STDOUT;
+  }
+  # Fix for binary - needed for Windows
+  binmode FH;
+  return *FH;
 }
