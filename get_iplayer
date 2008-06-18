@@ -8,13 +8,13 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 18th 2008
-# Version: 0.25
+# Version: 0.26
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
 # * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
 # * Re-jigs the mov file so that it can be streamed and start faster on some players - 20080618
-# * XOR decoding of files (if required - now deprecated) - 20080609
+# * Restarting downloads of incomplete files
 # * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
 # * Caching of Index (default 24hrs)
@@ -23,8 +23,11 @@
 # * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
-# * Restarting downloads of incomplete files (maybe broken for now)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Cygwin, Windows)
+#
+# Changes 0.26 - 20080618:
+# * Fixed partial download resuming
+# * Changed file suffix for partially downloaded files to <prog>.partial.mov to ease playback of partially downloaded movies 
 #
 # Changes 0.25 - 20080618:
 # * Automatically re-arrange the atoms so that file can be streamed and start faster (used method from qt-faststart.c, v0.1 by Mike Melanson, melanson@pcisys.net)
@@ -485,7 +488,7 @@ sub download_stream_lwp {
         #</script>
         chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
         $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
-        print STDERR "Web bug#1: $url_1b\n" if $opt_v;	  
+        print STDERR "INFO: Web bug#1: $url_1b\n" if $opt_v;	  
 
 	print STDERR "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt_v;
 	print STDERR "INFO: Stage 2 URL = $url_1\n" if $opt_v;
@@ -506,7 +509,7 @@ sub download_stream_lwp {
         }
 
 	my $file_done = "${download_dir}/${file}.mov";
-	$file = "${file_done}.part";
+	$file = "${download_dir}/${file}.partial.mov";
 	# undef $file if we're streaming to STDOUT
 	undef $file if $opt_x;
 	 
@@ -517,7 +520,7 @@ sub download_stream_lwp {
 
 	        # Stage 1b - get o.gif web bug to whitelist cookie
 	        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
-		print STDERR "INFO: Getting iplayer web bug             \r";
+		print STDERR "INFO: Getting iplayer 1st web bug              \r";
 		my $h = new HTTP::Headers(
 		#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
 		#Accept: */*
@@ -625,9 +628,83 @@ sub download_stream_lwp {
 		# The MOOV box starts one byte after MDAT box ends
 		my $moov_start = $mdat_start + $mdat_end_offset;
 
-		# get moov chunk into memory
-		my $moovdata = download_block(undef, $url_2, $ua, $moov_start, (${file_len}-1), $file_len );
-		
+
+		## scan 2nd level atoms in moov atom until we get stco atom(s)
+		# We can skip first 8 bytes (moov atom header)
+		#my $i = 8;
+		#while( $i < $moov_length - 4 ) {
+		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
+		#  my $atom_name = substr($moovdata, $i+4, 4);
+		#  print STDERR "Parsing atom: $atom_name, length: $atom_len\n";
+		#  # Increment $i by atom_len to get next atom
+		#  $i += $atom_len;
+		#}
+
+
+
+                # Open file if required
+                my $fh = open_file_append($file);
+
+                # If the partial file already exists, then redownload from the correct mdat/download offset
+                my $restart_offset = $mdat_start;
+		my $moovdata;
+                my $moov_length;
+                # If we have a non-zero sized file and not stdout then this is a partial download
+                if (-f $file && (! $opt_x) && stat($file)->size > 1000 ) {
+		  # Get moovlength from server
+		  $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
+		  # Calculate new start offset (considering that we've put moov first in file)
+                  $restart_offset = stat($file)->size - $moov_length;
+                  print STDERR "INFO: Restarting download from $restart_offset\n";
+                }
+
+
+                # If we have no existing file (or using stdout)
+                if ( $opt_x || stat($file)->size == 0 ) {
+		  # get moov chunk into memory
+		  $moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
+		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
+                  $moov_length = relocate_moov_chunk_offsets( $moovdata );
+  		  # write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
+		  print STDERR "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt_v;
+		  print $fh $moovdata;
+		  print $fh $header;
+                }
+
+                
+		# Download mdat in 32MB blocks
+		$now = time();
+		my $chunk_size = 0x2000000;
+		for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
+		  # get mdat chunk into file
+		  my $retcode;
+		  my $e;
+		  # Get block end offset
+		  if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
+		    $e = $moov_start - 1;
+                  } else {
+                    $e = $s + $chunk_size - 1;
+                  }
+                  # Get block from URL ansd append to $file
+                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
+                    print STDERR "ERROR: Could not download block $s - $e from $file\n\n";
+                    return 9;
+                  }
+		}
+
+		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
+		print STDERR "INFO: Downloaded $file_done\n";
+		# Moving file into place as complete (if not stdout)
+                move($file, $file_done) if ! $opt_x;
+        }
+	return 0;
+}
+
+
+# Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
+sub relocate_moov_chunk_offsets {
+                my $moovdata = @_[0];
+
 		# Change all the chunk offsets in moov->stco atoms and add moovsize to them all
 		# get moov atom length
 		my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
@@ -658,53 +735,10 @@ sub download_stream_lwp {
 		    $i += $stco_len;
 		  }
 		}
-
-		## scan 2nd level atoms in moov atom until we get stco atom(s)
-		# We can skip first 8 bytes (moov atom header)
-		#my $i = 8;
-		#while( $i < $moov_length - 4 ) {
-		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
-		#  my $atom_name = substr($moovdata, $i+4, 4);
-		#  print STDERR "Parsing atom: $atom_name, length: $atom_len\n";
-		#  # Increment $i by atom_len to get next atom
-		#  $i += $atom_len;
-		#}
-
-		
-		# write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
-		my $fh = open_file_append($file);
-                print STDERR "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt_v;
-                print $fh $moovdata;
-                print $fh $header;
-
-
-		# Download mdat in 32MB blocks
-		$now = time();
-		my $chunk_size = 0x2000000;
-		for ( my $s = $mdat_start; $s < ${moov_start}-1; $s+= $chunk_size ) {
-		  # get mdat chunk into file
-		  my $retcode;
-		  my $e;
-		  # Get block end offset
-		  if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
-		    $e = $moov_start - 1;
-                  } else {
-                    $e = $s + $chunk_size - 1;
-                  }
-                  # Get block from URL ansd append to $file
-                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
-                    print STDERR "ERROR: Could not download block $s - $e from $file\n\n";
-                    return 9;
-                  }
-		}
-
-		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
-		print STDERR "INFO: Downloaded $file_done\n";
-		# Moving file into place as complete (if not stdout)
-                move($file, $file_done) if ! $opt_x;
-        }
-	return 0;
+		@_[0] = $moovdata;
+		return $moov_length;
 }
+
 
 
 # Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
@@ -741,7 +775,7 @@ sub download_block {
 			# current file zise
 			my $size = stat($file)->size;
 			# download rates in bytes per second
-			my $rate = $size / (stat($file)->mtime - $now + 0.01);
+			my $rate = ($size - $orig_length) / (stat($file)->mtime - $now + 0.01);
 			# time remaining
 			my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
 			printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining         \r", 
