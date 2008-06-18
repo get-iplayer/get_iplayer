@@ -7,22 +7,28 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 16th 2008
-# Version: 0.23
+# Date: June 18th 2008
+# Version: 0.24
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
-# * Automatic XOR decoding of files - 20080609
-# * XOR decoding of previously downloaded files - 20080609
+# * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
+# * XOR decoding of files (if required - now deprecated) - 20080609
+# * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
 # * Caching of Index (default 24hrs)
 # * Creation of a basic html index file
 # * De-duplication of programme index
-# * HTTP Proxy support - 20080610
+# * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
-# * Restarting downloads of incomplete files
+# * Restarting downloads of incomplete files (maybe broken for now)
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu)
+#
+# Changes 0.24 - 20080618:
+# * Now supports downloading of *unencrypted* streams from BBC Iplayer site - no more XOR nonsense
+# * Downloads web bugs to whitelist our cookies on BBC servers
+# * Downloads the file in blocks to avoid XOR
 #
 # Changes 0.23 - 20080617:
 # * added binmode for decode sub also for windows to work properly
@@ -144,6 +150,7 @@ my %ua = (
 my %prog;
 # Hash to obtain pid given an index
 my %index_pid;
+my $now;
 
 # Web proxy
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
@@ -425,7 +432,6 @@ sub download_stream_lwp {
 	$ua->timeout([30]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 0 ) );
-		
 
 	# Stage 1: get PID and set cookie
 	$ua->agent( $ua{safari} );
@@ -466,6 +472,14 @@ sub download_stream_lwp {
 	$file =~ s/\s/_/g if ! $opt_w;
 	$file =~ s/[^\w_-]//gi if ! $opt_w;
 
+	# Parse this to get o.gif for stats web bug
+	#<script type="text/javascript">
+	#var i = new Image(1,1); i.src="http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~http://www.bbc.co.uk/iplayer/search/?q=graham&amp;go=Find+Programmes~RS~q~RS~q=graham&amp;start=1&amp;scope=iplayersearch&amp;go=Find+Programmes&amp;version_pid=b00c3rrt~RS~z~RS~02~RS~";
+        #</script>
+        chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
+        $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
+        print "Web bug#1: $url_1b\n" if $opt_v;	  
+
 	print "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt_v;
 	print "INFO: Stage 2 URL = $url_1\n" if $opt_v;
 	print "\rINFO: File name = $file.mov                 \n";
@@ -491,6 +505,60 @@ sub download_stream_lwp {
 		print "ERROR: File already exists\n\n";
 		return 1;
 	} else {
+
+	        # Stage 1b - get o.gif web bug to whitelist cookie
+	        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
+		print "INFO: Getting iplayer web bug             \r";
+		my $h = new HTTP::Headers(
+		#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
+		#Accept: */*
+		#Accept-Language: en
+		#Accept-Encoding: gzip, deflate
+		#Cookie: BBC-UID=54xxxxxxxxx71ad6e33cfdf040e01b44068765f2a0b061b4447fe92f6528b1ae0Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29
+		#Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
+		#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
+                #Connection: keep-alive
+                #Host: stats.bbc.co.uk
+			'User-Agent'	=> $ua{safari},
+			'Accept'	=> '*/*',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1b, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		if ( ! $res->is_success ) {
+			print "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
+			return 2;
+		}
+
+
+
+	        # Stage 1c - get o.gif framework web bug to whitelist cookie
+	        my $url_1c = 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?90927';
+		print "INFO: Getting iplayer 2nd web bug             \r";
+		my $h = new HTTP::Headers(
+                #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
+                #Accept: */*
+                #Accept-Language: en
+                #Accept-Encoding: gzip, deflate
+                #Cookie: BBC-UID=e4xxxxxx731e0ec0d34a019ab030cb2de22aef9c407041d4343f4937d42343d40Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29%20AppleWebKit%2f420%2e1%20%28KHTML%2c%20like%20Gecko%29%20Version%2f3%2e0%20Mobile%2f3B48b%20Safari%2f419%2e3
+                #Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
+                #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
+                #Connection: keep-alive
+                #Host: www.bbc.co.uk
+			'User-Agent'	=> $ua{safari},
+			'Accept'	=> '*/*',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1c, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		if ( ! $res->is_success ) {
+			print "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
+			return 2;
+		}
+
+
 
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 		print "\rGetting iplayer download URL         " if ! $opt_v;
@@ -518,64 +586,154 @@ sub download_stream_lwp {
 		print "INFO: Stage 3 URL = $url_2\n" if $opt_v;
 
 
-		# Stage 3: Download File
-		# Open output file for appending/writing
-		if ( ! open(FILE, ">> $file") ) {
-			print("ERROR: Cannot write or append to $file\n\n");
-			return 4;
-		}
-		# Fix for binary - needed for Windows
-		binmode FILE;
-		
+
+		# Stage 3a: Download 1st byte to get exact file length
                 # Determine offset for continuation dowload
-		my $orig_length = stat($file)->size;
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $ua{coremedia},
 			'Accept'	=> '*/*',
-			'Range'		=> 'bytes='.$orig_length.'-',
+			'Range'		=> 'bytes=0-1',
+		);
+		my $req = HTTP::Request->new ('GET', $url_2, $h);
+		my $res = $ua->request($req);
+		# e.g. Content-Range: bytes 0-1/181338136
+		my $file_len = $res->header("Content-Range");
+                $file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
+		print "INFO: Download File Length $file_len\n" if $opt_v;
+
+		# Get mdat header etc
+		my $buffer = download_block(undef, $url_2, $ua, 0, 50);
+		# Get into file (lazy me!)
+		download_block($file, $url_2, $ua, 0, 512, $file_len);
+
+		# Detemine moov start
+		# Get mdat box end start
+		my $mdat_start = 0x1c;
+		# Get mdat_end_offset_chars from downloaded block
+		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
+		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
+		print "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt_v;
+		print "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt_v;
+		# The MOOV box starts one byte after MDAT box ends
+		my $moov_start = $mdat_start + $mdat_end_offset;
+
+		# get moov chunk into memory (might rearrange this in the file later...)
+		my $moovdata = download_block(undef, $url_2, $ua, $moov_start, (${file_len}-1), $file_len );
+
+		# Download mdat in 32MB blocks (??)
+		$now = time();
+		for ( my $s = 513; $s < ${moov_start}-1; $s+= 0x2000000 ) {
+		  # get mdat chunk into file
+		  my $retcode;
+		  my $e;
+		  # Gert block end offset
+		  if ( ($s + 0x2000000 - 1) > (${moov_start}-1) ) {
+		    $e = $moov_start - 1;
+                  } else {
+                    $e = $s + 0x2000000 - 1;
+                  }
+                  # Get block from URL ansd append to $file
+                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len ) ) {
+                    print("ERROR: Could not download block $s - $e from $file\n\n");
+                    return 9;
+                  }
+		}
+
+		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
+  		if ( ! open(FILE, ">> $file") ) {
+			print("ERROR: Cannot write or append to $file\n\n");
+			return 4;
+                }
+                # Fix for binary - needed for Windows
+                binmode FILE;
+                print("INFO: Appending moov atom to $file\n") if $opt_v;
+                print FILE $moovdata;
+                close FILE;
+
+		print "INFO: Downloaded $file_done\n";
+		# Moving file into place as complete
+                move($file, $file_done);
+        }
+	return 0;
+}
+
+
+# Usage download_block($file, $url_2, $ua, $start, $end, $file_len);
+# or, $content = download_block(undef, $url_2, $ua, $start, $end, $file_len);
+sub download_block {
+
+                my ($file, $url_2, $ua, $start, $end, $file_len) = @_;
+                my $orig_length;
+                # If this is an 'append to file' mode call
+  		if ( $file ) {
+    		  # Stage 3b: Download File
+    		  # Open output file for appending/writing
+  		  if ( ! open(FILE, ">> $file") ) {
+			print("ERROR: Cannot write or append to $file\n\n");
+			return 4;
+                  }
+                  # Fix for binary - needed for Windows
+                  binmode FILE;
+                  $orig_length = stat($file)->size;
+                  print("INFO: Appending to $file\n") if $opt_v;
+                }
+
+                # Determine offset for continuation download
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $ua{coremedia},
+			'Accept'	=> '*/*',
+                        'Range'        => "bytes=${start}-${end}",
 		);
 		my $req = HTTP::Request->new ('GET', $url_2, $h);
 		# Set time to use for download rate calculation
-		my $now = time();
 		# Define callback sub that gets called during download request
 		# This sub actually writes to the open output file and reports on progress
-		my $callback = sub { 
+		my $callback = sub {
 			my ($data, $res, undef) = @_;
 			# Don't write the output to the file if there is no content-length header
                         return 0 if ( ! $res->header("Content-Length") );
 			print FILE $data;
-			my $size = stat($file)->size - $orig_length;
-			my @time = gmtime( ($res->header("Content-Length") - $size) * ( stat($file)->mtime - $now ) / ( $size + 1000 ) );
-			printf( "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining        \r", 
-                                ($size + $orig_length) / 1024.0 / 1024.0, 
-                                ($res->header("Content-Length") + $orig_length) / 1024.0 / 1024.0,
-                                ($size * 8.0) / (stat($file)->mtime - $now + 0.01) / 1024.0,
-                                100.0 * ($size + $orig_length) / ($orig_length + $res->header("Content-Length")),
+			# current file zise
+			my $size = stat($file)->size;
+			# download rates in bytes per second
+			my $rate = $size / (stat($file)->mtime - $now + 0.01);
+			# time remaining
+			my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
+			printf( "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining         \r", 
+                                $size / 1024.0 / 1024.0, 
+                                $file_len / 1024.0 / 1024.0,
+                                $rate * 8.0 / 1024.0,
+                                100.0 * $size / $file_len,
                                 @time[2,1,0],
                         );
 		};
 		# send request
-		print "\nINFO: Continuing download from byte $orig_length\n" if $orig_length;
+		print "\nINFO: Downloading range ${start}-${end}\n" if $opt_v;
 		print "\r                              \r";
-		my $res = $ua->request($req, $callback);
-		close FILE;
+		my $res;
+		if ($file) {
+  		  $res = $ua->request($req, $callback);
+  		  close FILE;
+                } else {
+                  $res = $ua->request($req);
+                }
                 # If we don't require any more bytes (previously fully downloaded) then skip
                 print "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt_v;
 		if ( (! $res->is_success) || (! $res->header("Content-Length")) ) {
-			print "ERROR: Failed to Download file\n\n";
+			print "ERROR: Failed to Download block\n\n";
 			unlink $cookiejar;
 			return 5;
-		} else {
-			print "INFO: Downloaded $file_done (".$res->header("Content-Length")." bytes)\n";
-			# Moving file into place as complete
-                        move($file, $file_done);
-		}
-	}
-	# XOR Decode if required
-	iplayer_decoder($file_done) if ! $opt_n;
+		} 
 
-	return 0;
+		if ($file) {
+		  return 0;
+                } else {
+                  return $res->content;
+                }
+
 }
+
+
 
 
 
