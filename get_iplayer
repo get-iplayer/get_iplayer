@@ -7,24 +7,29 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 18th 2008
+# Date: June 19th 2008
 #
-my $version = 0.28;
+my $version = 0.29;
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
 # * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
 # * Re-jigs the mov file so that it can be streamed and start faster on some players - 20080618
-# * Restarting downloads of incomplete files
-# * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
+# * Resume downloads of partially downloaded files
 # * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
-# * Caching of Index (default 24hrs)
+# * Caching of Index (default 12hrs)
 # * Creation of a basic html index file
-# * De-duplication of programme index
 # * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
+# * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
+#
+# Changes 0.29 - 20080619:
+# * Fixed streaming + file download mode
+# * Added random numbers after some requests more like iphone
+# * Added interrim checking of reported mp4 stream availability
+# * Reduced index cacahe default to 12 hours
 #
 # Changes 0.28 - 20080619:
 # * Update get_iplayer option (-u)
@@ -96,7 +101,7 @@ my $version = 0.28;
 #
 # Requires:
 # * perl 5.8
-# * perl LWP
+# * LWP (libwww-perl)
 
 use strict;
 use URI;
@@ -116,10 +121,10 @@ $|=1;
 
 sub usage {
 	print STDERR "Usage:\n";
+	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
 	print STDERR "  Download files:        get_iplayer [-l] [-t] [-f] [-w] [-v] [-s] [-x] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
 	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
-	print STDERR "  Decode Existing Files: get_iplayer [-v] -d <files to decode>\n";
-	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
+	print STDERR "  Update get_iplayer:    get_iplayer -u\n";
 	print STDERR "Options:\n";
 	print STDERR "       -l        Show/search long programme descriptions\n";
 	print STDERR "       -f        Flush cache\n";
@@ -128,7 +133,7 @@ sub usage {
 	print STDERR "       -p <url>  Web proxy URL spec\n";
 	print STDERR "       -x        Additionally stream to STDOUT (so you can pipe output to a player)\n";
 	print STDERR "       -n        No writing of file to disk (use with -x to prevent a copy being stored on disk)\n";
-	print STDERR "       -e <secs> Cache expiry in seconds\n";
+	print STDERR "       -e <secs> Cache expiry in seconds (default 12hrs)\n";
 	print STDERR "       -t        Test only - no download (will show programme type)\n";
 	print STDERR "       -d        Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
 	print STDERR "       -w        Keep whitespace (and escape chars) in filenames\n";
@@ -146,16 +151,18 @@ my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.';
 my $webfile 		= $download_dir.'/iplayer.html';
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
-my $cache_secs 		= $opt_e || 86000;
+my $cache_secs 		= $opt_e || 43000;
 
+my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
+my $pid_page_url_prefix	= 'http://www.bbc.co.uk/iplayer/page/item/';
+my $web_bug_2_url	= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
 my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix	= 'http://www.bbc.co.uk/programmes';
-my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
 my $version_url		= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url		= 'http://linuxcentre.net/get_iplayer/get_iplayer';
 
 # User Agents
-my %ua = (
+my %user_agent = (
   	coremedia	=> "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
   	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
   	update		=> "get_iplayer updater (v${version} - $^O)",
@@ -189,14 +196,14 @@ print STDERR "INFO: Using Proxy $proxy_url\n" if $proxy_url;
 
 # XOR Decode-only mode
 if ($opt_d) {
-	for my $file (@ARGV) {
-		if ( -f $file ) {
-			iplayer_decoder($file);
-		} else {
-			print STDERR "ERROR: Cannot find $file\n";
-		}
-	}
-	exit 0;
+  for my $file (@ARGV) {
+    if ( -f $file ) {
+      iplayer_decoder($file);
+    } else {
+      print STDERR "ERROR: Cannot find $file\n";
+    }
+  }
+  exit 0;
 } 
 
 # Update this script if required
@@ -215,27 +222,28 @@ get_links();
 
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
-	list_progs( sort { $a <=> $b } keys %index_pid );
-        exit 0;
+  list_progs( sort { $a <=> $b } keys %index_pid );
+  exit 0;
 }
 
 # Parse remaining args
 my @download_list;
 for ( @ARGV ) {
-        chomp();
-        # If Numerical value
-        if ( /^[\d]+$/ ) {
-                push @download_list, $_;
+  chomp();
 
-        # If PID then find matching programmes with this PID
-        } elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
-                s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-                push @download_list, get_regex_matches( $1 );
+  # If Numerical value
+  if ( /^[\d]+$/ ) {
+    push @download_list, $_;
 
-        # Else assume this is a programme name regex
-        } else {
-                push @download_list, get_regex_matches( $_ );
-        }
+  # If PID then find matching programmes with this PID
+  } elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
+    s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+    push @download_list, get_regex_matches( $1 );
+
+  # Else assume this is a programme name regex
+  } else {
+    push @download_list, get_regex_matches( $_ );
+  }
 }
 
 # Display list for download
@@ -246,6 +254,9 @@ list_progs( @download_list );
 download_stream_lwp( $index_pid{$_} ) for (@download_list);
 
 exit 0;
+
+
+
 
 
 # Lists progs given an array of index numbers
@@ -287,7 +298,7 @@ sub get_links_all {
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([10]);
 	$ua->proxy( ['http'] => $proxy_url );
-	$ua->agent( $ua{safari} );
+	$ua->agent( $user_agent{safari} );
 
 	# Loop while we still get stream links
 	my $index = 1;
@@ -455,9 +466,8 @@ sub download_stream_lwp {
 	my $pid = shift;
 	
 	# Create a full URL from the PID specified
-	my $page = "http://www.bbc.co.uk/iplayer/page/item/".$prog{$pid}{urlpid}.".shtml";
+	my $page = $pid_page_url_prefix.$prog{$pid}{urlpid}.'.shtml';
 	print STDERR "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
-
 
 	print STDERR "INFO: Stage 1 URL = $page\n" if $opt_v;
 	print STDERR "\rGetting iplayer programme page        " if ! $opt_v;
@@ -470,7 +480,7 @@ sub download_stream_lwp {
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 0 ) );
 
 	# Stage 1: get PID and set cookie
-	$ua->agent( $ua{safari} );
+	$ua->agent( $user_agent{safari} );
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
 	if ( ! $res->is_success ) {
@@ -483,6 +493,18 @@ sub download_stream_lwp {
 		print STDERR "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
 		exit 3;
 	}
+
+	# Parse if programme available
+	#    iplayer_streaming_http_mp4 : [
+	#    ],  ### This part is empty == no mov version yet
+	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, $res->content ) {
+		print STDERR "\rERROR: Programme is reported as not yet ready for download\n\n";
+		# Will return from here once satisfied that this test is reliable
+		#return 11;
+	} else {
+	        print STDERR "\rINFO: Programme is reported as ready for download\n";
+	}
+
 	# Extract Long Name, e.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
 	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
 	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
@@ -498,8 +520,8 @@ sub download_stream_lwp {
 	$prog{$pid}{type} = $pid_types{$pid};
 	# List types available
 	print STDERR "INFO: Types available: ", join(', ', %pid_types), "\n" if $opt_v;
-	# Create url
-	my $url_1 = "${url_download_prefix}/$pid";
+	# Create url with appended 6 digit random number
+	my $url_1 = "${url_download_prefix}/$pid?".(sprintf "%06.0f", 1000000*rand(0)).'%20';
 	# Create a filename
 	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $pid_types{$pid}";
 	# Replace slashes with _ regardless
@@ -555,7 +577,7 @@ sub download_stream_lwp {
 		#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
                 #Connection: keep-alive
                 #Host: stats.bbc.co.uk
-			'User-Agent'	=> $ua{safari},
+			'User-Agent'	=> $user_agent{safari},
 			'Accept'	=> '*/*',
 		);
 		my $req = HTTP::Request->new ('GET', $url_1b, $h);
@@ -569,8 +591,8 @@ sub download_stream_lwp {
 
 
 
-	        # Stage 1c - get o.gif framework web bug to whitelist cookie
-	        my $url_1c = 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?90927';
+	        # Stage 1c - get o.gif framework web bug to whitelist cookie (5 digit random number appended)
+	        my $url_1c = $web_bug_2_url.(sprintf "%05.0f", 100000*rand(0));
 		print STDERR "INFO: Getting iplayer 2nd web bug             \r";
 		my $h = new HTTP::Headers(
                 #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
@@ -582,7 +604,7 @@ sub download_stream_lwp {
                 #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
                 #Connection: keep-alive
                 #Host: www.bbc.co.uk
-			'User-Agent'	=> $ua{safari},
+			'User-Agent'	=> $user_agent{safari},
 			'Accept'	=> '*/*',
 		);
 		my $req = HTTP::Request->new ('GET', $url_1c, $h);
@@ -599,7 +621,7 @@ sub download_stream_lwp {
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 		print STDERR "\rGetting iplayer download URL         " if ! $opt_v;
 		my $h = new HTTP::Headers(
-			'User-Agent'	=> $ua{coremedia},
+			'User-Agent'	=> $user_agent{coremedia},
 			'Accept'	=> '*/*',
 			'Range'		=> 'bytes=0-1',
 		);
@@ -626,7 +648,7 @@ sub download_stream_lwp {
 		# Stage 3a: Download 1st byte to get exact file length
                 # Determine offset for continuation dowload
 		my $h = new HTTP::Headers(
-			'User-Agent'	=> $ua{coremedia},
+			'User-Agent'	=> $user_agent{coremedia},
 			'Accept'	=> '*/*',
 			'Range'		=> 'bytes=0-1',
 		);
@@ -726,6 +748,7 @@ sub download_stream_lwp {
 
 		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
 		print STDERR "INFO: Downloaded $file_done\n";
+		unlink $cookiejar;
 		# Moving file into place as complete (if not stdout)
                 move($file, $file_done) if ! $opt_x;
         }
@@ -735,40 +758,40 @@ sub download_stream_lwp {
 
 # Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
 sub relocate_moov_chunk_offsets {
-                my $moovdata = @_[0];
+  my $moovdata = @_[0];
+  # Change all the chunk offsets in moov->stco atoms and add moov_length to them all
+  # get moov atom length
+  my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
+  # Nasty but quicker to scan for 'stco'
+  for (my $i = 0; $i < $moov_length - 4; $i++) {
+    my $chars = substr($moovdata, $i, 4);
+    # If we have found and stco atom
+    if ( $chars eq 'stco' ) {
+      # determine length of atom (4 bytes preceding stco)
+      my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
+      print STDERR "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt_v;
 
-		# Change all the chunk offsets in moov->stco atoms and add moovsize to them all
-		# get moov atom length
-		my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
-		# Nasty but quicker to scan for 'stco'
-		for (my $i = 0; $i < $moov_length - 4; $i++) {
-		  my $chars = substr($moovdata, $i, 4);
-		  # If we have found and stco atom
-		  if ( $chars eq 'stco' ) {
-		    # determine length of atom (4 bytes preceding stco)
-		    my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
-		    print STDERR "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt_v;
+      # loop through all chunk offsets in this atom and add offset (== moov atom length)
+      for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
+        my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+	#print STDERR "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',  $chunk_offset + $moov_length = ";
+        $chunk_offset += $moov_length;
+        # write back bytes into $moovdata
+	substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
+	substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
+	substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
+	substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
+        #$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+	#print STDERR "$chunk_offset\n";
+      }
 
-		    # loop through all chunk offsets in this atom and add offset (== moov atom length)
-                   for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
-                      my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-		      #print STDERR "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',  $chunk_offset + $moov_length = ";
-                      $chunk_offset += $moov_length;
-                      # write back bytes into $moovdata
-		      substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
-		      substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
-		      substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
-		      substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
-                      #$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-		      #print STDERR "$chunk_offset\n";
-                    }
-
-		    # skip over this whole atom now it is processed
-		    $i += $stco_len;
-		  }
-		}
-		@_[0] = $moovdata;
-		return $moov_length;
+      # skip over this whole atom now it is processed
+      $i += $stco_len;
+    }
+  }
+  # Write $moovdata back to calling string
+  @_[0] = $moovdata;
+  return $moov_length;
 }
 
 
@@ -783,10 +806,10 @@ sub relocate_moov_chunk_offsets {
 # 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end, $file_len, undef);
 sub download_block {
 
-                my ($file, $url_2, $ua, $start, $end, $file_len, $fh) = @_;
+                my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
                 my $orig_length;
                 # If this is an 'append to file' mode call
-  		if ( $file && $fh ) {
+  		if ( defined $file && $fh && (!$opt_n) ) {
     		  # Stage 3b: Download File
                   $orig_length = stat($file)->size;
                   print STDERR "INFO: Appending to $file\n" if $opt_v;
@@ -794,11 +817,11 @@ sub download_block {
 
                 # Determine offset for continuation download
 		my $h = new HTTP::Headers(
-			'User-Agent'	=> $ua{coremedia},
+			'User-Agent'	=> $user_agent{coremedia},
 			'Accept'	=> '*/*',
                         'Range'        => "bytes=${start}-${end}",
 		);
-		my $req = HTTP::Request->new ('GET', $url_2, $h);
+		my $req = HTTP::Request->new ('GET', $url, $h);
 		# Set time to use for download rate calculation
 		# Define callback sub that gets called during download request
 		# This sub actually writes to the open output file and reports on progress
@@ -809,9 +832,9 @@ sub download_block {
                         # Write output
 			print $fh $data if ! $opt_n;
 			print STDOUT $data if $opt_x;
-			# return if $file not specified (i.e. streaming to stdout)
-			return if ! $file;
-			# current file zise
+			# return if streaming to stdout - no need for progress
+			return if $opt_x && $opt_n;
+			# current file size
 			my $size = stat($file)->size;
 			# download rates in bytes per second
 			my $rate = ($size - $orig_length) / (stat($file)->mtime - $now + 0.01);
@@ -829,10 +852,13 @@ sub download_block {
 		print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt_v;
 		print STDERR "\r                              \r";
 		my $res;
-		# If $fh undefined then get block to memory
+		# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
 		if (defined $fh) {
+		  print STDERR "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt_v && $opt_x;
+		  print STDERR "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt_v && !$opt_n;
   		  $res = $ua->request($req, $callback);
                 } else {
+                  print STDERR "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt_v;
                   $res = $ua->request($req);
                 }
                 # If we don't require any more bytes (previously fully downloaded) then skip
@@ -1090,7 +1116,6 @@ sub process_file {
 # Build XOR/Mask pattern
 sub create_pattern_string {
 	my $count = shift;
-
 	my $pat;
 	$pat .= chr($_) for @_;
 	print STDERR "Pattern = $pat\n" if $opt_v;
@@ -1104,9 +1129,7 @@ sub create_pattern_string {
 
 # Returns arbitrary block of data from open file $fh
 sub get_block {
-        my $fh = shift;
-	my $start = shift;
-	my $len = shift;
+        my ($fh, $start, $len) = @_;
 	my $buf;
 	# Seek to start offset
 	seek($fh, $start, SEEK_SET);
@@ -1135,10 +1158,11 @@ sub bytestring_to_int {
 		# Multiply byte value by 256^$i then accumulate
                 $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
         }
-#	print STDERR "DEBUG: Decimal value = $dec\n" if $opt_v;
+        #print STDERR "DEBUG: Decimal value = $dec\n" if $opt_v;
         return $dec;
 }
 
+# Is value odd?
 sub odd() {
     return 1 if ( ($_[0]/2.0) != int($_[0]/2.0) );
     return 0;
@@ -1169,8 +1193,8 @@ sub update_script {
   my $ua = LWP::UserAgent->new;
   $ua->timeout([10]);
   $ua->proxy( ['http'] => $proxy_url );
-  $ua->agent( $ua{update} );
-  print STDERR "INFO: Checking for latest version\n";
+  $ua->agent( $user_agent{update} );
+  print STDERR "INFO: Checking for latest version from linuxcentre.net\n";
   my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
   chomp( my $latest_ver = $res->content );
   if ( $res->is_success ) {
@@ -1190,6 +1214,8 @@ sub update_script {
           print STDERR "INFO: Copied new version $latest_ver into place (pervious version is now called '${script_file}.old')\n";
         }
       }
+    } else {
+      print STDERR "INFO: No update is necessary (latest version = $latest_ver)\n";
     }
   } else {
     print STDERR "ERROR: Failed to connect to update site\n";
