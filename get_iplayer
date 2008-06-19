@@ -8,7 +8,8 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 18th 2008
-# Version: 0.27
+#
+my $version = 0.28;
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -24,6 +25,9 @@
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
+#
+# Changes 0.28 - 20080619:
+# * Update get_iplayer option (-u)
 #
 # Changes 0.27 - 20080619:
 # * New option to allow streaming while downloading AND writing file to disk (allows you to watch while downloading while keeping a copy for later)
@@ -97,7 +101,7 @@
 use strict;
 use URI;
 use IO::Socket;
-use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w $opt_s $opt_x);
+use vars qw($opt_h $opt_t $opt_d $opt_f $opt_o $opt_p $opt_e $opt_l $opt_n $opt_v $opt_w $opt_s $opt_x $opt_u);
 use Getopt::Std;
 use Fcntl;
 use File::stat;
@@ -129,12 +133,13 @@ sub usage {
 	print STDERR "       -d        Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
 	print STDERR "       -w        Keep whitespace (and escape chars) in filenames\n";
 	print STDERR "       -v        Verbose\n";
+	print STDERR "       -u        Update get_iplayer if a newer one exists\n";
 	print STDERR "       -h        Help\n";
 	exit 1;
 }
 
 # Parse options
-usage() if (! getopts("htwnvdfso:p:e:lx")) || $opt_h;
+usage() if (! getopts("htwnvdfsuo:p:e:lx")) || $opt_h;
 
 # Options
 my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.';
@@ -146,9 +151,14 @@ my $cache_secs 		= $opt_e || 86000;
 my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix	= 'http://www.bbc.co.uk/programmes';
 my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
+my $version_url		= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
+my $update_url		= 'http://linuxcentre.net/get_iplayer/get_iplayer';
+
+# User Agents
 my %ua = (
   	coremedia	=> "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
   	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
+  	update		=> "get_iplayer updater (v${version} - $^O)",
 );
 
 # Sanity check some conflicting options
@@ -187,6 +197,11 @@ if ($opt_d) {
 		}
 	}
 	exit 0;
+} 
+
+# Update this script if required
+if ($opt_u) {
+  update_script();
 }
 
 # Check for valid dload dir
@@ -1145,4 +1160,40 @@ sub open_file_append {
   # Fix for binary - needed for Windows
   binmode FH;
   return *FH;
+}
+
+
+# Updates and overwrites this script - makes backup as <this file>.old
+sub update_script {
+  # Get version URL
+  my $ua = LWP::UserAgent->new;
+  $ua->timeout([10]);
+  $ua->proxy( ['http'] => $proxy_url );
+  $ua->agent( $ua{update} );
+  print STDERR "INFO: Checking for latest version\n";
+  my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
+  chomp( my $latest_ver = $res->content );
+  if ( $res->is_success ) {
+    # Compare version numbers
+    if ( $latest_ver > $version ) {
+      print STDERR "INFO: New version $latest_ver available, downloading\n";
+      my $res = $ua->request( HTTP::Request->new( GET => $update_url ) );    
+      my $req = HTTP::Request->new ('GET', $update_url);
+      # Save content into a $script_file
+      my $script_file = $0;
+      $ua->request($req, $script_file.'.tmp');
+      # If the download was successful then copy over this script and make executable after making a backup of this script
+      if ( $res->is_success ) {
+        if ( copy($script_file, $script_file.'.old') ) {
+          move($script_file.'.tmp', $script_file);
+          chmod 0755, $script_file;
+          print STDERR "INFO: Copied new version $latest_ver into place (pervious version is now called '${script_file}.old')\n";
+        }
+      }
+    }
+  } else {
+    print STDERR "ERROR: Failed to connect to update site\n";
+    exit 2;
+  }
+  exit 0;
 }
