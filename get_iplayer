@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
 # Date: June 18th 2008
-# Version: 0.26
+# Version: 0.27
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -23,7 +23,11 @@
 # * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Cygwin, Windows)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
+#
+# Changes 0.27 - 20080619:
+# * New option to allow streaming while downloading AND writing file to disk (allows you to watch while downloading while keeping a copy for later)
+# * Sanity check to ensure we don't stream partially downloaded content
 #
 # Changes 0.26 - 20080618:
 # * Fixed partial download resuming
@@ -109,22 +113,23 @@ $|=1;
 sub usage {
 	print STDERR "Usage:\n";
 	print STDERR "  Download files:        get_iplayer [-l] [-t] [-f] [-w] [-v] [-s] [-x] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
-	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
+	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
 	print STDERR "  Decode Existing Files: get_iplayer [-v] -d <files to decode>\n";
 	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
 	print STDERR "Options:\n";
-	print STDERR "       -l        show/search long programme descriptions\n";
-	print STDERR "       -f        flush cache\n";
+	print STDERR "       -l        Show/search long programme descriptions\n";
+	print STDERR "       -f        Flush cache\n";
 	print STDERR "       -o <dir>  Download output directory\n";
 	print STDERR "       -s        Downloaded files into Programme name subdirectory\n";
 	print STDERR "       -p <url>  Web proxy URL spec\n";
-	print STDERR "       -x        stream to STDOUT (so you can pipe output to a player)\n";
-	print STDERR "       -e <secs> cache expiry in seconds\n";
-	print STDERR "       -t        test only - no download (will show programme type)\n";
+	print STDERR "       -x        Additionally stream to STDOUT (so you can pipe output to a player)\n";
+	print STDERR "       -n        No writing of file to disk (use with -x to prevent a copy being stored on disk)\n";
+	print STDERR "       -e <secs> Cache expiry in seconds\n";
+	print STDERR "       -t        Test only - no download (will show programme type)\n";
 	print STDERR "       -d        Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
-	print STDERR "       -w        keep whitespace (and escape chars) in filenames\n";
-	print STDERR "       -v        verbose\n";
-	print STDERR "       -h        help\n";
+	print STDERR "       -w        Keep whitespace (and escape chars) in filenames\n";
+	print STDERR "       -v        Verbose\n";
+	print STDERR "       -h        Help\n";
 	exit 1;
 }
 
@@ -145,6 +150,12 @@ my %ua = (
   	coremedia	=> "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
   	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
 );
+
+# Sanity check some conflicting options
+if ($opt_n && (!$opt_x)) {
+  print STDERR "ERROR: Cannot download to nowhere\n";
+  exit 1;
+}
 
 # Programme data structure
 # $prog{$pid} = {
@@ -510,8 +521,6 @@ sub download_stream_lwp {
 
 	my $file_done = "${download_dir}/${file}.mov";
 	$file = "${download_dir}/${file}.partial.mov";
-	# undef $file if we're streaming to STDOUT
-	undef $file if $opt_x;
 	 
 	if ( -f $file_done ) {
 		print STDERR "ERROR: File already exists\n\n";
@@ -640,7 +649,11 @@ sub download_stream_lwp {
 		#  $i += $atom_len;
 		#}
 
-
+		# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
+                if ( $opt_x && (! $opt_n) && -f $file ) {
+                  print STDERR "WARNING: Partially downloaded file exists, downloading to disk will be disabled when streaming this file\n";
+                  $opt_n = 1;
+                }
 
                 # Open file if required
                 my $fh = open_file_append($file);
@@ -649,8 +662,8 @@ sub download_stream_lwp {
                 my $restart_offset = $mdat_start;
 		my $moovdata;
                 my $moov_length;
-                # If we have a non-zero sized file and not stdout then this is a partial download
-                if (-f $file && (! $opt_x) && stat($file)->size > 1000 ) {
+                # If we have a too-small-sized file and not stdout and not no-write then this is a partial download
+                if (-f $file && (! $opt_x) && (! $opt_n) && stat($file)->size > ($moov_length+$mdat_start) ) {
 		  # Get moovlength from server
 		  $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		  # Calculate new start offset (considering that we've put moov first in file)
@@ -659,16 +672,20 @@ sub download_stream_lwp {
                 }
 
 
-                # If we have no existing file (or using stdout)
-                if ( $opt_x || stat($file)->size == 0 ) {
+                # If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
+                if ( $opt_x || $opt_n || stat($file)->size < ($moov_length+$mdat_start) ) {
 		  # get moov chunk into memory
 		  $moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
 		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
                   $moov_length = relocate_moov_chunk_offsets( $moovdata );
   		  # write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
 		  print STDERR "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt_v;
-		  print $fh $moovdata;
-		  print $fh $header;
+		  # Write moov atom
+                  print $fh $moovdata if ! $opt_n;
+		  print STDOUT $moovdata if $opt_x;
+                  # Write header atoms (ftyp, wide)
+                  print $fh $header if ! $opt_n;
+		  print STDOUT $header if $opt_x;
                 }
 
                 
@@ -744,6 +761,11 @@ sub relocate_moov_chunk_offsets {
 # Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
 #  ensure filehandle $fh is open in append mode
 # or, $content = download_block(undef, $url_2, $ua, $start, $end, $file_len);
+# Called in 4 ways:
+# 1) write to real file			=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
+# 2) write to real file + STDOUT	=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt_x==true
+# 3) write to STDOUT only		=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt_x==true + $opt_n==false
+# 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end, $file_len, undef);
 sub download_block {
 
                 my ($file, $url_2, $ua, $start, $end, $file_len, $fh) = @_;
@@ -769,7 +791,9 @@ sub download_block {
 			my ($data, $res, undef) = @_;
 			# Don't write the output to the file if there is no content-length header
                         return 0 if ( ! $res->header("Content-Length") );
-			print $fh $data;
+                        # Write output
+			print $fh $data if ! $opt_n;
+			print STDOUT $data if $opt_x;
 			# return if $file not specified (i.e. streaming to stdout)
 			return if ! $file;
 			# current file zise
@@ -790,7 +814,8 @@ sub download_block {
 		print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt_v;
 		print STDERR "\r                              \r";
 		my $res;
-		if ($fh) {
+		# If $fh undefined then get block to memory
+		if (defined $fh) {
   		  $res = $ua->request($req, $callback);
                 } else {
                   $res = $ua->request($req);
@@ -803,7 +828,7 @@ sub download_block {
 			return 5;
 		} 
 
-		if ($fh) {
+		if (defined $fh) {
 		  return 0;
                 } else {
                   return $res->content;
@@ -1109,14 +1134,13 @@ sub odd() {
 sub open_file_append {
   local *FH;
   my $file = shift;
+  # Just in case we actually write to the file - make this /dev/null
+  $file = '/dev/null' if $opt_n;
   if ($file) {
     if ( ! open(FH, ">> $file") ) {
       print STDERR "ERROR: Cannot write or append to $file\n\n";
       exit 1;
     }
-  # if no filename is specified use stdout
-  } else {
-    return *STDOUT;
   }
   # Fix for binary - needed for Windows
   binmode FH;
