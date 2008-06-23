@@ -7,9 +7,9 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 19th 2008
+# Date: June 22nd 2008
 #
-my $version = 0.29;
+my $version = 0.30;
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -25,6 +25,12 @@ my $version = 0.29;
 # * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
 #
+#
+# Changes 0.30 - 20080622
+# * Generate FXD file for Freevo iplayer streaming plugin
+# * Now can resume downloads and strema to STDOUT simultaneously (streaming always starts from beginning of programme)
+# * Retry loop for getting index pages incase BBC site breaks like it just did
+# 
 # Changes 0.29 - 20080619:
 # * Fixed streaming + file download mode
 # * Added random numbers after some requests more like iphone
@@ -147,8 +153,10 @@ sub usage {
 usage() if (! getopts("htwnvdfsuo:p:e:lx")) || $opt_h;
 
 # Options
-my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.';
-my $webfile 		= $download_dir.'/iplayer.html';
+my $download_dir 	= $opt_o || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
+my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
+my $fxdfile 		= $download_dir.'folder.fxd'; # Where freevo will scan for FXD file
+my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
 my $cache_secs 		= $opt_e || 43000;
@@ -189,6 +197,7 @@ my %prog;
 # Hash to obtain pid given an index
 my %index_pid;
 my $now;
+my $childpid;
 
 # Web proxy
 my $proxy_url = $opt_p || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
@@ -303,19 +312,25 @@ sub get_links_all {
 	# Loop while we still get stream links
 	my $index = 1;
 	do {
+		my $retries = 3;
 		print STDERR "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
-
-		# Get index pages
-		my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
-		@html = split /\n/, $res->content;
-		# Set valid flag if we have progdata in this page
-		$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
-		if ( ! $res->is_success ) {
-			print STDERR "ERROR: Failed to get programme index page ${pageno} from iplayer site\n";
-			exit 2;
-		} else {
-			print STDERR ".";
-		}
+		do {
+			# Get index pages
+			my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
+			@html = split /\n/, $res->content;
+			# Set valid flag if we have progdata in this page
+			$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
+			if ( ! $res->is_success ) {
+				print STDERR "WARNING: Failed to get programme index page ${pageno} from iplayer site\n";
+				$retries--;
+				sleep 1;
+				print STDERR "X";
+				exit 2 if $retries == 0;
+			} else {
+				$retries = 0;
+				print STDERR ".";
+			} 
+		} until ($retries == 0);
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
@@ -434,29 +449,8 @@ sub get_links {
 			$index_pid{$index}	= $pid;
 		}
 	}
-
-	# Create local web page
-	if ( open(HTML, "> $webfile") ) {
-	  print HTML '<html><head></head><body><table border=1>';
-	  for (sort {$a <=> $b} keys %index_pid) {
-            my $pid = $index_pid{$_};
-	    my $urlpid = $prog{$pid}{urlpid};
-	    my $name = $prog{$pid}{name};
-	    print HTML "<tr>
-	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${urlpid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${urlpid}_150_84.jpg\"></a></td>
-	      <td>$_</td><td><a href=\"${prog_page_prefix}/${urlpid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
-	    </tr>
-	    <tr>
-	      <td colspan=4>$prog{$pid}{desc}</td>
-	    </tr>
-	    \n";
-	  }
-	  print HTML '</table></body>';
-	  close (HTML);
-	} else {
-	  print STDERR "Couldn't open html file $webfile for writing\n";
-	}
-	
+	create_html( sort {$a <=> $b} keys %index_pid );
+	create_fxd ( sort {$a <=> $b} keys %index_pid );
 	return 0;
 }
 
@@ -686,10 +680,32 @@ sub download_stream_lwp {
 		#  $i += $atom_len;
 		#}
 
+		# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
 		# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
                 if ( $opt_x && (! $opt_n) && -f $file ) {
-                  print STDERR "WARNING: Partially downloaded file exists, downloading to disk will be disabled when streaming this file\n";
-                  $opt_n = 1;
+                  print STDERR "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
+                  # Don't do usual streaming code
+                  $opt_x = 0;
+                  $childpid = fork();
+                  if (! $childpid) {
+			# Child starts here
+                	print STDERR "INFO: Streaming directly for partially downloaded file $file\n";
+			if ( ! open( STREAMIN, "< $file" ) ) {
+				print STDERR "INFO: Cannot Read partially downloaded file to stream\n";
+				exit 4;
+			}
+			my $outbuf;
+			# Write out until we run out of bytes
+			my $bytes_read = 65536;
+			while ( $bytes_read == 65536 ) { 
+				$bytes_read = read(STREAMIN, $outbuf, 65536 );				
+				#print STDERR "INFO: Read $bytes_read bytes\n";
+				print STDOUT $outbuf;
+			}
+			close STREAMIN;
+			print STDERR "INFO: Stream thread has completed\n";
+                	exit 0;
+		  }
                 }
 
                 # Open file if required
@@ -1222,4 +1238,107 @@ sub update_script {
     exit 2;
   }
   exit 0;
+}
+
+# Creates the Freevo FXD meta data (and pre-downloads graphics - todo)
+sub create_fxd() {
+  my %table = (
+    'A-C' => '[abc]',
+    'D-F' => '[def]',
+    'G-I' => '[ghi]',
+    'J-L' => '[jkl]',
+    'M-N' => '[mn]',
+    'O-P' => '[op]',
+    'Q-R' => '[qt]',
+    'S-T' => '[st]',
+    'U-V' => '[uv]',
+    'W-Z' => '[wxyz]',
+    '0-9' => '[\d]',
+  );
+  if ( open(FXD, "> $fxdfile") ) {
+        print FXD '<?xml version="1.0" ?><freevo>';
+
+        # containers for programmes sorted into subdirs
+        print FXD "\t<container title=\"iplayer by Programme Name\" type=\"video\">\n";
+        my %program_index;
+        my %program_count;
+        # create hash of programme_name -> index
+        for (@_) {
+          $program_index{$prog{$index_pid{$_}}{name}} = $_;
+          $program_count{$prog{$index_pid{$_}}{name}}++;
+        }
+        for my $name ( sort keys %program_index ) {
+                my @count = grep /^$name$/, keys %program_index;
+                print FXD "\t<container title=\"$name ($program_count{$name})\" type=\"video\">\n";
+	    	for (@_) {
+          	  my $pid = $index_pid{$_};
+          	  my $urlpid = $prog{$pid}{urlpid};
+          	  # loop through and find matches for each progname
+	    	  if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
+	    	    print FXD "<iplayer title=\"$prog{$pid}{episode} ($prog{$pid}{available})\">
+				<cmd>${get_iplayer_stream} $prog{$pid}{urlpid}</cmd>
+				<info>
+					<description>$prog{$pid}{desc}</description>
+				</info>
+			</iplayer>\n";
+                  }
+                }			
+                print FXD "\t</container>\n";
+        }
+        print FXD "\t</container>\n";        
+
+
+        # containers for alpha sorted programmes
+        print FXD "\t<container title=\"iplayer A-Z\" type=\"video\">\n";
+        for my $folder (sort keys %table) {
+                print FXD "\t<container title=\"iplayer $folder\" type=\"video\">\n";
+                for (@_) {
+	            	my $pid = $index_pid{$_};
+		    	my $urlpid = $prog{$pid}{urlpid};
+	    	    	my $name = $prog{$pid}{name};
+                        my $regex = $table{$folder};
+	    	    	if ( $name =~ /^$regex/i ) {
+	    		  print FXD "<iplayer title=\"$name - $prog{$pid}{episode} ($prog{$pid}{available})\">
+					<cmd>${get_iplayer_stream} $prog{$pid}{urlpid}</cmd>
+					<info>
+						<description>$prog{$pid}{desc}</description>
+					</info>
+				</iplayer>\n";
+                        }
+                }
+                print FXD "\t</container>\n";
+        }
+        print FXD "\t</container>\n";
+
+
+
+  } else {
+    print STDERR "Couldn't open fxd file $fxdfile for writing\n";
+  }
+  print FXD '</freevo>';
+  close (FXD);
+}
+
+sub create_html {
+	# Create local web page
+	if ( open(HTML, "> $webfile") ) {
+	  print HTML '<html><head></head><body><table border=1>';
+	  for (@_) {
+            my $pid = $index_pid{$_};
+	    my $urlpid = $prog{$pid}{urlpid};
+	    my $name = $prog{$pid}{name};
+	    print HTML "<tr>
+	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${urlpid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${urlpid}_150_84.jpg\"></a></td>
+	      <td>$_</td><td><a href=\"${prog_page_prefix}/${urlpid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
+	    </tr>
+	    <tr>
+	      <td colspan=4>$prog{$pid}{desc}</td>
+	    </tr>
+	    \n";
+	  }
+	  print HTML '</table></body>';
+	  close (HTML);
+	} else {
+	  print STDERR "Couldn't open html file $webfile for writing\n";
+	}
 }
