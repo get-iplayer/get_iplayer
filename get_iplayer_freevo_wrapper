@@ -1,0 +1,15 @@
+#!/bin/bash
+/home/plewis/get_iplayer -o /home/plewis/iplayer -x $1 | /usr/bin/mplayer -fs -cache 2048 - &
+#/home/plewis/get_iplayer -o /home/plewis/iplayer -x $1 | /usr/bin/xine -f -g --no-splash stdin:/ &
+PID=$!
+# Loop to kill off parent streaming when player is killed
+while [ 1 == 1 ]; do
+	sleep 2
+	# player still alive?
+	kill -0 $PID  >/dev/null  2>&1
+	# Commit suicide if player is dead
+	if [ $? != 0 ]; then
+	  killall -9 get_iplayer >/dev/null 2>&1
+	  kill -9 $$ >/dev/null 2>&1
+	fi
+done
