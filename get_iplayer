@@ -7,9 +7,9 @@
 # Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 26th 2008
+# Date: June 27th 2008
 #
-my $version = 0.32;
+my $version = 0.33;
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
@@ -29,6 +29,13 @@ my $version = 0.32;
 # * LWP (libwww-perl)
 # * Perl XML::Twig
 #
+# Changes 0.33 - 20080627
+# * Now gets programme categories and channel from Atom feed
+# * Only write the fxd and html files when writing cache
+# * Channel and category search (regex) --channel --category
+# * Fixed options saving/reading
+# * Added download progress for Atom feed and movie header
+#
 # Changes 0.32 - 20080626
 # * Now uses Atom feed rather than scraping website for programme info (much more reliable availability info)
 # * Now requires Perl XML::Twig
@@ -39,7 +46,7 @@ my $version = 0.32;
 # * Removed deprecated XOR decoding
 #
 # Changes 0.31 - 20080624
-# * Allow user to save options and specify default options in $HOME/.playerrc
+# * Allow user to save options and specify default options in $HOME/.iplayerrc
 # * Now uses long options also
 #
 # Changes 0.30 - 20080622
@@ -146,6 +153,8 @@ sub usage {
 	print STDERR "  Update get_iplayer:    get_iplayer -u\n";
 	print STDERR "Options:\n";
 	print STDERR " -l, --long           Show/search long programme descriptions\n";
+	print STDERR "     --channel        Only search in specified channel(s) - use a sub-string or regex\n";
+	print STDERR "     --category       Only search in specified category - use a sub-string or regex\n";
 	print STDERR " -f, --flush          Flush cache\n";
 	print STDERR " -o, --output <dir>   Download output directory\n";
 	print STDERR " -s, --subdir         Downloaded files into Programme name subdirectory\n";
@@ -158,14 +167,15 @@ sub usage {
 	print STDERR " -v, --verbose        Verbose\n";
 	print STDERR " -u, --update         Update get_iplayer if a newer one exists\n";
 	print STDERR " -h, --help           Help\n";
-	print STDERR " --scrape             Use old web page scraping method to get programme index\n";
-	print STDERR " --save               Save these options as default in .iplayerrc\n";
+	print STDERR "     --scrape         Use old web page scraping method to get programme index\n";
+	print STDERR "     --save           Save these options as default in .iplayerrc\n";
 	exit 1;
 }
 
 # Get cmdline params
 my %opt = ();
 my $save;
+my $optfile = "$ENV{HOME}/.iplayerrc";
 
 # Parse options if we're not saving options
 read_options_file() if ! grep /\-\-save/, @ARGV;
@@ -188,23 +198,23 @@ GetOptions(
         "debug"                         => \$opt{debug},
         "scrape"			=> \$opt{scrape},
 	"save"				=> \$save,
+	"channel=s"			=> \$opt{channel},
+	"category=s"			=> \$opt{category},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
 
+# Save opts if specified
+save_options_file() if $save;
 
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
 my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
-my $optfile 		= "$ENV{HOME}/.iplayerrc";
 my $fxdfile 		= $download_dir.'folder.fxd'; # Where freevo will scan for FXD file
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
 my $cache_secs 		= $opt{expiry} || 14400;
-
-# Save opts if specified
-save_options_file() if $save;
 
 # URLs
 my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
@@ -240,7 +250,8 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'duration'	=> <duration in HH:MM:SS>
 #	'versions'	=> <list of non-'Original' versions, e.g Signed>
 #	'thumbnail'	=> <programme thumbnail url>
-#	'channel'	=> <TV channel>
+#	'channel	=> <TV channel>
+#	'categories'	=> <Categories>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -268,7 +279,8 @@ get_links();
 
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
-  list_progs( sort { $a <=> $b } keys %index_pid );
+  list_progs( get_regex_matches( '.*' ) );
+  #list_progs( sort { $a <=> $b } keys %index_pid );
   exit 0;
 }
 
@@ -310,28 +322,45 @@ sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
 		my $desc = "- $prog{$pid}{desc}" if $opt{long};
-		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available}) $prog{$pid}{duration} $prog{$pid}{versions}\n";
+		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}, $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions} $desc\n";
 	}
 	print STDERR "\n";
 	return 0;
 }
 
+
 # Get matching programme index numbers using supplied regex
 sub get_regex_matches {
-
 	my $download_regex = shift;
 	my @download_list;
-	
+	my $channel_regex = $opt{channel} || '.*';
+	my $category_regex = $opt{category} || '.*';
+
 	for (keys %index_pid) {
 		my $pid = $index_pid{$_};
-		# Search prognames/pids
-		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i || $pid =~ /$download_regex/i || $pid =~ /$download_regex/i;
-		# Also search long descriptions and episode data if -l is specified
-		push @download_list, $_ if $opt{long} && ( $prog{$pid}{desc} =~ /$download_regex/i 
-			|| $prog{$pid}{episode} =~ /$download_regex/i );
+
+		# Only include programmes matching channels and catoegory regexes
+		if ( $prog{$pid}{channel} =~ /$channel_regex/i && $prog{$pid}{categories} =~ /$category_regex/i ) {
+
+			# Search prognames/pids while excluding channel_regex and category_regex
+			push @download_list, $_ if (
+				$prog{$pid}{name} =~ /$download_regex/i
+				|| ( $pid =~ /$download_regex/i && $download_regex =~ /b00/ )
+				|| ( $pid =~ /$download_regex/i && $download_regex =~ /b00/ )
+			);
+			# Also search long descriptions and episode data if -l is specified
+			push @download_list, $_ if (
+				$opt{long} 
+				&& 
+				( $prog{$pid}{desc} =~ /$download_regex/i 
+				  || $prog{$pid}{episode} =~ /$download_regex/i
+				)
+			);
+		}
 	}
 	return sort {$a <=> $b} @download_list;
 }
+
 
 sub get_links_all {
 	my $pageno = 1;
@@ -418,6 +447,7 @@ sub get_links_all {
 					'duration'	=> '<duration>',
 					'thumbnail'	=> '<thumbnail>',
 					'channel'	=> '<channel>',
+					'categories'	=> '<categories>',
 				};
 				print STDERR "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
 			}
@@ -453,16 +483,14 @@ sub get_links_atom {
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([10]);
 	$ua->proxy( ['http'] => $proxy_url );
-	$ua->agent( $user_agent{safari} );
 
 	# Download index feed
 	my $retries = 3;
 	do {
 		# Get index pages
-		my $res = $ua->request( HTTP::Request->new( GET => $atom_feed_url ) );
-		$xml = $res->content;
-		# Set valid flag if we have progdata in this page
-		if ( ! $res->is_success ) {
+		$now = time();
+		$xml = download_block(undef, $atom_feed_url, $ua);
+		if (! $xml) {
 			print STDERR "WARNING: Failed to get programme index feed from iplayer site\n";
 			$retries--;
 			exit 2 if $retries == 0;
@@ -473,6 +501,7 @@ sub get_links_atom {
 	} until ($retries == 0);
 
 	# Parse XML
+	print STDERR "\nINFO: Parsing Programme Data\n";
 	my $twig = XML::Twig->new();
 	$twig->parse($xml);
 	my $root = $twig->root;
@@ -536,12 +565,18 @@ sub get_links_atom {
 		}		
 		# We only so far have h264 versions for Signed and Original AFAIK, add entry for both of these (instead of version pid)
 		my @versions;
+		my @categories;
 		# If another version type does not occur in the categories then this is Original only
 		#push @versions, 'Original'; # if ( ! grep /^version.*/, keys %category );
 		# Add an entry for signed version if it exists
 		for (keys %category) {
 			push @versions, $category{$_} if $_ =~ /^version/ && $category{$_} eq 'Signed';
+			push @categories, $category{$_} if /^\d{6}$/;
 		}
+
+                my $elt;
+		my $channel;
+		$channel  = $elt->next_elt()->first_child_text() if ( $elt = $entry->first_child('author') );
 
 		# build data structure
 		$prog{$pid} = {
@@ -552,7 +587,8 @@ sub get_links_atom {
 			'available'	=> $available,
 			'duration'	=> $entry->first_child_text('duration'),
 			'thumbnail'	=> $entry->first_child('media:thumbnail')->att('url'),
-			'channel'	=> '', #$entry->child('author')->first_child_text('name'),
+			'channel'	=> $channel,
+			'categories'	=> (join ',', @categories),
 		};
 	}
 	# Add index field based on alphabetical sorting by prog name
@@ -599,11 +635,16 @@ sub get_links {
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
-				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}\n";
+				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
 			chmod 0777, $cachefile;
+
+			# Also write HTML and FXD files
+			create_html( sort {$a <=> $b} keys %index_pid );
+			create_fxd ( sort {$a <=> $b} keys %index_pid );
+
 		} else {
 			print STDERR "WARNING: Couldn't open cache file for writing\n";
 		}
@@ -614,7 +655,7 @@ sub get_links {
 		for (@cache) {
 			# Populate %prog from cache
 			chomp();
-			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel) = split /\|/;
+			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories) = split /\|/;
 			# Create data structure with prog data
 			$prog{$pid} = {
 				'index'		=> $index,
@@ -625,12 +666,11 @@ sub get_links {
 				'duration'	=> $duration,
 				'versions'	=> $versions,
 				'channel'	=> $channel,
+				'categories'	=> $categories,
 			};
 			$index_pid{$index}	= $pid;
 		}
 	}
-	create_html( sort {$a <=> $b} keys %index_pid );
-	create_fxd ( sort {$a <=> $b} keys %index_pid );
 	return 0;
 }
 
@@ -846,8 +886,10 @@ sub download_stream_lwp {
 
 		# Get ftyp+wide header etc
 		my $mdat_start = 0x1c;
+		$now = time();
 		my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
 		# Get bytes upto (but not including) mdat atom start -> $header
+		$now = time();
 		my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
 
 		# Detemine moov start
@@ -909,6 +951,7 @@ sub download_stream_lwp {
                 # If we have a too-small-sized file and not stdout and not no-write then this is a partial download
                 if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
 		  # Get moovlength from server
+		  $now = time();
 		  $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		  # Calculate new start offset (considering that we've put moov first in file)
                   $restart_offset = stat($file)->size - $moov_length;
@@ -919,6 +962,7 @@ sub download_stream_lwp {
                 # If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
                 if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
 		  # get moov chunk into memory
+		  $now = time();
 		  $moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
 		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
                   $moov_length = relocate_moov_chunk_offsets( $moovdata );
@@ -1011,89 +1055,114 @@ sub relocate_moov_chunk_offsets {
 # 2) write to real file + STDOUT	=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt{stdout}==true
 # 3) write to STDOUT only		=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt{stdout}==true + $opt{nowrite}==false
 # 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end, $file_len, undef);
+# 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end);
 sub download_block {
 
-                my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
-                my $orig_length;
-                # If this is an 'append to file' mode call
-  		if ( defined $file && $fh && (!$opt{nowrite}) ) {
-    		  # Stage 3b: Download File
-                  $orig_length = stat($file)->size;
-                  print STDERR "INFO: Appending to $file\n" if $opt{verbose};
-                }
+	my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
+	my $orig_length;
+	my $buffer;
 
-                # Determine offset for continuation download
-		my $h = new HTTP::Headers(
-			'User-Agent'	=> $user_agent{coremedia},
-			'Accept'	=> '*/*',
-                        'Range'        => "bytes=${start}-${end}",
-		);
-		my $req = HTTP::Request->new ('GET', $url, $h);
-		# Set time to use for download rate calculation
-		# Define callback sub that gets called during download request
-		# This sub actually writes to the open output file and reports on progress
-		my $callback = sub {
-			my ($data, $res, undef) = @_;
-			# Don't write the output to the file if there is no content-length header
-                        return 0 if ( ! $res->header("Content-Length") );
-                        # Write output
-			print $fh $data if ! $opt{nowrite};
-			print STDOUT $data if $opt{stdout};
-			# return if streaming to stdout - no need for progress
-			return if $opt{stdout} && $opt{nowrite};
-			# current file size
-			my $size = stat($file)->size;
-			# download rates in bytes per second
-			my $rate = ($size - $orig_length) / (stat($file)->mtime - $now + 0.01);
+	# If this is an 'append to file' mode call
+	if ( defined $file && $fh && (!$opt{nowrite}) ) {
+		# Stage 3b: Download File
+		$orig_length = stat($file)->size;
+		print STDERR "INFO: Appending to $file\n" if $opt{verbose};
+	}
+
+	# Determine offset for continuation download
+	my $h = new HTTP::Headers(
+		'User-Agent'	=> $user_agent{coremedia},
+		'Accept'	=> '*/*',
+		'Range'        => "bytes=${start}-${end}",
+	);
+
+	my $req = HTTP::Request->new ('GET', $url, $h);
+
+	# Set time to use for download rate calculation
+	# Define callback sub that gets called during download request
+	# This sub actually writes to the open output file and reports on progress
+	my $callback = sub {
+		my ($data, $res, undef) = @_;
+		# Don't write the output to the file if there is no content-length header
+		return 0 if ( ! $res->header("Content-Length") );
+		# Write output
+		print $fh $data if ! $opt{nowrite};
+		print STDOUT $data if $opt{stdout};
+		# return if streaming to stdout - no need for progress
+		return if $opt{stdout} && $opt{nowrite};
+		# current file size
+		my $size = stat($file)->size;
+		# download rates in bytes per second
+		my $rate = ($size - $orig_length) / (stat($file)->mtime - $now + 0.01);
+		# time remaining
+		my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
+		printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02d:%02d:%02d remaining         \r", 
+			$size / 1024.0 / 1024.0, 
+			$file_len / 1024.0 / 1024.0,
+			$rate * 8.0 / 1024.0,
+			100.0 * $size / $file_len,
+			@time[2,1,0],
+		;
+	};
+
+	my $callback_memory = sub {
+		my ($data, $res, undef) = @_;
+		# append output to buffer
+		$buffer .= $data;
+		# current buffer size
+		my $size = length($buffer);
+		# download rates in bytes per second
+		my $rate = $size / ( time() - $now + 0.01 );
+		# If we can get COntent_length then display full progress
+		if ($res->header("Content-Length")) {
+			# Block length
+			$file_len = $res->header("Content-Length");
 			# time remaining
 			my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
-			printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02dh:%02dm:%02ds remaining         \r", 
-                                $size / 1024.0 / 1024.0, 
-                                $file_len / 1024.0 / 1024.0,
-                                $rate * 8.0 / 1024.0,
-                                100.0 * $size / $file_len,
-                                @time[2,1,0],
-                        ;
-		};
-		# send request
-		print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt{verbose};
-		print STDERR "\r                              \r";
-		my $res;
-		# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
-		if (defined $fh) {
-		  print STDERR "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt{verbose} && $opt{stdout};
-		  print STDERR "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt{verbose} && !$opt{nowrite};
-  		  $res = $ua->request($req, $callback);
-                } else {
-                  print STDERR "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{verbose};
-                  $res = $ua->request($req);
-                }
-                # If we don't require any more bytes (previously fully downloaded) then skip
-                print STDERR "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt{verbose};
-		if ( (! $res->is_success) || (! $res->header("Content-Length")) ) {
+			printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02d:%02d:%02d remaining         \r", 
+				$size / 1024.0 / 1024.0, 
+				$file_len / 1024.0 / 1024.0,
+				$rate * 8.0 / 1024.0,
+				100.0 * $size / $file_len,
+				@time[2,1,0],
+			;
+
+		# Just used simple for if we cannot determine content length
+		} else {
+			printf STDERR "%8.2fMB %5.0fkbps         \r", $size / 1024.0 / 1024.0, $rate * 8.0 / 1024.0;
+		}
+	};
+
+	# send request
+	print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt{verbose};
+	print STDERR "\r                              \r";
+	my $res;
+
+	# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
+	if (defined $fh) {
+		print STDERR "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt{verbose} && $opt{stdout};
+		print STDERR "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt{verbose} && !$opt{nowrite};
+		$res = $ua->request($req, $callback);
+		if (  (! $res->is_success) || (! $res->header("Content-Length")) ) {
 			print STDERR "ERROR: Failed to Download block\n\n";
 			unlink $cookiejar;
 			return 5;
-		} 
-
-		if (defined $fh) {
-		  return 0;
-                } else {
-                  return $res->content;
-                }
-
-}
-
-
-# Returns arbitrary block of data from open file $fh
-sub get_block {
-        my ($fh, $start, $len) = @_;
-	my $buf;
-	# Seek to start offset
-	seek($fh, $start, SEEK_SET);
-	# Read bytes
-	read($fh, $buf, $len) == $len || die "\nReading: $!";
-	return $buf;
+		}
+                # If we don't require any more bytes (previously fully downloaded) then skip
+                print STDERR "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt{verbose};
+		return 0;
+		   
+	# Memory Block
+	} else {
+		print STDERR "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{verbose};
+		$res = $ua->request($req, $callback_memory);
+		if ( (! $res->is_success) ) {
+			print STDERR "ERROR: Failed to Download block\n\n";
+			return '';
+		} else {
+			return $buffer;
+		}
+	}
 }
 
 
@@ -1173,6 +1242,8 @@ sub update_script {
           move($script_file.'.tmp', $script_file);
           chmod 0755, $script_file;
           print STDERR "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
+          # Need to purge the cache as this changes between versions
+          unlink($cachefile);
         }
       }
     } else {
