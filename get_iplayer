@@ -4,27 +4,39 @@
 #
 # Lists and downloads BBC iplayer mov streams
 #
-# Author: Phil Lewis
+# Author: P Lewis
 # Email: iplayer (at sign) linuxcentre.net
-# Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 24th 2008
+# Date: June 26th 2008
 #
-my $version = 0.31;
+my $version = 0.32;
 #
 # Supports: 
 # * Downloading Mov streams from BBC Iplayer site - 20080312
 # * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
 # * Re-jigs the mov file so that it can be streamed and start faster on some players - 20080618
 # * Resume downloads of partially downloaded files
-# * Indexing of all available (i.e. listed) Iplayer programs (now uses A-Z index page with search set to '*') - 20080609
-# * Caching of Index (default 12hrs)
+# * Indexing of all available (i.e. listed) Iplayer programs using new Atom feed
+# * Caching of Index (default 4hrs)
 # * Creation of a basic html index file
 # * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (-l) - 20080610
-# * XOR decoding of previously downloaded files (if required - now deprecated) - 20080609
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
+#
+# Requires:
+# * perl 5.8
+# * LWP (libwww-perl)
+# * Perl XML::Twig
+#
+# Changes 0.32 - 20080626
+# * Now uses Atom feed rather than scraping website for programme info (much more reliable availability info)
+# * Now requires Perl XML::Twig
+# * Reduced cache expiry to 4 hrs (atom feed is now quicker to download and is more up to date)
+# * version pid (pid) is no longer used for reference - only programme pid (urlpid) == $pid
+# * Index now contains duration and start of availability date/time (Atom method only)
+# * Allow fallback to scraping website for programme index
+# * Removed deprecated XOR decoding
 #
 # Changes 0.31 - 20080624
 # * Allow user to save options and specify default options in $HOME/.playerrc
@@ -109,9 +121,6 @@ my $version = 0.31;
 # * Using LWP for all http requests
 # * Fixed indexing sort bug
 #
-# Requires:
-# * perl 5.8
-# * LWP (libwww-perl)
 
 use strict;
 use URI;
@@ -125,12 +134,14 @@ use LWP::UserAgent;
 #use LWP::Debug qw(+);
 use HTTP::Cookies;
 use HTTP::Headers;
+use XML::Twig;
+my $DEBUG = 0;
 $|=1;
 
 sub usage {
 	print STDERR "Usage:\n";
 	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
-	print STDERR "  Download files:        get_iplayer [-l] [-t] [-f] [-w] [-v] [-s] [-x] [-e <secs>] [-o <dir>] [-p <proxy_url>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
+	print STDERR "  Download files:        get_iplayer [<options>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
 	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
 	print STDERR "  Update get_iplayer:    get_iplayer -u\n";
 	print STDERR "Options:\n";
@@ -143,11 +154,11 @@ sub usage {
 	print STDERR " -n, --nowrite        No writing of file to disk (use with -x to prevent a copy being stored on disk)\n";
 	print STDERR " -e, --expiry <secs>  Cache expiry in seconds (default 12hrs)\n";
 	print STDERR " -t, --test           Test only - no download (will show programme type)\n";
-	print STDERR " -d, --decode         Perform XOR decoding/byte-swapping on specified existing files (legacy)\n";
 	print STDERR " -w, --whitespace     Keep whitespace (and escape chars) in filenames\n";
 	print STDERR " -v, --verbose        Verbose\n";
 	print STDERR " -u, --update         Update get_iplayer if a newer one exists\n";
 	print STDERR " -h, --help           Help\n";
+	print STDERR " --scrape             Use old web page scraping method to get programme index\n";
 	print STDERR " --save               Save these options as default in .iplayerrc\n";
 	exit 1;
 }
@@ -172,28 +183,32 @@ GetOptions(
         "no-write|nowrite|n"            => \$opt{nowrite},
         "expiry|e=n"                    => \$opt{expiry},
         "test|t"                        => \$opt{test},
-        "decode|d"                      => \$opt{decode},
         "whitespace|ws|w"               => \$opt{whitespace},
         "update|u"                      => \$opt{update},
         "debug"                         => \$opt{debug},
+        "scrape"			=> \$opt{scrape},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
 
-# Save opts if specified
-save_options_file() if $save;
 
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
 my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
+my $optfile 		= "$ENV{HOME}/.iplayerrc";
 my $fxdfile 		= $download_dir.'folder.fxd'; # Where freevo will scan for FXD file
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
-my $cache_secs 		= $opt{expiry} || 43000;
+my $cache_secs 		= $opt{expiry} || 14400;
 
+# Save opts if specified
+save_options_file() if $save;
+
+# URLs
 my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
+my $atom_feed_url	= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
 my $pid_page_url_prefix	= 'http://www.bbc.co.uk/iplayer/page/item/';
 my $web_bug_2_url	= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
 my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
@@ -215,15 +230,17 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 }
 
 # Programme data structure
-# $prog{$pid} = {
+# $prog{$urlpid} = {
 #	'index'		=> <index number>,
 #	'name'		=> <programme short name>,
-#	'urlpid'	=> <pid from the URL>,
 #	'episode'	=> <Episode info>,
 #	'desc'		=> <Long Description>,
-#	'available'	=> <No. of days/hours left>,
+#	'available'	=> <Date/Time made available>,
 #	'longname'	=> <Long name (only parsed in stage 1)>,
-#	'type'		=> <Programme type i.e. Original/Signed (only parsed in stage 1)>,
+#	'duration'	=> <duration in HH:MM:SS>
+#	'versions'	=> <list of non-'Original' versions, e.g Signed>
+#	'thumbnail'	=> <programme thumbnail url>
+#	'channel'	=> <TV channel>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -234,18 +251,6 @@ my $childpid;
 # Web proxy
 my $proxy_url = $opt{proxy} || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
 print STDERR "INFO: Using Proxy $proxy_url\n" if $proxy_url;
-
-# XOR Decode-only mode
-if ($opt{decode}) {
-  for my $file (@ARGV) {
-    if ( -f $file ) {
-      iplayer_decoder($file);
-    } else {
-      print STDERR "ERROR: Cannot find $file\n";
-    }
-  }
-  exit 0;
-} 
 
 # Update this script if required
 if ($opt{update}) {
@@ -305,7 +310,7 @@ sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
 		my $desc = "- $prog{$pid}{desc}" if $opt{long};
-		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available})\n";	
+		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode} $desc ($prog{$pid}{available}) $prog{$pid}{duration} $prog{$pid}{versions}\n";
 	}
 	print STDERR "\n";
 	return 0;
@@ -320,14 +325,13 @@ sub get_regex_matches {
 	for (keys %index_pid) {
 		my $pid = $index_pid{$_};
 		# Search prognames/pids
-		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i || $pid =~ /$download_regex/i || $prog{$pid}{urlpid} =~ /$download_regex/i;
+		push @download_list, $_ if $prog{$pid}{name} =~ /$download_regex/i || $pid =~ /$download_regex/i || $pid =~ /$download_regex/i;
 		# Also search long descriptions and episode data if -l is specified
 		push @download_list, $_ if $opt{long} && ( $prog{$pid}{desc} =~ /$download_regex/i 
 			|| $prog{$pid}{episode} =~ /$download_regex/i );
 	}
 	return sort {$a <=> $b} @download_list;
 }
-
 
 sub get_links_all {
 	my $pageno = 1;
@@ -342,7 +346,6 @@ sub get_links_all {
 	$ua->agent( $user_agent{safari} );
 
 	# Loop while we still get stream links
-	my $index = 1;
 	do {
 		my $retries = 3;
 		print STDERR "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
@@ -393,8 +396,7 @@ sub get_links_all {
 				# Need version_pid & url (note these are different pids)
 				# Get url and extract the URLPID and PID
 				$line =~ s/^.*href=\".*(b0.{6})\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1 $2/;
-				my $urlpid = $1;
-				my $pid = $2;
+				my $pid = $1;
 				# get next 40 lines into a single string
 				$progdata = '';
 				$progdata .= shift @html for (1..40);
@@ -404,33 +406,172 @@ sub get_links_all {
 				$progdata =~ s/\s*$//g;
 				$progdata =~ s/\s*\|/|/g;
 				$progdata =~ s/\|\s*/|/g;
-				print STDERR "urlpid|pid|available|prog|episode|desc = '$urlpid|$pid|$progdata'\n" if $opt{verbose};
-				my ($urlpid, $pid, $available, $name, $episode, $desc) = split /\|/, "$urlpid|$pid|$progdata";;
-				# Duplicate detection
-				if ( not defined $prog{$pid}{name} ) {
-					# Create data structure with prog data
-					$prog{$pid} = {
-						'index'		=> $index,
-						'name'		=> $name,
-						'urlpid'	=> $urlpid,
-						'episode'	=> $episode,
-						'desc'		=> $desc,
-						'available'	=> $available,
-					};
-					$index_pid{$index}	= $pid;
-					print STDERR "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
-					$index++;
-				} else {
-					print STDERR "WARNING: removing duplicate entry for \"$name ($pid) - $episode\"\n" if $opt{verbose};
-				}
+				print STDERR "pid|available|prog|episode|desc = '$pid|$progdata'\n" if $opt{verbose};
+				my ($pid, $available, $name, $episode, $desc) = split /\|/, "$pid|$progdata";;
+				# Create data structure with prog data
+				$prog{$pid} = {
+					'name'		=> $name,
+					'versions'	=> '<versions>',
+					'episode'	=> $episode,
+					'desc'		=> $desc,
+					'available'	=> $available,
+					'duration'	=> '<duration>',
+					'thumbnail'	=> '<thumbnail>',
+					'channel'	=> '<channel>',
+				};
+				print STDERR "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
 			}
 		}
 		# Next page
 		$pageno++;
 	} while ($valid);
+
+	# Add index field based on alphabetical sorting by prog name
+	my $index = 1;
+	my @prog_pid;
+	# Create unique array of '<progname|pid>'
+	push @prog_pid, "$prog{$_}{name}|$_" for (keys %prog);
+	# Sort by progname and index 
+	for (sort @prog_pid) {
+		# Extract pid
+		my $pid = (split /\|/)[1];
+		$index_pid{$index} = $pid;
+		$prog{$pid}{index} = $index;
+		$index++;
+	}
 	print STDERR "\n";
 	return 0;
 }
+
+
+sub get_links_atom {
+
+	my $xml;
+	my $valid = 1;
+	print STDERR "INFO: Getting Index Feed\n";
+	# Setup User agent
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout([10]);
+	$ua->proxy( ['http'] => $proxy_url );
+	$ua->agent( $user_agent{safari} );
+
+	# Download index feed
+	my $retries = 3;
+	do {
+		# Get index pages
+		my $res = $ua->request( HTTP::Request->new( GET => $atom_feed_url ) );
+		$xml = $res->content;
+		# Set valid flag if we have progdata in this page
+		if ( ! $res->is_success ) {
+			print STDERR "WARNING: Failed to get programme index feed from iplayer site\n";
+			$retries--;
+			exit 2 if $retries == 0;
+			sleep 1;
+		} else {
+			$retries = 0;
+		} 
+	} until ($retries == 0);
+
+	# Parse XML
+	my $twig = XML::Twig->new();
+	$twig->parse($xml);
+	my $root = $twig->root;
+
+#  <entry>
+#    <title type="text">Take a Bow: Street Feet on the Farm</title>
+#    <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
+#    <updated>2008-06-17T16:04:51Z</updated>
+#    <content type="xhtml" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+#      <xhtml:div>
+#        <xhtml:a href="http://www.bbc.co.uk/iplayer/page/item/b008pj3w.shtml">
+#          <xhtml:img src="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" alt="Take a Bow: Street Feet on the Farm" />
+#        </xhtml:a>
+#        <xhtml:br/>A celebration of young performing talents across the UK. Children from Cardiff become streetwise on the farm.
+#      </xhtml:div>
+#    </content>
+#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_303_170.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_512_288.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+#    <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
+#        <!-- Related site - not implemented yet -->
+#        <!--link href="http://www.bbc.co.uk/some_brand_site" rel="related" type="text/html" /-->
+#    <category term="100001" scheme="http://www.bbc.co.uk/pips#category" label="Children's"/>
+#    <category term="200001" scheme="http://www.bbc.co.uk/pips#category" label="Activities"/>
+#    <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
+#    <category term="letterT" scheme="http://www.bbc.co.uk/cpe#category" label="T"/>
+#    <author>
+#      <name>CBeebies</name>
+#      <uri>http://www.bbc.co.uk/iplayer/framework/img/ch/cbeebies.gif</uri>
+#    </author>
+#    <duration>00:05:00</duration>
+#  </entry>
+
+
+	my ( $name, $episode, $desc, $pid, $available );
+	foreach my $entry ($root->children('entry')) {
+
+		# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
+		$name = $entry->first_child_text('title');
+		$episode = $name;
+		$name =~ s/^(.*): .*$/$1/g;
+		$episode =~ s/^.*: (.*)$/$1/g;
+
+		# tag:bbc.co.uk,2008:PIPS:b008pj3w
+		$pid = $entry->first_child_text('id');
+		$pid =~ s/^.*PIPS:(.*)$/$1/g;
+
+		# 2008-06-22T05:01:49Z
+		$available = $entry->first_child_text('updated');
+		$available =~ s/^(\d{4}\-\d\d\-\d\d).*(\d\d:\d\d:\d\d).*$/$1 $2/g;
+
+		# parse embedded xhtml
+		$desc = $entry->first_child('content')->child_text(0,'xhtml:div');
+		$desc =~ s|^.*<xhtml:br/>(.*)$|$1|g;
+		$desc =~ s/^\s*(.*)\s*$/$1/g;
+		
+		# Parse the categories into hash
+		my %category;
+		for (my $i = 0; $i < $entry->children_count('category'); $i++) {
+			$category{ $entry->child($i, 'category')->att('term') } = $entry->child($i,'category')->att('label');
+		}		
+		# We only so far have h264 versions for Signed and Original AFAIK, add entry for both of these (instead of version pid)
+		my @versions;
+		# If another version type does not occur in the categories then this is Original only
+		#push @versions, 'Original'; # if ( ! grep /^version.*/, keys %category );
+		# Add an entry for signed version if it exists
+		for (keys %category) {
+			push @versions, $category{$_} if $_ =~ /^version/ && $category{$_} eq 'Signed';
+		}
+
+		# build data structure
+		$prog{$pid} = {
+			'name'		=> $name,
+			'versions'	=> (join ',', @versions),
+			'episode'	=> $episode,
+			'desc'		=> $desc,
+			'available'	=> $available,
+			'duration'	=> $entry->first_child_text('duration'),
+			'thumbnail'	=> $entry->first_child('media:thumbnail')->att('url'),
+			'channel'	=> '', #$entry->child('author')->first_child_text('name'),
+		};
+	}
+	# Add index field based on alphabetical sorting by prog name
+	my $index = 1;
+	my @prog_pid;
+	# Create unique array of '<progname|pid>'
+	push @prog_pid, "$prog{$_}{name}|$_" for (keys %prog);
+	# Sort by progname and index 
+	for (sort @prog_pid) {
+		# Extract pid
+		my $pid = (split /\|/)[1];
+		$index_pid{$index} = $pid;
+		$prog{$pid}{index} = $index;
+		$index++;
+	}
+
+	return 0;
+}
+
 
 
 sub get_links {
@@ -446,14 +587,19 @@ sub get_links {
 	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
 	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
 
-		# Use A-Z,0-9 searchine '*' instead - less pages
-		get_links_all();
-
+		if ($opt{scrape}) {
+			# Use A-Z,0-9 searchine '*' instead - less pages
+			get_links_all();
+		} else {
+			# Get index from Atom feed
+			get_links_atom();
+		}
+		
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
-				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{urlpid}|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{desc}\n";
+				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -468,15 +614,17 @@ sub get_links {
 		for (@cache) {
 			# Populate %prog from cache
 			chomp();
-			my ($index, $name, $pid, $urlpid, $available, $episode, $desc) = split /\|/;
+			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel) = split /\|/;
 			# Create data structure with prog data
 			$prog{$pid} = {
 				'index'		=> $index,
 				'name'		=> $name,
-				'urlpid'	=> $urlpid,
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'available'	=> $available,
+				'duration'	=> $duration,
+				'versions'	=> $versions,
+				'channel'	=> $channel,
 			};
 			$index_pid{$index}	= $pid;
 		}
@@ -492,7 +640,7 @@ sub download_stream_lwp {
 	my $pid = shift;
 	
 	# Create a full URL from the PID specified
-	my $page = $pid_page_url_prefix.$prog{$pid}{urlpid}.'.shtml';
+	my $page = $pid_page_url_prefix.$pid.'.shtml';
 	print STDERR "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
 	print STDERR "INFO: Stage 1 URL = $page\n" if $opt{verbose};
@@ -535,21 +683,32 @@ sub download_stream_lwp {
 	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
 	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
 
-	# Extract pid and type (i.e. Signed, Original, etc)
+	# Extract version pid and type (i.e. Signed, Original, etc)
 	chomp( my @type_pid = grep /(type|pid )      :/, @content );
 	# Remove tags
 	s/^.*'(.+)'.*$/$1/g for @type_pid;
 	# Get hash of pid => type
 	my %types = @type_pid;
-	my %pid_types;
-	$pid_types{$types{$_}}=$_ for keys %types;
-	$prog{$pid}{type} = $pid_types{$pid};
+	my %verpid_types;
+	my $verpid;
+	$verpid_types{$types{$_}}=$_ for keys %types;
 	# List types available
-	print STDERR "INFO: Types available: ", join(', ', %pid_types), "\n" if $opt{verbose};
+	print STDERR "INFO: Types available: ", join(', ', %verpid_types), "\n" if $opt{verbose};
+	# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
+	if ( grep /^Original$/, values %verpid_types ) {
+		$verpid = $types{'Original'};
+		$prog{$pid}{type} = 'Original';
+	} elsif ( grep /^Signed$/, values %verpid_types ) {
+		$verpid = $types{'Signed'};
+		$prog{$pid}{type} = 'Signed';
+	} else {
+		print STDERR "ERROR: Neither Original or Signed versions exist";
+		return 14;
+	}
 	# Create url with appended 6 digit random number
-	my $url_1 = "${url_download_prefix}/$pid?".(sprintf "%06.0f", 1000000*rand(0)).'%20';
+	my $url_1 = "${url_download_prefix}/$verpid?".(sprintf "%06.0f", 1000000*rand(0)).'%20';
 	# Create a filename
-	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $pid_types{$pid}";
+	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{type}";
 	# Replace slashes with _ regardless
 	$file =~ s/[\\\/]/_/g;
 	# Sanitize by default
@@ -926,255 +1085,6 @@ sub download_block {
 }
 
 
-
-
-
-# In-place modification of an iplayer file to do that dodgy xor stuff
-#
-# Usage: iplayer_decode <filename>
-#
-# * Modifies 2MB blksize bytes at a time for speed
-# * This process is NON reversible
-#
-sub iplayer_decoder {
-
-  chomp( my $file = shift );
-  if (! -f $file) {
-	print STDERR "ERROR: File $file does not exist - no decoding performed\n";
-  	return 1;
-  }
-
-  if (! open (RWFILE, "+<$file") ) {
-  	print STDERR "ERROR: Can't update $file: $!";
-  	return 1;
-  }
-  # For windows to read/write in binary mode
-  binmode RWFILE;
-  my $fh = *RWFILE;
-  
-  # Get mdat box end start
-  my $mdat_start = 0x1c;
-  my $mdat_end_offset_chars = get_block( $fh, $mdat_start, 4 );
-  my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-  print STDERR "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
-  print STDERR "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
-  # The MOOV box starts one byte after MDAT box ends
-  my $moov_start = $mdat_start + $mdat_end_offset;
-
-  # Some file content sanity checking
-  # Get 'mdat' atom name - it it desn't contain 'mdat' then this is not a quicktime file
-  if ( get_block( $fh, $mdat_start + 4, 4 ) !~ /mdat/ ) {
-    print STDERR "ERROR: file is not a valid quicktime/mov file (no 'mdat' atom)\n";
-    close $fh;
-    return 2;
-
-  # Get 'moov' atom start offset and ensure it is not > file length
-  } elsif ( $moov_start > stat($file)->size ) {
-    print STDERR "ERROR: quicktime/mov file is not fully downloaded or truncated (no 'moov' atom)\n";
-    close $fh;
-    return 3;
-  }
-
-  # Read start+4 + 4 bytes from $moov_start to get 'moov' text
-  my $moov_start_chars = get_block( $fh, $moov_start + 4, 4 );
-  print STDERR "BYTES: $moov_start_chars, HEX: ".get_hex($moov_start_chars)."\n" if $opt{verbose};
-
-  # see if we need any decoding
-  if ( $moov_start_chars !~ /moov/ ) {
-
-    # Get xor pattern
-    my $pattern = get_xor_pattern( $fh, $moov_start );
-    $pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
-    my $byte1 = hex $1;
-    my $byte2 = hex $2;
-
-    # Create long string of byte pairs
-    my $xor_test = create_pattern_string(2, $byte1, $byte2);
-    # We need a different xor pattern if we have an odd offset
-    if ( odd($moov_start) ) {
-      $xor_test = create_pattern_string(2, $byte2, $byte1);
-    } else {
-      $xor_test = create_pattern_string(2, $byte1, $byte2);
-    }
-
-    # XOR this 'moov' string
-    my $buffer = $moov_start_chars ^ $xor_test;
-    print STDERR "INFO: Swap Test (after XOR on 'moov') BYTES: $buffer, HEX: ".get_hex($buffer)."\n" if $opt{verbose};
-
-    # if we get 'moov' then no byte-swapping is required
-    if ( $buffer =~ /moov/ ) {
-      print STDERR "INFO: Swapping bytes not required\n";
-    } else {
-      print STDERR "INFO: Swapping bytes\n";
-      process_file($file, $fh, 'swap');
-    }
-
-    # Do XORing if required
-    # Get XOR pattern from this
-    my $pattern = get_xor_pattern( $fh, $moov_start );
-    if ( $pattern =~ /0000/ ) {
-	print STDERR "INFO: No XOR required\n";
-    } else {
-	print STDERR "INFO: XOR with '0x$pattern'\n";
-	process_file($file, $fh, 'xor', $pattern);
-    }
-
-    # recheck that XOR/swap was successful by checking for 'moov' string
-    $moov_start_chars = get_block( $fh, $moov_start + 4, 4 );
-    if ( $moov_start_chars =~ /moov/ ) {
-        print STDERR "INFO: Decoding Successful\n";
-    } else {
-        print STDERR "ERROR: Decoding Failed, moov = '$moov_start_chars', HEX: ".get_hex($moov_start_chars)."\n";
-    }
-
-  } else {
-    print STDERR "INFO: No XOR or Byte swapping required\n";
-  }
-
-
-  close $fh || die "Closing: $!";
-  return 0;
-}
-
-
-# Get XOR pattern from moov_start_offset
-sub get_xor_pattern {
-    my $fh = shift;
-    my $moov_start = shift;
-    my $moov_zeroes_chars;
-    
-    # determine XOR pattern from zeroes area
-    # Get the zero byte section in the MOOV box
-    my $moov_zeroes_start = $moov_start + 0x3D;
-    # Add one to this number to make it even to get the correct xor sequence
-    if ( odd( $moov_zeroes_start ) ) {
-      $moov_zeroes_start++;
-      print STDERR "DEBUG: making moov_zeroes_start offset even" if $opt{verbose};
-    }
-    # Read start+ 0x3d + 2 bytes to get '00 00'
-    $moov_zeroes_chars = get_block( $fh, $moov_zeroes_start, 2 );
-    print STDERR "INFO: Swap Test (moov zeroes for xor) BYTES: $moov_zeroes_chars, HEX: ".get_hex($moov_zeroes_chars)."\n" if $opt{verbose};
-
-    # Extract the two hex bytes from the pattern
-    my $pattern = get_hex($moov_zeroes_chars);
-    $pattern =~ s/ //g;
-    print STDERR "DEBUG: XOR pattern = $pattern\n" if $opt{verbose};
-    return $pattern;
-}
-
-
-# process_file(<file>, 'xor', <pattern>)
-# process_file(<file>, 'swap)
-sub process_file {
-	my ($file, $fh, $opt, $pattern) = @_;
-	my $recsize = 4096 * 512;
-	# Offsets
-	# Start offset *MUST* be even
-	my $start_offset = 0x2800;
-	my $end_offset = 0x400 + 2;
-	print STDERR "INFO: Using offsets Begin: ".$start_offset.", End: ".$end_offset."\n" if $opt{verbose};
-	my $buffer;
-	my $do_xor;
-	my $do_swap;
-	my ($ooff, $ffoo);
-	my ($byte1, $byte2, $xor);
-
-	# XOR setup
-	if ($opt =~ /xor/i) {
-		$do_xor = 1;
-		# Extract the two hex bytes from the pattern
-		$pattern =~ s/(\w\w)(\w\w)/$1 $2/g;
-		$byte1 = hex $1;
-		$byte2 = hex $2;
-		# Create long string of byte pairs
-		$xor = create_pattern_string($recsize/2, $byte1, $byte2);
-
-	# Swap setup
-	} else {
-		$do_swap = 1;
-		# Create long string of '00FF's
-		$ooff = create_pattern_string($recsize/2, 0x00, 0xff);
-		# Create long string of 'FF00's
-		$ffoo = create_pattern_string($recsize/2, 0xff, 0x00);
-	}
-
-	print STDERR "INFO: ($opt) Only processing $recsize bytes from $start_offset\n" if $opt{verbose};
-
-	my $length =  stat($file)->size;
-	print STDERR "$file length = $length\n" if $opt{verbose};
-
-	# Put file ptr in correct place
-	seek($fh, $start_offset, SEEK_SET);
-
-	# Do the xoring
-	for (my $i = $start_offset; $i < ($length - $end_offset); $i += $recsize) {
-
-		# Make sure we don't touch last $recsize bytes of file
-		if ( $i > ($length - $end_offset - $recsize) ) {
-			$recsize = $length - $end_offset - $i;
-			$xor = create_pattern_string($recsize/2, $byte1, $byte2);
-			print STDERR "\nINFO: ($opt) Only processing $recsize bytes from $i\n" if $opt{verbose};
-		}
-
-		read($fh, $buffer, $recsize) == $recsize
-			|| die "\nReading: $!";
-
-		# Do the XOR
-		$buffer = $buffer ^ $xor if $do_xor;
-	
-		# Do the byte swapping
-		if ($do_swap) {
-			# AND buffer with 0xFF00 pattern
-	                my $a = $buffer & $ffoo;
-	                # AND buffer with 0x00FF pattern
-	                my $b = $buffer & $ooff;
-	                # Right-shift bufferA one byte
-	                chop($a);
-	                my $c = "\0".$a;
-	                # Left-shift bufferB one byte
-	                my $d = substr($b, 1)."\0";
-	                # OR buffers together
-			$buffer = $c | $d;
-		}
-		# Rewind $buffer bytes then rewrite xor'ed data
-		seek($fh, -1 * $recsize, SEEK_CUR);
-		print $fh $buffer;
-
-		printf STDERR "\r%0.2f%%", $i/$length*100.0 if ! $opt{verbose};
-		printf STDERR "\r%0.2f%%, offset = %X, blksize = %d bytes, (length = %X, start = %X, end = %X)", $i/$length*100.0, $i, $recsize, $length, $start_offset, $length - $end_offset  if $opt{verbose};
-	}
-
-	# Last two bytes (length-0x402)->(length-0x401) have xor pattern swapped
-	my $xor = create_pattern_string(1, $byte2, $byte1);
-	print STDERR "\nINFO: ($opt) processing 2 bytes from ".($length - $end_offset)."\n" if $opt{verbose};
-	seek($fh, $length - $end_offset, SEEK_SET);
-	read($fh, $buffer, 2) == 2 || die "Reading: $!";
-
-	# Do the XOR using reverse
-	$buffer = $buffer ^ $xor if $do_xor;
-
-	# Rewind $buffer bytes then rewrite xor'ed data
-	seek($fh, -2, SEEK_CUR);
-	print $fh $buffer;
-	print STDERR "\r";
-}
-
-
-
-# Build XOR/Mask pattern
-sub create_pattern_string {
-	my $count = shift;
-	my $pat;
-	$pat .= chr($_) for @_;
-	print STDERR "Pattern = $pat\n" if $opt{verbose};
-
-	my $ret;
-	for (my $i = 0; $i<$count; $i++) { 
-		$ret .= $pat;
-	}
-	return $ret; 
-}
-
 # Returns arbitrary block of data from open file $fh
 sub get_block {
         my ($fh, $start, $len) = @_;
@@ -1186,6 +1096,7 @@ sub get_block {
 	return $buf;
 }
 
+
 # Converts a string of chars to it's HEX representation
 sub get_hex {
         my $buf = shift;
@@ -1196,6 +1107,7 @@ sub get_hex {
 	print STDERR "DEBUG: HEX string value = $ret\n" if $opt{verbose};
         return $ret;
 }
+
 
 # Converts a string of chars to it's MSB decimal value
 sub bytestring_to_int {
@@ -1209,6 +1121,7 @@ sub bytestring_to_int {
         #print STDERR "DEBUG: Decimal value = $dec\n" if $opt{verbose};
         return $dec;
 }
+
 
 # Is value odd?
 sub odd() {
@@ -1272,6 +1185,7 @@ sub update_script {
   exit 0;
 }
 
+
 # Creates the Freevo FXD meta data (and pre-downloads graphics - todo)
 sub create_fxd() {
   my %table = (
@@ -1304,11 +1218,10 @@ sub create_fxd() {
                 print FXD "\t<container title=\"$name ($program_count{$name})\" type=\"video\">\n";
 	    	for (@_) {
           	  my $pid = $index_pid{$_};
-          	  my $urlpid = $prog{$pid}{urlpid};
           	  # loop through and find matches for each progname
 	    	  if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
 	    	    print FXD "<iplayer title=\"$prog{$pid}{episode} ($prog{$pid}{available})\">
-				<cmd>${get_iplayer_stream} $prog{$pid}{urlpid}</cmd>
+				<cmd>${get_iplayer_stream} $pid</cmd>
 				<info>
 					<description>$prog{$pid}{desc}</description>
 				</info>
@@ -1326,12 +1239,11 @@ sub create_fxd() {
                 print FXD "\t<container title=\"iplayer $folder\" type=\"video\">\n";
                 for (@_) {
 	            	my $pid = $index_pid{$_};
-		    	my $urlpid = $prog{$pid}{urlpid};
 	    	    	my $name = $prog{$pid}{name};
                         my $regex = $table{$folder};
 	    	    	if ( $name =~ /^$regex/i ) {
 	    		  print FXD "<iplayer title=\"$name - $prog{$pid}{episode} ($prog{$pid}{available})\">
-					<cmd>${get_iplayer_stream} $prog{$pid}{urlpid}</cmd>
+					<cmd>${get_iplayer_stream} $pid</cmd>
 					<info>
 						<description>$prog{$pid}{desc}</description>
 					</info>
@@ -1357,11 +1269,10 @@ sub create_html {
 	  print HTML '<html><head></head><body><table border=1>';
 	  for (@_) {
             my $pid = $index_pid{$_};
-	    my $urlpid = $prog{$pid}{urlpid};
 	    my $name = $prog{$pid}{name};
 	    print HTML "<tr>
-	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${urlpid}.html\"><img height=84 width=150 src=\"http://www.bbc.co.uk/iplayer/images/episode/${urlpid}_150_84.jpg\"></a></td>
-	      <td>$_</td><td><a href=\"${prog_page_prefix}/${urlpid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
+	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
+	      <td>$_</td><td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
 	    </tr>
 	    <tr>
 	      <td colspan=4>$prog{$pid}{desc}</td>
@@ -1378,11 +1289,10 @@ sub create_html {
 
 # Save options to file
 sub save_options_file {
-	my $optfile = "$ENV{HOME}/.iplayerrc";
 	unlink $optfile;
 	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
 	# Save all opts except for these
-	for (grep !/(help|test|debug|decode)/, keys %opt) {
+	for (grep !/(help|test|debug)/, keys %opt) {
 		print OPT "$_ $opt{$_}\n"  if defined $opt{$_};
 	}
 	close OPT;
@@ -1392,7 +1302,6 @@ sub save_options_file {
 
 
 sub read_options_file {
-	my $optfile = "$ENV{HOME}/.iplayerrc";
 	return 0 if ! -f $optfile;
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
