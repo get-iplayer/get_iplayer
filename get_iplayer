@@ -2,32 +2,42 @@
 #
 # get_iplayer
 #
-# Lists and downloads BBC iplayer mov streams
+# Lists and downloads BBC iplayer H.264 streams
 #
-# Author: P Lewis
+# Author: Phil Lewis
 # Email: iplayer (at sign) linuxcentre.net
+# Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 27th 2008
+# Date: June 29th 2008
 #
-my $version = 0.33;
+my $version = 0.34;
 #
 # Supports: 
-# * Downloading Mov streams from BBC Iplayer site - 20080312
-# * Downloads *unencrypted* streams from BBC Iplayer site - 20080618
-# * Re-jigs the mov file so that it can be streamed and start faster on some players - 20080618
+# * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
+# * Downloads *unencrypted* streams from BBC iplayer site
+# * Re-jigs the mov file so that it can be streamed and start faster on some players
 # * Resume downloads of partially downloaded files
-# * Indexing of all available (i.e. listed) Iplayer programs using new Atom feed
+# * Indexing of all available (i.e. listed) iplayer programs using new Atom feed
 # * Caching of Index (default 4hrs)
 # * Creation of a basic html index file
-# * HTTP Proxy support - 20080610 (maybe broken for now on some proxies)
+# * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
-# * Regex search on long programme description/episode capability (-l) - 20080610
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activestate Perl, Cygwin)
+# * Regex search on long programme description/episode capability (--long)
+# * Regex search on channel and category (--channel, --category)
+# * Save default options in ~/.iplayerrc (--save)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activstate Perl)
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
 # * Perl XML::Twig
+#
+# Changes 0.34 - 20080629
+# * Fixed duplicate listing bug when using --long
+# * Added --quiet option
+# * Added freevo symlink creation option --freevo
+# * FXD file for freevo now uses standard Video plugin with a player wrapper script
+# * Use logger function instead of print
 #
 # Changes 0.33 - 20080627
 # * Now gets programme categories and channel from Atom feed
@@ -144,36 +154,46 @@ use HTTP::Headers;
 use XML::Twig;
 my $DEBUG = 0;
 $|=1;
+my %opt = ();
+
+# Print to STDERR
+sub logger(@) {
+	print STDERR @_[0] if ! $opt{quiet};
+}
 
 sub usage {
-	print STDERR "Usage:\n";
-	print STDERR "  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]\n";
-	print STDERR "  Download files:        get_iplayer [<options>] <regex|index|pid|url> [<regex|index|pid|url>]\n";
-	print STDERR "  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -\n";
-	print STDERR "  Update get_iplayer:    get_iplayer -u\n";
-	print STDERR "Options:\n";
-	print STDERR " -l, --long           Show/search long programme descriptions\n";
-	print STDERR "     --channel        Only search in specified channel(s) - use a sub-string or regex\n";
-	print STDERR "     --category       Only search in specified category - use a sub-string or regex\n";
-	print STDERR " -f, --flush          Flush cache\n";
-	print STDERR " -o, --output <dir>   Download output directory\n";
-	print STDERR " -s, --subdir         Downloaded files into Programme name subdirectory\n";
-	print STDERR " -p, --proxy <url>    Web proxy URL spec\n";
-	print STDERR " -x, --stdout         Additionally stream to STDOUT (so you can pipe output to a player)\n";
-	print STDERR " -n, --nowrite        No writing of file to disk (use with -x to prevent a copy being stored on disk)\n";
-	print STDERR " -e, --expiry <secs>  Cache expiry in seconds (default 12hrs)\n";
-	print STDERR " -t, --test           Test only - no download (will show programme type)\n";
-	print STDERR " -w, --whitespace     Keep whitespace (and escape chars) in filenames\n";
-	print STDERR " -v, --verbose        Verbose\n";
-	print STDERR " -u, --update         Update get_iplayer if a newer one exists\n";
-	print STDERR " -h, --help           Help\n";
-	print STDERR "     --scrape         Use old web page scraping method to get programme index\n";
-	print STDERR "     --save           Save these options as default in .iplayerrc\n";
+	logger <<EOF;
+Usage:
+  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]
+  Download files:        get_iplayer [<options>] <regex|index|pid|url> [<regex|index|pid|url>]
+  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -
+  Update get_iplayer:    get_iplayer -u
+
+Options:
+ -l, --long           Show/search long programme descriptions
+     --channel        Only search in specified channel(s) - use a sub-string or regex
+     --category       Only search in specified category - use a sub-string or regex
+ -f, --flush          Flush cache
+ -o, --output <dir>   Download output directory
+ -s, --subdir         Downloaded files into Programme name subdirectory
+ -p, --proxy <url>    Web proxy URL spec
+ -x, --stdout         Additionally stream to STDOUT (so you can pipe output to a player)
+ -n, --nowrite        No writing of file to disk (use with -x to prevent a copy being stored on disk)
+ -e, --expiry <secs>  Cache expiry in seconds (default 12hrs)
+ -t, --test           Test only - no download (will show programme type)
+ -w, --whitespace     Keep whitespace (and escape chars) in filenames
+     --freevo <file>  Create symlink to <file> once we have the header of the download
+ -v, --verbose        Verbose
+ -u, --update         Update get_iplayer if a newer one exists
+ -h, --help           Help
+ -q, --quiet          No output
+     --scrape         Use old web page scraping method to get programme index
+     --save           Save these options as default in .iplayerrc
+EOF
 	exit 1;
 }
 
 # Get cmdline params
-my %opt = ();
 my $save;
 my $optfile = "$ENV{HOME}/.iplayerrc";
 
@@ -200,6 +220,8 @@ GetOptions(
 	"save"				=> \$save,
 	"channel=s"			=> \$opt{channel},
 	"category=s"			=> \$opt{category},
+	"q|quiet"			=> \$opt{quiet},
+	"freevo=s"			=> \$opt{freevo},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
@@ -235,7 +257,7 @@ my %user_agent = (
 
 # Sanity check some conflicting options
 if ($opt{nowrite} && (!$opt{stdout})) {
-  print STDERR "ERROR: Cannot download to nowhere\n";
+  logger "ERROR: Cannot download to nowhere\n";
   exit 1;
 }
 
@@ -261,7 +283,7 @@ my $childpid;
 
 # Web proxy
 my $proxy_url = $opt{proxy} || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-print STDERR "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+logger "INFO: Using Proxy $proxy_url\n" if $proxy_url;
 
 # Update this script if required
 if ($opt{update}) {
@@ -305,7 +327,7 @@ for ( @ARGV ) {
 }
 
 # Display list for download
-print STDERR "Download List:\n" if @download_list;
+logger "Download List:\n" if @download_list;
 list_progs( @download_list );
 
 # Do the downloads based on list of index numbers
@@ -322,9 +344,9 @@ sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
 		my $desc = "- $prog{$pid}{desc}" if $opt{long};
-		print STDERR "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}, $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions} $desc\n";
+		logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}, $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions} $desc\n";
 	}
-	print STDERR "\n";
+	logger "\n";
 	return 0;
 }
 
@@ -332,7 +354,7 @@ sub list_progs {
 # Get matching programme index numbers using supplied regex
 sub get_regex_matches {
 	my $download_regex = shift;
-	my @download_list;
+	my %download_hash;
 	my $channel_regex = $opt{channel} || '.*';
 	my $category_regex = $opt{category} || '.*';
 
@@ -343,13 +365,13 @@ sub get_regex_matches {
 		if ( $prog{$pid}{channel} =~ /$channel_regex/i && $prog{$pid}{categories} =~ /$category_regex/i ) {
 
 			# Search prognames/pids while excluding channel_regex and category_regex
-			push @download_list, $_ if (
+			$download_hash{$_} = 1 if (
 				$prog{$pid}{name} =~ /$download_regex/i
 				|| ( $pid =~ /$download_regex/i && $download_regex =~ /b00/ )
 				|| ( $pid =~ /$download_regex/i && $download_regex =~ /b00/ )
 			);
 			# Also search long descriptions and episode data if -l is specified
-			push @download_list, $_ if (
+			$download_hash{$_} = 1 if (
 				$opt{long} 
 				&& 
 				( $prog{$pid}{desc} =~ /$download_regex/i 
@@ -358,7 +380,7 @@ sub get_regex_matches {
 			);
 		}
 	}
-	return sort {$a <=> $b} @download_list;
+	return sort {$a <=> $b} keys %download_hash;
 }
 
 
@@ -367,7 +389,7 @@ sub get_links_all {
 	my $pid;
 	my @html;
 	my $valid = 1;
-	print STDERR "INFO: Getting Index page\n";
+	logger "INFO: Getting Index page\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([10]);
@@ -377,7 +399,7 @@ sub get_links_all {
 	# Loop while we still get stream links
 	do {
 		my $retries = 3;
-		print STDERR "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
+		logger "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
 		do {
 			# Get index pages
 			my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
@@ -385,14 +407,14 @@ sub get_links_all {
 			# Set valid flag if we have progdata in this page
 			$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
 			if ( ! $res->is_success ) {
-				print STDERR "WARNING: Failed to get programme index page ${pageno} from iplayer site\n";
+				logger "WARNING: Failed to get programme index page ${pageno} from iplayer site\n";
 				$retries--;
 				sleep 1;
-				print STDERR "X";
+				logger "X";
 				exit 2 if $retries == 0;
 			} else {
 				$retries = 0;
-				print STDERR ".";
+				logger ".";
 			} 
 		} until ($retries == 0);
 
@@ -435,7 +457,7 @@ sub get_links_all {
 				$progdata =~ s/\s*$//g;
 				$progdata =~ s/\s*\|/|/g;
 				$progdata =~ s/\|\s*/|/g;
-				print STDERR "pid|available|prog|episode|desc = '$pid|$progdata'\n" if $opt{verbose};
+				logger "pid|available|prog|episode|desc = '$pid|$progdata'\n" if $opt{verbose};
 				my ($pid, $available, $name, $episode, $desc) = split /\|/, "$pid|$progdata";;
 				# Create data structure with prog data
 				$prog{$pid} = {
@@ -449,7 +471,7 @@ sub get_links_all {
 					'channel'	=> '<channel>',
 					'categories'	=> '<categories>',
 				};
-				print STDERR "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
+				logger "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
 			}
 		}
 		# Next page
@@ -469,7 +491,7 @@ sub get_links_all {
 		$prog{$pid}{index} = $index;
 		$index++;
 	}
-	print STDERR "\n";
+	logger "\n";
 	return 0;
 }
 
@@ -478,7 +500,7 @@ sub get_links_atom {
 
 	my $xml;
 	my $valid = 1;
-	print STDERR "INFO: Getting Index Feed\n";
+	logger "INFO: Getting Index Feed\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([10]);
@@ -491,7 +513,7 @@ sub get_links_atom {
 		$now = time();
 		$xml = download_block(undef, $atom_feed_url, $ua);
 		if (! $xml) {
-			print STDERR "WARNING: Failed to get programme index feed from iplayer site\n";
+			logger "WARNING: Failed to get programme index feed from iplayer site\n";
 			$retries--;
 			exit 2 if $retries == 0;
 			sleep 1;
@@ -501,7 +523,7 @@ sub get_links_atom {
 	} until ($retries == 0);
 
 	# Parse XML
-	print STDERR "\nINFO: Parsing Programme Data\n";
+	logger "\nINFO: Parsing Programme Data\n";
 	my $twig = XML::Twig->new();
 	$twig->parse($xml);
 	my $root = $twig->root;
@@ -556,6 +578,7 @@ sub get_links_atom {
 		# parse embedded xhtml
 		$desc = $entry->first_child('content')->child_text(0,'xhtml:div');
 		$desc =~ s|^.*<xhtml:br/>(.*)$|$1|g;
+		$desc =~ s/\n/ /g;
 		$desc =~ s/^\s*(.*)\s*$/$1/g;
 		
 		# Parse the categories into hash
@@ -646,7 +669,7 @@ sub get_links {
 			create_fxd ( sort {$a <=> $b} keys %index_pid );
 
 		} else {
-			print STDERR "WARNING: Couldn't open cache file for writing\n";
+			logger "WARNING: Couldn't open cache file for writing\n";
 		}
 
 
@@ -681,10 +704,10 @@ sub download_stream_lwp {
 	
 	# Create a full URL from the PID specified
 	my $page = $pid_page_url_prefix.$pid.'.shtml';
-	print STDERR "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
+	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
-	print STDERR "INFO: Stage 1 URL = $page\n" if $opt{verbose};
-	print STDERR "\rGetting iplayer programme page        " if ! $opt{verbose};
+	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
+	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
 	# Switch off automatic redirects
 	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
@@ -698,13 +721,13 @@ sub download_stream_lwp {
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
 	if ( ! $res->is_success ) {
-		print STDERR "\rERROR: Failed to get programme ID from iplayer site\n\n";
+		logger "\rERROR: Failed to get programme ID from iplayer site\n\n";
 		return 7;
 	}
 	my @content = split /\n/, $res->content;
 	# Non-UK detection
 	if ( grep /only available to play in the UK/i, @content ) {
-		print STDERR "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
+		logger "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
 		exit 3;
 	}
 
@@ -712,11 +735,11 @@ sub download_stream_lwp {
 	#    iplayer_streaming_http_mp4 : [
 	#    ],  ### This part is empty == no mov version yet
 	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, $res->content ) {
-		print STDERR "\rERROR: Programme is reported as not yet ready for download\n\n";
+		logger "\rERROR: Programme is reported as not yet ready for download\n\n";
 		# Will return from here once satisfied that this test is reliable
 		#return 11;
 	} else {
-	        print STDERR "\rINFO: Programme is reported as ready for download\n";
+	        logger "\rINFO: Programme is reported as ready for download\n";
 	}
 
 	# Extract Long Name, e.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
@@ -733,7 +756,7 @@ sub download_stream_lwp {
 	my $verpid;
 	$verpid_types{$types{$_}}=$_ for keys %types;
 	# List types available
-	print STDERR "INFO: Types available: ", join(', ', %verpid_types), "\n" if $opt{verbose};
+	logger "INFO: Types available: ", join(', ', %verpid_types), "\n" if $opt{verbose};
 	# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
 	if ( grep /^Original$/, values %verpid_types ) {
 		$verpid = $types{'Original'};
@@ -742,7 +765,7 @@ sub download_stream_lwp {
 		$verpid = $types{'Signed'};
 		$prog{$pid}{type} = 'Signed';
 	} else {
-		print STDERR "ERROR: Neither Original or Signed versions exist";
+		logger "ERROR: Neither Original or Signed versions exist";
 		return 14;
 	}
 	# Create url with appended 6 digit random number
@@ -761,11 +784,11 @@ sub download_stream_lwp {
         #</script>
         chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
         $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
-        print STDERR "INFO: Web bug#1: $url_1b\n" if $opt{verbose};	  
+        logger "INFO: Web bug#1: $url_1b\n" if $opt{verbose};	  
 
-	print STDERR "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt{verbose};
-	print STDERR "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
-	print STDERR "\rINFO: File name = $file.mov                 \n";
+	logger "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt{verbose};
+	logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
+	logger "\rINFO: File name = $file.mov                 \n";
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -785,13 +808,13 @@ sub download_stream_lwp {
 	$file = "${download_dir}/${file}.partial.mov";
 	 
 	if ( -f $file_done ) {
-		print STDERR "ERROR: File already exists\n\n";
+		logger "ERROR: File already exists\n\n";
 		return 1;
 	} else {
 
 	        # Stage 1b - get o.gif web bug to whitelist cookie
 	        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
-		print STDERR "INFO: Getting iplayer 1st web bug              \r";
+		logger "INFO: Getting iplayer 1st web bug              \r";
 		my $h = new HTTP::Headers(
 		#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
 		#Accept: */*
@@ -810,7 +833,7 @@ sub download_stream_lwp {
 		my $res = $ua->request($req);
 		# Get resulting Location header (i.e. redirect URL)
 		if ( ! $res->is_success ) {
-			print STDERR "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
+			logger "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
 			return 2;
 		}
 
@@ -818,7 +841,7 @@ sub download_stream_lwp {
 
 	        # Stage 1c - get o.gif framework web bug to whitelist cookie (5 digit random number appended)
 	        my $url_1c = $web_bug_2_url.(sprintf "%05.0f", 100000*rand(0));
-		print STDERR "INFO: Getting iplayer 2nd web bug             \r";
+		logger "INFO: Getting iplayer 2nd web bug             \r";
 		my $h = new HTTP::Headers(
                 #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
                 #Accept: */*
@@ -837,14 +860,14 @@ sub download_stream_lwp {
 		my $res = $ua->request($req);
 		# Get resulting Location header (i.e. redirect URL)
 		if ( ! $res->is_success ) {
-			print STDERR "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
+			logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
 			return 2;
 		}
 
 
 
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		print STDERR "\rGetting iplayer download URL         " if ! $opt{verbose};
+		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $user_agent{coremedia},
 			'Accept'	=> '*/*',
@@ -856,17 +879,17 @@ sub download_stream_lwp {
 		# Get resulting Location header (i.e. redirect URL)
 		my $url_2 = $res->header("location");
 		if ( ! $res->is_redirect ) {
-			print STDERR "ERROR: Failed to get redirect from iplayer site\n\n";
+			logger "ERROR: Failed to get redirect from iplayer site\n\n";
 			return 2;
 		}
 		# Extract redirection Location URL
 		$url_2 =~ s/^Location: (.*)$/$1/g;
 		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 		if ( $url_2 =~ /statuscode=404/ ) {
-			print STDERR "\rERROR: Programme is not yet ready for download\n\n";
+			logger "\rERROR: Programme is not yet ready for download\n\n";
 			return 3;
 		}
-		print STDERR "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+		logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
 
 
@@ -882,7 +905,7 @@ sub download_stream_lwp {
 		# e.g. Content-Range: bytes 0-1/181338136
 		my $file_len = $res->header("Content-Range");
                 $file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
-		print STDERR "INFO: Download File Length $file_len\n" if $opt{verbose};
+		logger "INFO: Download File Length $file_len\n" if $opt{verbose};
 
 		# Get ftyp+wide header etc
 		my $mdat_start = 0x1c;
@@ -896,8 +919,8 @@ sub download_stream_lwp {
 		# Get mdat_end_offset_chars from downloaded block
 		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
 		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-		print STDERR "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
-		print STDERR "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
+		logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
+		logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
 		# The MOOV box starts one byte after MDAT box ends
 		my $moov_start = $mdat_start + $mdat_end_offset;
 
@@ -908,7 +931,7 @@ sub download_stream_lwp {
 		#while( $i < $moov_length - 4 ) {
 		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
 		#  my $atom_name = substr($moovdata, $i+4, 4);
-		#  print STDERR "Parsing atom: $atom_name, length: $atom_len\n";
+		#  logger "Parsing atom: $atom_name, length: $atom_len\n";
 		#  # Increment $i by atom_len to get next atom
 		#  $i += $atom_len;
 		#}
@@ -916,15 +939,15 @@ sub download_stream_lwp {
 		# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
 		# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
                 if ( $opt{stdout} && (! $opt{nowrite}) && -f $file ) {
-                  print STDERR "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
+                  logger "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
                   # Don't do usual streaming code
                   $opt{stdout} = 0;
                   $childpid = fork();
                   if (! $childpid) {
 			# Child starts here
-                	print STDERR "INFO: Streaming directly for partially downloaded file $file\n";
+                	logger "INFO: Streaming directly for partially downloaded file $file\n";
 			if ( ! open( STREAMIN, "< $file" ) ) {
-				print STDERR "INFO: Cannot Read partially downloaded file to stream\n";
+				logger "INFO: Cannot Read partially downloaded file to stream\n";
 				exit 4;
 			}
 			my $outbuf;
@@ -932,11 +955,11 @@ sub download_stream_lwp {
 			my $bytes_read = 65536;
 			while ( $bytes_read == 65536 ) { 
 				$bytes_read = read(STREAMIN, $outbuf, 65536 );				
-				#print STDERR "INFO: Read $bytes_read bytes\n";
+				#logger "INFO: Read $bytes_read bytes\n";
 				print STDOUT $outbuf;
 			}
 			close STREAMIN;
-			print STDERR "INFO: Stream thread has completed\n";
+			logger "INFO: Stream thread has completed\n";
                 	exit 0;
 		  }
                 }
@@ -955,7 +978,7 @@ sub download_stream_lwp {
 		  $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		  # Calculate new start offset (considering that we've put moov first in file)
                   $restart_offset = stat($file)->size - $moov_length;
-                  print STDERR "INFO: Restarting download from $restart_offset\n";
+                  logger "INFO: Restarting download from $restart_offset\n";
                 }
 
 
@@ -967,7 +990,7 @@ sub download_stream_lwp {
 		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
                   $moov_length = relocate_moov_chunk_offsets( $moovdata );
   		  # write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
-		  print STDERR "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
+		  logger "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
 		  # Write moov atom
                   print $fh $moovdata if ! $opt{nowrite};
 		  print STDOUT $moovdata if $opt{stdout};
@@ -976,6 +999,12 @@ sub download_stream_lwp {
 		  print STDOUT $header if $opt{stdout};
                 }
 
+                # Create symlink for freevo if required
+                if ( $opt{freevo} ) {
+                	# remove old symlink
+                	unlink $opt{freevo} if -l $opt{freevo};
+                	symlink $file, $opt{freevo};
+                }
                 
 		# Download mdat in 32MB blocks
 		$now = time();
@@ -992,13 +1021,13 @@ sub download_stream_lwp {
                   }
                   # Get block from URL ansd append to $file
                   if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
-                    print STDERR "ERROR: Could not download block $s - $e from $file\n\n";
+                    logger "ERROR: Could not download block $s - $e from $file\n\n";
                     return 9;
                   }
 		}
 
 		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
-		print STDERR "INFO: Downloaded $file_done\n";
+		logger "INFO: Downloaded $file_done\n";
 		unlink $cookiejar;
 		# Moving file into place as complete (if not stdout)
                 move($file, $file_done) if ! $opt{stdout};
@@ -1009,40 +1038,40 @@ sub download_stream_lwp {
 
 # Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
 sub relocate_moov_chunk_offsets {
-  my $moovdata = @_[0];
-  # Change all the chunk offsets in moov->stco atoms and add moov_length to them all
-  # get moov atom length
-  my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
-  # Nasty but quicker to scan for 'stco'
-  for (my $i = 0; $i < $moov_length - 4; $i++) {
-    my $chars = substr($moovdata, $i, 4);
-    # If we have found and stco atom
-    if ( $chars eq 'stco' ) {
-      # determine length of atom (4 bytes preceding stco)
-      my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
-      print STDERR "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt{verbose};
+	my $moovdata = @_[0];
+	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
+	# get moov atom length
+	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
+	# Nasty but quicker to scan for 'stco'
+	for (my $i = 0; $i < $moov_length - 4; $i++) {
+		my $chars = substr($moovdata, $i, 4);
+		# If we have found and stco atom
+		if ( $chars eq 'stco' ) {
+			# determine length of atom (4 bytes preceding stco)
+			my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
+			logger "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt{verbose};
 
-      # loop through all chunk offsets in this atom and add offset (== moov atom length)
-      for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
-        my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-	#print STDERR "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',  $chunk_offset + $moov_length = ";
-        $chunk_offset += $moov_length;
-        # write back bytes into $moovdata
-	substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
-	substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
-	substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
-	substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
-        #$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-	#print STDERR "$chunk_offset\n";
-      }
+			# loop through all chunk offsets in this atom and add offset (== moov atom length)
+			for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
+				my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+				#logger "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',	$chunk_offset + $moov_length = ";
+				$chunk_offset += $moov_length;
+				# write back bytes into $moovdata
+				substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
+				substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
+				substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>	8) & 0xFF );
+				substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>	0) & 0xFF );
+				#$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+				#logger "$chunk_offset\n";
+			}
 
-      # skip over this whole atom now it is processed
-      $i += $stco_len;
-    }
-  }
-  # Write $moovdata back to calling string
-  @_[0] = $moovdata;
-  return $moov_length;
+			# skip over this whole atom now it is processed
+			$i += $stco_len;
+		}
+	}
+	# Write $moovdata back to calling string
+	@_[0] = $moovdata;
+	return $moov_length;
 }
 
 
@@ -1066,7 +1095,7 @@ sub download_block {
 	if ( defined $file && $fh && (!$opt{nowrite}) ) {
 		# Stage 3b: Download File
 		$orig_length = stat($file)->size;
-		print STDERR "INFO: Appending to $file\n" if $opt{verbose};
+		logger "INFO: Appending to $file\n" if $opt{verbose};
 	}
 
 	# Determine offset for continuation download
@@ -1090,6 +1119,7 @@ sub download_block {
 		print STDOUT $data if $opt{stdout};
 		# return if streaming to stdout - no need for progress
 		return if $opt{stdout} && $opt{nowrite};
+		return if $opt{quiet};
 		# current file size
 		my $size = stat($file)->size;
 		# download rates in bytes per second
@@ -1109,6 +1139,7 @@ sub download_block {
 		my ($data, $res, undef) = @_;
 		# append output to buffer
 		$buffer .= $data;
+		return if $opt{quiet};
 		# current buffer size
 		my $size = length($buffer);
 		# download rates in bytes per second
@@ -1134,30 +1165,30 @@ sub download_block {
 	};
 
 	# send request
-	print STDERR "\nINFO: Downloading range ${start}-${end}\n" if $opt{verbose};
-	print STDERR "\r                              \r";
+	logger "\nINFO: Downloading range ${start}-${end}\n" if $opt{verbose};
+	logger "\r                              \r";
 	my $res;
 
 	# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
 	if (defined $fh) {
-		print STDERR "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt{verbose} && $opt{stdout};
-		print STDERR "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt{verbose} && !$opt{nowrite};
+		logger "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt{verbose} && $opt{stdout};
+		logger "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt{verbose} && !$opt{nowrite};
 		$res = $ua->request($req, $callback);
 		if (  (! $res->is_success) || (! $res->header("Content-Length")) ) {
-			print STDERR "ERROR: Failed to Download block\n\n";
+			logger "ERROR: Failed to Download block\n\n";
 			unlink $cookiejar;
 			return 5;
 		}
                 # If we don't require any more bytes (previously fully downloaded) then skip
-                print STDERR "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt{verbose};
+                logger "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt{verbose};
 		return 0;
 		   
 	# Memory Block
 	} else {
-		print STDERR "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{verbose};
+		logger "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{verbose};
 		$res = $ua->request($req, $callback_memory);
 		if ( (! $res->is_success) ) {
-			print STDERR "ERROR: Failed to Download block\n\n";
+			logger "ERROR: Failed to Download block\n\n";
 			return '';
 		} else {
 			return $buffer;
@@ -1173,7 +1204,7 @@ sub get_hex {
         for (my $i=0; $i<length($buf); $i++) {
                 $ret .= " ".sprintf("%02lx", ord substr($buf, $i, 1) );
         }
-	print STDERR "DEBUG: HEX string value = $ret\n" if $opt{verbose};
+	logger "DEBUG: HEX string value = $ret\n" if $opt{verbose};
         return $ret;
 }
 
@@ -1187,93 +1218,86 @@ sub bytestring_to_int {
 		# Multiply byte value by 256^$i then accumulate
                 $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
         }
-        #print STDERR "DEBUG: Decimal value = $dec\n" if $opt{verbose};
+        #logger "DEBUG: Decimal value = $dec\n" if $opt{verbose};
         return $dec;
-}
-
-
-# Is value odd?
-sub odd() {
-    return 1 if ( ($_[0]/2.0) != int($_[0]/2.0) );
-    return 0;
 }
 
 
 # Usage: $fh = open_file_append($filename);
 sub open_file_append {
-  local *FH;
-  my $file = shift;
-  # Just in case we actually write to the file - make this /dev/null
-  $file = '/dev/null' if $opt{nowrite};
-  if ($file) {
-    if ( ! open(FH, ">> $file") ) {
-      print STDERR "ERROR: Cannot write or append to $file\n\n";
-      exit 1;
-    }
-  }
-  # Fix for binary - needed for Windows
-  binmode FH;
-  return *FH;
+	local *FH;
+	my $file = shift;
+	# Just in case we actually write to the file - make this /dev/null
+	$file = '/dev/null' if $opt{nowrite};
+	if ($file) {
+		if ( ! open(FH, ">> $file") ) {
+			logger "ERROR: Cannot write or append to $file\n\n";
+			exit 1;
+		}
+	}
+	# Fix for binary - needed for Windows
+	binmode FH;
+	return *FH;
 }
 
 
 # Updates and overwrites this script - makes backup as <this file>.old
 sub update_script {
-  # Get version URL
-  my $ua = LWP::UserAgent->new;
-  $ua->timeout([10]);
-  $ua->proxy( ['http'] => $proxy_url );
-  $ua->agent( $user_agent{update} );
-  print STDERR "INFO: Checking for latest version from linuxcentre.net\n";
-  my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
-  chomp( my $latest_ver = $res->content );
-  if ( $res->is_success ) {
-    # Compare version numbers
-    if ( $latest_ver > $version ) {
-      print STDERR "INFO: New version $latest_ver available, downloading\n";
-      my $res = $ua->request( HTTP::Request->new( GET => $update_url ) );    
-      my $req = HTTP::Request->new ('GET', $update_url);
-      # Save content into a $script_file
-      my $script_file = $0;
-      $ua->request($req, $script_file.'.tmp');
-      # If the download was successful then copy over this script and make executable after making a backup of this script
-      if ( $res->is_success ) {
-        if ( copy($script_file, $script_file.'.old') ) {
-          move($script_file.'.tmp', $script_file);
-          chmod 0755, $script_file;
-          print STDERR "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
-          # Need to purge the cache as this changes between versions
-          unlink($cachefile);
-        }
-      }
-    } else {
-      print STDERR "INFO: No update is necessary (latest version = $latest_ver)\n";
-    }
-  } else {
-    print STDERR "ERROR: Failed to connect to update site\n";
-    exit 2;
-  }
-  exit 0;
+	# Get version URL
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout([10]);
+	$ua->proxy( ['http'] => $proxy_url );
+	$ua->agent( $user_agent{update} );
+	logger "INFO: Checking for latest version from linuxcentre.net\n";
+	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
+	chomp( my $latest_ver = $res->content );
+	if ( $res->is_success ) {
+		# Compare version numbers
+		if ( $latest_ver > $version ) {
+			logger "INFO: New version $latest_ver available, downloading\n";
+			my $res = $ua->request( HTTP::Request->new( GET => $update_url ) );		
+			my $req = HTTP::Request->new ('GET', $update_url);
+			# Save content into a $script_file
+			my $script_file = $0;
+			$ua->request($req, $script_file.'.tmp');
+			# If the download was successful then copy over this script and make executable after making a backup of this script
+			if ( $res->is_success ) {
+				if ( copy($script_file, $script_file.'.old') ) {
+					move($script_file.'.tmp', $script_file);
+					chmod 0755, $script_file;
+					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
+					# Need to purge the cache as this changes between versions
+					unlink($cachefile);
+				}
+			}
+		} else {
+			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
+		}
+	} else {
+		logger "ERROR: Failed to connect to update site\n";
+		exit 2;
+	}
+	exit 0;
 }
 
 
 # Creates the Freevo FXD meta data (and pre-downloads graphics - todo)
 sub create_fxd() {
-  my %table = (
-    'A-C' => '[abc]',
-    'D-F' => '[def]',
-    'G-I' => '[ghi]',
-    'J-L' => '[jkl]',
-    'M-N' => '[mn]',
-    'O-P' => '[op]',
-    'Q-R' => '[qt]',
-    'S-T' => '[st]',
-    'U-V' => '[uv]',
-    'W-Z' => '[wxyz]',
-    '0-9' => '[\d]',
-  );
-  if ( open(FXD, "> $fxdfile") ) {
-        print FXD '<?xml version="1.0" ?><freevo>';
+	my %table = (
+		'A-C' => '[abc]',
+		'D-F' => '[def]',
+		'G-I' => '[ghi]',
+		'J-L' => '[jkl]',
+		'M-N' => '[mn]',
+		'O-P' => '[op]',
+		'Q-R' => '[qt]',
+		'S-T' => '[st]',
+		'U-V' => '[uv]',
+		'W-Z' => '[wxyz]',
+		'0-9' => '[\d]',
+	);
+	if ( open(FXD, "> $fxdfile") ) {
+		print FXD '<?xml version="1.0" ?><freevo>';
 
         # containers for programmes sorted into subdirs
         print FXD "\t<container title=\"iplayer by Programme Name\" type=\"video\">\n";
@@ -1291,12 +1315,19 @@ sub create_fxd() {
           	  my $pid = $index_pid{$_};
           	  # loop through and find matches for each progname
 	    	  if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
-	    	    print FXD "<iplayer title=\"$prog{$pid}{episode} ($prog{$pid}{available})\">
-				<cmd>${get_iplayer_stream} $pid</cmd>
-				<info>
-					<description>$prog{$pid}{desc}</description>
-				</info>
-			</iplayer>\n";
+			my $title = "$prog{$pid}{episode} ($prog{$pid}{available})";
+			my $desc = $prog{$pid}{desc};
+	    	   	$title =~ s/&/&amp\;/g;
+	    	   	$desc =~ s/&/&amp\;/g;
+	    	   	  $prog{$pid}{desc} =~ s/&/&amp\;/g;
+	    		  print FXD "	<movie title=\"${title}\">
+						<video>
+							<url id=\"p1\">${pid}.mov<playlist/></url>
+						</video>
+						<info>
+							<description>${desc}</description>
+						</info>
+					</movie>\n";
                   }
                 }			
                 print FXD "\t</container>\n";
@@ -1312,13 +1343,19 @@ sub create_fxd() {
 	            	my $pid = $index_pid{$_};
 	    	    	my $name = $prog{$pid}{name};
                         my $regex = $table{$folder};
+			my $title = "$name - $prog{$pid}{episode} ($prog{$pid}{available})";
+			my $desc = $prog{$pid}{desc};
+	    	   	$title =~ s/&/&amp\;/g;
+	    	   	$desc =~ s/&/&amp\;/g;
 	    	    	if ( $name =~ /^$regex/i ) {
-	    		  print FXD "<iplayer title=\"$name - $prog{$pid}{episode} ($prog{$pid}{available})\">
-					<cmd>${get_iplayer_stream} $pid</cmd>
-					<info>
-						<description>$prog{$pid}{desc}</description>
-					</info>
-				</iplayer>\n";
+	    		  print FXD "	<movie title=\"${title}\">
+						<video>
+							<url id=\"p1\">${pid}.mov<playlist/></url>
+						</video>
+						<info>
+							<description>${desc}</description>
+						</info>
+					</movie>\n";
                         }
                 }
                 print FXD "\t</container>\n";
@@ -1328,7 +1365,7 @@ sub create_fxd() {
 
 
   } else {
-    print STDERR "Couldn't open fxd file $fxdfile for writing\n";
+    logger "Couldn't open fxd file $fxdfile for writing\n";
   }
   print FXD '</freevo>';
   close (FXD);
@@ -1353,7 +1390,7 @@ sub create_html {
 	  print HTML '</table></body>';
 	  close (HTML);
 	} else {
-	  print STDERR "Couldn't open html file $webfile for writing\n";
+	  logger "Couldn't open html file $webfile for writing\n";
 	}
 }
 
@@ -1367,7 +1404,7 @@ sub save_options_file {
 		print OPT "$_ $opt{$_}\n"  if defined $opt{$_};
 	}
 	close OPT;
-	print STDERR "INFO: Options saved as defult in $optfile\n";
+	logger "INFO: Options saved as defult in $optfile\n";
 	exit 0;
 }
 
@@ -1381,3 +1418,4 @@ sub read_options_file {
 	}
 	close OPT;
 }
+
