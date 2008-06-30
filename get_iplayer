@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 29th 2008
+# Date: June 30th 2008
 #
-my $version = 0.34;
+my $version = 0.35;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
@@ -31,6 +31,11 @@ my $version = 0.34;
 # * perl 5.8
 # * LWP (libwww-perl)
 # * Perl XML::Twig
+#
+# Changes 0.35 - 20080630
+# * Restructured downloading code
+# * Now handles different versions better (i.e. Original, Signed) - tries to download next avaiable version type if one fails
+# * Freevo FXD now has programmes sorted by channel
 #
 # Changes 0.34 - 20080629
 # * Fixed duplicate listing bug when using --long
@@ -232,7 +237,7 @@ save_options_file() if $save;
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
 my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
-my $fxdfile 		= $download_dir.'folder.fxd'; # Where freevo will scan for FXD file
+my $fxdfile 		= $download_dir.'/folder.fxd'; # Where freevo will scan for FXD file
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $cookiejar		= "/tmp/iplayer_cookie_$$";
 my $cachefile		= '/tmp/iplayer.cache';
@@ -331,7 +336,7 @@ logger "Download List:\n" if @download_list;
 list_progs( @download_list );
 
 # Do the downloads based on list of index numbers
-download_stream_lwp( $index_pid{$_} ) for (@download_list);
+download_programme( $index_pid{$_} ) for (@download_list);
 
 exit 0;
 
@@ -698,8 +703,8 @@ sub get_links {
 }
 
 
-# Usage: download_stream_lwp (<pid>)
-sub download_stream_lwp {
+# Usage: download_programme (<pid>)
+sub download_programme {
 	my $pid = shift;
 	
 	# Create a full URL from the PID specified
@@ -708,6 +713,7 @@ sub download_stream_lwp {
 
 	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
 	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
+
 	# Switch off automatic redirects
 	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
@@ -735,7 +741,7 @@ sub download_stream_lwp {
 	#    iplayer_streaming_http_mp4 : [
 	#    ],  ### This part is empty == no mov version yet
 	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, $res->content ) {
-		logger "\rERROR: Programme is reported as not yet ready for download\n\n";
+		logger "\rWARNING: Programme is reported as not yet ready for download\n\n";
 		# Will return from here once satisfied that this test is reliable
 		#return 11;
 	} else {
@@ -746,154 +752,66 @@ sub download_stream_lwp {
 	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
 	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
 
-	# Extract version pid and type (i.e. Signed, Original, etc)
-	chomp( my @type_pid = grep /(type|pid )      :/, @content );
-	# Remove tags
-	s/^.*'(.+)'.*$/$1/g for @type_pid;
-	# Get hash of pid => type
-	my %types = @type_pid;
-	my %verpid_types;
-	my $verpid;
-	$verpid_types{$types{$_}}=$_ for keys %types;
-	# List types available
-	logger "INFO: Types available: ", join(', ', %verpid_types), "\n" if $opt{verbose};
-	# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
-	if ( grep /^Original$/, values %verpid_types ) {
-		$verpid = $types{'Original'};
-		$prog{$pid}{type} = 'Original';
-	} elsif ( grep /^Signed$/, values %verpid_types ) {
-		$verpid = $types{'Signed'};
-		$prog{$pid}{type} = 'Signed';
-	} else {
-		logger "ERROR: Neither Original or Signed versions exist";
-		return 14;
+	# Get type => verpid
+	my %verpid_types = get_ver_pid_types( @content );
+	my $url_2;
+
+	# Do this for each version tried in this order (if they appaered in the content)
+	for my $type ( qw/ Original Signed AudioDescribed OpenSubtitled Shortened Lengthened Other / ) {
+
+		# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
+		if ( grep /^$type$/, keys %verpid_types ) {
+			logger "INFO: Checking existence of type $type\n";
+			$prog{$pid}{type} = $type;
+			# Create url with appended 6 digit random number
+			my $url_1 = ${url_download_prefix}.'/'.$verpid_types{$type}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+
+			logger "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt{verbose};
+			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
+
+			# Get these web bugs to whitelist our cookie
+			get_web_bugs($ua, @content);
+
+			$url_2 = get_stream_download_url( $ua, $url_1 );
+		}
+		# Break out of loop if we have an actual URL
+		last if $url_2;
 	}
-	# Create url with appended 6 digit random number
-	my $url_1 = "${url_download_prefix}/$verpid?".(sprintf "%06.0f", 1000000*rand(0)).'%20';
-	# Create a filename
-	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{type}";
-	# Replace slashes with _ regardless
-	$file =~ s/[\\\/]/_/g;
-	# Sanitize by default
-	$file =~ s/\s/_/g if ! $opt{whitespace};
-	$file =~ s/[^\w_-]//gi if ! $opt{whitespace};
 
-	# Parse this to get o.gif for stats web bug
-	#<script type="text/javascript">
-	#var i = new Image(1,1); i.src="http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~http://www.bbc.co.uk/iplayer/search/?q=graham&amp;go=Find+Programmes~RS~q~RS~q=graham&amp;start=1&amp;scope=iplayersearch&amp;go=Find+Programmes&amp;version_pid=b00c3rrt~RS~z~RS~02~RS~";
-        #</script>
-        chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
-        $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
-        logger "INFO: Web bug#1: $url_1b\n" if $opt{verbose};	  
+	# Report error if no versions are available
+	if ( ! $url_2 ) {
+		logger "ERROR: No versions exist for download";
+		return 14;
+	}	
 
-	logger "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt{verbose};
-	logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
-	logger "\rINFO: File name = $file.mov                 \n";
+
+	# Determine the correct filenames for this download
+	my $file_prefix = generate_download_filename_prefix( $pid );
+	logger "\rINFO: File name prefix = $file_prefix                 \n";
+	my $file_done = "${download_dir}/${file_prefix}.mov";
+	my $file = "${download_dir}/${file_prefix}.partial.mov";
+	if ( -f $file_done ) {
+		logger "ERROR: File already exists\n\n";
+		return 1;
+	}	
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
 
-	# Create a subdir for programme sorting option
-	if ($opt{subdir}) {
-	        my $subdir = "$prog{$pid}{longname}";
-                $subdir =~ s/[\\\/]/_/g;
-                $subdir =~ s/\s/_/g if ! $opt{whitespace};
-                $subdir =~ s/[^\w_-]//gi if ! $opt{whitespace};
-                $file = "${subdir}/${file}";
-                # Create dir if it does not exist
-                mkdir("${download_dir}/${subdir}") if ! -d "${download_dir}/${subdir}";
-        }
+	# Do the h.264 download
+	download_h264_stream( $ua, $url_2, $file, $file_done );
 
-	my $file_done = "${download_dir}/${file}.mov";
-	$file = "${download_dir}/${file}.partial.mov";
-	 
-	if ( -f $file_done ) {
-		logger "ERROR: File already exists\n\n";
-		return 1;
-	} else {
-
-	        # Stage 1b - get o.gif web bug to whitelist cookie
-	        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
-		logger "INFO: Getting iplayer 1st web bug              \r";
-		my $h = new HTTP::Headers(
-		#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
-		#Accept: */*
-		#Accept-Language: en
-		#Accept-Encoding: gzip, deflate
-		#Cookie: BBC-UID=54xxxxxxxxx71ad6e33cfdf040e01b44068765f2a0b061b4447fe92f6528b1ae0Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29
-		#Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
-		#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
-                #Connection: keep-alive
-                #Host: stats.bbc.co.uk
-			'User-Agent'	=> $user_agent{safari},
-			'Accept'	=> '*/*',
-		);
-		my $req = HTTP::Request->new ('GET', $url_1b, $h);
-		# send request
-		my $res = $ua->request($req);
-		# Get resulting Location header (i.e. redirect URL)
-		if ( ! $res->is_success ) {
-			logger "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
-			return 2;
-		}
+	return 0;
+}
 
 
-
-	        # Stage 1c - get o.gif framework web bug to whitelist cookie (5 digit random number appended)
-	        my $url_1c = $web_bug_2_url.(sprintf "%05.0f", 100000*rand(0));
-		logger "INFO: Getting iplayer 2nd web bug             \r";
-		my $h = new HTTP::Headers(
-                #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
-                #Accept: */*
-                #Accept-Language: en
-                #Accept-Encoding: gzip, deflate
-                #Cookie: BBC-UID=e4xxxxxx731e0ec0d34a019ab030cb2de22aef9c407041d4343f4937d42343d40Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29%20AppleWebKit%2f420%2e1%20%28KHTML%2c%20like%20Gecko%29%20Version%2f3%2e0%20Mobile%2f3B48b%20Safari%2f419%2e3
-                #Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
-                #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
-                #Connection: keep-alive
-                #Host: www.bbc.co.uk
-			'User-Agent'	=> $user_agent{safari},
-			'Accept'	=> '*/*',
-		);
-		my $req = HTTP::Request->new ('GET', $url_1c, $h);
-		# send request
-		my $res = $ua->request($req);
-		# Get resulting Location header (i.e. redirect URL)
-		if ( ! $res->is_success ) {
-			logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
-			return 2;
-		}
-
-
-
-		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
-		my $h = new HTTP::Headers(
-			'User-Agent'	=> $user_agent{coremedia},
-			'Accept'	=> '*/*',
-			'Range'		=> 'bytes=0-1',
-		);
-		my $req = HTTP::Request->new ('GET', $url_1, $h);
-		# send request
-		my $res = $ua->request($req);
-		# Get resulting Location header (i.e. redirect URL)
-		my $url_2 = $res->header("location");
-		if ( ! $res->is_redirect ) {
-			logger "ERROR: Failed to get redirect from iplayer site\n\n";
-			return 2;
-		}
-		# Extract redirection Location URL
-		$url_2 =~ s/^Location: (.*)$/$1/g;
-		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
-		if ( $url_2 =~ /statuscode=404/ ) {
-			logger "\rERROR: Programme is not yet ready for download\n\n";
-			return 3;
-		}
-		logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
-
-
+# Actually do the h.264 downloading
+sub download_h264_stream {
+		my ( $ua, $url_2, $file, $file_done ) = @_;
 
 		# Stage 3a: Download 1st byte to get exact file length
+		logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+
                 # Determine offset for continuation dowload
 		my $h = new HTTP::Headers(
 			'User-Agent'	=> $user_agent{coremedia},
@@ -1019,7 +937,7 @@ sub download_stream_lwp {
                   } else {
                     $e = $s + $chunk_size - 1;
                   }
-                  # Get block from URL ansd append to $file
+                  # Get block from URL and append to $file
                   if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
                     logger "ERROR: Could not download block $s - $e from $file\n\n";
                     return 9;
@@ -1031,9 +949,154 @@ sub download_stream_lwp {
 		unlink $cookiejar;
 		# Moving file into place as complete (if not stdout)
                 move($file, $file_done) if ! $opt{stdout};
+
+                return 0;
+}
+
+
+
+# Get streaming mp4 URL
+sub get_stream_download_url {
+		my $ua = shift;
+		my $url_1 = shift;
+		
+		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
+		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $user_agent{coremedia},
+			'Accept'	=> '*/*',
+			'Range'		=> 'bytes=0-1',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		my $url_2 = $res->header("location");
+		if ( ! $res->is_redirect ) {
+			logger "ERROR: Failed to get redirect from iplayer site\n\n";
+			return '';
+		}
+		# Extract redirection Location URL
+		$url_2 =~ s/^Location: (.*)$/$1/g;
+		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
+		if ( $url_2 =~ /statuscode=404/ ) {
+			logger "\rERROR: Programme is not yet ready for download\n";
+			return '';
+		}
+
+		return $url_2;
+}
+
+
+
+# Given page content, extract the Versions and Pids and return in a hash: Versions => Pid
+sub get_ver_pid_types {
+	my @content = @_;
+	# Extract version pid and type (i.e. Signed, Original, etc)
+	chomp( my @type_pid = grep /(type|pid )      :/, @content );
+	# Remove tags
+	s/^.*'(.+)'.*$/$1/g for @type_pid;
+	# Get hash of pid => type
+	my %types = @type_pid;
+	logger "INFO: Types available: ", join(', ', %types), "\n" if $opt{verbose};
+	return %types;
+}
+
+
+# Generate the download filename prefix given a pid
+sub generate_download_filename_prefix {
+	my $pid = shift;
+	# Create a filename
+	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{type}";
+	# Replace slashes with _ regardless
+	$file =~ s/[\\\/]/_/g;
+	# Sanitize by default
+	$file =~ s/\s/_/g if ! $opt{whitespace};
+	$file =~ s/[^\w_-]//gi if ! $opt{whitespace};
+
+	# Don't create subdir if we are only testing downloads
+	# Create a subdir for programme sorting option
+	if ( $opt{subdir} && ! $opt{test} ) {
+	        my $subdir = "$prog{$pid}{longname}";
+                $subdir =~ s/[\\\/]/_/g;
+                $subdir =~ s/\s/_/g if ! $opt{whitespace};
+                $subdir =~ s/[^\w_-]//gi if ! $opt{whitespace};
+                $file = "${subdir}/${file}";
+                # Create dir if it does not exist
+                mkdir("${download_dir}/${subdir}") if ! -d "${download_dir}/${subdir}";
         }
+
+        return $file;
+}
+
+
+
+sub get_web_bugs {
+	my $ua = shift;
+	my @content = @_;
+
+	# Parse this to get o.gif for stats web bug
+	#<script type="text/javascript">
+	#var i = new Image(1,1); i.src="http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~http://www.bbc.co.uk/iplayer/search/?q=graham&amp;go=Find+Programmes~RS~q~RS~q=graham&amp;start=1&amp;scope=iplayersearch&amp;go=Find+Programmes&amp;version_pid=b00c3rrt~RS~z~RS~02~RS~";
+        #</script>
+        chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
+        $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
+        logger "INFO: Web bug#1: $url_1b\n" if $opt{verbose};
+
+        # Stage 1b - get o.gif web bug to whitelist cookie
+        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
+	logger "INFO: Getting iplayer 1st web bug              \r";
+	#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
+	#Accept: */*
+	#Accept-Language: en
+	#Accept-Encoding: gzip, deflate
+	#Cookie: BBC-UID=54xxxxxxxxx71ad6e33cfdf040e01b44068765f2a0b061b4447fe92f6528b1ae0Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29
+	#Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
+	#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
+	#Connection: keep-alive
+	#Host: stats.bbc.co.uk
+	my $h = new HTTP::Headers(
+		'User-Agent'	=> $user_agent{safari},
+		'Accept'	=> '*/*',
+	);
+	my $req = HTTP::Request->new ('GET', $url_1b, $h);
+	# send request
+	my $res = $ua->request($req);
+	# Get resulting Location header (i.e. redirect URL)
+	if ( ! $res->is_success ) {
+		logger "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
+		return 2;
+	}
+
+
+	# Stage 1c - get o.gif framework web bug to whitelist cookie (5 digit random number appended)
+	my $url_1c = $web_bug_2_url.(sprintf "%05.0f", 100000*rand(0));
+	logger "INFO: Getting iplayer 2nd web bug             \r";
+        #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
+        #Accept: */*
+        #Accept-Language: en
+        #Accept-Encoding: gzip, deflate
+        #Cookie: BBC-UID=e4xxxxxx731e0ec0d34a019ab030cb2de22aef9c407041d4343f4937d42343d40Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29%20AppleWebKit%2f420%2e1%20%28KHTML%2c%20like%20Gecko%29%20Version%2f3%2e0%20Mobile%2f3B48b%20Safari%2f419%2e3
+        #Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
+        #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
+        #Connection: keep-alive
+        #Host: www.bbc.co.uk
+	my $h = new HTTP::Headers(
+		'User-Agent'	=> $user_agent{safari},
+		'Accept'	=> '*/*',
+	);
+	my $req = HTTP::Request->new ('GET', $url_1c, $h);
+	# send request
+	my $res = $ua->request($req);
+	# Get resulting Location header (i.e. redirect URL)
+	if ( ! $res->is_success ) {
+		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
+		return 2;
+	}
+
 	return 0;
 }
+
 
 
 # Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
@@ -1335,6 +1398,39 @@ sub create_fxd() {
         print FXD "\t</container>\n";        
 
 
+        # containers for programmes sorted into channels
+        print FXD "\t<container title=\"iplayer by Channel\" type=\"video\">\n";
+        my %channels;
+        # create hash of channel names
+        for (@_) {
+          $channels{$prog{$index_pid{$_}}{channel}} = 1;
+        }
+        for my $channel ( sort keys %channels ) {
+        	print FXD "\t<container title=\"$channel\" type=\"video\">\n";
+	    	for (@_) {
+          		my $pid = $index_pid{$_};
+          		# loop through and find matches for each progname
+          		if ( $prog{$index_pid{$_}}{channel} =~ /^$channel$/ ) {
+				my $title = "$prog{$pid}{name} - $prog{$pid}{episode} ($prog{$pid}{available})";
+				my $desc = $prog{$pid}{desc};
+				$title =~ s/&/&amp\;/g;
+				$desc =~ s/&/&amp\;/g;
+				$prog{$pid}{desc} =~ s/&/&amp\;/g;
+				print FXD "<movie title=\"${title}\">
+						<video>
+							<url id=\"p1\">${pid}.mov<playlist/></url>
+							</video>
+						<info>	
+							<description>${desc}</description>
+						</info>
+					</movie>\n";
+			}
+                }
+                print FXD "\t</container>\n";
+        }
+        print FXD "\t</container>\n";        
+
+
         # containers for alpha sorted programmes
         print FXD "\t<container title=\"iplayer A-Z\" type=\"video\">\n";
         for my $folder (sort keys %table) {
@@ -1361,8 +1457,6 @@ sub create_fxd() {
                 print FXD "\t</container>\n";
         }
         print FXD "\t</container>\n";
-
-
 
   } else {
     logger "Couldn't open fxd file $fxdfile for writing\n";
