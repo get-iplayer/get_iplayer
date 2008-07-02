@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: June 30th 2008
+# Date: July 2nd 2008
 #
-my $version = 0.35;
+my $version = 0.36;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
@@ -25,12 +25,21 @@ my $version = 0.35;
 # * Regex search on long programme description/episode capability (--long)
 # * Regex search on channel and category (--channel, --category)
 # * Save default options in ~/.iplayerrc (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activstate Perl)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activstate Perl, cygwin)
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
-# * Perl XML::Twig
+#
+#
+# Changes 0.36 - 20080701
+# * Now use the --get/-g option to get the selected files, without this we only list matches
+# * Re-use cookie for faster connections (no need to get web bugs every time)
+# * Fixed download rate calc on 32M block downloads
+# * Increased LWP timeouts to 20 seconds
+# * Checks for when we get a duff moov atom length (i.e. an XORed file) then deletes the cookie and quits
+# * Removed XML::Twig parser - use perl regex instead
+# * Now reports how long ago rather than date made available...
 #
 # Changes 0.35 - 20080630
 # * Restructured downloading code
@@ -156,10 +165,11 @@ use LWP::UserAgent;
 #use LWP::Debug qw(+);
 use HTTP::Cookies;
 use HTTP::Headers;
-use XML::Twig;
+use Time::Local;
 my $DEBUG = 0;
 $|=1;
 my %opt = ();
+
 
 # Print to STDERR
 sub logger(@) {
@@ -169,15 +179,16 @@ sub logger(@) {
 sub usage {
 	logger <<EOF;
 Usage:
-  List Programmes:       get_iplayer [-v] [-l] [-e <secs>] [-p <proxy_url>]
-  Download files:        get_iplayer [<options>] <regex|index|pid|url> [<regex|index|pid|url>]
+  Search Programmes:     get_iplayer [-l] [--channel] [--category] [<options>] [<regex|index|pid|url>]
+  Download files:        get_iplayer -g [-l] [--channel] [--category] [<options>] <regex|index|pid|url> [<regex|index|pid|url>]
   Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -
   Update get_iplayer:    get_iplayer -u
 
 Options:
- -l, --long           Show/search long programme descriptions
-     --channel        Only search in specified channel(s) - use a sub-string or regex
-     --category       Only search in specified category - use a sub-string or regex
+ -l, --long           Also search long programme descriptions / episode names
+     --channel        Narrow search to specified channel(s) - use a sub-string or regex
+     --category       Narrow search to specified categories - use a sub-string or regex
+ -g, --get            Download matching programmes
  -f, --flush          Flush cache
  -o, --output <dir>   Download output directory
  -s, --subdir         Downloaded files into Programme name subdirectory
@@ -193,7 +204,7 @@ Options:
  -h, --help           Help
  -q, --quiet          No output
      --scrape         Use old web page scraping method to get programme index
-     --save           Save these options as default in .iplayerrc
+     --save           Save specified options as default in .iplayerrc
 EOF
 	exit 1;
 }
@@ -208,6 +219,7 @@ read_options_file() if ! grep /\-\-save/, @ARGV;
 # cmdline opts take precedence
 GetOptions(
         "help|h"                        => \$opt{help},
+        "get|g"				=> \$opt{get},
         "long|l"                        => \$opt{long},
         "verbose|v"                     => \$opt{verbose},
         "flush|f"                       => \$opt{flush},
@@ -239,9 +251,10 @@ my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downl
 my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
 my $fxdfile 		= $download_dir.'/folder.fxd'; # Where freevo will scan for FXD file
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
-my $cookiejar		= "/tmp/iplayer_cookie_$$";
+my $cookiejar		= "$ENV{HOME}/.get_iplayer_cookies";
 my $cachefile		= '/tmp/iplayer.cache';
 my $cache_secs 		= $opt{expiry} || 14400;
+my $lwp_request_timeout	= 20;
 
 # URLs
 my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
@@ -275,7 +288,7 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'available'	=> <Date/Time made available>,
 #	'longname'	=> <Long name (only parsed in stage 1)>,
 #	'duration'	=> <duration in HH:MM:SS>
-#	'versions'	=> <list of non-'Original' versions, e.g Signed>
+#	'versions'	=> <comma separated list of versions, e.g Original, Signed>
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <TV channel>
 #	'categories'	=> <Categories>
@@ -307,36 +320,37 @@ get_links();
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
   list_progs( get_regex_matches( '.*' ) );
-  #list_progs( sort { $a <=> $b } keys %index_pid );
   exit 0;
 }
 
 # Parse remaining args
-my @download_list;
+my @match_list;
 for ( @ARGV ) {
   chomp();
 
   # If Numerical value
   if ( /^[\d]+$/ ) {
-    push @download_list, $_;
+    push @match_list, $_;
 
   # If PID then find matching programmes with this PID
   } elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
     s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-    push @download_list, get_regex_matches( $1 );
+    push @match_list, get_regex_matches( $1 );
 
   # Else assume this is a programme name regex
   } else {
-    push @download_list, get_regex_matches( $_ );
+    push @match_list, get_regex_matches( $_ );
   }
 }
 
 # Display list for download
-logger "Download List:\n" if @download_list;
-list_progs( @download_list );
+logger "Matches:\n" if @match_list;
+list_progs( @match_list );
 
-# Do the downloads based on list of index numbers
-download_programme( $index_pid{$_} ) for (@download_list);
+# Do the downloads based on list of index numbers if required
+if ( $opt{get} ) {
+	download_programme( $index_pid{$_} ) for (@match_list);
+}
 
 exit 0;
 
@@ -397,7 +411,7 @@ sub get_links_all {
 	logger "INFO: Getting Index page\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
-	$ua->timeout([10]);
+	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{safari} );
 
@@ -508,14 +522,13 @@ sub get_links_atom {
 	logger "INFO: Getting Index Feed\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
-	$ua->timeout([10]);
+	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 
 	# Download index feed
 	my $retries = 3;
 	do {
 		# Get index pages
-		$now = time();
 		$xml = download_block(undef, $atom_feed_url, $ua);
 		if (! $xml) {
 			logger "WARNING: Failed to get programme index feed from iplayer site\n";
@@ -527,11 +540,6 @@ sub get_links_atom {
 		} 
 	} until ($retries == 0);
 
-	# Parse XML
-	logger "\nINFO: Parsing Programme Data\n";
-	my $twig = XML::Twig->new();
-	$twig->parse($xml);
-	my $root = $twig->root;
 
 #  <entry>
 #    <title type="text">Take a Bow: Street Feet on the Farm</title>
@@ -562,35 +570,46 @@ sub get_links_atom {
 #    <duration>00:05:00</duration>
 #  </entry>
 
+	# Parse XML
+	logger "\nINFO: Parsing Programme Data\n";
 
-	my ( $name, $episode, $desc, $pid, $available );
-	foreach my $entry ($root->children('entry')) {
+	# get list of entries within <entry> </entry> tags
+	my @entries = split /<entry>/, $xml;
+	# Discard first element == header
+	shift @entries;
+
+	my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail );
+	foreach my $entry (@entries) {
 
 		# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
-		$name = $entry->first_child_text('title');
+		$entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
+		$name = $1;
 		$episode = $name;
 		$name =~ s/^(.*): .*$/$1/g;
 		$episode =~ s/^.*: (.*)$/$1/g;
 
-		# tag:bbc.co.uk,2008:PIPS:b008pj3w
-		$pid = $entry->first_child_text('id');
-		$pid =~ s/^.*PIPS:(.*)$/$1/g;
+		# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
+		$entry =~ m{<id>.*PIPS:(.+?)</id>};
+		$pid = $1;
 
-		# 2008-06-22T05:01:49Z
-		$available = $entry->first_child_text('updated');
-		$available =~ s/^(\d{4}\-\d\d\-\d\d).*(\d\d:\d\d:\d\d).*$/$1 $2/g;
+		# <updated>2008-06-22T05:01:49Z</updated>
+		$entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+		$available = get_available_time_string( $1 );
 
-		# parse embedded xhtml
-		$desc = $entry->first_child('content')->child_text(0,'xhtml:div');
-		$desc =~ s|^.*<xhtml:br/>(.*)$|$1|g;
+		# parse embedded xhtml <content ...>... <xhtml:br/>(desc here)</xhtml:div>... </content>
+		#<xhtml:br/>Sitcom about a jazz fan, a fashion victim, a mystic and a gorilla. When Vince bites a rare jazz record, the Jazz Beast enters his bloodstream.       </xhtml:div>
+		$desc = $entry;
+		# Strip out newlines and replace with ' '
 		$desc =~ s/\n/ /g;
-		$desc =~ s/^\s*(.*)\s*$/$1/g;
-		
+		$desc =~ s|^.*<xhtml:br/>\s*(.*?)\s*</xhtml:div>.*$|$1|gm;
+
 		# Parse the categories into hash
+		# <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
 		my %category;
-		for (my $i = 0; $i < $entry->children_count('category'); $i++) {
-			$category{ $entry->child($i, 'category')->att('term') } = $entry->child($i,'category')->att('label');
-		}		
+		for my $line ( grep /<category/, (split /\n/, $entry) ) {
+			$line =~ m{<category\s+term=\"(.+?)\".*?label=\"(.+?)\"};
+			$category{$1} = $2;
+		}
 		# We only so far have h264 versions for Signed and Original AFAIK, add entry for both of these (instead of version pid)
 		my @versions;
 		my @categories;
@@ -598,14 +617,25 @@ sub get_links_atom {
 		#push @versions, 'Original'; # if ( ! grep /^version.*/, keys %category );
 		# Add an entry for signed version if it exists
 		for (keys %category) {
-			push @versions, $category{$_} if $_ =~ /^version/ && $category{$_} eq 'Signed';
+			push @versions, $category{$_} if /^version/ && $category{$_} eq 'Signed';
 			push @categories, $category{$_} if /^\d{6}$/;
 		}
 
-                my $elt;
-		my $channel;
-		$channel  = $elt->next_elt()->first_child_text() if ( $elt = $entry->first_child('author') );
+		# Get channel
+		# <author>...<name>****</name>....</author>
+		$channel = $entry;
+		$channel =~ s/\n/ /g;
+		$channel =~ s|^.*<author>.*?<name>\s*(.+?)\s*</name>.*?</author>.*$|$1|gm;
 
+		# Get duration
+		$entry =~ m{<duration>\s*(.+?)\s*</duration>};
+		$duration = $1;
+
+		# Get thumbnail
+		# <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
+		$entry =~ m{<media:thumbnail\s+url=\"(http://.+?)\"};
+		$thumbnail = $1;
+	
 		# build data structure
 		$prog{$pid} = {
 			'name'		=> $name,
@@ -613,8 +643,8 @@ sub get_links_atom {
 			'episode'	=> $episode,
 			'desc'		=> $desc,
 			'available'	=> $available,
-			'duration'	=> $entry->first_child_text('duration'),
-			'thumbnail'	=> $entry->first_child('media:thumbnail')->att('url'),
+			'duration'	=> $duration,
+			'thumbnail'	=> $thumbnail,
 			'channel'	=> $channel,
 			'categories'	=> (join ',', @categories),
 		};
@@ -718,9 +748,9 @@ sub download_programme {
 	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
 	# 30 second request timeout
-	$ua->timeout([30]);
+	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
-	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 0 ) );
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
 	# Stage 1: get PID and set cookie
 	$ua->agent( $user_agent{safari} );
@@ -741,7 +771,7 @@ sub download_programme {
 	#    iplayer_streaming_http_mp4 : [
 	#    ],  ### This part is empty == no mov version yet
 	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, $res->content ) {
-		logger "\rWARNING: Programme is reported as not yet ready for download\n\n";
+		logger "\rWARNING: Programme is reported as not yet ready for download\n";
 		# Will return from here once satisfied that this test is reliable
 		#return 11;
 	} else {
@@ -755,7 +785,8 @@ sub download_programme {
 	# Get type => verpid
 	my %verpid_types = get_ver_pid_types( @content );
 	my $url_2;
-
+	my $got_url;
+	
 	# Do this for each version tried in this order (if they appaered in the content)
 	for my $type ( qw/ Original Signed AudioDescribed OpenSubtitled Shortened Lengthened Other / ) {
 
@@ -766,24 +797,32 @@ sub download_programme {
 			# Create url with appended 6 digit random number
 			my $url_1 = ${url_download_prefix}.'/'.$verpid_types{$type}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
 
-			logger "INFO: Stage 2 Type = $prog{$pid}{type}\n" if $opt{verbose};
+			logger "INFO: Type = $prog{$pid}{type}\n" if $opt{verbose};
 			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
 
-			# Get these web bugs to whitelist our cookie
-			get_web_bugs($ua, @content);
+			# Get these web bugs to whitelist our cookie if we don't have one already
+			if ( get_web_bugs($ua, @content) ) {
+				logger "ERROR: Could not whitelist cookie\n";
+				return 16;
+			} 
 
 			$url_2 = get_stream_download_url( $ua, $url_1 );
+			$got_url = 1;
 		}
 		# Break out of loop if we have an actual URL
-		last if $url_2;
+		last if $got_url && $url_2;
 	}
 
 	# Report error if no versions are available
-	if ( ! $url_2 ) {
-		logger "ERROR: No versions exist for download";
+	if ( ! $got_url ) {
+		logger "ERROR: No versions exist for download\n";
 		return 14;
-	}	
-
+	}
+	# Report error if failed to get URL for version
+	if ( $got_url && ! $url_2 ) {
+		logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
+		return 15;
+	}
 
 	# Determine the correct filenames for this download
 	my $file_prefix = generate_download_filename_prefix( $pid );
@@ -793,7 +832,7 @@ sub download_programme {
 	if ( -f $file_done ) {
 		logger "ERROR: File already exists\n\n";
 		return 1;
-	}	
+	}
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -827,10 +866,8 @@ sub download_h264_stream {
 
 		# Get ftyp+wide header etc
 		my $mdat_start = 0x1c;
-		$now = time();
 		my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
 		# Get bytes upto (but not including) mdat atom start -> $header
-		$now = time();
 		my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
 
 		# Detemine moov start
@@ -885,25 +922,29 @@ sub download_h264_stream {
                 # Open file if required
                 my $fh = open_file_append($file);
 
-                # If the partial file already exists, then redownload from the correct mdat/download offset
+                # If the partial file already exists, then resume from the correct mdat/download offset
                 my $restart_offset = $mdat_start;
 		my $moovdata;
-                my $moov_length;
+                # Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
+		my $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
+		logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
+		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size
+		if ( $moov_length > (${moov_start}/9.0) ) {
+			logger "ERROR: Bad file download, deleted cookie, please retry\n";
+			unlink $cookiejar;
+			return 17;
+		}
                 # If we have a too-small-sized file and not stdout and not no-write then this is a partial download
                 if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
-		  # Get moovlength from server
-		  $now = time();
-		  $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		  # Calculate new start offset (considering that we've put moov first in file)
                   $restart_offset = stat($file)->size - $moov_length;
-                  logger "INFO: Restarting download from $restart_offset\n";
+                  logger "INFO: Restarting download from $restart_offset                        \n";
                 }
 
 
                 # If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
                 if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
 		  # get moov chunk into memory
-		  $now = time();
 		  $moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
 		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
                   $moov_length = relocate_moov_chunk_offsets( $moovdata );
@@ -925,7 +966,6 @@ sub download_h264_stream {
                 }
                 
 		# Download mdat in 32MB blocks
-		$now = time();
 		my $chunk_size = 0x2000000;
 		for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
 		  # get mdat chunk into file
@@ -946,7 +986,7 @@ sub download_h264_stream {
 
 		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
 		logger "INFO: Downloaded $file_done\n";
-		unlink $cookiejar;
+		#unlink $cookiejar;
 		# Moving file into place as complete (if not stdout)
                 move($file, $file_done) if ! $opt{stdout};
 
@@ -998,7 +1038,7 @@ sub get_ver_pid_types {
 	s/^.*'(.+)'.*$/$1/g for @type_pid;
 	# Get hash of pid => type
 	my %types = @type_pid;
-	logger "INFO: Types available: ", join(', ', %types), "\n" if $opt{verbose};
+	logger "INFO: Types available: ".join(', ', %types)."\n" if $opt{verbose};
 	return %types;
 }
 
@@ -1035,6 +1075,14 @@ sub get_web_bugs {
 	my $ua = shift;
 	my @content = @_;
 
+	# Load cookies and check if we have a BBC-UID cookie in there
+	my $cookies = HTTP::Cookies->new;
+	$cookies->load( $cookiejar );
+	if ( $cookies->as_string =~ /BBC\-UID=/ ) {
+		logger "INFO: Cookie already exists\n" if $opt{verbose};
+		return 0;
+	}
+	
 	# Parse this to get o.gif for stats web bug
 	#<script type="text/javascript">
 	#var i = new Image(1,1); i.src="http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~http://www.bbc.co.uk/iplayer/search/?q=graham&amp;go=Find+Programmes~RS~q~RS~q=graham&amp;start=1&amp;scope=iplayersearch&amp;go=Find+Programmes&amp;version_pid=b00c3rrt~RS~z~RS~02~RS~";
@@ -1064,7 +1112,9 @@ sub get_web_bugs {
 	my $res = $ua->request($req);
 	# Get resulting Location header (i.e. redirect URL)
 	if ( ! $res->is_success ) {
-		logger "ERROR: Failed to get o.gif web bug from iplayer site\n\n";
+		logger "ERROR: Failed to get o.gif web bug from iplayer site\n";
+		# Better remove our cookie cos it probably isn't whitelisted
+		unlink $cookiejar;
 		return 2;
 	}
 
@@ -1090,7 +1140,9 @@ sub get_web_bugs {
 	my $res = $ua->request($req);
 	# Get resulting Location header (i.e. redirect URL)
 	if ( ! $res->is_success ) {
-		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n\n";
+		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n";
+		# Better remove our cookie cos it probably isn't whitelisted
+		unlink $cookiejar;
 		return 2;
 	}
 
@@ -1122,8 +1174,8 @@ sub relocate_moov_chunk_offsets {
 				# write back bytes into $moovdata
 				substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
 				substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
-				substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>	8) & 0xFF );
-				substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>	0) & 0xFF );
+				substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
+				substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
 				#$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
 				#logger "$chunk_offset\n";
 			}
@@ -1153,6 +1205,7 @@ sub download_block {
 	my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
 	my $orig_length;
 	my $buffer;
+	$now = time();
 
 	# If this is an 'append to file' mode call
 	if ( defined $file && $fh && (!$opt{nowrite}) ) {
@@ -1207,7 +1260,7 @@ sub download_block {
 		my $size = length($buffer);
 		# download rates in bytes per second
 		my $rate = $size / ( time() - $now + 0.01 );
-		# If we can get COntent_length then display full progress
+		# If we can get Content_length then display full progress
 		if ($res->header("Content-Length")) {
 			# Block length
 			$file_len = $res->header("Content-Length");
@@ -1239,7 +1292,7 @@ sub download_block {
 		$res = $ua->request($req, $callback);
 		if (  (! $res->is_success) || (! $res->header("Content-Length")) ) {
 			logger "ERROR: Failed to Download block\n\n";
-			unlink $cookiejar;
+			#unlink $cookiejar;
 			return 5;
 		}
                 # If we don't require any more bytes (previously fully downloaded) then skip
@@ -1308,7 +1361,7 @@ sub open_file_append {
 sub update_script {
 	# Get version URL
 	my $ua = LWP::UserAgent->new;
-	$ua->timeout([10]);
+	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{update} );
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
@@ -1380,9 +1433,6 @@ sub create_fxd() {
 	    	  if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
 			my $title = "$prog{$pid}{episode} ($prog{$pid}{available})";
 			my $desc = $prog{$pid}{desc};
-	    	   	$title =~ s/&/&amp\;/g;
-	    	   	$desc =~ s/&/&amp\;/g;
-	    	   	  $prog{$pid}{desc} =~ s/&/&amp\;/g;
 	    		  print FXD "	<movie title=\"${title}\">
 						<video>
 							<url id=\"p1\">${pid}.mov<playlist/></url>
@@ -1413,9 +1463,6 @@ sub create_fxd() {
           		if ( $prog{$index_pid{$_}}{channel} =~ /^$channel$/ ) {
 				my $title = "$prog{$pid}{name} - $prog{$pid}{episode} ($prog{$pid}{available})";
 				my $desc = $prog{$pid}{desc};
-				$title =~ s/&/&amp\;/g;
-				$desc =~ s/&/&amp\;/g;
-				$prog{$pid}{desc} =~ s/&/&amp\;/g;
 				print FXD "<movie title=\"${title}\">
 						<video>
 							<url id=\"p1\">${pid}.mov<playlist/></url>
@@ -1428,7 +1475,7 @@ sub create_fxd() {
                 }
                 print FXD "\t</container>\n";
         }
-        print FXD "\t</container>\n";        
+        print FXD "\t</container>\n";
 
 
         # containers for alpha sorted programmes
@@ -1441,8 +1488,6 @@ sub create_fxd() {
                         my $regex = $table{$folder};
 			my $title = "$name - $prog{$pid}{episode} ($prog{$pid}{available})";
 			my $desc = $prog{$pid}{desc};
-	    	   	$title =~ s/&/&amp\;/g;
-	    	   	$desc =~ s/&/&amp\;/g;
 	    	    	if ( $name =~ /^$regex/i ) {
 	    		  print FXD "	<movie title=\"${title}\">
 						<video>
@@ -1494,7 +1539,7 @@ sub save_options_file {
 	unlink $optfile;
 	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
 	# Save all opts except for these
-	for (grep !/(help|test|debug)/, keys %opt) {
+	for (grep !/(help|test|debug|get)/, keys %opt) {
 		print OPT "$_ $opt{$_}\n"  if defined $opt{$_};
 	}
 	close OPT;
@@ -1513,3 +1558,13 @@ sub read_options_file {
 	close OPT;
 }
 
+# Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
+sub get_available_time_string {
+	my $datestring = shift;
+	# extract $year $mon $mday $hour $min $sec
+	$datestring =~ m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)Z};
+	my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
+	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
+	return "$time[7] days $time[2] hours ago";
+}
