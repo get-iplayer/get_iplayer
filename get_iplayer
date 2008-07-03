@@ -8,29 +8,36 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 2nd 2008
+# Date: July 3rd 2008
 #
-my $version = 0.36;
+my $version = 0.37;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
-# * Downloads *unencrypted* streams from BBC iplayer site
+# * Downloads *unencrypted* streams from BBC iplayer site (--get)
 # * Re-jigs the mov file so that it can be streamed and start faster on some players
 # * Resume downloads of partially downloaded files
 # * Indexing of all available (i.e. listed) iplayer programs using new Atom feed
 # * Caching of Index (default 4hrs)
-# * Creation of a basic html index file
+# * Creation of a basic html index file (--html <file>)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (--long)
 # * Regex search on channel and category (--channel, --category)
 # * Save default options in ~/.iplayerrc (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), and Windows (Activstate Perl, cygwin)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), MacOSX, and Windows (Activstate Perl, cygwin)
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
 #
+#
+# Changes 0.37 - 20080703
+# * Made fxd and html output formats optional with ability to specify output filenames
+# * --fxd output now has 3 menu modes channel->progname->episode (--fxd-channels), progname->episode (--fxd-names), alpha->progname-episode (--fxd-alpha)
+# * removed type=video attribute from fxd container tags
+# * Now encode/decode xml entities for output
+# * --stdout option now implies --get
 #
 # Changes 0.36 - 20080701
 # * Now use the --get/-g option to get the selected files, without this we only list matches
@@ -165,6 +172,7 @@ use LWP::UserAgent;
 #use LWP::Debug qw(+);
 use HTTP::Cookies;
 use HTTP::Headers;
+use HTML::Entities;
 use Time::Local;
 my $DEBUG = 0;
 $|=1;
@@ -179,9 +187,9 @@ sub logger(@) {
 sub usage {
 	logger <<EOF;
 Usage:
-  Search Programmes:     get_iplayer [-l] [--channel] [--category] [<options>] [<regex|index|pid|url>]
-  Download files:        get_iplayer -g [-l] [--channel] [--category] [<options>] <regex|index|pid|url> [<regex|index|pid|url>]
-  Stream Downloads:      get_iplayer [-v] [-x] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -
+  Search Programmes:     get_iplayer [-l] [--channel] [--category] [<options>] [<regex|index|pid|url> ...]
+  Download files:        get_iplayer -g [-l] [--channel] [--category] [<options>] <regex|index|pid|url> ...
+  Stream Downloads:      get_iplayer -x [-v] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -
   Update get_iplayer:    get_iplayer -u
 
 Options:
@@ -199,6 +207,11 @@ Options:
  -t, --test           Test only - no download (will show programme type)
  -w, --whitespace     Keep whitespace (and escape chars) in filenames
      --freevo <file>  Create symlink to <file> once we have the header of the download
+     --fxd <file>     Create Freevo FXD XML in specified file
+     --fxd-channels   Create freevo menu of channels -> programme names -> episodes
+     --fxd-names      Create freevo menu of programme names -> episodes
+     --fxd-alpha      Create freevo menu sorted alphabetically by programme name
+     --html <file>    Create basic HTML index of programmes in specified file
  -v, --verbose        Verbose
  -u, --update         Update get_iplayer if a newer one exists
  -h, --help           Help
@@ -239,6 +252,11 @@ GetOptions(
 	"category=s"			=> \$opt{category},
 	"q|quiet"			=> \$opt{quiet},
 	"freevo=s"			=> \$opt{freevo},
+	"fxd=s"				=> \$opt{fxd},
+	"fxd-channels"			=> \$opt{fxdchannels},
+	"fxd-names"			=> \$opt{fxdnames},
+	"fxd-alpha"			=> \$opt{fxdalpha},
+	"html"				=> \$opt{html},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
@@ -248,8 +266,6 @@ save_options_file() if $save;
 
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
-my $webfile 		= $download_dir.'/iplayer.html'; # Where html file is generated
-my $fxdfile 		= $download_dir.'/folder.fxd'; # Where freevo will scan for FXD file
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $cookiejar		= "$ENV{HOME}/.get_iplayer_cookies";
 my $cachefile		= '/tmp/iplayer.cache';
@@ -317,6 +333,10 @@ unlink ($cachefile) if $opt{flush};
 # Get stream links from BBC iplayer site or from cache (also populates all hashes)
 get_links();
 
+# Write HTML and FXD files if required
+create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
+create_fxd ( sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
   list_progs( get_regex_matches( '.*' ) );
@@ -348,7 +368,7 @@ logger "Matches:\n" if @match_list;
 list_progs( @match_list );
 
 # Do the downloads based on list of index numbers if required
-if ( $opt{get} ) {
+if ( $opt{get} || $opt{stdout} ) {
 	download_programme( $index_pid{$_} ) for (@match_list);
 }
 
@@ -625,7 +645,11 @@ sub get_links_atom {
 		# <author>...<name>****</name>....</author>
 		$channel = $entry;
 		$channel =~ s/\n/ /g;
-		$channel =~ s|^.*<author>.*?<name>\s*(.+?)\s*</name>.*?</author>.*$|$1|gm;
+		if ( $channel =~ m{^.*<author>.*?<name>\s*.+?\s*</name>.*?</author>.*$} ) {
+			$channel =~ s|^.*<author>.*?<name>\s*(.+?)\s*</name>.*?</author>.*$|$1|gm;
+		} else {
+			$channel = 'Unknown';
+		}
 
 		# Get duration
 		$entry =~ m{<duration>\s*(.+?)\s*</duration>};
@@ -638,15 +662,15 @@ sub get_links_atom {
 	
 		# build data structure
 		$prog{$pid} = {
-			'name'		=> $name,
-			'versions'	=> (join ',', @versions),
-			'episode'	=> $episode,
-			'desc'		=> $desc,
+			'name'		=> decode_entities( $name ),
+			'versions'	=> decode_entities( join ',', @versions ),
+			'episode'	=> decode_entities( $episode ),
+			'desc'		=> decode_entities( $desc ),
 			'available'	=> $available,
 			'duration'	=> $duration,
 			'thumbnail'	=> $thumbnail,
-			'channel'	=> $channel,
-			'categories'	=> (join ',', @categories),
+			'channel'	=> decode_entities( $channel ),
+			'categories'	=> decode_entities( join ',', @categories ),
 		};
 	}
 	# Add index field based on alphabetical sorting by prog name
@@ -698,10 +722,6 @@ sub get_links {
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
 			chmod 0777, $cachefile;
-
-			# Also write HTML and FXD files
-			create_html( sort {$a <=> $b} keys %index_pid );
-			create_fxd ( sort {$a <=> $b} keys %index_pid );
 
 		} else {
 			logger "WARNING: Couldn't open cache file for writing\n";
@@ -1399,137 +1419,149 @@ sub update_script {
 
 # Creates the Freevo FXD meta data (and pre-downloads graphics - todo)
 sub create_fxd() {
-	my %table = (
-		'A-C' => '[abc]',
-		'D-F' => '[def]',
-		'G-I' => '[ghi]',
-		'J-L' => '[jkl]',
-		'M-N' => '[mn]',
-		'O-P' => '[op]',
-		'Q-R' => '[qt]',
-		'S-T' => '[st]',
-		'U-V' => '[uv]',
-		'W-Z' => '[wxyz]',
-		'0-9' => '[\d]',
-	);
-	if ( open(FXD, "> $fxdfile") ) {
-		print FXD '<?xml version="1.0" ?><freevo>';
+	if ( ! open(FXD, "> $opt{fxd}") ) {
+		logger "ERROR: Couldn't open fxd file $opt{fxd} for writing\n";
+		return 1;
+	}
+	print FXD '<?xml version="1.0" ?><freevo>';
 
-        # containers for programmes sorted into subdirs
-        print FXD "\t<container title=\"iplayer by Programme Name\" type=\"video\">\n";
-        my %program_index;
-        my %program_count;
-        # create hash of programme_name -> index
-        for (@_) {
-          $program_index{$prog{$index_pid{$_}}{name}} = $_;
-          $program_count{$prog{$index_pid{$_}}{name}}++;
-        }
-        for my $name ( sort keys %program_index ) {
-                my @count = grep /^$name$/, keys %program_index;
-                print FXD "\t<container title=\"$name ($program_count{$name})\" type=\"video\">\n";
-	    	for (@_) {
-          	  my $pid = $index_pid{$_};
-          	  # loop through and find matches for each progname
-	    	  if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
-			my $title = "$prog{$pid}{episode} ($prog{$pid}{available})";
-			my $desc = $prog{$pid}{desc};
-	    		  print FXD "	<movie title=\"${title}\">
-						<video>
-							<url id=\"p1\">${pid}.mov<playlist/></url>
-						</video>
-						<info>
-							<description>${desc}</description>
-						</info>
+	if ( $opt{fxdnames} ) {
+		# containers sorted by prog names
+		print FXD "\t<container title=\"iplayer by Programme Name\">\n";
+		my %program_index;
+		my %program_count;
+		# create hash of programme_name -> index
+	        for (@_) {
+	        	$program_index{$prog{$index_pid{$_}}{name}} = $_;
+			$program_count{$prog{$index_pid{$_}}{name}}++;
+		}
+		for my $name ( sort keys %program_index ) {
+			my @count = grep /^$name$/, keys %program_index;
+			print FXD "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n";
+			for (@_) {
+				my $pid = $index_pid{$_};
+				# loop through and find matches for each progname
+				if ( $prog{$index_pid{$_}}{name} =~ /^$name$/ ) {
+					my $episode = encode_entities( $prog{$pid}{episode} );
+					my $desc = encode_entities( $prog{$pid}{desc} );
+					my $title = "${episode} ($prog{$pid}{available})";
+					print FXD "<movie title=\"${title}\">
+						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
+						<info><description>${desc}</description></info>
 					</movie>\n";
-                  }
-                }			
-                print FXD "\t</container>\n";
-        }
-        print FXD "\t</container>\n";        
+				}
+			}			
+			print FXD "\t</container>\n";
+		}
+		print FXD "\t</container>\n";        
+	}
 
 
-        # containers for programmes sorted into channels
-        print FXD "\t<container title=\"iplayer by Channel\" type=\"video\">\n";
-        my %channels;
-        # create hash of channel names
-        for (@_) {
-          $channels{$prog{$index_pid{$_}}{channel}} = 1;
-        }
-        for my $channel ( sort keys %channels ) {
-        	print FXD "\t<container title=\"$channel\" type=\"video\">\n";
-	    	for (@_) {
-          		my $pid = $index_pid{$_};
-          		# loop through and find matches for each progname
-          		if ( $prog{$index_pid{$_}}{channel} =~ /^$channel$/ ) {
-				my $title = "$prog{$pid}{name} - $prog{$pid}{episode} ($prog{$pid}{available})";
-				my $desc = $prog{$pid}{desc};
-				print FXD "<movie title=\"${title}\">
-						<video>
-							<url id=\"p1\">${pid}.mov<playlist/></url>
-							</video>
-						<info>	
-							<description>${desc}</description>
-						</info>
-					</movie>\n";
+	if ( $opt{fxdchannels} ) {
+		# containers for prog names sorted by channel
+		print FXD "\t<container title=\"iplayer by Channel\">\n";
+		my %program_index;
+		my %program_count;
+		my %channels;
+		# create hash of unique channel names and hash of programme_name -> index
+	        for (@_) {
+	        	$program_index{$prog{$index_pid{$_}}{name}} = $_;
+			$program_count{$prog{$index_pid{$_}}{name}}++;
+			$channels{$prog{$index_pid{$_}}{channel}} .= '|'.$prog{$index_pid{$_}}{name}.'|';
+		}
+		for my $channel ( sort keys %channels ) {
+			print FXD "\t<container title=\"".encode_entities( $channel )."\">\n";
+			for my $name ( sort keys %program_index ) {
+				# Do we have any of this prog $name on this $channel?
+				if ( $channels{$channel} =~ /\|$name\|/ ) {
+					my @count = grep /^$name$/, keys %program_index;
+					print FXD "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n";
+					for (@_) {
+						# loop through and find matches for each progname for this channel
+						my $pid = $index_pid{$_};
+						if ( $prog{$pid}{channel} =~ /^$channel$/ && $prog{$pid}{name} =~ /^$name$/ ) {
+							my $episode = encode_entities( $prog{$pid}{episode} );
+							my $desc = encode_entities( $prog{$pid}{desc} );
+							my $title = "${episode} ($prog{$pid}{available})";
+							print FXD "<movie title=\"${title}\">
+								<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
+								<info><description>${desc}</description></info>
+							</movie>\n";
+						}
+					}
+					print FXD "\t</container>\n";
+				}
 			}
-                }
-                print FXD "\t</container>\n";
-        }
-        print FXD "\t</container>\n";
+			print FXD "\t</container>\n";
+		}
+		print FXD "\t</container>\n";
+	}
 
 
-        # containers for alpha sorted programmes
-        print FXD "\t<container title=\"iplayer A-Z\" type=\"video\">\n";
-        for my $folder (sort keys %table) {
-                print FXD "\t<container title=\"iplayer $folder\" type=\"video\">\n";
-                for (@_) {
-	            	my $pid = $index_pid{$_};
-	    	    	my $name = $prog{$pid}{name};
-                        my $regex = $table{$folder};
-			my $title = "$name - $prog{$pid}{episode} ($prog{$pid}{available})";
-			my $desc = $prog{$pid}{desc};
-	    	    	if ( $name =~ /^$regex/i ) {
-	    		  print FXD "	<movie title=\"${title}\">
-						<video>
-							<url id=\"p1\">${pid}.mov<playlist/></url>
-						</video>
-						<info>
-							<description>${desc}</description>
-						</info>
+	if ( $opt{fxdalpha} ) {
+		my %table = (
+			'A-C' => '[abc]',
+			'D-F' => '[def]',
+			'G-I' => '[ghi]',
+			'J-L' => '[jkl]',
+			'M-N' => '[mn]',
+			'O-P' => '[op]',
+			'Q-R' => '[qt]',
+			'S-T' => '[st]',
+			'U-V' => '[uv]',
+			'W-Z' => '[wxyz]',
+			'0-9' => '[\d]',
+		);
+		print FXD "\t<container title=\"iplayer A-Z\">\n";
+		for my $folder (sort keys %table) {
+			print FXD "\t<container title=\"iplayer $folder\">\n";
+			for (@_) {
+				my $pid = $index_pid{$_};
+				my $name = encode_entities( $prog{$pid}{name} );
+				my $episode = encode_entities( $prog{$pid}{episode} );
+				my $desc = encode_entities( $prog{$pid}{desc} );
+				my $title = "${name} - ${episode} ($prog{$pid}{available})";
+				my $regex = $table{$folder};
+				if ( $name =~ /^$regex/i ) {
+					print FXD "<movie title=\"${title}\">
+						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
+						<info><description>${desc}</description></info>
 					</movie>\n";
-                        }
-                }
-                print FXD "\t</container>\n";
-        }
-        print FXD "\t</container>\n";
+				}
+			}
+			print FXD "\t</container>\n";
+		}
+		print FXD "\t</container>\n";
+	}
 
-  } else {
-    logger "Couldn't open fxd file $fxdfile for writing\n";
-  }
-  print FXD '</freevo>';
-  close (FXD);
+
+	print FXD '</freevo>';
+	close (FXD);
 }
+
 
 sub create_html {
 	# Create local web page
-	if ( open(HTML, "> $webfile") ) {
-	  print HTML '<html><head></head><body><table border=1>';
-	  for (@_) {
-            my $pid = $index_pid{$_};
-	    my $name = $prog{$pid}{name};
-	    print HTML "<tr>
-	      <td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
-	      <td>$_</td><td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td> <td>$prog{$pid}{episode}</td>
-	    </tr>
-	    <tr>
-	      <td colspan=4>$prog{$pid}{desc}</td>
-	    </tr>
-	    \n";
-	  }
-	  print HTML '</table></body>';
-	  close (HTML);
+	if ( open(HTML, "> $opt{html}") ) {
+		print HTML '<html><head></head><body><table border=1>';
+		for (@_) {
+			my $pid = $index_pid{$_};
+			my $name = encode_entities( $prog{$pid}{name} );
+			my $episode = encode_entities( $prog{$pid}{episode} );
+			my $desc = encode_entities( $prog{$pid}{desc} );
+			print HTML "<tr>
+					<td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
+					<td>$_</td><td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td> <td>${episode}</td>
+				</tr>
+				<tr>
+					<td colspan=4>${desc}</td>
+				</tr>
+			\n";
+		}
+		print HTML '</table></body>';
+		close (HTML);
 	} else {
-	  logger "Couldn't open html file $webfile for writing\n";
+		logger "Couldn't open html file $opt{html} for writing\n";
 	}
 }
 
