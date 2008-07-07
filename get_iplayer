@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 7th 2008
 #
-my $version = 0.37;
+my $version = 0.39;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
@@ -31,6 +31,11 @@ my $version = 0.37;
 # * perl 5.8
 # * LWP (libwww-perl)
 #
+#
+# Changes 0.39 - 20080707
+# * Download File name fixed in scrape mode - episode appeared twice
+# * Image thumbnail url was wrong in scrape mode
+# * html option never looked for a filename
 #
 # Changes 0.38 - 20080707
 # * Updates to allow downloading after the BBC updated their website - kludged for now using scrape method until I can work out the atom feed again
@@ -264,7 +269,7 @@ GetOptions(
 	"fxd-channels"			=> \$opt{fxdchannels},
 	"fxd-names"			=> \$opt{fxdnames},
 	"fxd-alpha"			=> \$opt{fxdalpha},
-	"html"				=> \$opt{html},
+	"html=s"			=> \$opt{html},
 	"terse"				=> \$opt{terse},
 ) || die usage();
 usage() if $opt{help};
@@ -526,7 +531,7 @@ sub get_links_all {
 					'desc'		=> $desc,
 					'available'	=> $available,
 					'duration'	=> '<duration>',
-					'thumbnail'	=> '<thumbnail>',
+					'thumbnail'	=> 'http://www.bbc.co.uk/iplayer/images/episode/'.$pid.'_150_84.jpg',
 					'channel'	=> '<channel>',
 					'categories'	=> '<categories>',
 				};
@@ -577,7 +582,7 @@ sub get_links_atom {
 			sleep 1;
 		} else {
 			$retries = 0;
-		} 
+		}
 	} until ($retries == 0);
 
 
@@ -821,9 +826,11 @@ sub download_programme {
 	}
 
 	# Extract Long Name, e.g.: iplayer.episode.setTitle("DIY SOS: Series 16: Swansea");
-	chomp( $prog{$pid}{longname} = (grep /iplayer\.episode\.setTitle/, @content)[0] );
+	chomp( $prog{$pid}{longname} = ( grep /iplayer\.episode\.setTitle/, @content)[0] );
 	$prog{$pid}{longname} =~ s/^\s*iplayer\.episode\.setTitle\(\"\s*(.+)\s*\".*$/$1/g;
-	
+	# Strip off the episode name
+	$prog{$pid}{longname} =~ s/^(.+):.*?$/$1/g;
+
 	# Get type => verpid
 	my %verpid_types = get_ver_pid_types( @content );
 	my $url_2;
