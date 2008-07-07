@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 7th 2008
 #
-my $version = 0.39;
+my $version = 0.40;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
@@ -31,7 +31,10 @@ my $version = 0.39;
 # * perl 5.8
 # * LWP (libwww-perl)
 #
-#
+# Changes 0.40 - 20080707
+# * Fixed saving of thumbnail url in cache
+# * Added audio pid download/convert support (downloads rtsp and converts to mp3)
+# 
 # Changes 0.39 - 20080707
 # * Download File name fixed in scrape mode - episode appeared twice
 # * Image thumbnail url was wrong in scrape mode
@@ -225,6 +228,7 @@ Options:
      --fxd-names      Create freevo menu of programme names -> episodes
      --fxd-alpha      Create freevo menu sorted alphabetically by programme name
      --html <file>    Create basic HTML index of programmes in specified file
+     --pid <pid|url>  Download arbitrary pid
  -v, --verbose        Verbose
  -u, --update         Update get_iplayer if a newer one exists
  -h, --help           Help
@@ -271,6 +275,7 @@ GetOptions(
 	"fxd-alpha"			=> \$opt{fxdalpha},
 	"html=s"			=> \$opt{html},
 	"terse"				=> \$opt{terse},
+	"pid=s"				=> \$opt{pid},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
@@ -288,16 +293,19 @@ my $cookiejar		= "$ENV{HOME}/.get_iplayer_cookies";
 my $cachefile		= '/tmp/iplayer.cache';
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
+my $mplayer		= 'mplayer';
+my $lame		= 'lame';
 
 # URLs
-my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
-my $atom_feed_url	= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
-my $pid_page_url_prefix	= 'http://www.bbc.co.uk/iplayer/episode/';
-my $web_bug_2_url	= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
-my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
-my $prog_page_prefix	= 'http://www.bbc.co.uk/programmes';
-my $version_url		= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
-my $update_url		= 'http://linuxcentre.net/get_iplayer/get_iplayer';
+my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
+my $atom_feed_url		= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
+my $pid_page_url_prefix		= 'http://www.bbc.co.uk/iplayer/episode/';
+my $web_bug_2_url		= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
+my $audio_download_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream';
+my $video_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
+my $prog_page_prefix		= 'http://www.bbc.co.uk/programmes';
+my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
+my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
 
 # User Agents
 my %user_agent = (
@@ -353,6 +361,14 @@ get_links();
 # Write HTML and FXD files if required
 create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
 create_fxd ( sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+
+# Get arbitrary pid
+if ( $opt{pid} ) {
+	# Remove any url parts from the pid
+	$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+	download_programme($opt{pid});
+	exit 0;
+}
 
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
@@ -742,7 +758,7 @@ sub get_links {
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
-				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}\n";
+				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -758,7 +774,7 @@ sub get_links {
 		for (@cache) {
 			# Populate %prog from cache
 			chomp();
-			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories) = split /\|/;
+			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories, $thumbnail) = split /\|/;
 			# Create data structure with prog data
 			$prog{$pid} = {
 				'index'		=> $index,
@@ -770,6 +786,7 @@ sub get_links {
 				'versions'	=> $versions,
 				'channel'	=> $channel,
 				'categories'	=> $categories,
+				'thumbnail'	=> $thumbnail,
 			};
 			$index_pid{$index}	= $pid;
 		}
@@ -786,27 +803,18 @@ sub download_programme {
 	my $page = $pid_page_url_prefix.$pid;
 	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
-	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
-	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
-
+	# Setup user-agent
 	# Switch off automatic redirects
 	my $ua = LWP::UserAgent->new( requests_redirectable => [] );
 	# Setup user agent
-	# 30 second request timeout
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
-	# Stage 1: get PID and set cookie
-	# This page Doesn't work with safari anymore....
-	$ua->agent( );
-	# send request
-	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
-	if ( ! $res->is_success ) {
-		logger "\rERROR: Failed to get programme ID from iplayer site\n\n";
-		return 7;
-	}
-	my @content = split /\n/, $res->content;
+	# Get stage_1 content
+	my @content = download_stage_1($ua, $page);
+	return 7 if ! @content;
+
 	# Non-UK detection
 	# Need to check this again after iplayer2 release
 	if ( grep /only available to play in the UK/i, @content ) {
@@ -814,10 +822,67 @@ sub download_programme {
 		exit 3;
 	}
 
+	# If we have the following then this is audio
+	#real: {
+	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
+	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+
+		# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
+		chomp( my $title = ( grep /title:\s+/, @content)[0] );
+		$title =~ s/^\s*title:\s\"\s*(.+)\s*\".*$/$1/g;
+		# Strip off the episode name
+		$title =~ m{^(.+):\s*(.*?)$};
+		$prog{$pid}{longname} = $1;
+		$prog{$pid}{episode} = $2;
+
+		# Get type => verpid
+		my %verpid_types = get_ver_pid_types( @content );
+		my $url_2;
+	
+		logger "INFO: Checking existence of programme\n";
+		$prog{$pid}{type} = 'Original';
+		# Create url with appended 6 digit random number
+		my $url_1 = ${audio_download_prefix}.'/'.$verpid_types{Original};
+
+		logger "INFO: Type = $prog{$pid}{type}\n" if $opt{verbose};
+		logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
+
+		# Get these web bugs to whitelist our cookie if we don't have one already
+		if ( get_web_bugs($ua, @content) ) {
+			logger "ERROR: Could not whitelist cookie\n";
+			return 16;
+		} 
+
+		$url_2 = get_audio_stream_download_url( $ua, $url_1 );
+
+		# Report error if no versions are available
+		if ( ! $url_2 ) {
+			logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
+			return 15;
+		}
+
+		# Determine the correct filenames for this download
+		my $file_prefix = generate_download_filename_prefix( $pid );
+		logger "\rINFO: File name prefix = $file_prefix                 \n";
+		my $file_done = "${download_dir}/${file_prefix}.mp3";
+		my $file = "${download_dir}/${file_prefix}.partial.wav";
+		if ( -f $file_done || -f $file ) {
+			logger "ERROR: File already exists\n\n";
+			return 1;
+		}
+
+		# Skip from here if we are only testing downloads
+		return 0 if $opt{test};
+
+		# Do the audio download
+		download_rtsp_stream( $ua, $url_2, $file, $file_done );
+		return 0;
+	}
+	
 	# Parse if programme available
 	#    iplayer_streaming_http_mp4 : [
 	#    ],  ### This part is empty == no mov version yet
-	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, $res->content ) {
+	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, @content ) {
 		logger "\rWARNING: Programme is reported as not yet ready for download\n";
 		# Will return from here once satisfied that this test is reliable
 		#return 11;
@@ -844,7 +909,7 @@ sub download_programme {
 			logger "INFO: Checking existence of type $type\n";
 			$prog{$pid}{type} = $type;
 			# Create url with appended 6 digit random number
-			my $url_1 = ${url_download_prefix}.'/'.$verpid_types{$type}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+			my $url_1 = ${video_download_prefix}.'/'.$verpid_types{$type}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
 
 			logger "INFO: Type = $prog{$pid}{type}\n" if $opt{verbose};
 			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
@@ -855,7 +920,7 @@ sub download_programme {
 				return 16;
 			} 
 
-			$url_2 = get_stream_download_url( $ua, $url_1 );
+			$url_2 = get_video_stream_download_url( $ua, $url_1 );
 			$got_url = 1;
 		}
 		# Break out of loop if we have an actual URL
@@ -890,6 +955,27 @@ sub download_programme {
 	download_h264_stream( $ua, $url_2, $file, $file_done );
 
 	return 0;
+}
+
+
+# Get stage 1 content
+sub download_stage_1 {
+	my ( $ua, $page ) = @_;
+
+	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
+	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
+
+
+	# Stage 1: get PID and set cookie
+	# This page Doesn't work with safari anymore....
+	$ua->agent( );
+	# send request
+	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
+	if ( ! $res->is_success ) {
+		logger "\rERROR: Failed to get programme ID from iplayer site\n\n";
+		return '';
+	}
+	return split /\n/, $res->content;
 }
 
 
@@ -1043,9 +1129,38 @@ sub download_h264_stream {
 }
 
 
+# Actually do the rtsp downloading
+sub download_rtsp_stream {
+	my ( $ua, $url_2, $file, $file_done ) = @_;
 
-# Get streaming mp4 URL
-sub get_stream_download_url {
+	# Stage 3a: Download 1st byte to get exact file length
+	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+
+	# Determine offset for continuation dowload
+	my $h = new HTTP::Headers(
+		'User-Agent'	=> $user_agent{coremedia},
+		'Accept'	=> '*/*',
+		'Range'		=> 'bytes=0-',
+	);
+	my $req = HTTP::Request->new ('GET', $url_2, $h);
+	my $res = $ua->request($req);
+	chomp( my $rtsp = $res->content );
+
+	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
+
+	system("$mplayer -cache 8192 -bandwidth 10000000 -vc null -vo null -ao pcm:waveheader:fast:file=$file \"$rtsp\"");
+	logger "INFO: Downloaded $file\n";
+	system("$lame -h -b 128 \"${file}\" \"${file_done}\"");
+	logger "INFO: Converted to mp3\n";
+
+	# Remove wav file
+	unlink $file if ! $opt{stdout};
+
+	return 0;
+}
+
+# Get streaming video URL
+sub get_video_stream_download_url {
 		my $ua = shift;
 		my $url_1 = shift;
 		
@@ -1072,6 +1187,49 @@ sub get_stream_download_url {
 			logger "\rERROR: Programme is not yet ready for download\n";
 			return '';
 		}
+
+		return $url_2;
+}
+
+# Get streaming audio URL (Real => rtsp)
+#<media kind="audio"
+#        type="audio/real"
+#        encoding="real"  >
+#        <connection
+#                priority="10"
+#                kind="sis"
+#                server="http://www.bbc.co.uk"
+#                identifier="/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two"
+#                href="http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"
+#        />
+#</media>
+sub get_audio_stream_download_url {
+		my $ua = shift;
+		my $url_1 = shift;
+		
+		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $user_agent{coremedia},
+			'Accept'	=> '*/*',
+			'Range'		=> 'bytes=0-',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		my $url_2 = $res->content;
+		if ( ! $res->is_success ) {
+			logger "ERROR: Failed to get audio url from iplayer site\n\n";
+			return '';
+		}
+		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
+		if ( $url_2 =~ /statuscode=404/ ) {
+			logger "\rERROR: Programme is not yet ready for download\n";
+			return '';
+		}
+		# extract ram URL
+		$url_2 =~ s/\n/ /g;
+		$url_2 =~ s/^.*href="(.+?)".*$/$1/g;
 
 		return $url_2;
 }
