@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 3rd 2008
+# Date: July 7th 2008
 #
 my $version = 0.37;
 #
@@ -31,6 +31,13 @@ my $version = 0.37;
 # * perl 5.8
 # * LWP (libwww-perl)
 #
+#
+# Changes 0.38 - 20080707
+# * Updates to allow downloading after the BBC updated their website - kludged for now using scrape method until I can work out the atom feed again
+# * Category/channel searching (and fxd channel menus) and duration listing will be broken until atom feeds get fixed.
+# * Programme version is broken - different URL now used for signed versions etc. Only Original versions are listed for now.
+# * Added --terse listing mode
+# * Don't display version, duration, channel and categories if we use scrape mode
 #
 # Changes 0.37 - 20080703
 # * Made fxd and html output formats optional with ability to specify output filenames
@@ -196,6 +203,7 @@ Options:
  -l, --long           Also search long programme descriptions / episode names
      --channel        Narrow search to specified channel(s) - use a sub-string or regex
      --category       Narrow search to specified categories - use a sub-string or regex
+     --terse          Only show terse programme info (does not affect searching)
  -g, --get            Download matching programmes
  -f, --flush          Flush cache
  -o, --output <dir>   Download output directory
@@ -257,12 +265,16 @@ GetOptions(
 	"fxd-names"			=> \$opt{fxdnames},
 	"fxd-alpha"			=> \$opt{fxdalpha},
 	"html"				=> \$opt{html},
+	"terse"				=> \$opt{terse},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
 
 # Save opts if specified
 save_options_file() if $save;
+
+# Kludge to force srape mode until atom feed avalability is solved
+$opt{scrape} = 1;
 
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
@@ -275,7 +287,7 @@ my $lwp_request_timeout	= 20;
 # URLs
 my $search_page_prefix	= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
 my $atom_feed_url	= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
-my $pid_page_url_prefix	= 'http://www.bbc.co.uk/iplayer/page/item/';
+my $pid_page_url_prefix	= 'http://www.bbc.co.uk/iplayer/episode/';
 my $web_bug_2_url	= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
 my $url_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix	= 'http://www.bbc.co.uk/programmes';
@@ -291,8 +303,8 @@ my %user_agent = (
 
 # Sanity check some conflicting options
 if ($opt{nowrite} && (!$opt{stdout})) {
-  logger "ERROR: Cannot download to nowhere\n";
-  exit 1;
+	logger "ERROR: Cannot download to nowhere\n";
+	exit 1;
 }
 
 # Programme data structure
@@ -321,7 +333,7 @@ logger "INFO: Using Proxy $proxy_url\n" if $proxy_url;
 
 # Update this script if required
 if ($opt{update}) {
-  update_script();
+	update_script();
 }
 
 # Check for valid dload dir
@@ -339,28 +351,28 @@ create_fxd ( sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
 
 # Print list of programmes if we're not downloading anything
 if ( ! $ARGV[0] ) {
-  list_progs( get_regex_matches( '.*' ) );
-  exit 0;
+	list_progs( get_regex_matches( '.*' ) );
+	exit 0;
 }
 
 # Parse remaining args
 my @match_list;
 for ( @ARGV ) {
-  chomp();
+	chomp();
 
-  # If Numerical value
-  if ( /^[\d]+$/ ) {
-    push @match_list, $_;
+	# If Numerical value
+	if ( /^[\d]+$/ ) {
+		push @match_list, $_;
 
-  # If PID then find matching programmes with this PID
-  } elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
-    s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-    push @match_list, get_regex_matches( $1 );
+		# If PID then find matching programmes with this PID
+	} elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
+		s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+		push @match_list, get_regex_matches( $1 );
 
-  # Else assume this is a programme name regex
-  } else {
-    push @match_list, get_regex_matches( $_ );
-  }
+	# Else assume this is a programme name regex
+	} else {
+		push @match_list, get_regex_matches( $_ );
+	}
 }
 
 # Display list for download
@@ -382,8 +394,16 @@ exit 0;
 sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
-		my $desc = "- $prog{$pid}{desc}" if $opt{long};
-		logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}, $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions} $desc\n";
+		my $atom_only;
+		# Remove some info if we're using the scrape method
+		$atom_only = ", $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions}" if ! $opt{scrape};
+		if ( $opt{long} ) {
+			logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only} - $prog{$pid}{desc}\n";
+		} elsif ( $opt{terse} ) {
+			logger "$_:\t$prog{$pid}{name} - $prog{$pid}{episode}\n";
+		} else {
+			logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only}\n";
+		}
 	}
 	logger "\n";
 	return 0;
@@ -561,34 +581,34 @@ sub get_links_atom {
 	} until ($retries == 0);
 
 
-#  <entry>
-#    <title type="text">Take a Bow: Street Feet on the Farm</title>
-#    <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
-#    <updated>2008-06-17T16:04:51Z</updated>
-#    <content type="xhtml" xmlns:xhtml="http://www.w3.org/1999/xhtml">
-#      <xhtml:div>
-#        <xhtml:a href="http://www.bbc.co.uk/iplayer/page/item/b008pj3w.shtml">
-#          <xhtml:img src="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" alt="Take a Bow: Street Feet on the Farm" />
-#        </xhtml:a>
-#        <xhtml:br/>A celebration of young performing talents across the UK. Children from Cardiff become streetwise on the farm.
-#      </xhtml:div>
-#    </content>
-#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_303_170.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_512_288.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-#    <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
-#        <!-- Related site - not implemented yet -->
-#        <!--link href="http://www.bbc.co.uk/some_brand_site" rel="related" type="text/html" /-->
-#    <category term="100001" scheme="http://www.bbc.co.uk/pips#category" label="Children's"/>
-#    <category term="200001" scheme="http://www.bbc.co.uk/pips#category" label="Activities"/>
-#    <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
-#    <category term="letterT" scheme="http://www.bbc.co.uk/cpe#category" label="T"/>
-#    <author>
-#      <name>CBeebies</name>
-#      <uri>http://www.bbc.co.uk/iplayer/framework/img/ch/cbeebies.gif</uri>
-#    </author>
-#    <duration>00:05:00</duration>
-#  </entry>
+	#  <entry>
+	#    <title type="text">Take a Bow: Street Feet on the Farm</title>
+	#    <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
+	#    <updated>2008-06-17T16:04:51Z</updated>
+	#    <content type="xhtml" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+	#      <xhtml:div>
+	#        <xhtml:a href="http://www.bbc.co.uk/iplayer/page/item/b008pj3w.shtml">
+	#          <xhtml:img src="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" alt="Take a Bow: Street Feet on the Farm" />
+	#        </xhtml:a>
+	#        <xhtml:br/>A celebration of young performing talents across the UK. Children from Cardiff become streetwise on the farm.
+	#      </xhtml:div>
+	#    </content>
+	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_303_170.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_512_288.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
+	#    <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
+	#        <!-- Related site - not implemented yet -->
+	#        <!--link href="http://www.bbc.co.uk/some_brand_site" rel="related" type="text/html" /-->
+	#    <category term="100001" scheme="http://www.bbc.co.uk/pips#category" label="Children's"/>
+	#    <category term="200001" scheme="http://www.bbc.co.uk/pips#category" label="Activities"/>
+	#    <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
+	#    <category term="letterT" scheme="http://www.bbc.co.uk/cpe#category" label="T"/>
+	#    <author>
+	#      <name>CBeebies</name>
+	#      <uri>http://www.bbc.co.uk/iplayer/framework/img/ch/cbeebies.gif</uri>
+	#    </author>
+	#    <duration>00:05:00</duration>
+	#  </entry>
 
 	# Parse XML
 	logger "\nINFO: Parsing Programme Data\n";
@@ -758,7 +778,7 @@ sub download_programme {
 	my $pid = shift;
 	
 	# Create a full URL from the PID specified
-	my $page = $pid_page_url_prefix.$pid.'.shtml';
+	my $page = $pid_page_url_prefix.$pid;
 	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
 	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
@@ -773,7 +793,8 @@ sub download_programme {
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
 	# Stage 1: get PID and set cookie
-	$ua->agent( $user_agent{safari} );
+	# This page Doesn't work with safari anymore....
+	$ua->agent( );
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
 	if ( ! $res->is_success ) {
@@ -782,6 +803,7 @@ sub download_programme {
 	}
 	my @content = split /\n/, $res->content;
 	# Non-UK detection
+	# Need to check this again after iplayer2 release
 	if ( grep /only available to play in the UK/i, @content ) {
 		logger "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
 		exit 3;
@@ -798,10 +820,10 @@ sub download_programme {
 	        logger "\rINFO: Programme is reported as ready for download\n";
 	}
 
-	# Extract Long Name, e.g.: iplayer.prog = " The Really Wild Show: Series 21"; 
-	chomp( $prog{$pid}{longname} = (grep /^\s*iplayer.prog = \".+"/, @content)[0] );
-	$prog{$pid}{longname} =~ s/^\s*iplayer.prog = "\s*(.+)\s*".*$/$1/g;
-
+	# Extract Long Name, e.g.: iplayer.episode.setTitle("DIY SOS: Series 16: Swansea");
+	chomp( $prog{$pid}{longname} = (grep /iplayer\.episode\.setTitle/, @content)[0] );
+	$prog{$pid}{longname} =~ s/^\s*iplayer\.episode\.setTitle\(\"\s*(.+)\s*\".*$/$1/g;
+	
 	# Get type => verpid
 	my %verpid_types = get_ver_pid_types( @content );
 	my $url_2;
@@ -866,61 +888,61 @@ sub download_programme {
 
 # Actually do the h.264 downloading
 sub download_h264_stream {
-		my ( $ua, $url_2, $file, $file_done ) = @_;
+	my ( $ua, $url_2, $file, $file_done ) = @_;
 
-		# Stage 3a: Download 1st byte to get exact file length
-		logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+	# Stage 3a: Download 1st byte to get exact file length
+	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
-                # Determine offset for continuation dowload
-		my $h = new HTTP::Headers(
-			'User-Agent'	=> $user_agent{coremedia},
-			'Accept'	=> '*/*',
-			'Range'		=> 'bytes=0-1',
-		);
-		my $req = HTTP::Request->new ('GET', $url_2, $h);
-		my $res = $ua->request($req);
-		# e.g. Content-Range: bytes 0-1/181338136
-		my $file_len = $res->header("Content-Range");
-                $file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
-		logger "INFO: Download File Length $file_len\n" if $opt{verbose};
+	# Determine offset for continuation dowload
+	my $h = new HTTP::Headers(
+		'User-Agent'	=> $user_agent{coremedia},
+		'Accept'	=> '*/*',
+		'Range'		=> 'bytes=0-1',
+	);
+	my $req = HTTP::Request->new ('GET', $url_2, $h);
+	my $res = $ua->request($req);
+	# e.g. Content-Range: bytes 0-1/181338136
+	my $file_len = $res->header("Content-Range");
+	$file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
+	logger "INFO: Download File Length $file_len\n" if $opt{verbose};
 
-		# Get ftyp+wide header etc
-		my $mdat_start = 0x1c;
-		my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
-		# Get bytes upto (but not including) mdat atom start -> $header
-		my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
+	# Get ftyp+wide header etc
+	my $mdat_start = 0x1c;
+	my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
+	# Get bytes upto (but not including) mdat atom start -> $header
+	my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
 
-		# Detemine moov start
-		# Get mdat_end_offset_chars from downloaded block
-		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
-		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-		logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
-		logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
-		# The MOOV box starts one byte after MDAT box ends
-		my $moov_start = $mdat_start + $mdat_end_offset;
+	# Detemine moov start
+	# Get mdat_end_offset_chars from downloaded block
+	my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
+	my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
+	logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
+	logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
+	# The MOOV box starts one byte after MDAT box ends
+	my $moov_start = $mdat_start + $mdat_end_offset;
 
 
-		## scan 2nd level atoms in moov atom until we get stco atom(s)
-		# We can skip first 8 bytes (moov atom header)
-		#my $i = 8;
-		#while( $i < $moov_length - 4 ) {
-		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
-		#  my $atom_name = substr($moovdata, $i+4, 4);
-		#  logger "Parsing atom: $atom_name, length: $atom_len\n";
-		#  # Increment $i by atom_len to get next atom
-		#  $i += $atom_len;
-		#}
+	## scan 2nd level atoms in moov atom until we get stco atom(s)
+	# We can skip first 8 bytes (moov atom header)
+	#my $i = 8;
+	#while( $i < $moov_length - 4 ) {
+	#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
+	#  my $atom_name = substr($moovdata, $i+4, 4);
+	#  logger "Parsing atom: $atom_name, length: $atom_len\n";
+	#  # Increment $i by atom_len to get next atom
+	#  $i += $atom_len;
+	#}
 
-		# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
-		# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
-                if ( $opt{stdout} && (! $opt{nowrite}) && -f $file ) {
-                  logger "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
-                  # Don't do usual streaming code
-                  $opt{stdout} = 0;
-                  $childpid = fork();
-                  if (! $childpid) {
+	# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
+	# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
+	if ( $opt{stdout} && (! $opt{nowrite}) && -f $file ) {
+		logger "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
+		# Don't do usual streaming code
+		$opt{stdout} = 0;
+		$childpid = fork();
+		if (! $childpid) {
 			# Child starts here
-                	logger "INFO: Streaming directly for partially downloaded file $file\n";
+			logger "INFO: Streaming directly for partially downloaded file $file\n";
 			if ( ! open( STREAMIN, "< $file" ) ) {
 				logger "INFO: Cannot Read partially downloaded file to stream\n";
 				exit 4;
@@ -935,82 +957,82 @@ sub download_h264_stream {
 			}
 			close STREAMIN;
 			logger "INFO: Stream thread has completed\n";
-                	exit 0;
-		  }
-                }
-
-                # Open file if required
-                my $fh = open_file_append($file);
-
-                # If the partial file already exists, then resume from the correct mdat/download offset
-                my $restart_offset = $mdat_start;
-		my $moovdata;
-                # Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
-		my $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
-		logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
-		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size
-		if ( $moov_length > (${moov_start}/9.0) ) {
-			logger "ERROR: Bad file download, deleted cookie, please retry\n";
-			unlink $cookiejar;
-			return 17;
+			exit 0;
 		}
-                # If we have a too-small-sized file and not stdout and not no-write then this is a partial download
-                if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
-		  # Calculate new start offset (considering that we've put moov first in file)
-                  $restart_offset = stat($file)->size - $moov_length;
-                  logger "INFO: Restarting download from $restart_offset                        \n";
-                }
+	}
+
+	# Open file if required
+	my $fh = open_file_append($file);
+
+	# If the partial file already exists, then resume from the correct mdat/download offset
+	my $restart_offset = $mdat_start;
+	my $moovdata;
+	# Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
+	my $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
+	logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
+	# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size
+	if ( $moov_length > (${moov_start}/9.0) ) {
+		logger "ERROR: Bad file download, deleted cookie, please retry\n";
+		unlink $cookiejar;
+		return 17;
+	}
+	# If we have a too-small-sized file and not stdout and not no-write then this is a partial download
+	if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
+		# Calculate new start offset (considering that we've put moov first in file)
+		$restart_offset = stat($file)->size - $moov_length;
+		logger "INFO: Restarting download from $restart_offset                        \n";
+	}
 
 
-                # If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
-                if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
-		  # get moov chunk into memory
-		  $moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
-		  # Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
-                  $moov_length = relocate_moov_chunk_offsets( $moovdata );
-  		  # write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
-		  logger "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
-		  # Write moov atom
-                  print $fh $moovdata if ! $opt{nowrite};
-		  print STDOUT $moovdata if $opt{stdout};
-                  # Write header atoms (ftyp, wide)
-                  print $fh $header if ! $opt{nowrite};
-		  print STDOUT $header if $opt{stdout};
-                }
+	# If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
+	if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
+		# get moov chunk into memory
+		$moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
+		# Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
+		$moov_length = relocate_moov_chunk_offsets( $moovdata );
+		# write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
+		logger "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
+		# Write moov atom
+		print $fh $moovdata if ! $opt{nowrite};
+		print STDOUT $moovdata if $opt{stdout};
+		# Write header atoms (ftyp, wide)
+		print $fh $header if ! $opt{nowrite};
+		print STDOUT $header if $opt{stdout};
+	}
 
-                # Create symlink for freevo if required
-                if ( $opt{freevo} ) {
-                	# remove old symlink
-                	unlink $opt{freevo} if -l $opt{freevo};
-                	symlink $file, $opt{freevo};
-                }
-                
-		# Download mdat in 32MB blocks
-		my $chunk_size = 0x2000000;
-		for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
-		  # get mdat chunk into file
-		  my $retcode;
-		  my $e;
-		  # Get block end offset
-		  if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
-		    $e = $moov_start - 1;
-                  } else {
-                    $e = $s + $chunk_size - 1;
-                  }
-                  # Get block from URL and append to $file
-                  if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
-                    logger "ERROR: Could not download block $s - $e from $file\n\n";
-                    return 9;
-                  }
+	# Create symlink for freevo if required
+	if ( $opt{freevo} ) {
+		# remove old symlink
+		unlink $opt{freevo} if -l $opt{freevo};
+		symlink $file, $opt{freevo};
+	}
+
+	# Download mdat in 32MB blocks
+	my $chunk_size = 0x2000000;
+	for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
+		# get mdat chunk into file
+		my $retcode;
+		my $e;
+		# Get block end offset
+		if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
+			$e = $moov_start - 1;
+		} else {
+			$e = $s + $chunk_size - 1;
 		}
+		# Get block from URL and append to $file
+		if ( download_block($file, $url_2, $ua, $s, $e, $file_len, $fh ) ) {
+			logger "ERROR: Could not download block $s - $e from $file\n\n";
+			return 9;
+		}
+	}
 
-		# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
-		logger "INFO: Downloaded $file_done\n";
-		#unlink $cookiejar;
-		# Moving file into place as complete (if not stdout)
-                move($file, $file_done) if ! $opt{stdout};
+	# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
+	logger "INFO: Downloaded $file_done\n";
+	#unlink $cookiejar;
+	# Moving file into place as complete (if not stdout)
+	move($file, $file_done) if ! $opt{stdout};
 
-                return 0;
+	return 0;
 }
 
 
@@ -1050,14 +1072,25 @@ sub get_stream_download_url {
 
 
 # Given page content, extract the Versions and Pids and return in a hash: Versions => Pid
+#<!--
+#	iplayer.episode.setPidData("b0078vh4","b005rpmb");
+#	iplayer.episode.setTitle("Razzledazzle: Dog");
+#	iplayer.episode.setDownloadAvailability(1);
+#	iplayer.episode.init();	
+#		
+#		iplayer.episode.buildVideoPlayer();
+#		
+#		
+#//-->
 sub get_ver_pid_types {
 	my @content = @_;
-	# Extract version pid and type (i.e. Signed, Original, etc)
-	chomp( my @type_pid = grep /(type|pid )      :/, @content );
+	# Extract version pid 
+	chomp( my $pid = (grep /iplayer\.episode\.setPidData/, @content)[0] );
 	# Remove tags
-	s/^.*'(.+)'.*$/$1/g for @type_pid;
+	$pid =~ s/^.*\"(b0\w{6})\"\).*$/$1/g;
 	# Get hash of pid => type
-	my %types = @type_pid;
+	my %types;
+	$types{'Original'} = $pid;
 	logger "INFO: Types available: ".join(', ', %types)."\n" if $opt{verbose};
 	return %types;
 }
@@ -1104,11 +1137,9 @@ sub get_web_bugs {
 	}
 	
 	# Parse this to get o.gif for stats web bug
-	#<script type="text/javascript">
-	#var i = new Image(1,1); i.src="http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~http://www.bbc.co.uk/iplayer/search/?q=graham&amp;go=Find+Programmes~RS~q~RS~q=graham&amp;start=1&amp;scope=iplayersearch&amp;go=Find+Programmes&amp;version_pid=b00c3rrt~RS~z~RS~02~RS~";
-        #</script>
-        chomp( my $url_1b = (grep /i\.src=\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
-        $url_1b =~ s/^.*i\.src=\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
+	#var i = new Image(1,1); i.src = "http://stats.bbc.co.uk/o.gif?~RS~s~RS~iPlayer~RS~t~RS~Web_progi~RS~i~RS~b00cc05l~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/_proxy_/episode/b00cc05l~RS~r~RS~(none)~RS~q~RS~~RS~z~RS~17~RS~";
+        chomp( my $url_1b = (grep /i\.src\s*=\s*\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
+        $url_1b =~ s/^.*i\.src\s*=\s*\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
         logger "INFO: Web bug#1: $url_1b\n" if $opt{verbose};
 
         # Stage 1b - get o.gif web bug to whitelist cookie
