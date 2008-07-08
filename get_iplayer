@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 7th 2008
+# Date: July 8th 2008
 #
-my $version = 0.40;
+my $version = 0.41;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
@@ -30,6 +30,9 @@ my $version = 0.40;
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
+#
+# Changes 0.41 - 20070708
+# * Fixed cookie deletion bug
 #
 # Changes 0.40 - 20080707
 # * Fixed saving of thumbnail url in cache
@@ -1066,6 +1069,7 @@ sub download_h264_stream {
 	# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size
 	if ( $moov_length > (${moov_start}/9.0) ) {
 		logger "ERROR: Bad file download, deleted cookie, please retry\n";
+		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 		unlink $cookiejar;
 		return 17;
 	}
@@ -1330,6 +1334,7 @@ sub get_web_bugs {
 	if ( ! $res->is_success ) {
 		logger "ERROR: Failed to get o.gif web bug from iplayer site\n";
 		# Better remove our cookie cos it probably isn't whitelisted
+		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 		unlink $cookiejar;
 		return 2;
 	}
@@ -1358,6 +1363,7 @@ sub get_web_bugs {
 	if ( ! $res->is_success ) {
 		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n";
 		# Better remove our cookie cos it probably isn't whitelisted
+		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 		unlink $cookiejar;
 		return 2;
 	}
