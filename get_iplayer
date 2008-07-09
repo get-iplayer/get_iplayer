@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 9th 2008
 #
-my $version = 0.42;
+my $version = 0.43;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams from BBC iplayer site
@@ -31,7 +31,10 @@ my $version = 0.42;
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
-# * mplayer and lame (for radio support)
+# * mplayer, lame and tee (for radio support only)
+#
+# Changes 0.43 - 20070709
+# * Bugfixed stdout support for radio
 #
 # Changes 0.42 - 20070709
 # * Now uses channel specific atom feeds from iplayer site by default - scrape is still optional for TV index
@@ -1213,7 +1216,6 @@ sub download_h264_stream {
 sub download_rtsp_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
 	my $childpid;
-	my $childpid2;
 	my $namedpipe = "${profile_dir}/namedpipe";
 
 	# Create named pipe
@@ -1234,50 +1236,26 @@ sub download_rtsp_stream {
 
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
-       # Stream PCM audio to stdout only:
-       if ( $opt{stdout} ) {
-		# Fork a child which will wait for the file to be a certain size before sending to stdout
-		$childpid = fork();
-		if (! $childpid) {
-			# Child starts here
-			# Wait for upto 60 seconds for a 1 meg file to appear
-			logger "INFO: Waiting to stream $file directly\n";
-			my $i;
-			for (my $i = 0; $i<=60; $i++) {
-				sleep 1;
-				last if ( (-f $file) && (stat($file)->size > 1024000) );
-			}
-			# Quit if no file is streamed
-			exit 1 if $i == 60;
-		# test only
-		system("cat $file");
-		exit 0;	
-			logger "INFO: Streaming $file directly\n";
-			if ( ! open( STREAMIN, "< $file" ) ) {
-				logger "ERROR: Cannot Read downloaded file $file to stream\n";
-				exit 4;
-			}
-			my $outbuf;
-			# Write out until we run out of bytes
-			my $bytes_read = 65536;
-			while ( $bytes_read == 65536 ) {
-				$bytes_read = read(STREAMIN, $outbuf, 65536 );
-				print STDOUT $outbuf;
-			}
-			close STREAMIN;
-			logger "INFO: Stream thread has completed\n";
-			exit 0;
-		}
-	}
-
-
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
-	$childpid2 = fork();
-	if (! $childpid2) {
+	$childpid = fork();
+	if (! $childpid) {
 		# Child starts here
 		$| = 1;
 		logger "INFO: Transcoding $file\n";
-		system("cat $namedpipe | $lame -f - $file");
+
+		# Stream mp3 to file and stdout simultaneously
+		if ( $opt{stdout} && ! $opt{nowrite} ) {
+			system("$lame -f $namedpipe - 2>/dev/null| tee $file");
+
+		# Stream mp3 stdout only
+		} elsif ( $opt{stdout} && $opt{nowrite} ) {
+			system("$lame -f $namedpipe - 2>/dev/null");
+
+		# Stream mp3 to file directly
+		} elsif ( ! $opt{stdout} ) {
+			system("$lame -f $namedpipe $file >/dev/null 2>/dev/null");
+		}
+
 		# Move file to done state
 		move $file, $file_done if ! $opt{nowrite};
 		logger "INFO: Transcoding thread has completed\n";
@@ -1285,18 +1263,16 @@ sub download_rtsp_stream {
 	}
 
 	# Start the mplayer process and write to named pipe
-	if ( system("$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\"") ) {
-	#if ( system("$mplayer -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
+	if ( system("$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
+	#if ( system("$mplayer -really-quiet -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
 		# If we fail then kill off child processes
-		kill 9, $childpid, $childpid2;
+		kill 9, $childpid;
 		return 2;
 	};
 	logger "INFO: Downloaded $file_done\n";
 
 	# Wait for child processes
 	wait;
-	# Remove namedpipe file
-	#unlink $file if ! $opt{stdout};
 
 	return 0;
 }
