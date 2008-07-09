@@ -8,29 +8,45 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 8th 2008
+# Date: July 9th 2008
 #
-my $version = 0.41;
+my $version = 0.42;
 #
 # Supports: 
-# * Downloading h.264/Mov/Quicktime streams from BBC iplayer site
-# * Downloads *unencrypted* streams from BBC iplayer site (--get)
-# * Re-jigs the mov file so that it can be streamed and start faster on some players
-# * Resume downloads of partially downloaded files
-# * Indexing of all available (i.e. listed) iplayer programs using new Atom feed
+# * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams from BBC iplayer site
+# * Downloads streams from BBC iplayer site (--get)
+# * Re-jigs the mov file so that video can be streamed and start faster on some players
+# * Resume downloads of partially downloaded mov files
+# * Indexing of all available Radio and TV (i.e. listed) iplayer programs using Atom feeds
 # * Caching of Index (default 4hrs)
 # * Creation of a basic html index file (--html <file>)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (--long)
-# * Regex search on channel and category (--channel, --category)
-# * Save default options in ~/.iplayerrc (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu), MacOSX, and Windows (Activstate Perl, cygwin)
+# * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
+# * Search by type 'tv', 'radio', or 'all' (default: --type=tv)
+# * Save default options in ~/.get_iplayer/config (--save)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows (Activstate Perl, cygwin)
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
+# * mplayer and lame (for radio support)
 #
+# Changes 0.42 - 20070709
+# * Now uses channel specific atom feeds from iplayer site by default - scrape is still optional for TV index
+# * Relocated all cache, cookies, config and namedpipe files into $HOME/.get_iplayer/
+# * Indexes iplayer Radio programmes
+# * Added --type to limit search to radio, tv or all (tv is default)
+# * Radio RTSP stream now transcoded on the fly to mp3 using named pipes
+# * Added stdout support for radio - still only creates small mp3 file when stdout used?!
+# * TV and Radio now use separate index cache files that are populated independantly
+# * Added retry loop for bad cookie detection - dont just fail
+# * Added --exclude-channel/--exclude-category support
+# * Added channel name to html output
+# * Known issue: BBC has an error in their atom feeds which says that the programme has been available longer than it has.
+# * Known issue: stdout support for radio only creates small mp3 file, lame stalls
+# 
 # Changes 0.41 - 20070708
 # * Fixed cookie deletion bug
 #
@@ -204,47 +220,64 @@ sub logger(@) {
 
 sub usage {
 	logger <<EOF;
-Usage:
-  Search Programmes:     get_iplayer [-l] [--channel] [--category] [<options>] [<regex|index|pid|url> ...]
-  Download files:        get_iplayer -g [-l] [--channel] [--category] [<options>] <regex|index|pid|url> ...
-  Stream Downloads:      get_iplayer -x [-v] [-n] [-p <proxy_url>] <regex|index|pid|url> | mplayer -cache 2048 -
-  Update get_iplayer:    get_iplayer -u
+get_iplayer v$version, Usage:
+  Search Programmes:	get_iplayer [<search options>] [<regex|index|pid|url> ...]
+  Download files:	get_iplayer --get [<search options>] <regex|index|pid|url> ...
+  Stream Downloads:	get_iplayer --stdout [-p <proxy_url>] [<options>] <regex|index|pid|url> | mplayer -cache 2048 -
+  Update get_iplayer:	get_iplayer --update
 
-Options:
- -l, --long           Also search long programme descriptions / episode names
-     --channel        Narrow search to specified channel(s) - use a sub-string or regex
-     --category       Narrow search to specified categories - use a sub-string or regex
-     --terse          Only show terse programme info (does not affect searching)
- -g, --get            Download matching programmes
- -f, --flush          Flush cache
- -o, --output <dir>   Download output directory
- -s, --subdir         Downloaded files into Programme name subdirectory
- -p, --proxy <url>    Web proxy URL spec
- -x, --stdout         Additionally stream to STDOUT (so you can pipe output to a player)
- -n, --nowrite        No writing of file to disk (use with -x to prevent a copy being stored on disk)
- -e, --expiry <secs>  Cache expiry in seconds (default 12hrs)
- -t, --test           Test only - no download (will show programme type)
- -w, --whitespace     Keep whitespace (and escape chars) in filenames
-     --freevo <file>  Create symlink to <file> once we have the header of the download
-     --fxd <file>     Create Freevo FXD XML in specified file
-     --fxd-channels   Create freevo menu of channels -> programme names -> episodes
-     --fxd-names      Create freevo menu of programme names -> episodes
-     --fxd-alpha      Create freevo menu sorted alphabetically by programme name
-     --html <file>    Create basic HTML index of programmes in specified file
-     --pid <pid|url>  Download arbitrary pid
- -v, --verbose        Verbose
- -u, --update         Update get_iplayer if a newer one exists
- -h, --help           Help
- -q, --quiet          No output
-     --scrape         Use old web page scraping method to get programme index
-     --save           Save specified options as default in .iplayerrc
+Search Options:
+ <regex|index|pid|url>		Search programme names based on given pattern
+ -l, --long			Additionally search in long programme descriptions / episode names
+     --channel <regex>		Narrow search to matched channel(s)
+     --category <regex>		Narrow search to matched categories
+     --exclude-channel <regex>	Narrow search to exclude matched channel(s)
+     --exclude-category <regex>	Narrow search to exclude matched catogories
+     --type <radio|tv|all>	Only search in these types of programmes (tv is default)
+
+Display Options:
+ -l, --long			Display long programme descriptions / episode names and other data
+     --terse			Only show terse programme info (does not affect searching)
+
+Download Options:
+ -g, --get			Download matching programmes
+ -x, --stdout			Additionally stream to STDOUT (so you can pipe output to a player)
+ -p, --proxy <url>		Web proxy URL spec
+     --pid <pid|url>		Download an arbitrary pid that does not appear in the index
+ -t, --test			Test only - no download (will show programme type)
+
+Output Options:
+ -o, --output <dir>		Download output directory
+ -s, --subdir			Downloaded files into Programme name subdirectory
+ -n, --nowrite			No writing of file to disk (use with -x to prevent a copy being stored on disk)
+ -w, --whitespace		Keep whitespace (and escape chars) in filenames
+ -q, --quiet			No logging output
+
+Config Options:
+ -f, --flush			Flush cache
+ -e, --expiry <secs>		Cache expiry in seconds (default 12hrs)
+     --scrape			Use old web page scraping method to get programme index
+     --freevo <file>		Create symlink to <file> once we have the header of the download
+     --fxd <file>		Create Freevo FXD XML in specified file
+     --fxd-channels		Create freevo menu of channels -> programme names -> episodes
+     --fxd-names		Create freevo menu of programme names -> episodes
+     --fxd-alpha		Create freevo menu sorted alphabetically by programme name
+     --html <file>		Create basic HTML index of programmes in specified file
+ -v, --verbose			Verbose
+ -u, --update			Update get_iplayer if a newer one exists
+ -h, --help			Help
+     --save			Save specified options as default in .iplayerrc
 EOF
 	exit 1;
 }
 
 # Get cmdline params
 my $save;
-my $optfile = "$ENV{HOME}/.iplayerrc";
+# This is where all profile data/caches/cookies etc goes
+my $profile_dir = "$ENV{HOME}/.get_iplayer";
+# Make profile dir if it doesnt exist
+mkdir $profile_dir if ! -d $profile_dir;
+my $optfile = "${profile_dir}/options";
 
 # Parse options if we're not saving options
 read_options_file() if ! grep /\-\-save/, @ARGV;
@@ -279,6 +312,9 @@ GetOptions(
 	"html=s"			=> \$opt{html},
 	"terse"				=> \$opt{terse},
 	"pid=s"				=> \$opt{pid},
+	"type=s"			=> \$opt{type},
+	"exclude-category=s"		=> \$opt{excludecategory},
+	"exclude-channel=s"		=> \$opt{excludechannel},
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
@@ -287,17 +323,20 @@ my $DEBUG = $opt{debug};
 save_options_file() if $save;
 
 # Kludge to force srape mode until atom feed avalability is solved
-$opt{scrape} = 1;
+##$opt{scrape} = 1;
+$opt{type} = 'tv' if ! $opt{type};
 
 # Options
 my $download_dir 	= $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.'; # Where downloads will be written
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
-my $cookiejar		= "$ENV{HOME}/.get_iplayer_cookies";
-my $cachefile		= '/tmp/iplayer.cache';
+my $cookiejar		= "${profile_dir}/cookies";
+my $cachefile_tv	= "${profile_dir}/tv.cache";
+my $cachefile_radio	= "${profile_dir}/radio.cache";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $mplayer		= 'mplayer';
 my $lame		= 'lame';
+my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
 
 # URLs
 my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
@@ -309,6 +348,34 @@ my $video_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_s
 my $prog_page_prefix		= 'http://www.bbc.co.uk/programmes';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
+
+my %channels_tv = (
+	'bbc_one'				=> 'tv|BBC One',
+	'bbc_two'				=> 'tv|BBC Two',
+	'bbc_three'				=> 'tv|BBC Three',
+	'bbc_four'				=> 'tv|BBC Four',
+	'cbbc'					=> 'tv|CBBC',
+	'cbeebies'				=> 'tv|CBeebies',
+	'bbc_news24'				=> 'tv|BBC News 24',
+	'bbc_parliament'			=> 'tv|BBC Parliament',
+);
+
+my %channels_radio = (
+	'bbc_1xtra'				=> 'radio|BBC 1Xtra',
+	'bbc_radio_two'				=> 'radio|BBC Radio 2',
+	'bbc_radio_three'			=> 'radio|BBC Radio 3',
+	'bbc_radio_four'			=> 'radio|BBC Radio 4',
+	'bbc_radio_five_live'			=> 'radio|BBC Radio 5 live',
+	'bbc_radio_five_live_sports_extra'	=> 'radio|BBC 5 live Sports Extra',
+	'bbc_6music'				=> 'radio|BBC 6 Music',
+	'bbc_7'					=> 'radio|BBC 7',
+	'bbc_asian_network'			=> 'radio|BBC Asian Network',
+	'bbc_radio_foyle'			=> 'radio|BBC Radio Foyle',
+	'bbc_radio_scotland'			=> 'radio|BBC Radio Scotland',
+	'bbc_radio_ulster'			=> 'radio|BBC Radio Ulster',
+	'bbc_radio_wales'			=> 'radio|BBC Radio Wales',
+);
+
 
 # User Agents
 my %user_agent = (
@@ -336,6 +403,7 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <TV channel>
 #	'categories'	=> <Categories>
+# 	'type'		=> <Type: tv or radio>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -355,11 +423,10 @@ if ($opt{update}) {
 # Check for valid dload dir
 die ("ERROR: $download_dir does not exist\n") if ! -d $download_dir;
 
-# Flush cache if required
-unlink ($cachefile) if $opt{flush};
-
 # Get stream links from BBC iplayer site or from cache (also populates all hashes)
-get_links();
+get_links($cachefile_tv, \%channels_tv) if $opt{type} =~ /(tv|all)/i;
+# Only get radio stream links if we're not using scrape method
+get_links($cachefile_radio, \%channels_radio) if $opt{type} =~ /(radio|all)/i && ! $opt{scrape};
 
 # Write HTML and FXD files if required
 create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
@@ -369,7 +436,12 @@ create_fxd ( sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
 if ( $opt{pid} ) {
 	# Remove any url parts from the pid
 	$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-	download_programme($opt{pid});
+	# Retry loop
+	my $count;
+	while ( $count < 3 && download_programme( $opt{pid} ) =~ /retry/ ) {
+		logger "WARNING: Retrying download for PID $opt{pid}\n";
+		$count++;
+	}
 	exit 0;
 }
 
@@ -388,7 +460,7 @@ for ( @ARGV ) {
 	if ( /^[\d]+$/ ) {
 		push @match_list, $_;
 
-		# If PID then find matching programmes with this PID
+	# If PID then find matching programmes with this PID
 	} elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
 		s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
 		push @match_list, get_regex_matches( $1 );
@@ -405,12 +477,17 @@ list_progs( @match_list );
 
 # Do the downloads based on list of index numbers if required
 if ( $opt{get} || $opt{stdout} ) {
-	download_programme( $index_pid{$_} ) for (@match_list);
+	for (@match_list) {
+		# Retry loop
+		my $count;
+		while ( $count < 3 && download_programme( $index_pid{$_} ) =~ /retry/ ) {
+			logger "WARNING: Retrying download for '$prog{$index_pid{$_}}{name} - $prog{$index_pid{$_}}{episode}'\n";
+			$count++;
+		}
+	}
 }
 
 exit 0;
-
-
 
 
 
@@ -418,15 +495,20 @@ exit 0;
 sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
+		# Skip if this is a radio programme and --type=radio not set
+		next if ( $opt{type} =~ /radio/i && $prog{$pid}{type} !~ /radio/i );
+		next if ( $opt{type} =~ /tv/i && $prog{$pid}{type} !~ /tv/i );
+		my $type;
+		$type = "$prog{$pid}{type}, " if $opt{type} =~ /all/i;
 		my $atom_only;
 		# Remove some info if we're using the scrape method
-		$atom_only = ", $prog{$pid}{duration}, '$prog{$pid}{channel}', $prog{$pid}{categories} $prog{$pid}{versions}" if ! $opt{scrape};
+		$atom_only = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if ! $opt{scrape};
 		if ( $opt{long} ) {
-			logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only} - $prog{$pid}{desc}\n";
+			logger "$_: ${type}$prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only} - $prog{$pid}{desc}\n";
 		} elsif ( $opt{terse} ) {
-			logger "$_:\t$prog{$pid}{name} - $prog{$pid}{episode}\n";
+			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
 		} else {
-			logger "$_: $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only}\n";
+			logger "$_: ${type}$prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only}\n";
 		}
 	}
 	logger "\n";
@@ -440,12 +522,18 @@ sub get_regex_matches {
 	my %download_hash;
 	my $channel_regex = $opt{channel} || '.*';
 	my $category_regex = $opt{category} || '.*';
+	my $channel_exclude_regex = $opt{excludechannel} || '^ROGUE$';
+	my $category_exclude_regex = $opt{excludecategory} || '^ROGUE$';
 
 	for (keys %index_pid) {
 		my $pid = $index_pid{$_};
 
 		# Only include programmes matching channels and catoegory regexes
-		if ( $prog{$pid}{channel} =~ /$channel_regex/i && $prog{$pid}{categories} =~ /$category_regex/i ) {
+		if ( $prog{$pid}{channel} =~ /$channel_regex/i
+		  && $prog{$pid}{categories} =~ /$category_regex/i
+		  && $prog{$pid}{channel} !~ /$channel_exclude_regex/i
+		  && $prog{$pid}{categories} !~ /$category_exclude_regex/i
+		) {
 
 			# Search prognames/pids while excluding channel_regex and category_regex
 			$download_hash{$_} = 1 if (
@@ -457,7 +545,7 @@ sub get_regex_matches {
 			$download_hash{$_} = 1 if (
 				$opt{long} 
 				&& 
-				( $prog{$pid}{desc} =~ /$download_regex/i 
+				( $prog{$pid}{desc} =~ /$download_regex/i
 				  || $prog{$pid}{episode} =~ /$download_regex/i
 				)
 			);
@@ -467,7 +555,7 @@ sub get_regex_matches {
 }
 
 
-sub get_links_all {
+sub get_links_html {
 	my $pageno = 1;
 	my $pid;
 	my @html;
@@ -498,7 +586,7 @@ sub get_links_all {
 			} else {
 				$retries = 0;
 				logger ".";
-			} 
+			}
 		} until ($retries == 0);
 
 		# Get the complete URL
@@ -553,6 +641,7 @@ sub get_links_all {
 					'thumbnail'	=> 'http://www.bbc.co.uk/iplayer/images/episode/'.$pid.'_150_84.jpg',
 					'channel'	=> '<channel>',
 					'categories'	=> '<categories>',
+					'type'		=> 'tv',
 				};
 				logger "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
 			}
@@ -578,147 +667,126 @@ sub get_links_all {
 	return 0;
 }
 
-
+# get_links_atom (%channels)
 sub get_links_atom {
+	my %channels = %{$_[0]};
 
 	my $xml;
-	my $valid = 1;
-	logger "INFO: Getting Index Feed\n";
+	my $feed_data;
+	my $res;
+	logger "INFO: Getting Index Feeds\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
+	$ua->agent( $user_agent{desktop} );
 
 	# Download index feed
-	my $retries = 3;
-	do {
-		# Get index pages
-		$xml = download_block(undef, $atom_feed_url, $ua);
-		if (! $xml) {
-			logger "WARNING: Failed to get programme index feed from iplayer site\n";
-			$retries--;
-			exit 2 if $retries == 0;
-			sleep 1;
-		} else {
-			$retries = 0;
+	for ( keys %channels ) {
+		my $url = "http://feeds.bbc.co.uk/iplayer/$_/list/limit/200";
+		my $retries = 3;
+		logger "DEBUG: Getting feed $url\n" if $opt{verbose};
+		do {
+			# Get index pages
+			$res = $ua->request( HTTP::Request->new( GET => $url ) );
+			if ( ! $res->is_success ) {
+				logger "WARNING: Failed to get programme index feed for $_ from iplayer site\n";
+				$retries--;
+				logger "X";
+				exit 2 if $retries == 0;
+			} else {
+				$retries = 0;
+				logger ".";
+			} 
+		} until ($retries == 0);
+		$xml = $res->content;
+		logger "INFO: Got ".(grep /<entry/, split /\n/, $res->content)." programmes\n" if $opt{verbose};
+		decode_entities($xml);	
+
+		### New Feed
+		#  <entry>
+		#    <title type="text">House of Lords: 02/07/2008</title>
+		#    <id>tag:bbc.co.uk,2008:PIPS:b00cd5p7</id>
+		#    <updated>2008-06-24T00:15:11Z</updated>
+		#    <content type="html">
+		#      <p>
+		#        <a href="http://www.bbc.co.uk/iplayer/episode/b00cd5p7?src=a_syn30">
+		#          <img src="http://www.bbc.co.uk/iplayer/images/episode/b00cd5p7_150_84.jpg" alt="House of Lords: 02/07/2008" />
+		#        </a>
+		#      </p>
+		#      <p>
+		#        House of Lords, including the third reading of the Health and Social Care Bill. 1 July.
+		#      </p>
+		#    </content>
+		#    <category term="Factual" scheme="urn:bbciplayer:category" />
+		#    <link rel="via" href="http://www.bbc.co.uk/iplayer/episode/b00cd5p7?src=a_syn30" type="application/atom+xml" title="House of Lords: 02/07/2008">
+		#    </link>
+		#  </entry>
+		#
+		# Parse XML
+
+		# get list of entries within <entry> </entry> tags
+		my @entries = split /<entry>/, $xml;
+		# Discard first element == header
+		shift @entries;
+
+		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $type );
+		foreach my $entry (@entries) {
+
+			# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
+			$entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
+			$name = $1;
+			$episode = $name;
+			$name =~ s/^(.*): .*$/$1/g;
+			$episode =~ s/^.*: (.*)$/$1/g;
+
+			# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
+			$entry =~ m{<id>.*PIPS:(.+?)</id>};
+			$pid = $1;
+
+			# <updated>2008-06-22T05:01:49Z</updated>
+			$entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+			$available = get_available_time_string( $1 );
+
+			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
+			$desc = $entry;
+			# Strip out newlines and replace with ' '
+			$desc =~ s/\n/ /g;
+			$desc =~ s|^.*<p>\s*(.*?)\s*</p>\s*</content>.*$|$1|gm;
+
+			# Parse the categories into hash
+			# <category term="Factual" scheme="urn:bbciplayer:category" />
+			# <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
+			my @category;
+			for my $line ( grep /<category/, (split /\n/, $entry) ) {
+				$line =~ m{<category\s+term=\"(.+?)\".*?scheme=\"urn:bbciplayer:category\"};
+				push @category, $1 || '<category>';
+			}
+
+			# Extract channel and type
+			($type, $channel) = (split /\|/, $channels{$_})[0,1];
+
+			# build data structure
+			$prog{$pid} = {
+				'name'		=> $name,
+				'versions'	=> 'Original',
+				'episode'	=> $episode,
+				'desc'		=> $desc,
+				'available'	=> $available,
+				'duration'	=> '<duration>',
+				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg",
+				'channel'	=> $channel,
+				'categories'	=> join(',', @category),
+				'type'		=> $type,
+			};
 		}
-	} until ($retries == 0);
-
-
-	#  <entry>
-	#    <title type="text">Take a Bow: Street Feet on the Farm</title>
-	#    <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
-	#    <updated>2008-06-17T16:04:51Z</updated>
-	#    <content type="xhtml" xmlns:xhtml="http://www.w3.org/1999/xhtml">
-	#      <xhtml:div>
-	#        <xhtml:a href="http://www.bbc.co.uk/iplayer/page/item/b008pj3w.shtml">
-	#          <xhtml:img src="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" alt="Take a Bow: Street Feet on the Farm" />
-	#        </xhtml:a>
-	#        <xhtml:br/>A celebration of young performing talents across the UK. Children from Cardiff become streetwise on the farm.
-	#      </xhtml:div>
-	#    </content>
-	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_303_170.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-	#    <link rel="enclosure" href="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_512_288.jpg" type="image/jpeg" title="Take a Bow: Street Feet on the Farm" length="0" />
-	#    <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
-	#        <!-- Related site - not implemented yet -->
-	#        <!--link href="http://www.bbc.co.uk/some_brand_site" rel="related" type="text/html" /-->
-	#    <category term="100001" scheme="http://www.bbc.co.uk/pips#category" label="Children's"/>
-	#    <category term="200001" scheme="http://www.bbc.co.uk/pips#category" label="Activities"/>
-	#    <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
-	#    <category term="letterT" scheme="http://www.bbc.co.uk/cpe#category" label="T"/>
-	#    <author>
-	#      <name>CBeebies</name>
-	#      <uri>http://www.bbc.co.uk/iplayer/framework/img/ch/cbeebies.gif</uri>
-	#    </author>
-	#    <duration>00:05:00</duration>
-	#  </entry>
-
-	# Parse XML
-	logger "\nINFO: Parsing Programme Data\n";
-
-	# get list of entries within <entry> </entry> tags
-	my @entries = split /<entry>/, $xml;
-	# Discard first element == header
-	shift @entries;
-
-	my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail );
-	foreach my $entry (@entries) {
-
-		# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
-		$entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
-		$name = $1;
-		$episode = $name;
-		$name =~ s/^(.*): .*$/$1/g;
-		$episode =~ s/^.*: (.*)$/$1/g;
-
-		# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
-		$entry =~ m{<id>.*PIPS:(.+?)</id>};
-		$pid = $1;
-
-		# <updated>2008-06-22T05:01:49Z</updated>
-		$entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
-		$available = get_available_time_string( $1 );
-
-		# parse embedded xhtml <content ...>... <xhtml:br/>(desc here)</xhtml:div>... </content>
-		#<xhtml:br/>Sitcom about a jazz fan, a fashion victim, a mystic and a gorilla. When Vince bites a rare jazz record, the Jazz Beast enters his bloodstream.       </xhtml:div>
-		$desc = $entry;
-		# Strip out newlines and replace with ' '
-		$desc =~ s/\n/ /g;
-		$desc =~ s|^.*<xhtml:br/>\s*(.*?)\s*</xhtml:div>.*$|$1|gm;
-
-		# Parse the categories into hash
-		# <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
-		my %category;
-		for my $line ( grep /<category/, (split /\n/, $entry) ) {
-			$line =~ m{<category\s+term=\"(.+?)\".*?label=\"(.+?)\"};
-			$category{$1} = $2;
-		}
-		# We only so far have h264 versions for Signed and Original AFAIK, add entry for both of these (instead of version pid)
-		my @versions;
-		my @categories;
-		# If another version type does not occur in the categories then this is Original only
-		#push @versions, 'Original'; # if ( ! grep /^version.*/, keys %category );
-		# Add an entry for signed version if it exists
-		for (keys %category) {
-			push @versions, $category{$_} if /^version/ && $category{$_} eq 'Signed';
-			push @categories, $category{$_} if /^\d{6}$/;
-		}
-
-		# Get channel
-		# <author>...<name>****</name>....</author>
-		$channel = $entry;
-		$channel =~ s/\n/ /g;
-		if ( $channel =~ m{^.*<author>.*?<name>\s*.+?\s*</name>.*?</author>.*$} ) {
-			$channel =~ s|^.*<author>.*?<name>\s*(.+?)\s*</name>.*?</author>.*$|$1|gm;
-		} else {
-			$channel = 'Unknown';
-		}
-
-		# Get duration
-		$entry =~ m{<duration>\s*(.+?)\s*</duration>};
-		$duration = $1;
-
-		# Get thumbnail
-		# <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b008pj3w_150_84.jpg" width="150" height="84" time="" />
-		$entry =~ m{<media:thumbnail\s+url=\"(http://.+?)\"};
-		$thumbnail = $1;
-	
-		# build data structure
-		$prog{$pid} = {
-			'name'		=> decode_entities( $name ),
-			'versions'	=> decode_entities( join ',', @versions ),
-			'episode'	=> decode_entities( $episode ),
-			'desc'		=> decode_entities( $desc ),
-			'available'	=> $available,
-			'duration'	=> $duration,
-			'thumbnail'	=> $thumbnail,
-			'channel'	=> decode_entities( $channel ),
-			'categories'	=> decode_entities( join ',', @categories ),
-		};
 	}
+	logger "\n";
 	# Add index field based on alphabetical sorting by prog name
-	my $index = 1;
+	my %index;
+	$index{tv} = 1;
+	# Start index counter at 10001 for radio progs
+	$index{radio} = 10001;
 	my @prog_pid;
 	# Create unique array of '<progname|pid>'
 	push @prog_pid, "$prog{$_}{name}|$_" for (keys %prog);
@@ -726,19 +794,25 @@ sub get_links_atom {
 	for (sort @prog_pid) {
 		# Extract pid
 		my $pid = (split /\|/)[1];
-		$index_pid{$index} = $pid;
-		$prog{$pid}{index} = $index;
-		$index++;
+		my $type = $prog{$pid}{type};
+		$index_pid{ $index{$type} } = $pid;
+		$prog{$pid}{index} = $index{$type};
+		$index{$type}++;
 	}
 
 	return 0;
 }
 
 
-
+# get_links( $cachefile, %channels )
 sub get_links {
 	my @cache;
 	my $now = time();
+	my $cachefile = shift;
+	my %channels = %{$_[0]};
+
+	# Flush cache file if specified
+	unlink ($cachefile) if $opt{flush};
 
 	# Open cache file (need to verify we can even read this)
 	if ( open(CACHE, "< $cachefile") ) {
@@ -751,17 +825,17 @@ sub get_links {
 
 		if ($opt{scrape}) {
 			# Use A-Z,0-9 searchine '*' instead - less pages
-			get_links_all();
+			get_links_html(\%channels);
 		} else {
 			# Get index from Atom feed
-			get_links_atom();
+			get_links_atom(\%channels);
 		}
 		
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
-				print CACHE "$_|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
+				print CACHE "$_|$prog{$pid}{type}|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -777,7 +851,7 @@ sub get_links {
 		for (@cache) {
 			# Populate %prog from cache
 			chomp();
-			my ($index, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories, $thumbnail) = split /\|/;
+			my ($index, $type, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories, $thumbnail) = split /\|/;
 			# Create data structure with prog data
 			$prog{$pid} = {
 				'index'		=> $index,
@@ -790,6 +864,7 @@ sub get_links {
 				'channel'	=> $channel,
 				'categories'	=> $categories,
 				'thumbnail'	=> $thumbnail,
+				'type'		=> $type,
 			};
 			$index_pid{$index}	= $pid;
 		}
@@ -853,7 +928,7 @@ sub download_programme {
 		# Get these web bugs to whitelist our cookie if we don't have one already
 		if ( get_web_bugs($ua, @content) ) {
 			logger "ERROR: Could not whitelist cookie\n";
-			return 16;
+			return 'retry';
 		} 
 
 		$url_2 = get_audio_stream_download_url( $ua, $url_1 );
@@ -868,7 +943,7 @@ sub download_programme {
 		my $file_prefix = generate_download_filename_prefix( $pid );
 		logger "\rINFO: File name prefix = $file_prefix                 \n";
 		my $file_done = "${download_dir}/${file_prefix}.mp3";
-		my $file = "${download_dir}/${file_prefix}.partial.wav";
+		my $file = "${download_dir}/${file_prefix}.partial.mp3";
 		if ( -f $file_done || -f $file ) {
 			logger "ERROR: File already exists\n\n";
 			return 1;
@@ -878,8 +953,7 @@ sub download_programme {
 		return 0 if $opt{test};
 
 		# Do the audio download
-		download_rtsp_stream( $ua, $url_2, $file, $file_done );
-		return 0;
+		return download_rtsp_stream( $ua, $url_2, $file, $file_done );
 	}
 	
 	# Parse if programme available
@@ -955,9 +1029,8 @@ sub download_programme {
 	return 0 if $opt{test};
 
 	# Do the h.264 download
-	download_h264_stream( $ua, $url_2, $file, $file_done );
+	return download_h264_stream( $ua, $url_2, $file, $file_done );
 
-	return 0;
 }
 
 
@@ -1030,7 +1103,7 @@ sub download_h264_stream {
 	#}
 
 	# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
-	# Sanity check - we cannot support downloading of partial content if we're srtreaming also. 
+	# Sanity check - we cannot support downloading of partial content if we're streaming also. 
 	if ( $opt{stdout} && (! $opt{nowrite}) && -f $file ) {
 		logger "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
 		# Don't do usual streaming code
@@ -1063,16 +1136,19 @@ sub download_h264_stream {
 	# If the partial file already exists, then resume from the correct mdat/download offset
 	my $restart_offset = $mdat_start;
 	my $moovdata;
+
+	# if cookie fails then trigger a retry after deleting cookiejar
 	# Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
 	my $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 	logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
-	# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size
-	if ( $moov_length > (${moov_start}/9.0) ) {
-		logger "ERROR: Bad file download, deleted cookie, please retry\n";
+	# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
+	if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
+		logger "WARNING: Bad file download, deleting cookie                 \n";
 		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 		unlink $cookiejar;
-		return 17;
+		return 'retry';
 	}
+
 	# If we have a too-small-sized file and not stdout and not no-write then this is a partial download
 	if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
 		# Calculate new start offset (considering that we've put moov first in file)
@@ -1136,6 +1212,12 @@ sub download_h264_stream {
 # Actually do the rtsp downloading
 sub download_rtsp_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
+	my $childpid;
+	my $childpid2;
+	my $namedpipe = "${profile_dir}/namedpipe";
+
+	# Create named pipe
+	system("mknod $namedpipe p");
 
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -1152,16 +1234,73 @@ sub download_rtsp_stream {
 
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
-	system("$mplayer -cache 8192 -bandwidth 10000000 -vc null -vo null -ao pcm:waveheader:fast:file=$file \"$rtsp\"");
-	logger "INFO: Downloaded $file\n";
-	system("$lame -h -b 128 \"${file}\" \"${file_done}\"");
-	logger "INFO: Converted to mp3\n";
+       # Stream PCM audio to stdout only:
+       if ( $opt{stdout} ) {
+		# Fork a child which will wait for the file to be a certain size before sending to stdout
+		$childpid = fork();
+		if (! $childpid) {
+			# Child starts here
+			# Wait for upto 60 seconds for a 1 meg file to appear
+			logger "INFO: Waiting to stream $file directly\n";
+			my $i;
+			for (my $i = 0; $i<=60; $i++) {
+				sleep 1;
+				last if ( (-f $file) && (stat($file)->size > 1024000) );
+			}
+			# Quit if no file is streamed
+			exit 1 if $i == 60;
+		# test only
+		system("cat $file");
+		exit 0;	
+			logger "INFO: Streaming $file directly\n";
+			if ( ! open( STREAMIN, "< $file" ) ) {
+				logger "ERROR: Cannot Read downloaded file $file to stream\n";
+				exit 4;
+			}
+			my $outbuf;
+			# Write out until we run out of bytes
+			my $bytes_read = 65536;
+			while ( $bytes_read == 65536 ) {
+				$bytes_read = read(STREAMIN, $outbuf, 65536 );
+				print STDOUT $outbuf;
+			}
+			close STREAMIN;
+			logger "INFO: Stream thread has completed\n";
+			exit 0;
+		}
+	}
 
-	# Remove wav file
-	unlink $file if ! $opt{stdout};
+
+	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
+	$childpid2 = fork();
+	if (! $childpid2) {
+		# Child starts here
+		$| = 1;
+		logger "INFO: Transcoding $file\n";
+		system("cat $namedpipe | $lame -f - $file");
+		# Move file to done state
+		move $file, $file_done if ! $opt{nowrite};
+		logger "INFO: Transcoding thread has completed\n";
+		exit 0;
+	}
+
+	# Start the mplayer process and write to named pipe
+	if ( system("$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\"") ) {
+	#if ( system("$mplayer -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
+		# If we fail then kill off child processes
+		kill 9, $childpid, $childpid2;
+		return 2;
+	};
+	logger "INFO: Downloaded $file_done\n";
+
+	# Wait for child processes
+	wait;
+	# Remove namedpipe file
+	#unlink $file if ! $opt{stdout};
 
 	return 0;
 }
+
 
 # Get streaming video URL
 sub get_video_stream_download_url {
@@ -1605,7 +1744,8 @@ sub update_script {
 					chmod 0755, $script_file;
 					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
 					# Need to purge the cache as this changes between versions
-					unlink($cachefile);
+					unlink($cachefile_tv);
+					unlink($cachefile_radio);
 				}
 			}
 		} else {
@@ -1736,7 +1876,6 @@ sub create_fxd() {
 		print FXD "\t</container>\n";
 	}
 
-
 	print FXD '</freevo>';
 	close (FXD);
 }
@@ -1751,12 +1890,16 @@ sub create_html {
 			my $name = encode_entities( $prog{$pid}{name} );
 			my $episode = encode_entities( $prog{$pid}{episode} );
 			my $desc = encode_entities( $prog{$pid}{desc} );
+			my $channel = encode_entities( $prog{$pid}{channel} );
 			print HTML "<tr>
 					<td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
-					<td>$_</td><td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td> <td>${episode}</td>
+					<td>$_</td>
+					<td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td>
+					<td>${episode}</td>
+					<td>${channel}</td>
 				</tr>
 				<tr>
-					<td colspan=4>${desc}</td>
+					<td colspan=5>${desc}</td>
 				</tr>
 			\n";
 		}
