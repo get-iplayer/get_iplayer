@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 9th 2008
+# Date: July 10th 2008
 #
-my $version = 0.44;
+my $version = 0.45;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams from BBC iplayer site
@@ -18,7 +18,8 @@ my $version = 0.44;
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
 # * Resume downloads of partially downloaded mov files
 # * Indexing of all available Radio and TV (i.e. listed) iplayer programs using Atom feeds
-# * Caching of Index (default 4hrs)
+# * Info option (--info) to get full programme metadata
+# * Caching of Programme Index (default 4hrs)
 # * Creation of a basic html index file (--html <file>)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
@@ -32,6 +33,10 @@ my $version = 0.44;
 # * perl 5.8
 # * LWP (libwww-perl)
 # * mplayer, lame and tee (for radio support only)
+#
+# Changes 0.45 - 20070710
+# * Use HTTP pipelined requests for feeds
+# * Added info option (--info/-i) to get full programme metadata on searches below 40 matches
 #
 # Changes 0.44 - 20070709
 # * Add radio one into channels list - sorry!
@@ -59,146 +64,6 @@ my $version = 0.44;
 # Changes 0.40 - 20080707
 # * Fixed saving of thumbnail url in cache
 # * Added audio pid download/convert support (downloads rtsp and converts to mp3)
-# 
-# Changes 0.39 - 20080707
-# * Download File name fixed in scrape mode - episode appeared twice
-# * Image thumbnail url was wrong in scrape mode
-# * html option never looked for a filename
-#
-# Changes 0.38 - 20080707
-# * Updates to allow downloading after the BBC updated their website - kludged for now using scrape method until I can work out the atom feed again
-# * Category/channel searching (and fxd channel menus) and duration listing will be broken until atom feeds get fixed.
-# * Programme version is broken - different URL now used for signed versions etc. Only Original versions are listed for now.
-# * Added --terse listing mode
-# * Don't display version, duration, channel and categories if we use scrape mode
-#
-# Changes 0.37 - 20080703
-# * Made fxd and html output formats optional with ability to specify output filenames
-# * --fxd output now has 3 menu modes channel->progname->episode (--fxd-channels), progname->episode (--fxd-names), alpha->progname-episode (--fxd-alpha)
-# * removed type=video attribute from fxd container tags
-# * Now encode/decode xml entities for output
-# * --stdout option now implies --get
-#
-# Changes 0.36 - 20080701
-# * Now use the --get/-g option to get the selected files, without this we only list matches
-# * Re-use cookie for faster connections (no need to get web bugs every time)
-# * Fixed download rate calc on 32M block downloads
-# * Increased LWP timeouts to 20 seconds
-# * Checks for when we get a duff moov atom length (i.e. an XORed file) then deletes the cookie and quits
-# * Removed XML::Twig parser - use perl regex instead
-# * Now reports how long ago rather than date made available...
-#
-# Changes 0.35 - 20080630
-# * Restructured downloading code
-# * Now handles different versions better (i.e. Original, Signed) - tries to download next avaiable version type if one fails
-# * Freevo FXD now has programmes sorted by channel
-#
-# Changes 0.34 - 20080629
-# * Fixed duplicate listing bug when using --long
-# * Added --quiet option
-# * Added freevo symlink creation option --freevo
-# * FXD file for freevo now uses standard Video plugin with a player wrapper script
-# * Use logger function instead of print
-#
-# Changes 0.33 - 20080627
-# * Now gets programme categories and channel from Atom feed
-# * Only write the fxd and html files when writing cache
-# * Channel and category search (regex) --channel --category
-# * Fixed options saving/reading
-# * Added download progress for Atom feed and movie header
-#
-# Changes 0.32 - 20080626
-# * Now uses Atom feed rather than scraping website for programme info (much more reliable availability info)
-# * Now requires Perl XML::Twig
-# * Reduced cache expiry to 4 hrs (atom feed is now quicker to download and is more up to date)
-# * version pid (pid) is no longer used for reference - only programme pid (urlpid) == $pid
-# * Index now contains duration and start of availability date/time (Atom method only)
-# * Allow fallback to scraping website for programme index
-# * Removed deprecated XOR decoding
-#
-# Changes 0.31 - 20080624
-# * Allow user to save options and specify default options in $HOME/.iplayerrc
-# * Now uses long options also
-#
-# Changes 0.30 - 20080622
-# * Generate FXD file for Freevo iplayer streaming plugin
-# * Now can resume downloads and strema to STDOUT simultaneously (streaming always starts from beginning of programme)
-# * Retry loop for getting index pages incase BBC site breaks like it just did
-# 
-# Changes 0.29 - 20080619:
-# * Fixed streaming + file download mode
-# * Added random numbers after some requests more like iphone
-# * Added interrim checking of reported mp4 stream availability
-# * Reduced index cacahe default to 12 hours
-#
-# Changes 0.28 - 20080619:
-# * Update get_iplayer option (-u)
-#
-# Changes 0.27 - 20080619:
-# * New option to allow streaming while downloading AND writing file to disk (allows you to watch while downloading while keeping a copy for later)
-# * Sanity check to ensure we don't stream partially downloaded content
-#
-# Changes 0.26 - 20080618:
-# * Fixed partial download resuming
-# * Changed file suffix for partially downloaded files to <prog>.partial.mov to ease playback of partially downloaded movies 
-#
-# Changes 0.25 - 20080618:
-# * Automatically re-arrange the atoms so that file can be streamed and start faster (used method from qt-faststart.c, v0.1 by Mike Melanson, melanson@pcisys.net)
-# * Option -x allows STDOUT streaming during download (see usage)
-# * All messages now go to STDERR
-#
-# Changes 0.24 - 20080618:
-# * Now supports downloading of *unencrypted* streams from BBC Iplayer site - no more XOR nonsense
-# * Downloads web bugs to whitelist our cookies on BBC servers
-# * Downloads the file in blocks to avoid XOR
-#
-# Changes 0.23 - 20080617:
-# * added binmode for decode sub also for windows to work properly
-#
-# Changes 0.22 - 20080616:
-# * Detect null Content-Length header upon download - doesn't replace a partially d/loaded file if there is a failure
-#
-# Changes 0.21 - 20080616:
-# * Added binmode for Windows file writing - fixes bug where windows would not decode properly
-#
-# Changes 0.20 - 20080615:
-# * Remaining time reported in hrs/mins/secs
-# * Added sort-into-subdirectories option to create subdirectories for programmes
-#
-# Changes 0.19 - 20080614:
-# * Fixed PID searching
-# * Now supports restarting downloads of incomplete files
-# * Fixed swap detection bug where moov atom started on even byte offset
-# * Remaining time added
-# * Fixed kbps (not misreported kBps anymore)
-#
-# Changes 0.18 - 20080613:
-# * Auto detection of byte-swapping
-# * Auto detection of XOR sequence
-#
-# Changes 0.17 - 20080612:
-# * Non-UK error detection
-# * Not available error detection
-#
-# Changes 0.16 - 20080612:
-# * Fixed HTML output links 
-# * Sanitized data structures
-# * Now parses days/hours left
-# * Fixed XOR % completion calculation
-# * Reads IPLAYER_OUTDIR environment
-#
-# Changes 0.15 - 20080611:
-# * Fixed duplicate programme removal
-# * Now supports different programme type downloads (i.e. Original, Signed, etc)
-# * Changes hashes to give more meaningful names
-# * Test option (-t) will now determine the programme type
-# * Increased speed of XOR decoder by reading in 1024 blocks at a time
-#
-# Changes 0.14 - 20080611:
-# * Not using curl anymore - seems to fail through some firewalls mysteriously and will not work on Ubuntu
-# * Using LWP for all http requests
-# * Fixed indexing sort bug
-#
 
 use strict;
 use URI;
@@ -209,6 +74,7 @@ use File::stat;
 use File::Copy;
 use IO::Seekable;
 use LWP::UserAgent;
+use LWP::ConnCache;
 #use LWP::Debug qw(+);
 use HTTP::Cookies;
 use HTTP::Headers;
@@ -244,6 +110,7 @@ Search Options:
 Display Options:
  -l, --long			Display long programme descriptions / episode names and other data
      --terse			Only show terse programme info (does not affect searching)
+ -i, --info			Show full programme metadata (only if number of matches < 50)
 
 Download Options:
  -g, --get			Download matching programmes
@@ -306,7 +173,6 @@ GetOptions(
         "update|u"                      => \$opt{update},
         "debug"                         => \$opt{debug},
         "scrape"			=> \$opt{scrape},
-	"save"				=> \$save,
 	"channel=s"			=> \$opt{channel},
 	"category=s"			=> \$opt{category},
 	"q|quiet"			=> \$opt{quiet},
@@ -321,6 +187,8 @@ GetOptions(
 	"type=s"			=> \$opt{type},
 	"exclude-category=s"		=> \$opt{excludecategory},
 	"exclude-channel=s"		=> \$opt{excludechannel},
+	"i|info"			=> \$opt{info},
+	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
 my $DEBUG = $opt{debug};
@@ -328,8 +196,9 @@ my $DEBUG = $opt{debug};
 # Save opts if specified
 save_options_file() if $save;
 
-# Kludge to force srape mode until atom feed avalability is solved
+## Kludge to force srape mode until atom feed avalability is solved
 ##$opt{scrape} = 1;
+# Default to type=tv
 $opt{type} = 'tv' if ! $opt{type};
 
 # Options
@@ -340,6 +209,7 @@ my $cachefile_tv	= "${profile_dir}/tv.cache";
 my $cachefile_radio	= "${profile_dir}/radio.cache";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
+my $info_limit		= 40;
 my $mplayer		= 'mplayer';
 my $lame		= 'lame';
 my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
@@ -347,11 +217,15 @@ my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
 # URLs
 my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
 my $atom_feed_url		= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
+my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer', # /$channel/list/limit/200
 my $pid_page_url_prefix		= 'http://www.bbc.co.uk/iplayer/episode/';
 my $web_bug_2_url		= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
 my $audio_download_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream';
 my $video_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix		= 'http://www.bbc.co.uk/programmes';
+my $thumbnail_prefix		= 'http://www.bbc.co.uk/iplayer/images/episode',
+my $metadata_xml_prefix		= 'http://www.bbc.co.uk/iplayer/metafiles/episode', # /${pid}.xml
+my $metadata_mobile_prefix	= 'http://www.bbc.co.uk/iplayer/widget/episodedetail/episode', # /${pid}/template/mobile/service_type/tv/
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
 
@@ -386,9 +260,10 @@ my %channels_radio = (
 
 # User Agents
 my %user_agent = (
-  	coremedia	=> "Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a",
-  	safari		=> "Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3",
+  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
+  	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
   	update		=> "get_iplayer updater (v${version} - $^O)",
+  	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
 );
 
 # Sanity check some conflicting options
@@ -407,6 +282,7 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'longname'	=> <Long name (only parsed in stage 1)>,
 #	'duration'	=> <duration in HH:MM:SS>
 #	'versions'	=> <comma separated list of versions, e.g Original, Signed>
+#	'version'	=> <selected version e.g Original, Signed, etc - only set before d/load>
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <TV channel>
 #	'categories'	=> <Categories>
@@ -500,6 +376,24 @@ exit 0;
 
 # Lists progs given an array of index numbers
 sub list_progs {
+	my $ua;
+
+	logger "INFO: ".($#_ + 1)." Matching Programmes\n";
+
+	if ( $opt{info} ) {
+		$ua = LWP::UserAgent->new;
+		$ua->timeout([$lwp_request_timeout]);
+		$ua->proxy( ['http'] => $proxy_url );
+		$ua->agent( $user_agent{desktop} );
+		$ua->conn_cache(LWP::ConnCache->new());
+		# Truncate array if were lisiting info and > $info_limit entries are requested - be nice to the beeb!
+		if ( $#_ >= $info_limit ) {
+			$#_ = $info_limit - 1;
+			logger "WARNING: Only processing the first $info_limit matches\n";
+		}
+	}
+
+
 	for (@_) {
 		my $pid = $index_pid{$_};
 		# Skip if this is a radio programme and --type=radio not set
@@ -517,8 +411,10 @@ sub list_progs {
 		} else {
 			logger "$_: ${type}$prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only}\n";
 		}
+		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
 	}
 	logger "\n";
+
 	return 0;
 }
 
@@ -564,6 +460,7 @@ sub get_regex_matches {
 
 sub get_links_html {
 	my $pageno = 1;
+	my $res;
 	my $pid;
 	my @html;
 	my $valid = 1;
@@ -572,29 +469,19 @@ sub get_links_html {
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
-	$ua->agent( $user_agent{safari} );
-
+	$ua->agent( $user_agent{desktop} );
+	$ua->conn_cache(LWP::ConnCache->new());
+                
 	# Loop while we still get stream links
 	do {
-		my $retries = 3;
 		logger "DEBUG: Getting ${search_page_prefix}${pageno}\n" if $DEBUG;
-		do {
-			# Get index pages
-			my $res = $ua->request( HTTP::Request->new( GET => "${search_page_prefix}${pageno}" ) );
-			@html = split /\n/, $res->content;
-			# Set valid flag if we have progdata in this page
-			$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
-			if ( ! $res->is_success ) {
-				logger "WARNING: Failed to get programme index page ${pageno} from iplayer site\n";
-				$retries--;
-				sleep 1;
-				logger "X";
-				exit 2 if $retries == 0;
-			} else {
-				$retries = 0;
-				logger ".";
-			}
-		} until ($retries == 0);
+		@html = split /\n/, request_url_retry($ua, "${search_page_prefix}${pageno}", 3, '.', "WARNING: Failed to get programme index page ${pageno} from iplayer site\n");
+
+		# Don't continue if we get a duff index page
+		exit 2 if $#html < 1;
+
+		# Set valid flag if we have progdata in this page
+		$valid = 0 if ! grep(/version_pid=\w+">[^<]+<\/a>/, @html);
 
 		# Get the complete URL
 		# e.g.:  <a class="resultlink" href="/iplayer/page/item/b00bwky1.shtml?filter=azgroup%3A%2A&amp;start=33&amp;scope=iplayeratoz&amp;version_pid=b00c3kcd">Wild China</a>
@@ -645,7 +532,7 @@ sub get_links_html {
 					'desc'		=> $desc,
 					'available'	=> $available,
 					'duration'	=> '<duration>',
-					'thumbnail'	=> 'http://www.bbc.co.uk/iplayer/images/episode/'.$pid.'_150_84.jpg',
+					'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
 					'channel'	=> '<channel>',
 					'categories'	=> '<categories>',
 					'type'		=> 'tv',
@@ -687,27 +574,14 @@ sub get_links_atom {
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{desktop} );
+	$ua->conn_cache(LWP::ConnCache->new());
 
 	# Download index feed
 	for ( keys %channels ) {
-		my $url = "http://feeds.bbc.co.uk/iplayer/$_/list/limit/200";
-		my $retries = 3;
+		my $url = "${channel_feed_url}/$_/list/limit/200";
 		logger "DEBUG: Getting feed $url\n" if $opt{verbose};
-		do {
-			# Get index pages
-			$res = $ua->request( HTTP::Request->new( GET => $url ) );
-			if ( ! $res->is_success ) {
-				logger "WARNING: Failed to get programme index feed for $_ from iplayer site\n";
-				$retries--;
-				logger "X";
-				exit 2 if $retries == 0;
-			} else {
-				$retries = 0;
-				logger ".";
-			} 
-		} until ($retries == 0);
-		$xml = $res->content;
-		logger "INFO: Got ".(grep /<entry/, split /\n/, $res->content)." programmes\n" if $opt{verbose};
+		$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
+		logger "INFO: Got ".(grep /<entry/, split /\n/, $xml)." programmes\n" if $opt{verbose};
 		decode_entities($xml);	
 
 		### New Feed
@@ -781,7 +655,7 @@ sub get_links_atom {
 				'desc'		=> $desc,
 				'available'	=> $available,
 				'duration'	=> '<duration>',
-				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg",
+				'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
 				'channel'	=> $channel,
 				'categories'	=> join(',', @category),
 				'type'		=> $type,
@@ -920,16 +794,16 @@ sub download_programme {
 		$prog{$pid}{longname} = $1;
 		$prog{$pid}{episode} = $2;
 
-		# Get type => verpid
-		my %verpid_types = get_ver_pid_types( @content );
+		# Get version => pid
+		my %version_pids = get_version_pids( @content );
 		my $url_2;
 	
 		logger "INFO: Checking existence of programme\n";
-		$prog{$pid}{type} = 'Original';
+		$prog{$pid}{version} = 'Original';
 		# Create url with appended 6 digit random number
-		my $url_1 = ${audio_download_prefix}.'/'.$verpid_types{Original};
+		my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
 
-		logger "INFO: Type = $prog{$pid}{type}\n" if $opt{verbose};
+		logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
 		logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
 
 		# Get these web bugs to whitelist our cookie if we don't have one already
@@ -981,30 +855,25 @@ sub download_programme {
 	$prog{$pid}{longname} =~ s/^(.+):.*?$/$1/g;
 
 	# Get type => verpid
-	my %verpid_types = get_ver_pid_types( @content );
+	my %version_pids = get_version_pids( @content );
 	my $url_2;
 	my $got_url;
 	
 	# Do this for each version tried in this order (if they appaered in the content)
-	for my $type ( qw/ Original Signed AudioDescribed OpenSubtitled Shortened Lengthened Other / ) {
+	for my $version ( qw/ Original Signed AudioDescribed OpenSubtitled Shortened Lengthened Other / ) {
 
 		# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
-		if ( grep /^$type$/, keys %verpid_types ) {
-			logger "INFO: Checking existence of type $type\n";
-			$prog{$pid}{type} = $type;
-			# Create url with appended 6 digit random number
-			my $url_1 = ${video_download_prefix}.'/'.$verpid_types{$type}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
-
-			logger "INFO: Type = $prog{$pid}{type}\n" if $opt{verbose};
-			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
+		if ( grep /^$version$/, keys %version_pids ) {
+			logger "INFO: Checking existence of $version version\n";
+			$prog{$pid}{version} = $version;
+			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
 
 			# Get these web bugs to whitelist our cookie if we don't have one already
 			if ( get_web_bugs($ua, @content) ) {
 				logger "ERROR: Could not whitelist cookie\n";
 				return 16;
 			} 
-
-			$url_2 = get_video_stream_download_url( $ua, $url_1 );
+			$url_2 = get_video_stream_download_url( $ua, $version_pids{$version} );
 			$got_url = 1;
 		}
 		# Break out of loop if we have an actual URL
@@ -1048,9 +917,10 @@ sub download_stage_1 {
 	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
 	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
 
-
 	# Stage 1: get PID and set cookie
-	# This page Doesn't work with safari anymore....
+	# This page Doesn't work with safari ua anymore....
+	# If this break in future, use http://www.bbc.co.uk/mediaselector/4/json/stream/<pid> However this
+	#   method does not provide anything except the next URL, cannot get other prog info from it
 	$ua->agent( );
 	# send request
 	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
@@ -1062,6 +932,7 @@ sub download_stage_1 {
 }
 
 
+
 # Actually do the h.264 downloading
 sub download_h264_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
@@ -1069,7 +940,7 @@ sub download_h264_stream {
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
-	# Determine offset for continuation dowload
+	# Setup request header
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -1160,7 +1031,7 @@ sub download_h264_stream {
 	if (-f $file && (! $opt{stdout}) && (! $opt{nowrite}) && stat($file)->size > ($moov_length+$mdat_start) ) {
 		# Calculate new start offset (considering that we've put moov first in file)
 		$restart_offset = stat($file)->size - $moov_length;
-		logger "INFO: Restarting download from $restart_offset                        \n";
+		logger "INFO: Resuming download from $restart_offset                        \n";
 	}
 
 
@@ -1228,7 +1099,7 @@ sub download_rtsp_stream {
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
-	# Determine offset for continuation dowload
+	# Determine offset for resuming download
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -1285,7 +1156,11 @@ sub download_rtsp_stream {
 # Get streaming video URL
 sub get_video_stream_download_url {
 		my $ua = shift;
-		my $url_1 = shift;
+		my $pid = shift;
+
+		# Create url with appended 6 digit random number
+		my $url_1 = ${video_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+		logger "INFO: video stream download URL = $url_1\n" if $opt{verbose};
 		
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
@@ -1313,6 +1188,8 @@ sub get_video_stream_download_url {
 
 		return $url_2;
 }
+
+
 
 # Get streaming audio URL (Real => rtsp)
 #<media kind="audio"
@@ -1370,17 +1247,17 @@ sub get_audio_stream_download_url {
 #		
 #		
 #//-->
-sub get_ver_pid_types {
+sub get_version_pids {
 	my @content = @_;
-	# Extract version pid 
+	# Extract pid versions 
 	chomp( my $pid = (grep /iplayer\.episode\.setPidData/, @content)[0] );
 	# Remove tags
 	$pid =~ s/^.*\"(b0\w{6})\"\).*$/$1/g;
-	# Get hash of pid => type
-	my %types;
-	$types{'Original'} = $pid;
-	logger "INFO: Types available: ".join(', ', %types)."\n" if $opt{verbose};
-	return %types;
+	# Get hash of pid => version
+	my %version_pids;
+	$version_pids{'Original'} = $pid;
+	logger "INFO: Versions available: ".join(', ', %version_pids)."\n" if $opt{verbose};
+	return %version_pids;
 }
 
 
@@ -1388,7 +1265,7 @@ sub get_ver_pid_types {
 sub generate_download_filename_prefix {
 	my $pid = shift;
 	# Create a filename
-	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{type}";
+	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{version}";
 	# Replace slashes with _ regardless
 	$file =~ s/[\\\/]/_/g;
 	# Sanitize by default
@@ -1555,7 +1432,7 @@ sub download_block {
 		logger "INFO: Appending to $file\n" if $opt{verbose};
 	}
 
-	# Determine offset for continuation download
+	# Setup request headers
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -1705,6 +1582,7 @@ sub update_script {
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{update} );
+	$ua->conn_cache(LWP::ConnCache->new());
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
 	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
 	chomp( my $latest_ver = $res->content );
@@ -1905,6 +1783,7 @@ sub save_options_file {
 }
 
 
+# Load default options from file
 sub read_options_file {
 	return 0 if ! -f $optfile;
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
@@ -1915,6 +1794,7 @@ sub read_options_file {
 	close OPT;
 }
 
+
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
 sub get_available_time_string {
 	my $datestring = shift;
@@ -1924,4 +1804,144 @@ sub get_available_time_string {
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
 	return "$time[7] days $time[2] hours ago";
+}
+
+# get full episode metadata given pid and ua. Uses two different urls to get data
+sub get_pid_metadata {
+	my $ua = shift;
+	my $pid = shift;
+	my $metadata;
+	my $entry;
+	my $entry2;
+
+	# This URL works for all prog types:
+	# http://www.bbc.co.uk/iplayer/playlist/${pid}
+
+	# This URL only works for TV progs:
+	# http://www.bbc.co.uk/iplayer/metafiles/episode/${pid}.xml
+
+	# This URL works for all prog types:
+	# http://www.bbc.co.uk/iplayer/widget/episodedetail/episode/${pid}/template/mobile/service_type/tv/
+
+	# Only supply this is a TV prog
+	if ( $prog{$pid}{type} =~ /tv/i ) {
+		logger "DEBUG: Getting episode data for ${pid}\n" if $opt{verbose};
+		$entry = request_url_retry($ua, "${metadata_xml_prefix}/${pid}.xml", 3, '', "WARNING: Failed to get episode metadata for $pid\n");
+		decode_entities($entry);
+		# Flatten
+		$entry =~ s|\n| |g;
+		# Remove any related programme data
+		$entry =~ s|<relatedConcepts>.*$||gi;
+	}
+
+	if ( 1 ) {
+		$entry2 = request_url_retry($ua, "${metadata_mobile_prefix}/${pid}/template/mobile/service_type/tv/", 3, '', "WARNING: Failed to get episode metadata for $pid\n");
+		decode_entities($entry2);
+		# Flatten
+		$entry2 =~ s|\n| |g;
+		# Remove any related programme data
+		$entry2 =~ s|<relatedConcepts>.*$||gi;
+	}
+
+
+	# entry Format:
+	# <?xml version="1.0" encoding="UTF-8"?> <iplayerMedia version="0.2">    <concept>          <pid>b00c7ytx</pid>
+	#     <url>http://www.bbc.co.uk/iplayer/page/item/b00c7ytx.shtml</url>     <title>Doctor Who: Series 4</title>
+	#     <subtitle>Turn Left</subtitle>     <thumbnail>    
+	#   <url>http://www.bbc.co.uk/iplayer/images/episode/b00c7ytx_512_288.jpg</url>   
+	#    <width>512</width>       <height>288</height>       <mediaType>image/jpeg</mediaType>     </thumbnail>  
+	#    <shortSynopsis>Can Donna and Rose stop the approaching Darkness?</shortSynopsis>  
+	#   <mediumSynopsis>As Donna's world collapses, she finds help from a mysterious blonde woman - but can Donna and Rose stop the approaching Darkness?</mediumSynopsis>  
+	#   <longSynopsis></longSynopsis>     <masterbrand id="bbc_one">  
+	#     <thumbnail>         <url>http://www.bbc.co.uk/iplayer/framework/img/ch/bbc_one.gif</url>         <width>54</width> 
+	#<!-- Note:these value are currently hard coded as they're not in the content package -->         <height>40</height>     
+	#     <mediaType>image/gif</mediaType>       </thumbnail>   
+	#    <ident>          <server>cp44293.edgefcs.net</server>          <identifier>public/bbc_one</identifier>    
+	#     <width>512</width>         <height>288</height>         <mediaType>video/x-flv</mediaType>       </ident>     </masterbrand>      
+	#   <versions><!-- there will only be one version for launch. This will be the first available version -->  
+	#      <version>           <name>AudioDescribed,Original</name>      
+	#     <pid>b00c7yq9</pid>           <guidance>             <text></text>           </guidance>     
+	#      <duration>00:45:00</duration>            <available>true</available>         </version>              </versions>
+	
+	# entry2 Format:
+	# 	<h1>Doctor Who: Series 4</h1>
+	#<div id="p-panel-episode">
+	#        <div id="episode-image">
+	#                <a href="#" id="version" pid="b00c7yq9"><img id="play-version" pid="b00c7yq9" src="img/click_to_play.png" /></a>
+	#                <img src="/iplayer/images/episode/b00c7ytx_314_176.jpg" />
+	#                <div id="player-container"></div>
+	#
+	#                <div id="info-message"></div>
+	#        </div>
+	#        <h2>Turn Left <span>-  45 mins</span></h2>
+	#        <p><img class="episode-masterbrand" src="img/bbc_one.png"> As Donna's world collapses, she finds help from a mysterious blonde woman - but can Donna and Rose stop the approaching Darkness?</p>
+	#        <p>Available till:  8:54pm Friday 11th July</p>
+
+	# Format: http://www.bbc.co.uk/iplayer/playlist/b00c8ssg
+	#<?xml version="1.0" encoding="UTF-8"?>
+	#
+	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
+	#  <id>tag:bbc.co.uk,2008:iplayer:b00c8ssg:playlist</id>
+	#  <link rel="self" href="http://www.bbc.co.uk/iplayer/playlist/b00c8ssg"/>
+	#  <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00c8ssg"/>
+	#  <link rel="holding" href="http://www.bbc.co.uk/iplayer/images/episode/b00c8ssg_640_360.jpg" height="360" width="640" type="image/jpeg" />
+	#  <title>Eddie Halliwell: 03/07/2008</title>
+	#  <summary>With two hours of the best new trance and techno.</summary>
+	#  <updated>2008-06-26T01:01:37Z</updated>
+	#  <item kind="radioProgramme" duration="7200" identifier="b00c8smr" group="b00c8ssg" publisher="pips">
+	#    <title>Eddie Halliwell: 03/07/2008</title>
+	#    <broadcast>2008-07-03T23:00:00</broadcast>
+	#    <service id="bbc_radio_one" href="http://www.bbc.co.uk/iplayer/bbc_radio_one">BBC Radio 1</service>
+	#    <masterbrand id="bbc_radio_one" href="http://www.bbc.co.uk/iplayer/bbc_radio_one">BBC Radio 1</masterbrand>
+	#    <passionSite href="http://www.bbc.co.uk/programmes/b006wq9w/microsite">Eddie Halliwell</passionSite>
+	#    <mediator identifier="b00c8smr" name="pips"/>
+	#  </item>
+	#</playlist>
+
+	my ($duration, $available, $expiry, $longdesc, $versions, $guidance);
+
+	$expiry = $1 if $entry2 =~ m{<p>Available till:\s*(.*?)\s*</p>};
+	$duration = $1 if $entry =~ m{<duration>\s*(.*?)\s*</duration>};
+	$available = $1 if $entry =~ m{<available>\s*(.*?)\s*</available>};
+	$longdesc = $1 if $entry =~ m{<longSynopsis>\s*(.*?)\s*</longSynopsis>};
+	if (! $longdesc) {
+		$longdesc = $1 if $entry =~ m{<mediumSynopsis>\s*(.*?)\s*</mediumSynopsis>};
+	}
+	if (! $longdesc) {
+		$longdesc = $1 if $entry =~ m{<shortSynopsis>\s*(.*?)\s*</shortSynopsis>};
+	}
+	$versions = $1 if $entry =~ m{<name>\s*(.*?)\s*</name>};
+	$guidance = $1 if $entry =~ m{<guidance>\s*<text>\s*(.*?)\s*</text>};
+	
+	$metadata .= "Pid:\t\t$pid\n";
+	$metadata .= "Duration:\t$duration\n";
+	$metadata .= "Available:\t$available\n";
+	$metadata .= "Expires:\t$expiry\n";
+	$metadata .= "Versions:\t$versions\n";
+	$metadata .= "Guidance:\t$guidance\n";
+	$metadata .= "Description:\t$longdesc\n";
+	return $metadata;
+}
+
+
+# Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
+# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
+sub request_url_retry {
+	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_; 
+	my $res;
+
+	my $i;
+	for ($i = 0; $i < $retries; $i++) {
+		$res = $ua->request( HTTP::Request->new( GET => $url ) );
+		if ( ! $res->is_success ) {
+			logger $failmsg;
+		} else {
+			logger $succeedmsg;
+			last;
+		}
+	}
+	# Return empty string if we failed
+	return '' if $i == $retries;
+	# otherwise return content
+	return $res->content;
 }
