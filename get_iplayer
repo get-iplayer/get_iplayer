@@ -8,12 +8,12 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 10th 2008
+# Date: July 12th 2008
 #
-my $version = 0.45;
+my $version = 0.46;
 #
 # Supports: 
-# * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams from BBC iplayer site
+# * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
 # * Downloads streams from BBC iplayer site (--get)
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
 # * Resume downloads of partially downloaded mov files
@@ -27,12 +27,22 @@ my $version = 0.45;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows (Activstate Perl, cygwin)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows (Activestate Perl, cygwin)
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
 # * mplayer, lame and tee (for radio support only)
+#
+# Todo:
+# ** Use non-shell tee?
+# ** Fix non-uk detection - iphone auth?
+# ** Index/Download live radio streams w/schedule feeds to assist timing
+#
+# Changes 0.46 - 20070712
+# * Can now Index and Download BBC podcast mp3/aac streams using --type=podcast
+# * Check external programme dependancies
+# * Use non-shell mknod (POSIX mkfifo)
 #
 # Changes 0.45 - 20070710
 # * Use HTTP pipelined requests for feeds
@@ -65,21 +75,25 @@ my $version = 0.45;
 # * Fixed saving of thumbnail url in cache
 # * Added audio pid download/convert support (downloads rtsp and converts to mp3)
 
-use strict;
-use URI;
-use IO::Socket;
-use Getopt::Long;
+use Env qw[@PATH];
 use Fcntl;
-use File::stat;
 use File::Copy;
-use IO::Seekable;
-use LWP::UserAgent;
-use LWP::ConnCache;
-#use LWP::Debug qw(+);
+use File::Path;
+use File::stat;
+use Getopt::Long;
+use HTML::Entities;
 use HTTP::Cookies;
 use HTTP::Headers;
-use HTML::Entities;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+#use LWP::Debug qw(+);
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
 use Time::Local;
+use URI;
+
 my $DEBUG = 0;
 $|=1;
 my %opt = ();
@@ -93,53 +107,54 @@ sub logger(@) {
 sub usage {
 	logger <<EOF;
 get_iplayer v$version, Usage:
-  Search Programmes:	get_iplayer [<search options>] [<regex|index|pid|url> ...]
-  Download files:	get_iplayer --get [<search options>] <regex|index|pid|url> ...
-  Stream Downloads:	get_iplayer --stdout [-p <proxy_url>] [<options>] <regex|index|pid|url> | mplayer -cache 2048 -
-  Update get_iplayer:	get_iplayer --update
+Search Programmes:  get_iplayer [<search options>] [<regex|index|pid|pidurl> ...]
+Download files:     get_iplayer --get [<search options>] <regex|index|pid|pidurl> ...
+                    get_iplayer --pid <pid|pidurl> [<options>]
+Stream Downloads:   get_iplayer --stdout [<options>] <regex|index|pid|pidurl> | mplayer -cache 2048 -
+Update get_iplayer: get_iplayer --update
 
 Search Options:
- <regex|index|pid|url>		Search programme names based on given pattern
- -l, --long			Additionally search in long programme descriptions / episode names
-     --channel <regex>		Narrow search to matched channel(s)
-     --category <regex>		Narrow search to matched categories
-     --exclude-channel <regex>	Narrow search to exclude matched channel(s)
-     --exclude-category <regex>	Narrow search to exclude matched catogories
-     --type <radio|tv|all>	Only search in these types of programmes (tv is default)
+ <regex|index|pid|url>         Search programme names based on given pattern
+ -l, --long                    Additionally search in long programme descriptions / episode names
+ --channel <regex>             Narrow search to matched channel(s)
+ --category <regex>            Narrow search to matched categories
+ --exclude-channel <regex>     Narrow search to exclude matched channel(s)
+ --exclude-category <regex>    Narrow search to exclude matched catogories
+ --type <radio|tv|podcast|all> Only search in these types of programmes (tv is default)
 
 Display Options:
- -l, --long			Display long programme descriptions / episode names and other data
-     --terse			Only show terse programme info (does not affect searching)
- -i, --info			Show full programme metadata (only if number of matches < 50)
+ -l, --long                    Display long programme descriptions / episode names and other data
+ --terse                       Only show terse programme info (does not affect searching)
+ -i, --info                    Show full programme metadata (only if number of matches < 50)
 
 Download Options:
- -g, --get			Download matching programmes
- -x, --stdout			Additionally stream to STDOUT (so you can pipe output to a player)
- -p, --proxy <url>		Web proxy URL spec
-     --pid <pid|url>		Download an arbitrary pid that does not appear in the index
- -t, --test			Test only - no download (will show programme type)
+ -g, --get                     Download matching programmes
+ -x, --stdout                  Additionally stream to STDOUT (so you can pipe output to a player)
+ -p, --proxy <url>             Web proxy URL spec
+ --pid <pid|url>               Download an arbitrary pid that does not appear in the index
+ -t, --test                    Test only - no download (will show programme type)
 
 Output Options:
- -o, --output <dir>		Download output directory
- -s, --subdir			Downloaded files into Programme name subdirectory
- -n, --nowrite			No writing of file to disk (use with -x to prevent a copy being stored on disk)
- -w, --whitespace		Keep whitespace (and escape chars) in filenames
- -q, --quiet			No logging output
+ -o, --output <dir>            Download output directory
+ -s, --subdir                  Downloaded files into Programme name subdirectory
+ -n, --nowrite                 No writing of file to disk (use with -x to prevent a copy being stored on disk)
+ -w, --whitespace              Keep whitespace (and escape chars) in filenames
+ -q, --quiet                   No logging output
 
 Config Options:
- -f, --flush			Flush cache
- -e, --expiry <secs>		Cache expiry in seconds (default 12hrs)
-     --scrape			Use old web page scraping method to get programme index
-     --freevo <file>		Create symlink to <file> once we have the header of the download
-     --fxd <file>		Create Freevo FXD XML in specified file
-     --fxd-channels		Create freevo menu of channels -> programme names -> episodes
-     --fxd-names		Create freevo menu of programme names -> episodes
-     --fxd-alpha		Create freevo menu sorted alphabetically by programme name
-     --html <file>		Create basic HTML index of programmes in specified file
- -v, --verbose			Verbose
- -u, --update			Update get_iplayer if a newer one exists
- -h, --help			Help
-     --save			Save specified options as default in .iplayerrc
+ -f, --flush                   Flush cache
+ -e, --expiry <secs>           Cache expiry in seconds (default 12hrs)
+ --scrape                      Use old web page scraping method to get programme index
+ --freevo <file>               Create symlink to <file> once we have the header of the download
+ --fxd <file>                  Create Freevo FXD XML in specified file
+ --fxd-channels                Create freevo menu of channels -> programme names -> episodes
+ --fxd-names                   Create freevo menu of programme names -> episodes
+ --fxd-alpha                   Create freevo menu sorted alphabetically by programme name
+ --html <file>                 Create basic HTML index of programmes in specified file
+ -v, --verbose                 Verbose
+ -u, --update                  Update get_iplayer if a newer one exists
+ -h, --help                    Help
+ --save                        Save specified options as default in .get_iplayer/config
 EOF
 	exit 1;
 }
@@ -155,6 +170,8 @@ my $optfile = "${profile_dir}/options";
 # Parse options if we're not saving options
 read_options_file() if ! grep /\-\-save/, @ARGV;
 
+# Allow bundling of single char options
+Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
         "help|h"                        => \$opt{help},
@@ -207,11 +224,13 @@ my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper scr
 my $cookiejar		= "${profile_dir}/cookies";
 my $cachefile_tv	= "${profile_dir}/tv.cache";
 my $cachefile_radio	= "${profile_dir}/radio.cache";
+my $cachefile_podcast	= "${profile_dir}/podcast.cache"; 
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
 my $mplayer		= 'mplayer';
 my $lame		= 'lame';
+my $tee			= 'tee';
 my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
 
 # URLs
@@ -238,6 +257,14 @@ my %channels_tv = (
 	'cbeebies'				=> 'tv|CBeebies',
 	'bbc_news24'				=> 'tv|BBC News 24',
 	'bbc_parliament'			=> 'tv|BBC Parliament',
+	'bbc_one_northern_ireland'		=> 'tv|BBC One Northern Ireland',
+	'bbc_one_scotland'			=> 'tv|BBC One Scotland',
+	'bbc_one_wales'				=> 'tv|BBC One Wales',
+	'bbc_webonly'				=> 'tv|BBC Web Only',
+	'categories/news/tv'			=> 'tv|BBC News',
+	'categories/sport/tv'			=> 'tv|BBC Sport',
+#	'categories/tv'				=> 'tv|All',
+#	'categories/signed/tv'			=> 'tv|Signed',
 );
 
 my %channels_radio = (
@@ -255,6 +282,27 @@ my %channels_radio = (
 	'bbc_radio_scotland'			=> 'radio|BBC Radio Scotland',
 	'bbc_radio_ulster'			=> 'radio|BBC Radio Ulster',
 	'bbc_radio_wales'			=> 'radio|BBC Radio Wales',
+#	'categories/radio'			=> 'radio|All',
+);
+
+my %channels_podcast = (
+	'1xtra'					=> 'podcast|BBC 1Xtra',
+	'radio1'				=> 'podcast|BBC Radio 1',
+	'radio2'				=> 'podcast|BBC Radio 2',
+	'radio3'				=> 'podcast|BBC Radio 3',
+	'radio4'				=> 'podcast|BBC Radio 4',
+	'fivelive'				=> 'podcast|BBC Radio 5 live',
+	'6music'				=> 'podcast|BBC 6 Music',
+	'bbc7'					=> 'podcast|BBC 7',
+	'asiannetwork'				=> 'podcast|BBC Asian Network',
+	'worldservice'				=> 'podcast|BBC World Service',
+	'scotland'				=> 'podcast|BBC Radio Scotland',
+	'northernireland'			=> 'podcast|BBC Radio Ulster/Foyle',
+	'wales'					=> 'podcast|BBC Radio Wales',
+	'cymru'					=> 'podcast|BBC Cymru',
+	'local'					=> 'podcast|BBC Local Radio',
+	'radio'					=> 'podcast|BBC Cross Station',
+#	'categories/radio'			=> 'podcast|All',
 );
 
 
@@ -303,13 +351,21 @@ if ($opt{update}) {
 	update_script();
 }
 
-# Check for valid dload dir
-die ("ERROR: $download_dir does not exist\n") if ! -d $download_dir;
+# Check for valid dload dir or create it
+if (! -d $download_dir) {
+	logger "INFO: Created directory $download_dir\n";
+	mkpath($download_dir);
+}
+
 
 # Get stream links from BBC iplayer site or from cache (also populates all hashes)
-get_links($cachefile_tv, \%channels_tv) if $opt{type} =~ /(tv|all)/i;
+get_links($cachefile_tv, 'tv', \%channels_tv) if $opt{type} =~ /(tv|all)/i;
+
 # Only get radio stream links if we're not using scrape method
-get_links($cachefile_radio, \%channels_radio) if $opt{type} =~ /(radio|all)/i && ! $opt{scrape};
+get_links($cachefile_radio, 'radio', \%channels_radio) if $opt{type} =~ /(radio|all)/i;
+
+# Only get podcast links if we're not using scrape method
+get_links($cachefile_podcast, 'podcast', \%channels_podcast) if $opt{type} =~ /(podcast|all)/i;
 
 # Write HTML and FXD files if required
 create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
@@ -505,26 +561,30 @@ sub get_links_html {
 
 		# parse @html array for episode info
 		while (@html) {
-			my $progdata;
 			chomp( my $line = shift @html );
 			# If this line has a version_pid line (i.e. one with anchor text in it)
 			if ( $line =~ /version_pid=\w+">[^<]+<\/a>/ ) {
-				# Need version_pid & url (note these are different pids)
-				# Get url and extract the URLPID and PID
-				$line =~ s/^.*href=\".*(b0.{6})\.shtml\?.*version_pid=(\w+)">[^<]+<\/a>/$1 $2/;
-				my $pid = $1;
+				my ( $pid, $available, $name, $episode, $desc );
+
+				# Get url and extract  PID
+				$pid = $1 if $line =~ m{href=".*(b0.{6})\.shtml\?.*version_pid=\w+">[^<]+</a>};
+
 				# get next 40 lines into a single string
-				$progdata = '';
+				my $progdata;
 				$progdata .= shift @html for (1..40);
+				
+				# Flatten
+				$progdata =~ s/\n/ /g;
+				
 				# Extract prog data
-				$progdata =~ s!^.*<span class=\"available\">\s*([\w ]+)\s*</span>.*<p class=\"title\">\s*<strong>(.+)</strong>.+</span>\s*([^<]+)</p>.*<p class=\"description\">([^<]+).*$!$1|$2|$3|$4!g;
-				# Remove unwanted whitespace
-				$progdata =~ s/\s*$//g;
-				$progdata =~ s/\s*\|/|/g;
-				$progdata =~ s/\|\s*/|/g;
-				logger "pid|available|prog|episode|desc = '$pid|$progdata'\n" if $opt{verbose};
-				my ($pid, $available, $name, $episode, $desc) = split /\|/, "$pid|$progdata";;
 				# Create data structure with prog data
+				$available = $1 if $progdata =~ m{<span class="available">\s*([\w ]+)\s*</span>};
+				$name = $1 if $progdata =~ m{<strong>\s*(.+)\s*</strong>};
+				$episode = $1 if $progdata =~ m{<strong>\s*.+\s*</strong>.+</span>\s*([^<]+?)\s*</p>};
+				$desc = $1 if $progdata =~ m{<p class=\"description\">\s*([^<]+)};
+
+				logger "pid|available|name|episode|desc = '$pid|$available|$name|$episode|$desc'\n" if $opt{verbose};
+				
 				$prog{$pid} = {
 					'name'		=> $name,
 					'versions'	=> '<versions>',
@@ -577,8 +637,13 @@ sub get_links_atom {
 	$ua->conn_cache(LWP::ConnCache->new());
 
 	# Download index feed
-	for ( keys %channels ) {
-		my $url = "${channel_feed_url}/$_/list/limit/200";
+	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
+	my @channel_list;
+	push @channel_list, grep !/categor/, keys %channels;
+	push @channel_list, grep  /categor/, keys %channels;
+	for ( @channel_list ) {
+
+		my $url = "${channel_feed_url}/$_/list/limit/400";
 		logger "DEBUG: Getting feed $url\n" if $opt{verbose};
 		$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
 		logger "INFO: Got ".(grep /<entry/, split /\n/, $xml)." programmes\n" if $opt{verbose};
@@ -614,30 +679,32 @@ sub get_links_atom {
 		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $type );
 		foreach my $entry (@entries) {
 
+			my $entry_flat = $entry;
+			$entry_flat =~ s/\n/ /g;
+
+			# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
+			$pid = $1 if $entry =~ m{<id>.*PIPS:(.+?)</id>};
+
+			# Skip if this pid is a duplicate
+			if ( defined $prog{$pid} ) {
+				logger "WARNING: '$pid, $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{channel}' already exists (this channel = $_)\n" if $opt{verbose};
+				next;
+			}
+
 			# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
-			$entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
-			$name = $1;
+			$name = $1 if $entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
 			$episode = $name;
 			$name =~ s/^(.*): .*$/$1/g;
 			$episode =~ s/^.*: (.*)$/$1/g;
 
-			# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
-			$entry =~ m{<id>.*PIPS:(.+?)</id>};
-			$pid = $1;
-
 			# <updated>2008-06-22T05:01:49Z</updated>
-			$entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
-			$available = get_available_time_string( $1 );
+			$available = get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
-			$desc = $entry;
-			# Strip out newlines and replace with ' '
-			$desc =~ s/\n/ /g;
-			$desc =~ s|^.*<p>\s*(.*?)\s*</p>\s*</content>.*$|$1|gm;
+			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
 
 			# Parse the categories into hash
 			# <category term="Factual" scheme="urn:bbciplayer:category" />
-			# <category term="100001PT011" scheme="http://www.bbc.co.uk/cpe#category" label="Children's, Performances &amp; Events"/>
 			my @category;
 			for my $line ( grep /<category/, (split /\n/, $entry) ) {
 				$line =~ m{<category\s+term=\"(.+?)\".*?scheme=\"urn:bbciplayer:category\"};
@@ -646,6 +713,8 @@ sub get_links_atom {
 
 			# Extract channel and type
 			($type, $channel) = (split /\|/, $channels{$_})[0,1];
+
+			logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt{debug};
 
 			# build data structure
 			$prog{$pid} = {
@@ -663,14 +732,29 @@ sub get_links_atom {
 		}
 	}
 	logger "\n";
+	return 0;
+}
+
+
+# Populates the index field of the prog hash as well as creating the %index_pid hash
+# Should be run after getting any link lists
+sub sort_indexes {
+
 	# Add index field based on alphabetical sorting by prog name
 	my %index;
 	$index{tv} = 1;
+	
 	# Start index counter at 10001 for radio progs
 	$index{radio} = 10001;
+
+	# Start index counter at 20001 for podcast progs
+	$index{podcast} = 20001;
+
 	my @prog_pid;
+
 	# Create unique array of '<progname|pid>'
 	push @prog_pid, "$prog{$_}{name}|$_" for (keys %prog);
+
 	# Sort by progname and index 
 	for (sort @prog_pid) {
 		# Extract pid
@@ -680,16 +764,255 @@ sub get_links_atom {
 		$prog{$pid}{index} = $index{$type};
 		$index{$type}++;
 	}
-
 	return 0;
 }
 
 
-# get_links( $cachefile, %channels )
+# get_podcast_links ()
+sub get_podcast_links {
+	my %channels = %{$_[0]};
+
+	my $xml;
+	my $res;
+	logger "INFO: Getting Podcast Index\n";
+	# Setup User agent
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout([$lwp_request_timeout]);
+	$ua->proxy( ['http'] => $proxy_url );
+	$ua->agent( $user_agent{safari} );
+	$ua->conn_cache(LWP::ConnCache->new());
+	
+	# Method
+	# http://www.bbc.co.uk/radio/podcasts/ip/lists/$channel.sssi => 
+	# http://www.bbc.co.uk/radio/podcasts/$name/assets/iphone_keepnet.sssi => (rewrite URL)
+	# ( http://downloads.bbc.co.uk/podcasts/radio/$name/rss.xml for some progs!)
+	# http://downloads.bbc.co.uk/podcasts/$channel/$name/rss.xml =>
+
+	# Get top-level podcast index (iphone)
+	#  <li class="li_with_image">
+	#    <a href="/radio/podcasts/trintro/assets/iphone_keepnet.sssi">
+	#      <div class="list-link">
+	#        <span class="img">
+	#          <img class="podcast_image"
+	#          src="http://www.bbc.co.uk/radio/podcasts/trintro/assets/_70x70.jpg" />
+	#        </span>
+	#        <p class="podcast_title">Tom Robinson Introducing...</p>
+	#      </div>
+	#    </a>
+	#  </li>
+
+	# Download index feed
+	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
+	my @channel_list;
+	push @channel_list, grep !/categor/, keys %channels;
+	push @channel_list, grep  /categor/, keys %channels;
+	for my $service ( @channel_list ) {
+		my ( $name, $title );
+
+		# Get hash of podcast_channel_prog: podcast_prog => nicename
+		my $url = "http://www.bbc.co.uk/radio/podcasts/ip/lists/${service}.sssi";
+		my %podcast_channel_prog;
+		my @podcast_channel_list = split /<li class=\"li_with_image\">/, request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get prodcast index from site\n");
+		for ( @podcast_channel_list ) {
+			# Get podcast id name
+			$name = $1 if m{<a href="/radio/podcasts/(.+?)/};
+			next if !$name;
+			# Get nice name
+			$title = $1 if m{<p class="podcast_title">(.+?)</p>};
+			$podcast_channel_prog{ $name } = $title;
+			#print "SERVICE: $service\tNAME: $name\n";
+		}
+	
+		# Loop thru each programme name
+		for ( keys %podcast_channel_prog ) {
+			my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $type );
+
+			# Get RSS feeds for each podcast programme
+			my $url = "http://downloads.bbc.co.uk/podcasts/$service/$_/rss.xml";
+	
+			logger "DEBUG: Getting podcast feed $url\n" if $opt{verbose};
+			$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $service / $_ from iplayer site\n") if $opt{verbose};
+			$xml = request_url_retry($ua, $url, 3, '.', '') if ! $opt{verbose};
+			# Dirty hack cos some progs are under service=radio :-|
+			if (! $xml) {
+				my $url = "http://downloads.bbc.co.uk/podcasts/radio/$_/rss.xml";
+				$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for radio / $_ from iplayer site\n") if $opt{verbose};
+				$xml = request_url_retry($ua, $url, 3, '.', '') if ! $opt{verbose};
+			}
+			# skip if no data
+			next if ! $xml;
+
+			logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt{verbose};
+			decode_entities($xml);
+	
+			# First entry is channel data
+			# <?xml version="1.0" encoding="utf-8"?>
+			#<rss xmlns:media="http://search.yahoo.com/mrss/"
+			#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+			#version="2.0">
+			#  <channel>
+			#    <title>Stuart Maconie's Freak Zone</title>
+			#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+			#    <description>Weekly highlights from Stuart Maconie's
+			#    ...podcast is only available in the UK.</description>
+			#    <itunes:summary>Weekly highlights from Stuart Maconie's
+			#    ...podcast is only available in the UK.</itunes:summary>
+			#    <itunes:author>BBC 6 Music</itunes:author>
+			#    <itunes:owner>
+			#      <itunes:name>BBC</itunes:name>
+			#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
+			#    </itunes:owner>
+			#    <language>en</language>
+			#    <ttl>720</ttl>
+			#    <image>
+			#      <url>
+			#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
+			#      <title>Stuart Maconie's Freak Zone</title>
+			#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+			#    </image>
+			#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+			#    <copyright>(C) BBC 2008</copyright>
+			#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
+			#    <itunes:category text="Music" />
+			#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
+			#    freakzone, macoonie</itunes:keywords>
+			#    <media:keywords>Stewart Maconie, Macconie, freekzone,
+			#    freakzone, macoonie</media:keywords>
+			#   <itunes:explicit>no</itunes:explicit>
+			#    <media:rating scheme="urn:simple">nonadult</media:rating>
+	
+			# Parse XML
+	
+			# get list of entries within <entry> </entry> tags
+			my @entries = split /<item>/, $xml;
+			# first element == <channel> header
+			my $header = shift @entries;
+	
+			# Get podcast name
+			$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
+	
+			# Extract channel and type
+			($type, $channel) = (split /\|/, $channels{$service})[0,1];
+	
+			# Parse the categories into hash
+			# <itunes:category text="Music" />
+			my @category;
+			for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
+				$line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
+				push @category, $1 || '<category>';
+			}
+	
+			# Get thumbnail
+			# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+			$thumbnail = $1 if m{<itunes:image href="\s*(.+?)\s*"};
+	
+			# Followed by items:
+			#    <item>
+			#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
+			#      pop francais?</title>
+			#      <description>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's module.</description>
+			#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's
+			#      module....</itunes:subtitle>
+			#      <itunes:summary>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's module.</itunes:summary>
+			#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+			#      <itunes:duration>14:23</itunes:duration>
+			#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+			#      length="13891916" type="audio/mpeg" />
+			#      <guid isPermaLink="false">
+			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
+			#      <link>
+			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+			#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+			#      fileSize="13891916" type="audio/mpeg" medium="audio"
+			#      expression="full" duration="863" />
+			#      <itunes:author>BBC 6 Music</itunes:author>
+			#    </item>
+	
+			foreach my $entry (@entries) {
+	
+				my $entry_flat = $entry;
+				$entry_flat =~ s/\n/ /g;
+	
+				# Use the link as a guid
+				# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+				$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
+	
+				# Skip if this pid is a duplicate
+				if ( defined $prog{$pid} ) {
+					logger "WARNING: '$pid, $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{channel}' already exists (this channel = $_)\n" if $opt{verbose};
+					next;
+				}
+	
+				# parse episode
+				# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
+				$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
+	
+				# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+				$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
+	
+				# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
+				$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
+	
+				# Duration
+				$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
+	
+				# build data structure
+				$prog{$pid} = {
+					'name'		=> $name,
+					'versions'	=> 'Original',
+					'episode'	=> $episode,
+					'desc'		=> $desc,
+					'available'	=> $available,
+					'duration'	=> $duration,
+					'thumbnail'	=> $thumbnail,
+					'channel'	=> $channel,
+					'categories'	=> join(',', @category),
+					'type'		=> $type,
+				};
+			}
+		}
+	}
+	logger "\n";
+	return 0;
+}
+
+
+# Feed info:
+#	# All podcasts menu (iphone)
+#	http://www.bbc.co.uk/radio/podcasts/ip/
+#	# All radio1 podcasts
+#	http://www.bbc.co.uk/radio/podcasts/ip/lists/radio1.sssi
+#	# All radio1 -> moyles podcasts
+#	http://www.bbc.co.uk/radio/podcasts/moyles/assets/iphone_keepnet.sssi
+#	# RSS Feed (indexed from?)
+#	http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml
+#	# aod index
+#	http://www.bbc.co.uk/radio/aod/index_noframes.shtml
+# 	# schedule feeds
+#	http://www.bbc.co.uk/bbcthree/programmes/schedules.xml
+#	# These need drill-down to get episodes:
+#	# TV schedules by date
+#	http://www.bbc.co.uk/iplayer/widget/schedule/service/cbeebies/date/20080704
+#	# TV schedules in JSON, Yaml or XML
+#	http://www.bbc.co.uk/cbbc/programmes/schedules.(json|yaml|xml)
+#	# TV index on programmes tv
+#	http://www.bbc.co.uk/tv/programmes/a-z/by/*/player
+#	# TV + Radio
+#	http://www.bbc.co.uk/programmes/a-z/by/*/player
+#	# All TV (limit has effect of limiting to 2.? times number entries kB??)
+#	# seems that only around 50% of progs are available here compared to programmes site:
+#	http://feeds.bbc.co.uk/iplayer/categories/tv/list/limit/200
+#	# All Radio
+#	http://feeds.bbc.co.uk/iplayer/categories/radio/list/limit/999
+# get_links( $cachefile, <radio|tv|podcast>, \%channels )
 sub get_links {
 	my @cache;
 	my $now = time();
 	my $cachefile = shift;
+	my $type = shift;
 	my %channels = %{$_[0]};
 
 	# Flush cache file if specified
@@ -701,22 +1024,37 @@ sub get_links {
 		close (CACHE);
 	}
 
-	# if a cache file doesn't exist/corrupted or original file is older than 2 mins then download new data
-	if ( ($cache[0] =~ /^0$/) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
+	# if a cache file doesn't exist/corrupted or original file is older than $cache_sec then download new data
+	if ( (! @cache) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
 
-		if ($opt{scrape}) {
+		# Only TV using scrape
+		if ($opt{scrape} && $type =~ /tv/ ) {
 			# Use A-Z,0-9 searchine '*' instead - less pages
 			get_links_html(\%channels);
-		} else {
+		}
+
+		# Podcast only
+		if ($type =~ /podcast/) {
+			get_podcast_links(\%channels);
+		}
+
+		# Radio and TV (no scrape)
+		if ( $type =~ /(tv|radio)/ && ! $opt{scrape} ) {
 			# Get index from Atom feed
 			get_links_atom(\%channels);
 		}
+
+		# Sort indexes
+		sort_indexes();
 		
 		# Open cache file for writing
 		if ( open(CACHE, "> $cachefile") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
-				print CACHE "$_|$prog{$pid}{type}|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
+				# Only write entries for corect prog type
+				if ($prog{$pid}{type} eq $type) {
+					print CACHE "$_|$prog{$pid}{type}|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
+				}
 			}
 			close (CACHE);
 			# Make sure anyone can read/write file (security risk here!!)
@@ -757,10 +1095,6 @@ sub get_links {
 # Usage: download_programme (<pid>)
 sub download_programme {
 	my $pid = shift;
-	
-	# Create a full URL from the PID specified
-	my $page = $pid_page_url_prefix.$pid;
-	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
 	# Setup user-agent
 	# Switch off automatic redirects
@@ -770,21 +1104,61 @@ sub download_programme {
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
+	# If were a podcast...
+	if ( $prog{$pid}{type} eq 'podcast' ) {
+		# Determine the correct filename and extension for this download
+		my $filename_orig = $pid;
+		my $extension = $pid;
+		$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
+		$extension =~ s|^.*\.(\w+)$|$1|g;
+		my $file_prefix = generate_download_filename_prefix($pid, "<longname> - <episode> $filename_orig");
+		logger "\rINFO: File name prefix = $file_prefix                  \n";
+		my $file_done = "${download_dir}/${file_prefix}.$extension";
+		my $file = "${download_dir}/${file_prefix}.partial.$extension";
+		if ( -f $file_done ) {
+			logger "ERROR: File already exists\n\n";
+			return 1;
+		}
+		download_podcast_stream( $ua, $pid, $file, $file_done );
+		return 0;
+	}	
+
+	# Create a full URL from the PID specified
+	my $page = $pid_page_url_prefix.$pid;
+	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
+
 	# Get stage_1 content
 	my @content = download_stage_1($ua, $page);
 	return 7 if ! @content;
 
 	# Non-UK detection
 	# Need to check this again after iplayer2 release
-	if ( grep /only available to play in the UK/i, @content ) {
-		logger "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
-		exit 3;
-	}
+	#print @content;
+	#if ( grep /only available to play in the UK/i, @content ) {
+	#	logger "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
+	#	exit 3;
+	#}
 
 	# If we have the following then this is audio
 	#real: {
 	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
 	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+
+		# Check dependancies for radio programme transcoding / streaming
+		# Check if we need 'tee'
+		if ( (! exists_in_path($tee)) && $opt{stdout} && (! $opt{nowrite}) ) {
+			logger "\nERROR: $tee does not exist in path, skipping\n";
+			return 20;
+		}
+		# Check if we have mplayer and lame
+		if (! exists_in_path($lame)) {
+			logger "\nERROR: Required $lame does not exist, skipping\n";
+			return 20;
+		}		
+		if (! exists_in_path($mplayer)) {
+			logger "\nERROR: Required $mplayer does not exist, skipping\n";
+			return 20;
+		}
 
 		# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
 		chomp( my $title = ( grep /title:\s+/, @content)[0] );
@@ -821,7 +1195,7 @@ sub download_programme {
 		}
 
 		# Determine the correct filenames for this download
-		my $file_prefix = generate_download_filename_prefix( $pid );
+		my $file_prefix = generate_download_filename_prefix( $pid, "<longname> - <episode> <pid>" );
 		logger "\rINFO: File name prefix = $file_prefix                 \n";
 		my $file_done = "${download_dir}/${file_prefix}.mp3";
 		my $file = "${download_dir}/${file_prefix}.partial.mp3";
@@ -997,8 +1371,8 @@ sub download_h264_stream {
 			my $outbuf;
 			# Write out until we run out of bytes
 			my $bytes_read = 65536;
-			while ( $bytes_read == 65536 ) { 
-				$bytes_read = read(STREAMIN, $outbuf, 65536 );				
+			while ( $bytes_read == 65536 ) {
+				$bytes_read = read(STREAMIN, $outbuf, 65536 );
 				#logger "INFO: Read $bytes_read bytes\n";
 				print STDOUT $outbuf;
 			}
@@ -1094,8 +1468,8 @@ sub download_rtsp_stream {
 	my $namedpipe = "${profile_dir}/namedpipe";
 
 	# Create named pipe
-	system("mknod $namedpipe p");
-
+	mkfifo($namedpipe, 0700);
+	
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
@@ -1120,7 +1494,7 @@ sub download_rtsp_stream {
 
 		# Stream mp3 to file and stdout simultaneously
 		if ( $opt{stdout} && ! $opt{nowrite} ) {
-			system("$lame -f $namedpipe - 2>/dev/null| tee $file");
+			system("$lame -f $namedpipe - 2>/dev/null| $tee $file");
 
 		# Stream mp3 stdout only
 		} elsif ( $opt{stdout} && $opt{nowrite} ) {
@@ -1149,6 +1523,32 @@ sub download_rtsp_stream {
 	# Wait for child processes
 	wait;
 
+	return 0;
+}
+
+# Actually do the podcast downloading
+sub download_podcast_stream {
+	my ( $ua, $url_2, $file, $file_done ) = @_;
+	my $childpid;
+	my $namedpipe = "${profile_dir}/namedpipe";
+
+	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+
+	# Resume partial download?
+	my $start = 0;
+	if ( -f $file ) {
+		$start = stat($file)->size;
+		logger "INFO: Resuming download from $start\n";
+	}
+
+	my $fh = open_file_append($file);
+
+	if ( download_block($file, $url_2, $ua, $start, undef, undef, $fh) != 0 ) {
+		logger "ERROR: Download failed\n";
+	} else {
+		logger "INFO: Downloaded $file_done\n";
+		move $file, $file_done;
+	}
 	return 0;
 }
 
@@ -1261,11 +1661,22 @@ sub get_version_pids {
 }
 
 
-# Generate the download filename prefix given a pid
+# Generate the download filename prefix given a pid and optional format such as '<longname> - <episode> <pid> <version>'
 sub generate_download_filename_prefix {
 	my $pid = shift;
+	my $file = shift || "<longname> - <episode> <pid> <version>";
+
+	# If we dont have longname defined just set it to name
+	$prog{$pid}{longname} = $prog{$pid}{name} if ! $prog{$pid}{longname};
+
 	# Create a filename
-	my $file = "$prog{$pid}{longname} - $prog{$pid}{episode} ${pid} $prog{$pid}{version}";
+	# Tokenize and substitute $format
+	for my $key ( keys %{ $prog{$pid} } ) {
+		my $replace = $prog{$pid}{$key};
+		$file =~ s|\<$key\>|$replace|gi;
+	}
+	$file =~ s|<pid>|$pid|gi;
+	
 	# Replace slashes with _ regardless
 	$file =~ s/[\\\/]/_/g;
 	# Sanitize by default
@@ -1448,6 +1859,8 @@ sub download_block {
 		my ($data, $res, undef) = @_;
 		# Don't write the output to the file if there is no content-length header
 		return 0 if ( ! $res->header("Content-Length") );
+		# If we don't know file length in advanced then set to size reported reported from server upon download
+		$file_len = $res->header("Content-Length") + $start if ! defined $file_len;
 		# Write output
 		print $fh $data if ! $opt{nowrite};
 		print STDOUT $data if $opt{stdout};
@@ -1510,10 +1923,8 @@ sub download_block {
 		$res = $ua->request($req, $callback);
 		if (  (! $res->is_success) || (! $res->header("Content-Length")) ) {
 			logger "ERROR: Failed to Download block\n\n";
-			#unlink $cookiejar;
 			return 5;
 		}
-                # If we don't require any more bytes (previously fully downloaded) then skip
                 logger "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt{verbose};
 		return 0;
 		   
@@ -1898,10 +2309,11 @@ sub get_pid_metadata {
 	#  </item>
 	#</playlist>
 
-	my ($duration, $available, $expiry, $longdesc, $versions, $guidance);
+	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance);
 
 	$expiry = $1 if $entry2 =~ m{<p>Available till:\s*(.*?)\s*</p>};
 	$duration = $1 if $entry =~ m{<duration>\s*(.*?)\s*</duration>};
+	$channel = $1 if $entry =~ m{<masterbrand id="\s*(.*?)\s*">};
 	$available = $1 if $entry =~ m{<available>\s*(.*?)\s*</available>};
 	$longdesc = $1 if $entry =~ m{<longSynopsis>\s*(.*?)\s*</longSynopsis>};
 	if (! $longdesc) {
@@ -1915,11 +2327,13 @@ sub get_pid_metadata {
 	
 	$metadata .= "Pid:\t\t$pid\n";
 	$metadata .= "Duration:\t$duration\n";
+	$metadata .= "Channel:\t$channel\n";
 	$metadata .= "Available:\t$available\n";
 	$metadata .= "Expires:\t$expiry\n";
 	$metadata .= "Versions:\t$versions\n";
 	$metadata .= "Guidance:\t$guidance\n";
 	$metadata .= "Description:\t$longdesc\n";
+
 	return $metadata;
 }
 
@@ -1944,4 +2358,17 @@ sub request_url_retry {
 	return '' if $i == $retries;
 	# otherwise return content
 	return $res->content;
+}
+
+
+# Checks if a particular program exists in the $ENV{PATH} or if it has a path already check for exisitence of file
+sub exists_in_path {
+	my $file = shift;
+	# If this has a path specified, does file exist
+	return 1 if $file =~ /[\/\\]/ && -f $file;
+	# Search PATH
+	for (@PATH) {
+		return 1 if -f "${_}/${file}";
+	}
+	return 0;
 }
