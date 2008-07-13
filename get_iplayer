@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 12th 2008
 #
-my $version = 0.46;
+my $version = 0.47;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -21,6 +21,7 @@ my $version = 0.46;
 # * Info option (--info) to get full programme metadata
 # * Caching of Programme Index (default 4hrs)
 # * Creation of a basic html index file (--html <file>)
+# * Execution of a custom user command after every successful download (--command)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
 # * Regex search on programme name capability (makes it useful to run this from crontab)
 # * Regex search on long programme description/episode capability (--long)
@@ -38,6 +39,11 @@ my $version = 0.46;
 # ** Use non-shell tee?
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
+#
+# Changes 0.47 - 20070712
+# * Corrected bad display of download rate and time remaining calcs => now uses less cpu
+# * --command option allows user to run a custom command after every successful download using substitution variables (see README.txt)
+# * Improved --info metadata
 #
 # Changes 0.46 - 20070712
 # * Can now Index and Download BBC podcast mp3/aac streams using --type=podcast
@@ -140,7 +146,8 @@ Output Options:
  -n, --nowrite                 No writing of file to disk (use with -x to prevent a copy being stored on disk)
  -w, --whitespace              Keep whitespace (and escape chars) in filenames
  -q, --quiet                   No logging output
-
+ -c, --command <command>       Run user command after successful download using args such as <pid>, <name> etc
+ 
 Config Options:
  -f, --flush                   Flush cache
  -e, --expiry <secs>           Cache expiry in seconds (default 12hrs)
@@ -205,6 +212,7 @@ GetOptions(
 	"exclude-category=s"		=> \$opt{excludecategory},
 	"exclude-channel=s"		=> \$opt{excludechannel},
 	"i|info"			=> \$opt{info},
+	"c|command=s"			=> \$opt{command},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -326,8 +334,8 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'name'		=> <programme short name>,
 #	'episode'	=> <Episode info>,
 #	'desc'		=> <Long Description>,
-#	'available'	=> <Date/Time made available>,
-#	'longname'	=> <Long name (only parsed in stage 1)>,
+#	'available'	=> <Date/Time made available or remaining>,
+#	'longname'	=> <Long name (only parsed in stage 1 download)>,
 #	'duration'	=> <duration in HH:MM:SS>
 #	'versions'	=> <comma separated list of versions, e.g Original, Signed>
 #	'version'	=> <selected version e.g Original, Signed, etc - only set before d/load>
@@ -377,10 +385,16 @@ if ( $opt{pid} ) {
 	$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
 	# Retry loop
 	my $count;
-	while ( $count < 3 && download_programme( $opt{pid} ) =~ /retry/ ) {
+	my $retries = 3;
+	my $retcode;
+	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) =~ /retry/ ) {
 		logger "WARNING: Retrying download for PID $opt{pid}\n";
 		$count++;
 	}
+	# Run post download command if download was successful
+	if ($retcode == 0) {
+		run_user_command( $index_pid{$_}, $opt{command} ) if $opt{command};
+	}	
 	exit 0;
 }
 
@@ -419,10 +433,16 @@ if ( $opt{get} || $opt{stdout} ) {
 	for (@match_list) {
 		# Retry loop
 		my $count;
-		while ( $count < 3 && download_programme( $index_pid{$_} ) =~ /retry/ ) {
+		my $retries = 3;
+		my $retcode;
+		while ( $count < $retries && ($retcode = download_programme( $index_pid{$_} )) =~ /retry/ ) {
 			logger "WARNING: Retrying download for '$prog{$index_pid{$_}}{name} - $prog{$index_pid{$_}}{episode}'\n";
 			$count++;
 		}
+		# Run post download command if download was successful
+#		if ($retcode == 0) {
+			run_user_command( $index_pid{$_}, $opt{command} ) if $opt{command};
+#		}
 	}
 }
 
@@ -591,10 +611,10 @@ sub get_links_html {
 					'episode'	=> $episode,
 					'desc'		=> $desc,
 					'available'	=> $available,
-					'duration'	=> '<duration>',
+					'duration'	=> 'Unknown',
 					'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
-					'channel'	=> '<channel>',
-					'categories'	=> '<categories>',
+					'channel'	=> 'Unknown',
+					'categories'	=> 'Unknown',
 					'type'		=> 'tv',
 				};
 				logger "  $name ($pid) - $episode - $desc\n" if $opt{verbose};
@@ -723,7 +743,7 @@ sub get_links_atom {
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'available'	=> $available,
-				'duration'	=> '<duration>',
+				'duration'	=> 'Unknown',
 				'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
 				'channel'	=> $channel,
 				'categories'	=> join(',', @category),
@@ -1119,8 +1139,7 @@ sub download_programme {
 			logger "ERROR: File already exists\n\n";
 			return 1;
 		}
-		download_podcast_stream( $ua, $pid, $file, $file_done );
-		return 0;
+		return download_podcast_stream( $ua, $pid, $file, $file_done );
 	}	
 
 	# Create a full URL from the PID specified
@@ -1456,7 +1475,6 @@ sub download_h264_stream {
 	#unlink $cookiejar;
 	# Moving file into place as complete (if not stdout)
 	move($file, $file_done) if ! $opt{stdout};
-
 	return 0;
 }
 
@@ -1545,6 +1563,7 @@ sub download_podcast_stream {
 
 	if ( download_block($file, $url_2, $ua, $start, undef, undef, $fh) != 0 ) {
 		logger "ERROR: Download failed\n";
+		return 22;
 	} else {
 		logger "INFO: Downloaded $file_done\n";
 		move $file, $file_done;
@@ -1834,6 +1853,7 @@ sub download_block {
 	my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
 	my $orig_length;
 	my $buffer;
+	my $lastpercent = 0;
 	$now = time();
 
 	# If this is an 'append to file' mode call
@@ -1869,16 +1889,26 @@ sub download_block {
 		return if $opt{quiet};
 		# current file size
 		my $size = stat($file)->size;
-		# download rates in bytes per second
-		my $rate = ($size - $orig_length) / (stat($file)->mtime - $now + 0.01);
-		# time remaining
-		my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
-		printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02d:%02d:%02d remaining         \r", 
+		# Download percent
+		my $percent = 100.0 * $size / $file_len;
+		return if ($percent - $lastpercent) < 0.1;
+		$lastpercent = $percent;
+		# download rates in bytes per second and time remaining
+		my $rate;
+		my $time;
+		if ((stat($file)->mtime - $now) < 1) {
+			$rate = '-----kbps';
+			$time = '--:--:--';
+		} else {
+			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * ($size - $orig_length) / (stat($file)->mtime - $now));
+			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate ) )[2,1,0] );
+		}
+		printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
 			$size / 1024.0 / 1024.0, 
 			$file_len / 1024.0 / 1024.0,
-			$rate * 8.0 / 1024.0,
-			100.0 * $size / $file_len,
-			@time[2,1,0],
+			$rate,
+			$percent,
+			$time,
 		;
 	};
 
@@ -1890,24 +1920,42 @@ sub download_block {
 		# current buffer size
 		my $size = length($buffer);
 		# download rates in bytes per second
-		my $rate = $size / ( time() - $now + 0.01 );
+		my $timecalled = time();
+		my $rate;
+		my $time;
+		my $percent;
 		# If we can get Content_length then display full progress
 		if ($res->header("Content-Length")) {
+			$file_len = $res->header("Content-Length") if ! defined $file_len;
+			# Download percent
+			$percent = 100.0 * $size / $file_len;
+			return if ($percent - $lastpercent) < 0.1;
+			$lastpercent = $percent;
 			# Block length
 			$file_len = $res->header("Content-Length");
+			if ($timecalled - $now < 0.1) {
+				$rate = '-----kbps';
+				$time = '--:--:--';
+			} else {
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $size / ($timecalled - $now) );
+				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate ) )[2,1,0] );
+			}
 			# time remaining
-			my @time = gmtime( ($file_len - $size) / ($rate + 0.01) );
-			printf STDERR "%8.2fMB / %.2fMB %5.0fkbps %5.1f%%, %02d:%02d:%02d remaining         \r", 
-				$size / 1024.0 / 1024.0, 
+			printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
+				$size / 1024.0 / 1024.0,
 				$file_len / 1024.0 / 1024.0,
-				$rate * 8.0 / 1024.0,
-				100.0 * $size / $file_len,
-				@time[2,1,0],
+				$rate,
+				$percent,
+				$time,
 			;
-
 		# Just used simple for if we cannot determine content length
 		} else {
-			printf STDERR "%8.2fMB %5.0fkbps         \r", $size / 1024.0 / 1024.0, $rate * 8.0 / 1024.0;
+			if ($timecalled - $now < 0.1) {
+				$rate = '-----kbps';
+			} else {
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $size / ($timecalled - $now) );
+			}
+			printf STDERR "%8.2fMB %s         \r", $size / 1024.0 / 1024.0, $rate;
 		}
 	};
 
@@ -2231,10 +2279,10 @@ sub get_pid_metadata {
 	# This URL only works for TV progs:
 	# http://www.bbc.co.uk/iplayer/metafiles/episode/${pid}.xml
 
-	# This URL works for all prog types:
+	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/iplayer/widget/episodedetail/episode/${pid}/template/mobile/service_type/tv/
 
-	# Only supply this is a TV prog
+	# Only supply this if a TV prog
 	if ( $prog{$pid}{type} =~ /tv/i ) {
 		logger "DEBUG: Getting episode data for ${pid}\n" if $opt{verbose};
 		$entry = request_url_retry($ua, "${metadata_xml_prefix}/${pid}.xml", 3, '', "WARNING: Failed to get episode metadata for $pid\n");
@@ -2245,7 +2293,7 @@ sub get_pid_metadata {
 		$entry =~ s|<relatedConcepts>.*$||gi;
 	}
 
-	if ( 1 ) {
+	if ( $prog{$pid}{type} =~ /(tv|radio)/i ) {
 		$entry2 = request_url_retry($ua, "${metadata_mobile_prefix}/${pid}/template/mobile/service_type/tv/", 3, '', "WARNING: Failed to get episode metadata for $pid\n");
 		decode_entities($entry2);
 		# Flatten
@@ -2324,15 +2372,17 @@ sub get_pid_metadata {
 	}
 	$versions = $1 if $entry =~ m{<name>\s*(.*?)\s*</name>};
 	$guidance = $1 if $entry =~ m{<guidance>\s*<text>\s*(.*?)\s*</text>};
-	
-	$metadata .= "Pid:\t\t$pid\n";
-	$metadata .= "Duration:\t$duration\n";
-	$metadata .= "Channel:\t$channel\n";
-	$metadata .= "Available:\t$available\n";
-	$metadata .= "Expires:\t$expiry\n";
-	$metadata .= "Versions:\t$versions\n";
-	$metadata .= "Guidance:\t$guidance\n";
-	$metadata .= "Description:\t$longdesc\n";
+
+	# Fill in from cache if not got from metadata
+	$metadata .= "\nPid:\t\t$pid\n";
+	$metadata .= "Index:\t\t$prog{$pid}{index}\n";
+	$metadata .= "Duration:\t".	($duration || $prog{$pid}{duration})	."\n";
+	$metadata .= "Channel:\t".	($channel || $prog{$pid}{channel})	."\n";
+	$metadata .= "Available:\t".	($available || $prog{$pid}{available})	."\n";
+	$metadata .= "Expires:\t".	($expiry || $prog{$pid}{expiry})	."\n";
+	$metadata .= "Versions:\t".	($versions || $prog{$pid}{versions})	."\n";
+	$metadata .= "Guidance:\t".	($guidance || $prog{$pid}{guidance})	."\n";
+	$metadata .= "Description:\t".	($longdesc || $prog{$pid}{desc})	."\n";
 
 	return $metadata;
 }
@@ -2361,14 +2411,50 @@ sub request_url_retry {
 }
 
 
-# Checks if a particular program exists in the $ENV{PATH} or if it has a path already check for exisitence of file
+# Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
 	my $file = shift;
 	# If this has a path specified, does file exist
-	return 1 if $file =~ /[\/\\]/ && -f $file;
+	return 1 if $file =~ /[\/\\]/ && (-f $file || -f "${file}.exe");
 	# Search PATH
 	for (@PATH) {
-		return 1 if -f "${_}/${file}";
+		return 1 if -f "${_}/${file}" || -f "${_}/${file}.exe";
 	}
 	return 0;
+}
+
+
+# Run a user specified command
+# e.g.
+# --command 'echo "<pid> <longname> downloaded"'
+sub run_user_command {
+	my $pid = shift;
+	my @command = @_;
+
+	# Tokenize and substitute $format
+	for my $key ( keys %{ $prog{$pid} } ) {
+		s|\<$key\>|$prog{$pid}{$key}|gi for @command;
+	}
+	s|<pid>|$pid|gi for @command;
+
+	# Escape chars in command for shell use
+	$_ = esc_chars($_) for @command;
+
+	# run command
+	logger "INFO: Running command '".(join ' ', @command)."'\n" if $opt{verbose};
+	my $exit_value = system @command;
+	
+	# make exit code sane
+	$exit_value = $exit_value >> 8;
+	logger "ERROR: Command Exit Code: $exit_value\n" if $exit_value;
+	logger "INFO: Command succeeded\n" if $opt{verbose} && ! $exit_value;
+        return 0;
+}
+
+
+# Escape chars in string for shell use
+sub esc_chars {
+	# will change, for example, a!!a to a\!\!a
+	s/([;<>\*\|&\$!#\(\)\[\]\{\}:'"])/\\$1/g;
+	return $_;
 }
