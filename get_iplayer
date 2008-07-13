@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 12th 2008
 #
-my $version = 0.47;
+my $version = 0.48;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -39,6 +39,9 @@ my $version = 0.47;
 # ** Use non-shell tee?
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
+#
+# Changes 0.48 - 20070713
+# * changed shell escaping from --command option
 #
 # Changes 0.47 - 20070712
 # * Corrected bad display of download rate and time remaining calcs => now uses less cpu
@@ -2429,24 +2432,24 @@ sub exists_in_path {
 
 
 # Run a user specified command
-# e.g.
-# --command 'echo "<pid> <longname> downloaded"'
+# e.g. --command 'echo "<pid> <longname> downloaded"'
+# run_user_command($pid, 'echo "<pid> <longname> downloaded"');
 sub run_user_command {
 	my $pid = shift;
-	my @command = @_;
+	my $command = shift;
 
 	# Tokenize and substitute $format
 	for my $key ( keys %{ $prog{$pid} } ) {
-		s|\<$key\>|$prog{$pid}{$key}|gi for @command;
+		$command =~ s|\<$key\>|$prog{$pid}{$key}|gi;
 	}
-	s|<pid>|$pid|gi for @command;
+	$command =~ s|<pid>|$pid|gi;
 
 	# Escape chars in command for shell use
-	$_ = esc_chars($_) for @command;
+	esc_chars(\$command);
 
 	# run command
-	logger "INFO: Running command '".(join ' ', @command)."'\n" if $opt{verbose};
-	my $exit_value = system @command;
+	logger "INFO: Running command '$command'\n" if $opt{verbose};
+	my $exit_value = system $command;
 	
 	# make exit code sane
 	$exit_value = $exit_value >> 8;
