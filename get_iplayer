@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 12th 2008
 #
-my $version = 0.48;
+my $version = 0.49;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -39,6 +39,9 @@ my $version = 0.48;
 # ** Use non-shell tee?
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
+#
+# Changes 0.49 - 20070713
+# * Re-corrected bad display of download rate calcs (I had a hangover yesterday)
 #
 # Changes 0.48 - 20070713
 # * changed shell escaping from --command option
@@ -1901,14 +1904,16 @@ sub download_block {
 		return if ($percent - $lastpercent) < 0.1;
 		$lastpercent = $percent;
 		# download rates in bytes per second and time remaining
+		my $rate_bps;
 		my $rate;
 		my $time;
 		if ((stat($file)->mtime - $now) < 1) {
 			$rate = '-----kbps';
 			$time = '--:--:--';
 		} else {
-			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * ($size - $orig_length) / (stat($file)->mtime - $now));
-			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate ) )[2,1,0] );
+			$rate_bps = ($size - $orig_length) / (stat($file)->mtime - $now);
+			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
 		}
 		printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
 			$size / 1024.0 / 1024.0, 
@@ -1928,6 +1933,7 @@ sub download_block {
 		my $size = length($buffer);
 		# download rates in bytes per second
 		my $timecalled = time();
+		my $rate_bps;
 		my $rate;
 		my $time;
 		my $percent;
@@ -1944,8 +1950,9 @@ sub download_block {
 				$rate = '-----kbps';
 				$time = '--:--:--';
 			} else {
-				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $size / ($timecalled - $now) );
-				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate ) )[2,1,0] );
+				$rate_bps = $size / ($timecalled - $now);
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps );
+				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
 			}
 			# time remaining
 			printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
