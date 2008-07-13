@@ -343,6 +343,7 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'channel	=> <TV channel>
 #	'categories'	=> <Categories>
 # 	'type'		=> <Type: tv or radio>
+#	'filename'	=> <Filename of saved file - set only while downloading>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -440,9 +441,9 @@ if ( $opt{get} || $opt{stdout} ) {
 			$count++;
 		}
 		# Run post download command if download was successful
-#		if ($retcode == 0) {
+		if ($retcode == 0) {
 			run_user_command( $index_pid{$_}, $opt{command} ) if $opt{command};
-#		}
+		}
 	}
 }
 
@@ -1135,6 +1136,7 @@ sub download_programme {
 		logger "\rINFO: File name prefix = $file_prefix                  \n";
 		my $file_done = "${download_dir}/${file_prefix}.$extension";
 		my $file = "${download_dir}/${file_prefix}.partial.$extension";
+		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
 			logger "ERROR: File already exists\n\n";
 			return 1;
@@ -1218,6 +1220,7 @@ sub download_programme {
 		logger "\rINFO: File name prefix = $file_prefix                 \n";
 		my $file_done = "${download_dir}/${file_prefix}.mp3";
 		my $file = "${download_dir}/${file_prefix}.partial.mp3";
+		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done || -f $file ) {
 			logger "ERROR: File already exists\n\n";
 			return 1;
@@ -1289,6 +1292,7 @@ sub download_programme {
 	logger "\rINFO: File name prefix = $file_prefix                 \n";
 	my $file_done = "${download_dir}/${file_prefix}.mov";
 	my $file = "${download_dir}/${file_prefix}.partial.mov";
+	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
 		logger "ERROR: File already exists\n\n";
 		return 1;
