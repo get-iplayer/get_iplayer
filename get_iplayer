@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 12th 2008
+# Date: July 13th 2008
 #
-my $version = 0.49;
+my $version = 0.50;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -28,7 +28,7 @@ my $version = 0.49;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows (Activestate Perl, cygwin)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows Activestate Perl(no radio or stdout), cygwin
 #
 # Requires:
 # * perl 5.8
@@ -39,6 +39,11 @@ my $version = 0.49;
 # ** Use non-shell tee?
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
+# ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.50 - 20070714
+# * Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
+# * Changed progress calc using file pointer instead of file stat - better for cygwin
 #
 # Changes 0.49 - 20070713
 # * Re-corrected bad display of download rate calcs (I had a hangover yesterday)
@@ -463,6 +468,7 @@ sub list_progs {
 
 	logger "INFO: ".($#_ + 1)." Matching Programmes\n";
 
+	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt{info} ) {
 		$ua = LWP::UserAgent->new;
 		$ua->timeout([$lwp_request_timeout]);
@@ -484,15 +490,18 @@ sub list_progs {
 		next if ( $opt{type} =~ /tv/i && $prog{$pid}{type} !~ /tv/i );
 		my $type;
 		$type = "$prog{$pid}{type}, " if $opt{type} =~ /all/i;
-		my $atom_only;
-		# Remove some info if we're using the scrape method
-		$atom_only = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if ! $opt{scrape};
+		# Remove some info depending on type
+		my $optional;
+		$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv' && ! $opt{scrape};
+		$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'radio';
+		$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
+		# Display based on output options
 		if ( $opt{long} ) {
-			logger "$_: ${type}$prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only} - $prog{$pid}{desc}\n";
+			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional} - $prog{$pid}{desc}\n";
 		} elsif ( $opt{terse} ) {
 			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
 		} else {
-			logger "$_: ${type}$prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{available}${atom_only}\n";
+			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
 		}
 		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
 	}
@@ -724,8 +733,9 @@ sub get_links_atom {
 			$name =~ s/^(.*): .*$/$1/g;
 			$episode =~ s/^.*: (.*)$/$1/g;
 
+			# This is not the availability!
 			# <updated>2008-06-22T05:01:49Z</updated>
-			$available = get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+			#$available = get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
@@ -749,7 +759,7 @@ sub get_links_atom {
 				'versions'	=> 'Original',
 				'episode'	=> $episode,
 				'desc'		=> $desc,
-				'available'	=> $available,
+				'available'	=> 'Unknown',
 				'duration'	=> 'Unknown',
 				'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
 				'channel'	=> $channel,
@@ -810,6 +820,7 @@ sub get_podcast_links {
 	$ua->conn_cache(LWP::ConnCache->new());
 	
 	# Method
+	# (HTML: http://www.bbc.co.uk/radio/podcasts/directory/station/radio1)
 	# http://www.bbc.co.uk/radio/podcasts/ip/lists/$channel.sssi => 
 	# http://www.bbc.co.uk/radio/podcasts/$name/assets/iphone_keepnet.sssi => (rewrite URL)
 	# ( http://downloads.bbc.co.uk/podcasts/radio/$name/rss.xml for some progs!)
@@ -1869,7 +1880,7 @@ sub download_block {
 	# If this is an 'append to file' mode call
 	if ( defined $file && $fh && (!$opt{nowrite}) ) {
 		# Stage 3b: Download File
-		$orig_length = stat($file)->size;
+		$orig_length = tell $fh;
 		logger "INFO: Appending to $file\n" if $opt{verbose};
 	}
 
@@ -1898,20 +1909,22 @@ sub download_block {
 		return if $opt{stdout} && $opt{nowrite};
 		return if $opt{quiet};
 		# current file size
-		my $size = stat($file)->size;
+		my $size = tell $fh;
 		# Download percent
 		my $percent = 100.0 * $size / $file_len;
+		# Don't update display if we haven't dowloaded at least another 0.1%
 		return if ($percent - $lastpercent) < 0.1;
 		$lastpercent = $percent;
 		# download rates in bytes per second and time remaining
 		my $rate_bps;
 		my $rate;
 		my $time;
-		if ((stat($file)->mtime - $now) < 1) {
+		my $timecalled = time();
+		if ($timecalled - $now < 1) {
 			$rate = '-----kbps';
 			$time = '--:--:--';
 		} else {
-			$rate_bps = ($size - $orig_length) / (stat($file)->mtime - $now);
+			$rate_bps = ($size - $orig_length) / ($timecalled - $now);
 			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
 			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
 		}
