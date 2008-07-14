@@ -44,6 +44,7 @@ my $version = 0.50;
 # Changes 0.50 - 20070714
 # * Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
 # * Changed progress calc using file pointer instead of file stat - better for cygwin
+# * Allow option to specify location of mplayer and lame binaries if not in path (--mplayer and --lame)
 #
 # Changes 0.49 - 20070713
 # * Re-corrected bad display of download rate calcs (I had a hangover yesterday)
@@ -169,6 +170,8 @@ Config Options:
  --fxd-names                   Create freevo menu of programme names -> episodes
  --fxd-alpha                   Create freevo menu sorted alphabetically by programme name
  --html <file>                 Create basic HTML index of programmes in specified file
+ --mplayer <path>              Location of mplayer binary
+ --lame <path>                 Location of lame binary
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -224,6 +227,8 @@ GetOptions(
 	"exclude-channel=s"		=> \$opt{excludechannel},
 	"i|info"			=> \$opt{info},
 	"c|command=s"			=> \$opt{command},
+	"mplayer=s"			=> \$opt{mplayer},
+	"lame=s"			=> \$opt{lame},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -247,8 +252,8 @@ my $cachefile_podcast	= "${profile_dir}/podcast.cache";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
-my $mplayer		= 'mplayer';
-my $lame		= 'lame';
+my $mplayer		= $opt{mplayer} || 'mplayer';
+my $lame		= $opt{lame} || 'lame';
 my $tee			= 'tee';
 my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
 
