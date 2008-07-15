@@ -8,7 +8,7 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 13th 2008
+# Date: July 14th 2008
 #
 my $version = 0.50;
 #
@@ -259,7 +259,6 @@ my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
 
 # URLs
 my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
-my $atom_feed_url		= 'http://www.bbc.co.uk/iplayer/atom/available.xml';
 my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer', # /$channel/list/limit/200
 my $pid_page_url_prefix		= 'http://www.bbc.co.uk/iplayer/episode/';
 my $web_bug_2_url		= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
@@ -1538,15 +1537,15 @@ sub download_rtsp_stream {
 
 		# Stream mp3 to file and stdout simultaneously
 		if ( $opt{stdout} && ! $opt{nowrite} ) {
-			system("$lame -f $namedpipe - 2>/dev/null| $tee $file");
+			system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
 
 		# Stream mp3 stdout only
 		} elsif ( $opt{stdout} && $opt{nowrite} ) {
-			system("$lame -f $namedpipe - 2>/dev/null");
+			system( "$lame -f $namedpipe - 2>/dev/null");
 
 		# Stream mp3 to file directly
 		} elsif ( ! $opt{stdout} ) {
-			system("$lame -f $namedpipe $file >/dev/null 2>/dev/null");
+			system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
 		}
 
 		# Move file to done state
@@ -1556,7 +1555,7 @@ sub download_rtsp_stream {
 	}
 
 	# Start the mplayer process and write to named pipe
-	if ( system("$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
+	if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
 	#if ( system("$mplayer -really-quiet -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
 		# If we fail then kill off child processes
 		kill 9, $childpid;
