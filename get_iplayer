@@ -2,15 +2,15 @@
 #
 # get_iplayer
 #
-# Lists and downloads BBC iplayer H.264 streams
+# Lists and downloads BBC iplayer audio and video streams
 #
 # Author: Phil Lewis
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 14th 2008
+# Date: July 17th 2008
 #
-my $version = 0.50;
+my $version = 0.53;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -28,7 +28,7 @@ my $version = 0.50;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows Activestate Perl(no radio or stdout), cygwin
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows ActivePerl(no radio to stdout and no mp3 transcode), cygwin
 #
 # Requires:
 # * perl 5.8
@@ -40,6 +40,19 @@ my $version = 0.50;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.53 - 20070717
+# * Fix mkfifo quit under Activeperl
+#
+# Changes 0.52 - 20070716
+# * Fix inverted logic bug in --wav option
+# * Fix already exists bug for partially downloaded radio progs
+# * Use dynamic fifo file so simultaneous downloads can occur for radio
+# * Use signal handler to clean up temp named pipe file
+#
+# Changes 0.51 - 20070716
+# * Fallback to wav mod for type=radio if platform doesn't support fifos (e.g. ActivePerl/Windows)
+# * Added --wav option for radio (i.e. don't transcode to mp3)
 #
 # Changes 0.50 - 20070714
 # * Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
@@ -172,6 +185,7 @@ Config Options:
  --html <file>                 Create basic HTML index of programmes in specified file
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
+ --wav                         In radio mode output as wav and don't transcode to mp3
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -229,6 +243,7 @@ GetOptions(
 	"c|command=s"			=> \$opt{command},
 	"mplayer=s"			=> \$opt{mplayer},
 	"lame=s"			=> \$opt{lame},
+	"wav"				=> \$opt{wav},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -249,6 +264,7 @@ my $cookiejar		= "${profile_dir}/cookies";
 my $cachefile_tv	= "${profile_dir}/tv.cache";
 my $cachefile_radio	= "${profile_dir}/radio.cache";
 my $cachefile_podcast	= "${profile_dir}/podcast.cache"; 
+my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
@@ -336,6 +352,10 @@ my %user_agent = (
   	update		=> "get_iplayer updater (v${version} - $^O)",
   	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
 );
+
+# Setup signal handlers
+$SIG{INT} = $SIG{PIPE} = $SIG{CHLD} =\&cleanup;
+
 
 # Sanity check some conflicting options
 if ($opt{nowrite} && (!$opt{stdout})) {
@@ -1193,7 +1213,7 @@ sub download_programme {
 			return 20;
 		}
 		# Check if we have mplayer and lame
-		if (! exists_in_path($lame)) {
+		if ( (! $opt{wav}) && (! exists_in_path($lame))) {
 			logger "\nERROR: Required $lame does not exist, skipping\n";
 			return 20;
 		}		
@@ -1237,12 +1257,14 @@ sub download_programme {
 		}
 
 		# Determine the correct filenames for this download
+		my $ext = 'mp3';
+		$ext = 'wav' if $opt{wav};
 		my $file_prefix = generate_download_filename_prefix( $pid, "<longname> - <episode> <pid>" );
 		logger "\rINFO: File name prefix = $file_prefix                 \n";
-		my $file_done = "${download_dir}/${file_prefix}.mp3";
-		my $file = "${download_dir}/${file_prefix}.partial.mp3";
+		my $file_done = "${download_dir}/${file_prefix}.${ext}";
+		my $file = "${download_dir}/${file_prefix}.partial.${ext}";
 		$prog{$pid}{filename} = $file_done;
-		if ( -f $file_done || -f $file ) {
+		if ( -f $file_done ) {
 			logger "ERROR: File already exists\n\n";
 			return 1;
 		}
@@ -1508,10 +1530,9 @@ sub download_h264_stream {
 sub download_rtsp_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
 	my $childpid;
-	my $namedpipe = "${profile_dir}/namedpipe";
 
 	# Create named pipe
-	mkfifo($namedpipe, 0700);
+	mkfifo($namedpipe, 0700) if ! $opt{wav};
 	
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -1529,42 +1550,75 @@ sub download_rtsp_stream {
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
-	$childpid = fork();
-	if (! $childpid) {
-		# Child starts here
-		$| = 1;
-		logger "INFO: Transcoding $file\n";
-
-		# Stream mp3 to file and stdout simultaneously
-		if ( $opt{stdout} && ! $opt{nowrite} ) {
-			system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
-
-		# Stream mp3 stdout only
-		} elsif ( $opt{stdout} && $opt{nowrite} ) {
-			system( "$lame -f $namedpipe - 2>/dev/null");
-
-		# Stream mp3 to file directly
-		} elsif ( ! $opt{stdout} ) {
-			system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
-		}
-
+	# else do direct mplayer write to wav file if:
+	#  1) we don't have a named pipe available (e.g. in activeperl)
+	#  2) --wav was specified to write file only
+	if ( (! -p $namedpipe) || ($opt{wav} && ! $opt{stdout}) ) {
+		# Remove named pipe
+		unlink $namedpipe;
+		# Write out to .wav ext instead (used on fallback if no fifo support)
+		logger "INFO: Writing wav format\n";
+		$file =~ s/mp3$/wav/gi;
+		$file_done =~ s/mp3$/wav/gi;
+		# Start the mplayer process and write to wav file
+		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$file \"$rtsp\" 1>&2") ) {
+			return 2;
+		};
 		# Move file to done state
 		move $file, $file_done if ! $opt{nowrite};
-		logger "INFO: Transcoding thread has completed\n";
-		exit 0;
+
+	# Use transcoding and named pipes
+	} else {
+		$childpid = fork();
+		if (! $childpid) {
+			# Child starts here
+			$| = 1;
+			logger "INFO: Transcoding $file\n";
+
+			# Stream mp3 to file and stdout simultaneously
+			if ( $opt{stdout} && ! $opt{nowrite} ) {
+				if ( ! $opt{wav} ) {
+					system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
+				} else {
+					system( "cat $namedpipe 2>/dev/null| $tee $file");
+				}
+
+			# Stream mp3 stdout only
+			} elsif ( $opt{stdout} && $opt{nowrite} ) {
+				if ( ! $opt{wav} ) {
+					system( "$lame -f $namedpipe - 2>/dev/null");
+				} else {
+					system( "cat $namedpipe 2>/dev/null");
+				}
+
+			# Stream mp3 to file directly
+			} elsif ( ! $opt{stdout} ) {
+				if ( ! $opt{wav} ) {
+					system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
+				} else {
+					system( "cat $namedpipe > $file 2>/dev/null");
+				}
+			}
+			# Remove named pipe
+			unlink $namedpipe;
+
+			# Move file to done state
+			move $file, $file_done if ! $opt{nowrite};
+			logger "INFO: Transcoding thread has completed\n";
+			exit 0;
+		}
+
+		# Start the mplayer process and write to named pipe
+		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
+		#if ( system("$mplayer -really-quiet -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
+			# If we fail then kill off child processes
+			kill 9, $childpid;
+			return 2;
+		};
+		# Wait for child processes
+		wait;
 	}
-
-	# Start the mplayer process and write to named pipe
-	if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
-	#if ( system("$mplayer -really-quiet -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
-		# If we fail then kill off child processes
-		kill 9, $childpid;
-		return 2;
-	};
 	logger "INFO: Downloaded $file_done\n";
-
-	# Wait for child processes
-	wait;
 
 	return 0;
 }
@@ -1573,8 +1627,6 @@ sub download_rtsp_stream {
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
 	my $childpid;
-	my $namedpipe = "${profile_dir}/namedpipe";
-
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
 	# Resume partial download?
@@ -2488,4 +2540,12 @@ sub esc_chars {
 	# will change, for example, a!!a to a\!\!a
 	s/([;<>\*\|&\$!#\(\)\[\]\{\}:'"])/\\$1/g;
 	return $_;
+}
+
+
+# Signal handler to clean up after a ctrl-c or kill
+sub cleanup {
+	logger "Cleaning up\n" if $opt{verbose};
+	unlink $namedpipe;
+	exit 1;
 }
