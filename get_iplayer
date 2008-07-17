@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: July 17th 2008
 #
-my $version = 0.53;
+my $version = 0.54;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -40,6 +40,10 @@ my $version = 0.53;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.54 - 20070717
+# * Fix rename radio file bug under Activeperl
+# * do not catch sigchld, quits prog after first download
 #
 # Changes 0.53 - 20070717
 # * Fix mkfifo quit under Activeperl
@@ -354,7 +358,7 @@ my %user_agent = (
 );
 
 # Setup signal handlers
-$SIG{INT} = $SIG{PIPE} = $SIG{CHLD} =\&cleanup;
+$SIG{INT} = $SIG{PIPE} =\&cleanup;
 
 
 # Sanity check some conflicting options
