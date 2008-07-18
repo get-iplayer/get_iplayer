@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 17th 2008
+# Date: July 18th 2008
 #
-my $version = 0.54;
+my $version = 0.55;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,9 +41,12 @@ my $version = 0.54;
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 #
+# Changes 0.55 - 20070718
+# * Detect and report lack fo realaudio format for radio programmes
+#
 # Changes 0.54 - 20070717
 # * Fix rename radio file bug under Activeperl
-# * do not catch sigchld, quits prog after first download
+# * Do not catch sigchld, quits prog after first download
 #
 # Changes 0.53 - 20070717
 # * Fix mkfifo quit under Activeperl
@@ -1073,6 +1076,13 @@ sub get_podcast_links {
 #	http://feeds.bbc.co.uk/iplayer/categories/tv/list/limit/200
 #	# All Radio
 #	http://feeds.bbc.co.uk/iplayer/categories/radio/list/limit/999
+#	# New:
+#	# iCal feeds see: http://www.bbc.co.uk/blogs/radiolabs/2008/07/some_ical_views_onto_programme.shtml
+#	http://bbc.co.uk/programmes/b0079cmw/episodes/player.ics
+#	# Other data
+#	http://www.bbc.co.uk/cbbc/programmes/genres/childrens/player
+#	http://www.bbc.co.uk/programmes/genres/childrens/schedules/upcoming.ics
+#
 # get_links( $cachefile, <radio|tv|podcast>, \%channels )
 sub get_links {
 	my @cache;
@@ -1238,7 +1248,7 @@ sub download_programme {
 		my %version_pids = get_version_pids( @content );
 		my $url_2;
 	
-		logger "INFO: Checking existence of programme\n";
+		logger "\nINFO: Checking existence of programme\n";
 		$prog{$pid}{version} = 'Original';
 		# Create url with appended 6 digit random number
 		my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
@@ -1706,6 +1716,7 @@ sub get_video_stream_download_url {
 sub get_audio_stream_download_url {
 		my $ua = shift;
 		my $url_1 = shift;
+		my $url_2;
 		
 		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
 		my $h = new HTTP::Headers(
@@ -1716,20 +1727,27 @@ sub get_audio_stream_download_url {
 		my $req = HTTP::Request->new ('GET', $url_1, $h);
 		# send request
 		my $res = $ua->request($req);
-		# Get resulting Location header (i.e. redirect URL)
-		my $url_2 = $res->content;
+		# Get resulting content 
+		my $content = $res->content;
+		# Flatten
+		$content =~ s/\n/ /g;
 		if ( ! $res->is_success ) {
 			logger "ERROR: Failed to get audio url from iplayer site\n\n";
 			return '';
 		}
 		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
-		if ( $url_2 =~ /statuscode=404/ ) {
+		if ( $content =~ /statuscode=404/ ) {
 			logger "\rERROR: Programme is not yet ready for download\n";
 			return '';
 		}
 		# extract ram URL
-		$url_2 =~ s/\n/ /g;
-		$url_2 =~ s/^.*href="(.+?)".*$/$1/g;
+		$url_2 = $1 if $content =~ m{<media kind="audio"\s*type="audio/real".*href="(.+?)"\s*};
+
+		# If we cannot see 'encoding="real"...' then we don't have real audio transcoded format then skip
+		if ( ! $url_2 ) {
+			logger "\rERROR: Programme is not yet ready for download in RealAudio format\n";
+			return '';
+		}
 
 		return $url_2;
 }
