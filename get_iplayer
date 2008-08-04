@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: July 18th 2008
+# Date: August 4th 2008
 #
-my $version = 0.55;
+my $version = 0.56;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -28,12 +28,13 @@ my $version = 0.55;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian), MacOSX, and Windows ActivePerl(no radio to stdout and no mp3 transcode), cygwin
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian, Unslung/NSLU2), 
+# * Tested on MacOSX, and Windows ActivePerl (no radio to stdout and no mp3 transcode), cygwin
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
-# * mplayer, lame and tee (for radio support only)
+# * mplayer, lame and tee (for radio/mp3 stdout support only)
 #
 # Todo:
 # ** Use non-shell tee?
@@ -41,77 +42,36 @@ my $version = 0.55;
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 #
-# Changes 0.55 - 20070718
+# Changes 0.56 - 20080804
+# * Added raw realaudio stream saving support (--raw) which does not require lame (thanks to nrq)
+# * Added new BBC channel 'BBC HD'
+# * Improved efficiency of stco atom searching to make slow machines start streaming faster
+# * Known issue: stdout support for radio wav and raw support can be problematic due to named pipe closing
+#
+# Changes 0.55 - 20080718
 # * Detect and report lack fo realaudio format for radio programmes
 #
-# Changes 0.54 - 20070717
+# Changes 0.54 - 20080717
 # * Fix rename radio file bug under Activeperl
 # * Do not catch sigchld, quits prog after first download
 #
-# Changes 0.53 - 20070717
+# Changes 0.53 - 20080717
 # * Fix mkfifo quit under Activeperl
 #
-# Changes 0.52 - 20070716
+# Changes 0.52 - 20080716
 # * Fix inverted logic bug in --wav option
 # * Fix already exists bug for partially downloaded radio progs
 # * Use dynamic fifo file so simultaneous downloads can occur for radio
 # * Use signal handler to clean up temp named pipe file
 #
-# Changes 0.51 - 20070716
+# Changes 0.51 - 20080716
 # * Fallback to wav mod for type=radio if platform doesn't support fifos (e.g. ActivePerl/Windows)
 # * Added --wav option for radio (i.e. don't transcode to mp3)
 #
-# Changes 0.50 - 20070714
+# Changes 0.50 - 20080714
 # * Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
 # * Changed progress calc using file pointer instead of file stat - better for cygwin
 # * Allow option to specify location of mplayer and lame binaries if not in path (--mplayer and --lame)
-#
-# Changes 0.49 - 20070713
-# * Re-corrected bad display of download rate calcs (I had a hangover yesterday)
-#
-# Changes 0.48 - 20070713
-# * changed shell escaping from --command option
-#
-# Changes 0.47 - 20070712
-# * Corrected bad display of download rate and time remaining calcs => now uses less cpu
-# * --command option allows user to run a custom command after every successful download using substitution variables (see README.txt)
-# * Improved --info metadata
-#
-# Changes 0.46 - 20070712
-# * Can now Index and Download BBC podcast mp3/aac streams using --type=podcast
-# * Check external programme dependancies
-# * Use non-shell mknod (POSIX mkfifo)
-#
-# Changes 0.45 - 20070710
-# * Use HTTP pipelined requests for feeds
-# * Added info option (--info/-i) to get full programme metadata on searches below 40 matches
-#
-# Changes 0.44 - 20070709
-# * Add radio one into channels list - sorry!
-#
-# Changes 0.43 - 20070709
-# * Bugfixed stdout support for radio
-#
-# Changes 0.42 - 20070709
-# * Now uses channel specific atom feeds from iplayer site by default - scrape is still optional for TV index
-# * Relocated all cache, cookies, config and namedpipe files into $HOME/.get_iplayer/
-# * Indexes iplayer Radio programmes
-# * Added --type to limit search to radio, tv or all (tv is default)
-# * Radio RTSP stream now transcoded on the fly to mp3 using named pipes
-# * Added stdout support for radio - still only creates small mp3 file when stdout used?!
-# * TV and Radio now use separate index cache files that are populated independantly
-# * Added retry loop for bad cookie detection - dont just fail
-# * Added --exclude-channel/--exclude-category support
-# * Added channel name to html output
-# * Known issue: BBC has an error in their atom feeds which says that the programme has been available longer than it has.
-# * Known issue: stdout support for radio only creates small mp3 file, lame stalls
-# 
-# Changes 0.41 - 20070708
-# * Fixed cookie deletion bug
-#
-# Changes 0.40 - 20080707
-# * Fixed saving of thumbnail url in cache
-# * Added audio pid download/convert support (downloads rtsp and converts to mp3)
 
 use Env qw[@PATH];
 use Fcntl;
@@ -193,6 +153,7 @@ Config Options:
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
  --wav                         In radio mode output as wav and don't transcode to mp3
+ --raw                         In radio mode output as raw realaudio and don't transcode to mp3
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -251,6 +212,7 @@ GetOptions(
 	"mplayer=s"			=> \$opt{mplayer},
 	"lame=s"			=> \$opt{lame},
 	"wav"				=> \$opt{wav},
+        "raw"                           => \$opt{raw},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -307,6 +269,7 @@ my %channels_tv = (
 	'bbc_one_scotland'			=> 'tv|BBC One Scotland',
 	'bbc_one_wales'				=> 'tv|BBC One Wales',
 	'bbc_webonly'				=> 'tv|BBC Web Only',
+	'bbc_hd'				=> 'tv|BBC HD',
 	'categories/news/tv'			=> 'tv|BBC News',
 	'categories/sport/tv'			=> 'tv|BBC Sport',
 #	'categories/tv'				=> 'tv|All',
@@ -1227,9 +1190,9 @@ sub download_programme {
 			return 20;
 		}
 		# Check if we have mplayer and lame
-		if ( (! $opt{wav}) && (! exists_in_path($lame))) {
-			logger "\nERROR: Required $lame does not exist, skipping\n";
-			return 20;
+		if ( (! $opt{wav}) && (! $opt{raw}) && (! exists_in_path($lame)) ) {
+			logger "\nWARNING: Required $lame does not exist, falling back to wav mode\n";
+			$opt{wav} = 1;
 		}		
 		if (! exists_in_path($mplayer)) {
 			logger "\nERROR: Required $mplayer does not exist, skipping\n";
@@ -1272,6 +1235,7 @@ sub download_programme {
 
 		# Determine the correct filenames for this download
 		my $ext = 'mp3';
+		$ext = 'ra'  if $opt{raw};
 		$ext = 'wav' if $opt{wav};
 		my $file_prefix = generate_download_filename_prefix( $pid, "<longname> - <episode> <pid>" );
 		logger "\rINFO: File name prefix = $file_prefix                 \n";
@@ -1546,7 +1510,7 @@ sub download_rtsp_stream {
 	my $childpid;
 
 	# Create named pipe
-	mkfifo($namedpipe, 0700) if ! $opt{wav};
+	mkfifo($namedpipe, 0700) if (! $opt{wav}) && (! $opt{raw});
 	
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -1563,19 +1527,35 @@ sub download_rtsp_stream {
 
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
+	# Fallback to wav mode if no named pipe and raw not specified
+	if ( (! -p $namedpipe) && ! $opt{raw} ) {
+		# Remove named pipe
+		unlink $namedpipe;
+		$opt{wav} = 1;
+		# Write out to .wav ext instead
+		$file =~ s/mp3$/wav/gi;
+		$file_done =~ s/mp3$/wav/gi;
+	}
+
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
 	# else do direct mplayer write to wav file if:
 	#  1) we don't have a named pipe available (e.g. in activeperl)
 	#  2) --wav was specified to write file only
-	if ( (! -p $namedpipe) || ($opt{wav} && ! $opt{stdout}) ) {
-		# Remove named pipe
-		unlink $namedpipe;
-		# Write out to .wav ext instead (used on fallback if no fifo support)
+	if ( $opt{wav} && ! $opt{stdout} ) {
 		logger "INFO: Writing wav format\n";
-		$file =~ s/mp3$/wav/gi;
-		$file_done =~ s/mp3$/wav/gi;
 		# Start the mplayer process and write to wav file
 		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$file \"$rtsp\" 1>&2") ) {
+			return 2;
+		};
+		# Move file to done state
+		move $file, $file_done if ! $opt{nowrite};
+
+	# No transcoding if --raw was specified
+	} elsif ( $opt{raw} && ! $opt{stdout} ) {
+		# Write out to .ra ext instead (used on fallback if no fifo support)
+		logger "INFO: Writing raw realaudio stream\n";
+		# Start the mplayer process and write to raw file
+		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2") ) {
 			return 2;
 		};
 		# Move file to done state
@@ -1591,27 +1571,28 @@ sub download_rtsp_stream {
 
 			# Stream mp3 to file and stdout simultaneously
 			if ( $opt{stdout} && ! $opt{nowrite} ) {
-				if ( ! $opt{wav} ) {
-					system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
+				if ( $opt{wav} || $opt{raw} ) {
+					# Race condition - closes named pipe immediately unless we wait
+					sleep 5;
+					tee($namedpipe, $file);
+					#system( "cat $namedpipe 2>/dev/null| $tee $file");
 				} else {
-					system( "cat $namedpipe 2>/dev/null| $tee $file");
+					system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
 				}
 
 			# Stream mp3 stdout only
 			} elsif ( $opt{stdout} && $opt{nowrite} ) {
-				if ( ! $opt{wav} ) {
-					system( "$lame -f $namedpipe - 2>/dev/null");
+				if ( $opt{wav} || $opt{raw} ) {
+					sleep 5;
+					tee($namedpipe);
+					#system( "cat $namedpipe 2>/dev/null");
 				} else {
-					system( "cat $namedpipe 2>/dev/null");
+					system( "$lame -f $namedpipe - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt{stdout} ) {
-				if ( ! $opt{wav} ) {
-					system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
-				} else {
-					system( "cat $namedpipe > $file 2>/dev/null");
-				}
+				system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
 			}
 			# Remove named pipe
 			unlink $namedpipe;
@@ -1621,15 +1602,23 @@ sub download_rtsp_stream {
 			logger "INFO: Transcoding thread has completed\n";
 			exit 0;
 		}
-
 		# Start the mplayer process and write to named pipe
-		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
-		#if ( system("$mplayer -really-quiet -dumpfile $file -dumpstream -cache 128 -bandwidth $bandwidth -vc null -vo null \"$rtsp\"") ) {
-			# If we fail then kill off child processes
-			kill 9, $childpid;
-			return 2;
-		};
-		# Wait for child processes
+		# Raw mode
+		if ( $opt{raw} ) {
+			if ( system( "$mplayer -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2") ) {
+				# If we fail then kill off child processes
+				kill 9, $childpid;
+				return 2;
+			};
+		# WAV / mp3 mode
+		} else {
+			if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
+				# If we fail then kill off child processes
+				kill 9, $childpid;
+				return 2;
+			};
+		}
+		# Wait for child processes to prevent zombies
 		wait;
 	}
 	logger "INFO: Downloaded $file_done\n";
@@ -1904,32 +1893,31 @@ sub relocate_moov_chunk_offsets {
 	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
 	# get moov atom length
 	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
-	# Nasty but quicker to scan for 'stco'
-	for (my $i = 0; $i < $moov_length - 4; $i++) {
-		my $chars = substr($moovdata, $i, 4);
-		# If we have found and stco atom
-		if ( $chars eq 'stco' ) {
-			# determine length of atom (4 bytes preceding stco)
-			my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
-			logger "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt{verbose};
+	# Use index() to seatch for a string within a string
+	my $i = -1;
+	while (($i = index($moovdata, 'stco', $i)) > -1) {
+		print "STCO Found at $i\n";
 
-			# loop through all chunk offsets in this atom and add offset (== moov atom length)
-			for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
-				my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-				#logger "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',	$chunk_offset + $moov_length = ";
-				$chunk_offset += $moov_length;
-				# write back bytes into $moovdata
-				substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
-				substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
-				substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
-				substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
-				#$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-				#logger "$chunk_offset\n";
-			}
+		# determine length of atom (4 bytes preceding stco)
+		my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
+		logger "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt{verbose};
 
-			# skip over this whole atom now it is processed
-			$i += $stco_len;
+		# loop through all chunk offsets in this atom and add offset (== moov atom length)
+		for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
+			my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+			#logger "chunk_offset @ $i, $j = '".get_hex( substr($moovdata, $j, 4) )."',	$chunk_offset + $moov_length = ";
+			$chunk_offset += $moov_length;
+			# write back bytes into $moovdata
+			substr($moovdata, $j+0, 1) = chr( ($chunk_offset >> 24) & 0xFF );
+			substr($moovdata, $j+1, 1) = chr( ($chunk_offset >> 16) & 0xFF );
+			substr($moovdata, $j+2, 1) = chr( ($chunk_offset >>  8) & 0xFF );
+			substr($moovdata, $j+3, 1) = chr( ($chunk_offset >>  0) & 0xFF );
+			#$chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+			#logger "$chunk_offset\n";
 		}
+
+		# skip over this whole atom now it is processed
+		$i += $stco_len;
 	}
 	# Write $moovdata back to calling string
 	@_[0] = $moovdata;
@@ -2118,6 +2106,38 @@ sub bytestring_to_int {
         }
         #logger "DEBUG: Decimal value = $dec\n" if $opt{verbose};
         return $dec;
+}
+
+
+# version of unix tee
+# Usage tee ($infile, $outfile)
+# If $outfile is undef then just cat file to STDOUT
+sub tee {
+	my ( $infile, $outfile ) = @_;
+	# Open $outfile for writing, $infile for reading
+	if ( $outfile) {
+		if ( ! open( OUT, "> $outfile" ) ) {
+			logger "ERROR: Could not open $outfile for writing\n";
+			return 1;
+		} else {
+			logger "INFO: Opened $outfile for writing\n" if $opt{verbose};
+		}
+	}
+	if ( ! open( IN, "< $infile" ) ) {
+		logger "ERROR: Could not open $infile for reading\n";
+		return 2;
+	} else {
+		logger "INFO: Opened $infile for reading\n" if $opt{verbose};
+	}
+	# Read and redirect IN
+	while ( <IN> ) {
+		print $_;
+		print OUT $_ if $outfile;
+	}
+	# Close output file
+	close OUT if $outfile;
+	close IN;
+	return 0;
 }
 
 
