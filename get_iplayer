@@ -1896,7 +1896,6 @@ sub relocate_moov_chunk_offsets {
 	# Use index() to seatch for a string within a string
 	my $i = -1;
 	while (($i = index($moovdata, 'stco', $i)) > -1) {
-		print "STCO Found at $i\n";
 
 		# determine length of atom (4 bytes preceding stco)
 		my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
@@ -2520,6 +2519,7 @@ sub request_url_retry {
 	my $res;
 
 	my $i;
+	logger "INFO: Getting page $url\n" if $opt{verbose};
 	for ($i = 0; $i < $retries; $i++) {
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
