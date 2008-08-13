@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: August 13th 2008
 #
-my $version = 0.58;
+my $version = 0.59;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,6 +41,9 @@ my $version = 0.58;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.59 - 20080813
+# * de-duplication of search/match results
 #
 # Changes 0.58 - 20080813
 # * quote filenames in helper apps to allow whitespace in filenames for mp3 transcoding
@@ -418,6 +421,11 @@ for ( @ARGV ) {
 		push @match_list, get_regex_matches( $_ );
 	}
 }
+
+# De-dup matches and retain order
+my %seen = ();
+my @unique = grep { ! $seen{ $_ }++ } @match_list;
+@match_list = @unique;
 
 # Display list for download
 logger "Matches:\n" if @match_list;
