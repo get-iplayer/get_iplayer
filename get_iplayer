@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: August 5th 2008
+# Date: August 13th 2008
 #
-my $version = 0.57;
+my $version = 0.58;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,6 +41,11 @@ my $version = 0.57;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.58 - 20080813
+# * quote filenames in helper apps to allow whitespace in filenames for mp3 transcoding
+# * provide better debug output for radio downloading
+# * Known issue: mplayer bug means that it cannot accept whitespace in filenames when dumping to wav/pcm files
 #
 # Changes 0.57 - 20080805
 # * Now use an OPML feed from BBC to get a list of all podcast RSS feeds - no more web scraping
@@ -1468,7 +1473,9 @@ sub download_rtsp_stream {
 	if ( $opt{wav} && ! $opt{stdout} ) {
 		logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
-		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$file \"$rtsp\" 1>&2") ) {
+		my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
+		logger "DEGUG: Running $cmd\n" if $opt{debug};
+		if ( system($cmd) ) {
 			return 2;
 		};
 		# Move file to done state
@@ -1479,7 +1486,9 @@ sub download_rtsp_stream {
 		# Write out to .ra ext instead (used on fallback if no fifo support)
 		logger "INFO: Writing raw realaudio stream\n";
 		# Start the mplayer process and write to raw file
-		if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2") ) {
+		my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2";
+		logger "DEGUG: Running $cmd\n" if $opt{debug};
+		if ( system($cmd) ) {
 			return 2;
 		};
 		# Move file to done state
@@ -1501,7 +1510,9 @@ sub download_rtsp_stream {
 					tee($namedpipe, $file);
 					#system( "cat $namedpipe 2>/dev/null| $tee $file");
 				} else {
-					system( "$lame -f $namedpipe - 2>/dev/null| $tee $file");
+					my $cmd = "$lame -f $namedpipe - 2>/dev/null| $tee \"$file\"";
+					logger "DEGUG: Running $cmd\n" if $opt{debug};
+					system($cmd);
 				}
 
 			# Stream mp3 stdout only
@@ -1511,12 +1522,16 @@ sub download_rtsp_stream {
 					tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
+					my $cmd = "$lame -f $namedpipe - 2>/dev/null";
+					logger "DEGUG: Running $cmd\n" if $opt{debug};
 					system( "$lame -f $namedpipe - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt{stdout} ) {
-				system( "$lame -f $namedpipe $file >/dev/null 2>/dev/null");
+				my $cmd = "$lame -f $namedpipe \"$file\" >/dev/null 2>/dev/null";
+				logger "DEGUG: Running $cmd\n" if $opt{debug};
+				system($cmd);
 			}
 			# Remove named pipe
 			unlink $namedpipe;
@@ -1529,14 +1544,17 @@ sub download_rtsp_stream {
 		# Start the mplayer process and write to named pipe
 		# Raw mode
 		if ( $opt{raw} ) {
-			if ( system( "$mplayer -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2") ) {
+			my $cmd = "$mplayer -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2";
+			logger "DEGUG: Running $cmd\n" if $opt{debug};
+			if ( system($cmd) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				return 2;
 			};
 		# WAV / mp3 mode
 		} else {
-			if ( system( "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2") ) {
+			my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
+			if ( system($cmd) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				return 2;
