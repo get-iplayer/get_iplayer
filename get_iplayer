@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: August 13th 2008
+# Date: August 31st 2008
 #
-my $version = 0.59;
+my $version = 0.60;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,6 +41,12 @@ my $version = 0.59;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.60 - 20080824
+# * Now can create MythTV streams XML file aswell as Freevo fxd XML (thanks to ear9mrn)
+# * Added --bandwidth option for rtsp streams (thanks to nrq)
+# * Removed world writable perms on cache files
+# * quiet option now works properly with radio downloads
 #
 # Changes 0.59 - 20080813
 # * de-duplication of search/match results
@@ -160,14 +166,16 @@ Config Options:
  -e, --expiry <secs>           Cache expiry in seconds (default 12hrs)
  --freevo <file>               Create symlink to <file> once we have the header of the download
  --fxd <file>                  Create Freevo FXD XML in specified file
- --fxd-channels                Create freevo menu of channels -> programme names -> episodes
- --fxd-names                   Create freevo menu of programme names -> episodes
- --fxd-alpha                   Create freevo menu sorted alphabetically by programme name
+ --mythtv <file>               Create Mythtv streams XML in specified file
+ --xml-channels                Create freevo/Mythtv menu of channels -> programme names -> episodes
+ --xml-names                   Create freevo/Mythtv menu of programme names -> episodes
+ --xml-alpha                   Create freevo/Mythtv menu sorted alphabetically by programme name
  --html <file>                 Create basic HTML index of programmes in specified file
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
  --wav                         In radio mode output as wav and don't transcode to mp3
  --raw                         In radio mode output as raw realaudio and don't transcode to mp3
+ --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -211,9 +219,10 @@ GetOptions(
 	"q|quiet"			=> \$opt{quiet},
 	"freevo=s"			=> \$opt{freevo},
 	"fxd=s"				=> \$opt{fxd},
-	"fxd-channels"			=> \$opt{fxdchannels},
-	"fxd-names"			=> \$opt{fxdnames},
-	"fxd-alpha"			=> \$opt{fxdalpha},
+	"mythtv=s"			=> \$opt{mythtv},
+	"xml-channels|fxd-channels"	=> \$opt{xmlchannels},
+	"xml-names|fxd-names"		=> \$opt{xmlnames},
+	"xml-alpha|fxd-alpha"		=> \$opt{xmlalpha},
 	"html=s"			=> \$opt{html},
 	"terse"				=> \$opt{terse},
 	"pid=s"				=> \$opt{pid},
@@ -226,6 +235,7 @@ GetOptions(
 	"lame=s"			=> \$opt{lame},
 	"wav"				=> \$opt{wav},
         "raw"                           => \$opt{raw},
+        "bandwidth=s"			=> \$opt{bandwidth},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -249,9 +259,12 @@ my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
 my $mplayer		= $opt{mplayer} || 'mplayer';
+my $mplayer_opts	= '-nolirc';
+$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
 my $lame		= $opt{lame} || 'lame';
+my $lame_opts		.= ' --quiet' if $opt{quiet};
 my $tee			= 'tee';
-my $bandwidth		= 512000; # Download bandwidth bps used for rtsp streams
+my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 
 # URLs
 my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
@@ -373,9 +386,10 @@ get_links($cachefile_radio, 'radio', \%channels_radio) if $opt{type} =~ /(radio|
 # Only get podcast links (dummy channels hash)
 get_links($cachefile_podcast, 'podcast', \%channels_radio) if $opt{type} =~ /(podcast|all)/i;
 
-# Write HTML and FXD files if required
+# Write HTML and XML files if required
 create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
-create_fxd ( sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+create_xml ( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+create_xml ( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
 
 # Get arbitrary pid
 if ( $opt{pid} ) {
@@ -1033,9 +1047,6 @@ sub get_links {
 				}
 			}
 			close (CACHE);
-			# Make sure anyone can read/write file (security risk here!!)
-			chmod 0777, $cachefile;
-
 		} else {
 			logger "WARNING: Couldn't open cache file for writing\n";
 		}
@@ -1481,7 +1492,7 @@ sub download_rtsp_stream {
 	if ( $opt{wav} && ! $opt{stdout} ) {
 		logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
-		my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
@@ -1494,7 +1505,7 @@ sub download_rtsp_stream {
 		# Write out to .ra ext instead (used on fallback if no fifo support)
 		logger "INFO: Writing raw realaudio stream\n";
 		# Start the mplayer process and write to raw file
-		my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
@@ -1518,7 +1529,7 @@ sub download_rtsp_stream {
 					tee($namedpipe, $file);
 					#system( "cat $namedpipe 2>/dev/null| $tee $file");
 				} else {
-					my $cmd = "$lame -f $namedpipe - 2>/dev/null| $tee \"$file\"";
+					my $cmd = "$lame $lame_opts -f $namedpipe - 2>/dev/null| $tee \"$file\"";
 					logger "DEGUG: Running $cmd\n" if $opt{debug};
 					system($cmd);
 				}
@@ -1530,14 +1541,14 @@ sub download_rtsp_stream {
 					tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
-					my $cmd = "$lame -f $namedpipe - 2>/dev/null";
+					my $cmd = "$lame $lame_opts -f $namedpipe - 2>/dev/null";
 					logger "DEGUG: Running $cmd\n" if $opt{debug};
-					system( "$lame -f $namedpipe - 2>/dev/null");
+					system( "$lame $lame_opts -f $namedpipe - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt{stdout} ) {
-				my $cmd = "$lame -f $namedpipe \"$file\" >/dev/null 2>/dev/null";
+				my $cmd = "$lame $lame_opts -f $namedpipe \"$file\" >/dev/null 2>/dev/null";
 				logger "DEGUG: Running $cmd\n" if $opt{debug};
 				system($cmd);
 			}
@@ -1552,7 +1563,7 @@ sub download_rtsp_stream {
 		# Start the mplayer process and write to named pipe
 		# Raw mode
 		if ( $opt{raw} ) {
-			my $cmd = "$mplayer -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2";
+			my $cmd = "$mplayer $mplayer_opts -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2";
 			logger "DEGUG: Running $cmd\n" if $opt{debug};
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
@@ -1561,7 +1572,7 @@ sub download_rtsp_stream {
 			};
 		# WAV / mp3 mode
 		} else {
-			my $cmd = "$mplayer -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
+			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
@@ -2151,17 +2162,20 @@ sub update_script {
 }
 
 
-# Creates the Freevo FXD meta data (and pre-downloads graphics - todo)
-sub create_fxd() {
-	if ( ! open(FXD, "> $opt{fxd}") ) {
-		logger "ERROR: Couldn't open fxd file $opt{fxd} for writing\n";
+# Creates the Freevo FXD or MythTV Streams meta data (and pre-downloads graphics - todo)
+sub create_xml() {
+	my $xmlfile = shift;
+	if ( ! open(XML, "> $xmlfile") ) {
+		logger "ERROR: Couldn't open xml file $xmlfile for writing\n";
 		return 1;
 	}
-	print FXD '<?xml version="1.0" ?><freevo>';
+	print XML '<?xml version="1.0" ?>';
+	print XML '<freevo>' if $opt{fxd};
+	print XML "\n<MediaStreams>\n" if $opt{mythtv};
 
-	if ( $opt{fxdnames} ) {
+	if ( $opt{xmlnames} ) {
 		# containers sorted by prog names
-		print FXD "\t<container title=\"iplayer by Programme Name\">\n";
+		print XML "\t<container title=\"iplayer by Programme Name\">\n" if $opt{fxd};
 		my %program_index;
 		my %program_count;
 		# create hash of programme_name -> index
@@ -2171,7 +2185,8 @@ sub create_fxd() {
 		}
 		for my $name ( sort keys %program_index ) {
 			my @count = grep /^$name$/, keys %program_index;
-			print FXD "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n";
+			print XML "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt{fxd};
+			print XML "\t<Streams>\n" if $opt{mythtv};
 			for (@_) {
 				my $pid = $index_pid{$_};
 				# loop through and find matches for each progname
@@ -2179,21 +2194,28 @@ sub create_fxd() {
 					my $episode = encode_entities( $prog{$pid}{episode} );
 					my $desc = encode_entities( $prog{$pid}{desc} );
 					my $title = "${episode} ($prog{$pid}{available})";
-					print FXD "<movie title=\"${title}\">
+					print XML "<movie title=\"${title}\">
 						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
 						<info><description>${desc}</description></info>
-					</movie>\n";
+					</movie>\n" if $opt{fxd};
+					print XML "<Stream>
+						<Name>\"${title}\"</Name>
+						<url>${pid}.mov</url>
+						<Subtitle></Subtitle>
+						<Synopsis>${desc}</Synopsis>
+					</Stream>\n" if $opt{mythtv};
 				}
 			}			
-			print FXD "\t</container>\n";
+			print XML "\t</container>\n" if $opt{fxd};
+			print XML "\t</Streams>\n" if $opt{mythtv};
 		}
-		print FXD "\t</container>\n";        
+		print XML "\t</container>\n" if $opt{fxd};
 	}
 
 
-	if ( $opt{fxdchannels} ) {
+	if ( $opt{xmlchannels} ) {
 		# containers for prog names sorted by channel
-		print FXD "\t<container title=\"iplayer by Channel\">\n";
+		print XML "\t<container title=\"iplayer by Channel\">\n" if $opt{fxd};
 		my %program_index;
 		my %program_count;
 		my %channels;
@@ -2204,12 +2226,17 @@ sub create_fxd() {
 			$channels{$prog{$index_pid{$_}}{channel}} .= '|'.$prog{$index_pid{$_}}{name}.'|';
 		}
 		for my $channel ( sort keys %channels ) {
-			print FXD "\t<container title=\"".encode_entities( $channel )."\">\n";
+			print XML "\t<container title=\"".encode_entities( $channel )."\">\n" if $opt{fxd};
+			print XML "\t<Feed>
+				\t<Name>".encode_entities( $channel )."</Name>
+				\t<Provider>BBC</Provider>\n
+				\t<Streams>\n" if $opt{mythtv};
 			for my $name ( sort keys %program_index ) {
 				# Do we have any of this prog $name on this $channel?
 				if ( $channels{$channel} =~ /\|$name\|/ ) {
 					my @count = grep /^$name$/, keys %program_index;
-					print FXD "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n";
+					print XML "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt{fxd};
+					print XML "\t\t<Stream>\n" if $opt{mythtv};
 					for (@_) {
 						# loop through and find matches for each progname for this channel
 						my $pid = $index_pid{$_};
@@ -2217,22 +2244,25 @@ sub create_fxd() {
 							my $episode = encode_entities( $prog{$pid}{episode} );
 							my $desc = encode_entities( $prog{$pid}{desc} );
 							my $title = "${episode} ($prog{$pid}{available})";
-							print FXD "<movie title=\"${title}\">
+							print XML "<movie title=\"${title}\">
 								<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
 								<info><description>${desc}</description></info>
-							</movie>\n";
+							</movie>\n" if $opt{fxd};
+							print XML "\t\t<Name>$name</Name>\n\t\t<Url>${pid}.mov</Url>\n\t\t<Subtitle>${episode}</Subtitle>\n\t\t<Synopsis>${desc}</Synopsis>\n" if $opt{mythtv};
 						}
 					}
-					print FXD "\t</container>\n";
+					print XML "\t</container>\n" if $opt{fxd};
+					print XML "\t</Stream>\n" if $opt{mythtv};
 				}
 			}
-			print FXD "\t</container>\n";
+			print XML "\t</container>\n" if $opt{fxd};
+			print XML "\t</Streams>\n\t</Feed>\n" if $opt{mythtv};
 		}
-		print FXD "\t</container>\n";
+		print XML "\t</container>\n" if $opt{fxd};
 	}
 
 
-	if ( $opt{fxdalpha} ) {
+	if ( $opt{xmlalpha} ) {
 		my %table = (
 			'A-C' => '[abc]',
 			'D-F' => '[def]',
@@ -2246,9 +2276,9 @@ sub create_fxd() {
 			'W-Z' => '[wxyz]',
 			'0-9' => '[\d]',
 		);
-		print FXD "\t<container title=\"iplayer A-Z\">\n";
+		print XML "\t<container title=\"iplayer A-Z\">\n";
 		for my $folder (sort keys %table) {
-			print FXD "\t<container title=\"iplayer $folder\">\n";
+			print XML "\t<container title=\"iplayer $folder\">\n";
 			for (@_) {
 				my $pid = $index_pid{$_};
 				my $name = encode_entities( $prog{$pid}{name} );
@@ -2257,19 +2287,24 @@ sub create_fxd() {
 				my $title = "${name} - ${episode} ($prog{$pid}{available})";
 				my $regex = $table{$folder};
 				if ( $name =~ /^$regex/i ) {
-					print FXD "<movie title=\"${title}\">
+					print XML "<movie title=\"${title}\">
 						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
 						<info><description>${desc}</description></info>
-					</movie>\n";
+					</movie>\n" if $opt{fxd};
+					print XML "<Stream title=\"${title}\">
+						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
+						<info><description>${desc}</description></info>
+					</Stream>\n" if $opt{mythtv};
 				}
 			}
-			print FXD "\t</container>\n";
+			print XML "\t</container>\n";
 		}
-		print FXD "\t</container>\n";
+		print XML "\t</container>\n";
 	}
 
-	print FXD '</freevo>';
-	close (FXD);
+	print XML '</freevo>' if $opt{fxd};
+	print XML '</MediaStreams>' if $opt{mythtv};
+	close XML;
 }
 
 
