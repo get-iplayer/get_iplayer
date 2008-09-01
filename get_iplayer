@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: August 31st 2008
+# Date: September 1st 2008
 #
-my $version = 0.60;
+my $version = 0.61;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -42,57 +42,16 @@ my $version = 0.60;
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 #
+# Changes 0.61 - 20080901
+# * Subtitles can now be downloaded if available using --subtitles option and are converted automatically into SubRip (.srt) format
+# * Subtitles can be offset by a number of milliseconds using --suboffset <ms> (the H.264 streams seem to start a little earlier than the flash video versions)
+#
 # Changes 0.60 - 20080824
 # * Now can create MythTV streams XML file aswell as Freevo fxd XML (thanks to ear9mrn)
 # * Added --bandwidth option for rtsp streams (thanks to nrq)
 # * Removed world writable perms on cache files
 # * quiet option now works properly with radio downloads
 #
-# Changes 0.59 - 20080813
-# * de-duplication of search/match results
-#
-# Changes 0.58 - 20080813
-# * quote filenames in helper apps to allow whitespace in filenames for mp3 transcoding
-# * provide better debug output for radio downloading
-# * Known issue: mplayer bug means that it cannot accept whitespace in filenames when dumping to wav/pcm files
-#
-# Changes 0.57 - 20080805
-# * Now use an OPML feed from BBC to get a list of all podcast RSS feeds - no more web scraping
-# * Fixed thumbnail parsing for podcasts
-# * Removed obsolete and broken --scrape option
-# * Fixed category parsing for changed iplayer XML feed format
-# * Show Categories in --info display
-#
-# Changes 0.56 - 20080804
-# * Added raw realaudio stream saving support (--raw) which does not require lame (thanks to nrq)
-# * Added new BBC channel 'BBC HD'
-# * Improved efficiency of stco atom searching to make slow machines start streaming faster
-# * Known issue: stdout support for radio wav and raw support can be problematic due to named pipe closing
-#
-# Changes 0.55 - 20080718
-# * Detect and report lack fo realaudio format for radio programmes
-#
-# Changes 0.54 - 20080717
-# * Fix rename radio file bug under Activeperl
-# * Do not catch sigchld, quits prog after first download
-#
-# Changes 0.53 - 20080717
-# * Fix mkfifo quit under Activeperl
-#
-# Changes 0.52 - 20080716
-# * Fix inverted logic bug in --wav option
-# * Fix already exists bug for partially downloaded radio progs
-# * Use dynamic fifo file so simultaneous downloads can occur for radio
-# * Use signal handler to clean up temp named pipe file
-#
-# Changes 0.51 - 20080716
-# * Fallback to wav mod for type=radio if platform doesn't support fifos (e.g. ActivePerl/Windows)
-# * Added --wav option for radio (i.e. don't transcode to mp3)
-#
-# Changes 0.50 - 20080714
-# * Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
-# * Changed progress calc using file pointer instead of file stat - better for cygwin
-# * Allow option to specify location of mplayer and lame binaries if not in path (--mplayer and --lame)
 
 use Env qw[@PATH];
 use Fcntl;
@@ -176,6 +135,8 @@ Config Options:
  --wav                         In radio mode output as wav and don't transcode to mp3
  --raw                         In radio mode output as raw realaudio and don't transcode to mp3
  --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
+ --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
+ --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -235,7 +196,9 @@ GetOptions(
 	"lame=s"			=> \$opt{lame},
 	"wav"				=> \$opt{wav},
         "raw"                           => \$opt{raw},
-        "bandwidth=s"			=> \$opt{bandwidth},
+        "bandwidth=n"			=> \$opt{bandwidth},
+	"subtitles"			=> \$opt{subtitles},
+	"suboffset=n"			=> \$opt{suboffset},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -1201,7 +1164,7 @@ sub download_programme {
 		# Do the audio download
 		return download_rtsp_stream( $ua, $url_2, $file, $file_done );
 	}
-	
+
 	# Parse if programme available
 	#    iplayer_streaming_http_mp4 : [
 	#    ],  ### This part is empty == no mov version yet
@@ -1270,9 +1233,127 @@ sub download_programme {
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
 
+	# Get subtitles if they exist and are required
+	my $subfile_done;
+	my $subfile;
+	if ( $opt{subtitles} ) {
+		$subfile_done = "${download_dir}/${file_prefix}.srt";
+		$subfile = "${download_dir}/${file_prefix}.partial.srt";
+		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
+	}
+
 	# Do the h.264 download
 	return download_h264_stream( $ua, $url_2, $file, $file_done );
 
+	# Rename the subtitle file accordingly
+	move($subfile, $subfile_done) if $opt{subtitles} && -f $subfile;
+}
+
+
+# Download Subtitles
+#GET http://www.bbc.co.uk/mediaselector/4/mtis/stream/b008dc8r
+#<?xml version="1.0" encoding="UTF-8"?>                                     
+#<mediaSelection xmlns="http://bbc.co.uk/2008/mp/mediaselection">           
+#<media kind="captions"                                                     
+#        type="application/ttaf+xml"   >                                    
+#        <connection                                                        
+#                priority="10"                                              
+#                kind="http"                                                
+#                server="http://www.bbc.co.uk/iplayer/subtitles/"           
+#                identifier="b0008dc8rstreaming89808204.xml"                
+#                href="http://www.bbc.co.uk/iplayer/subtitles/b0008dc8rstreaming89808204.xml" 
+#        />                                                                                   
+#</media>                                                                                     
+#....
+sub download_subtitles {
+	my ( $ua, $file, $verpid ) = @_;
+	my $suburl;
+	my $subs;
+	logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt{verbose};
+	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
+
+	# flatten
+	$xml =~ s/\n/ /g;
+	# Extract url
+	$suburl = $1 if $xml =~ m{<media\s+kind="captions".+?href="(.+?)".+?</media>};
+
+	# Return if we have no url
+	if (! $suburl) {
+		logger "INFO: Subtitles not available\n";
+		return 2;
+	}
+
+	logger "INFO: Getting Subtitles from $suburl\n" if $opt{verbose};
+
+	# Open subs file
+	unlink($file);
+	my $fh = open_file_append($file);
+
+	# Download subs
+	$subs = request_url_retry($ua, $suburl, 2);
+	if (! $subs ) {
+		logger "ERROR: Subtitle Download failed\n";
+		return 1;
+	} else {
+		logger "INFO: Downloaded Subtitles\n";
+	}
+
+	# Convert the format to srt
+	# SRT:
+	#1
+	#00:01:22,490 --> 00:01:26,494
+	#Next round!
+	#
+	#2
+	#00:01:33,710 --> 00:01:37,714
+	#Now that we've moved to paradise, there's nothing to eat.
+	#
+	
+	# TT:
+	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
+
+	my $count = 1;
+	my @lines = grep /<p\s+begin/, split /\n/, $subs;
+	for ( @lines ) {
+		my ( $begin, $end, $sub );
+		$begin = $1 if m{begin="(.+?)"};
+		$end =   $1 if m{end="(.+?)"};
+		$sub =	 $1 if m{>(.+?)</p>};
+		if ($begin && $end && $sub ) {
+			$begin =~ s/\./,/g;
+			$end =~ s/\./,/g;
+			if ($opt{suboffset}) {
+				$begin = subtitle_offset( $begin, $opt{suboffset} );
+				$end = subtitle_offset( $end, $opt{suboffset} );
+			}
+			decode_entities($sub);
+			# Write to file
+			print $fh "$count\n";
+			print $fh "$begin --> $end\n";
+			print $fh "$sub\n\n";
+			$count++;
+		}
+	}	
+	close $fh;
+
+	return 0;
+}
+
+
+# Returns an offset timestamp given an srt begin or end timestamp and offset in ms
+sub subtitle_offset {
+	my ( $timestamp, $offset ) = @_;
+	my ( $hr, $min, $sec, $ms ) = split /[:,\.]/, $timestamp;
+	# split into hrs, mins, secs, ms
+	my $ts = $ms + $sec*1000 + $min*60*1000 + $hr*60*60*1000 + $offset;
+	$hr = int( $ts/(60*60*1000) );
+	$ts -= $hr*60*60*1000;
+	$min = int( $ts/(60*1000) );
+	$ts -= $min*60*1000;
+	$sec = int( $ts/1000 );
+	$ts -= $sec*1000;
+	$ms = $ts;
+	return "$hr:$min:$sec,$ms";
 }
 
 
