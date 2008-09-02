@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 1st 2008
+# Date: September 2nd 2008
 #
-my $version = 0.61;
+my $version = 0.62;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,6 +41,9 @@ my $version = 0.61;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.62 - 20080902
+# * Added ID3 tagging for radio downloads (uses lame)
 #
 # Changes 0.61 - 20080901
 # * Subtitles can now be downloaded if available using --subtitles option and are converted automatically into SubRip (.srt) format
@@ -225,7 +228,8 @@ my $mplayer		= $opt{mplayer} || 'mplayer';
 my $mplayer_opts	= '-nolirc';
 $mplayer_opts		.= ' -really-quiet' if $opt{quiet};
 my $lame		= $opt{lame} || 'lame';
-my $lame_opts		.= ' --quiet' if $opt{quiet};
+my $lame_opts		= '-f ';
+$lame_opts		.= '--quiet ' if $opt{quiet};
 my $tee			= 'tee';
 my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 
@@ -1067,7 +1071,7 @@ sub download_programme {
 		my $file = "${download_dir}/${file_prefix}.partial.$extension";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
-			logger "ERROR: File already exists\n\n";
+			logger "ERROR: File $file_done already exists\n\n";
 			return 1;
 		}
 		return download_podcast_stream( $ua, $pid, $file, $file_done );
@@ -1154,7 +1158,7 @@ sub download_programme {
 		my $file = "${download_dir}/${file_prefix}.partial.${ext}";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
-			logger "ERROR: File already exists\n\n";
+			logger "ERROR: File $file_done already exists\n\n";
 			return 1;
 		}
 
@@ -1162,7 +1166,7 @@ sub download_programme {
 		return 0 if $opt{test};
 
 		# Do the audio download
-		return download_rtsp_stream( $ua, $url_2, $file, $file_done );
+		return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
 	}
 
 	# Parse if programme available
@@ -1226,7 +1230,7 @@ sub download_programme {
 	my $file = "${download_dir}/${file_prefix}.partial.mov";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
-		logger "ERROR: File already exists\n\n";
+		logger "ERROR: File $file_done already exists\n\n";
 		return 1;
 	}
 
@@ -1535,7 +1539,7 @@ sub download_h264_stream {
 
 # Actually do the rtsp downloading
 sub download_rtsp_stream {
-	my ( $ua, $url_2, $file, $file_done ) = @_;
+	my ( $ua, $url_2, $file, $file_done, $pid ) = @_;
 	my $childpid;
 
 	# Create named pipe
@@ -1602,6 +1606,11 @@ sub download_rtsp_stream {
 			$| = 1;
 			logger "INFO: Transcoding $file\n";
 
+			# Create ID3 tagging options for lame (escape " for shell)
+			my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
+			$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
+			$lame_opts .= "--ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
+
 			# Stream mp3 to file and stdout simultaneously
 			if ( $opt{stdout} && ! $opt{nowrite} ) {
 				if ( $opt{wav} || $opt{raw} ) {
@@ -1610,7 +1619,7 @@ sub download_rtsp_stream {
 					tee($namedpipe, $file);
 					#system( "cat $namedpipe 2>/dev/null| $tee $file");
 				} else {
-					my $cmd = "$lame $lame_opts -f $namedpipe - 2>/dev/null| $tee \"$file\"";
+					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null| $tee \"$file\"";
 					logger "DEGUG: Running $cmd\n" if $opt{debug};
 					system($cmd);
 				}
@@ -1622,14 +1631,14 @@ sub download_rtsp_stream {
 					tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
-					my $cmd = "$lame $lame_opts -f $namedpipe - 2>/dev/null";
+					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null";
 					logger "DEGUG: Running $cmd\n" if $opt{debug};
-					system( "$lame $lame_opts -f $namedpipe - 2>/dev/null");
+					system( "$lame $lame_opts $namedpipe - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt{stdout} ) {
-				my $cmd = "$lame $lame_opts -f $namedpipe \"$file\" >/dev/null 2>/dev/null";
+				my $cmd = "$lame $lame_opts $namedpipe \"$file\" >/dev/null 2>/dev/null";
 				logger "DEGUG: Running $cmd\n" if $opt{debug};
 				system($cmd);
 			}
@@ -1672,7 +1681,6 @@ sub download_rtsp_stream {
 # Actually do the podcast downloading
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
-	my $childpid;
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
 	# Resume partial download?
