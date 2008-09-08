@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 2nd 2008
+# Date: September 8th 2008
 #
-my $version = 0.62;
+my $version = 0.63;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -41,6 +41,9 @@ my $version = 0.62;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+# Changes 0.63 - 20080908
+# * Added code to resolve rtmp url for future use (--rtmp returns the urls)
 #
 # Changes 0.62 - 20080902
 # * Added ID3 tagging for radio downloads (uses lame)
@@ -140,6 +143,7 @@ Config Options:
  --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
+ --rtmp                        Returns the RTMP urls of the programme(s) - doesn't actually download them yet
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -202,6 +206,7 @@ GetOptions(
         "bandwidth=n"			=> \$opt{bandwidth},
 	"subtitles"			=> \$opt{subtitles},
 	"suboffset=n"			=> \$opt{suboffset},
+	"rtmp"				=> \$opt{rtmp},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -1162,6 +1167,9 @@ sub download_programme {
 			return 1;
 		}
 
+		# Display RTMP stream data if required
+		get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{rtmp};
+
 		# Skip from here if we are only testing downloads
 		return 0 if $opt{test};
 
@@ -1234,6 +1242,9 @@ sub download_programme {
 		return 1;
 	}
 
+	# Display RTMP stream data if required
+	get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{rtmp};
+
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
 
@@ -1278,6 +1289,7 @@ sub download_subtitles {
 
 	# flatten
 	$xml =~ s/\n/ /g;
+
 	# Extract url
 	$suburl = $1 if $xml =~ m{<media\s+kind="captions".+?href="(.+?)".+?</media>};
 
@@ -1358,6 +1370,92 @@ sub subtitle_offset {
 	$ts -= $sec*1000;
 	$ms = $ts;
 	return "$hr:$min:$sec,$ms";
+}
+
+
+sub get_media_stream_data {
+	my ( $ua, $verpid ) = @_;
+	logger "INFO: Getting media stream metadata for $verpid\n" if $opt{verbose};
+	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
+	# flatten
+	$xml =~ s/\n/ /g;
+
+	# Get the RTMP stream URL if provided
+	my ($server, $authstring, $identifier);
+
+	#	<media kind="video"
+	#        width="640"
+	#        height="360"
+	#        type="video/mp4"
+	#        encoding="h264"  >
+	#        <connection
+	#                priority="10"
+	#                application="bbciplayertok"
+	#                kind="level3"
+	#                server="bbciplayertokfs.fplive.net"
+	#                identifier="mp4:b000zxf4-H26490898078"
+	#                authString="d52f77fede048f1ffd6587fd47446dee"
+	#        />
+	# h.264 high quality stream
+	if ( $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+		logger "INFO: h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP high quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+	}
+
+	#	<media kind="video"
+	#        width="512"
+	#        height="288"
+	#        type="video/x-flv"
+	#        encoding="vp6"  >
+	#        <connection
+	#                priority="10"
+	#                kind="akamai"
+	#                server="cp41752.edgefcs.net"
+	#                identifier="secure/b000zxf4-streaming90898078"
+	#                authString="daEdSdgbcaibFa7biaobCaYdadyaTamazbq-biXsum-cCp-FqrECnEoGBwFvwG"
+	#        />
+	#	</media>
+	#
+	# h.264 normal quality stream
+	if ( $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+		logger "INFO: h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP normal quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+	}
+
+	#<media kind="audio"
+	#        type="audio/mpeg"
+	#        encoding="mp3"  >
+	#        <connection
+	#                priority="10"
+	#                kind="akamai"
+	#                server="cp48181.edgefcs.net"
+	#                identifier="mp3:secure/radio1/RBN2_mashup_b00d67h9_2008_09_05_22_14_25"
+	#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
+	#        />
+	#</media>
+	# Audio rtmp mp3
+	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+		# Remove offending mp3: at the start of the identifier
+		$identifier =~ s/^mp3://;
+		logger "INFO: MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: MP3 stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+	}
+
+	#<media kind="audio"
+	#       type="audio/real"
+	#        encoding="real"  >
+	#        <connection
+	#                priority="10"
+	#                kind="sis"
+	#                server="http://www.bbc.co.uk"
+	#                identifier="/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one"
+	#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
+	#        />
+	#</media>
+
 }
 
 
