@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 9th 2008
 #
-my $version = 0.66;
+my $version = 0.67;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -42,6 +42,12 @@ my $version = 0.66;
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 #
+#
+# Changes 0.67 - 20080910
+# * streaminfo option now gets Nokia N96 rtsp stream URL (not just the URl that points to it)
+# * streaminfo option now makes all other functions quiet and sets --get and --test
+# * Added all audio, subtitles, iphone and wii stream info to streaminfo option
+# * quiet option can now be overridden by verbose or debug options
 #
 # Changes 0.66 - 20080909
 # * Changed --rtmp to --streaminfo
@@ -97,9 +103,10 @@ $|=1;
 my %opt = ();
 
 
-# Print to STDERR
+# Print to STDERR if not quiet unless verbose or debug
 sub logger(@) {
-	print STDERR @_[0] if ! $opt{quiet};
+	# Make sure quiet can be overridden by verbose and debug options
+	print STDERR @_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
 }
 
 sub usage {
@@ -267,6 +274,12 @@ my $lame_opts		= '-f ';
 $lame_opts		.= '--quiet ' if $opt{quiet};
 my $tee			= 'tee';
 my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
+# Set quiet, test and get options if we're asked for streaminfo
+if ( $opt{streaminfo} ) {
+	$opt{test} = 1;
+	$opt{get} = 1;
+	$opt{quiet} = 1;
+}
 
 # URLs
 my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
@@ -1112,8 +1125,12 @@ sub download_programme {
 			logger "ERROR: File $file_done already exists\n\n";
 			return 1;
 		}
+
+		# Skip from here if we are only testing downloads
+		return 0 if $opt{test};
+
 		return download_podcast_stream( $ua, $pid, $file, $file_done );
-	}	
+	}
 
 	# Create a full URL from the PID specified
 	my $page = $pid_page_url_prefix.$pid;
@@ -1201,7 +1218,7 @@ sub download_programme {
 		}
 
 		# Display RTMP stream data if required
-		get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
+		get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
 
 		# Skip from here if we are only testing downloads
 		return 0 if $opt{test};
@@ -1276,7 +1293,7 @@ sub download_programme {
 	}
 
 	# Display RTMP stream data if required
-	get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
+	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -1406,16 +1423,24 @@ sub subtitle_offset {
 }
 
 
+# Gets media streams data for this version pid
 sub get_media_stream_data {
-	my ( $ua, $verpid ) = @_;
-	logger "INFO: Getting media stream metadata for $verpid\n" if $opt{verbose};
+	my ( $pid, $verpid ) = @_;
+	my $ua = LWP::UserAgent->new();
+	# Setup user agent with redirection enabled
+	$ua->timeout([$lwp_request_timeout]);
+	$ua->proxy( ['http'] => $proxy_url );
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
+	$opt{quiet} = 0;
+	logger "INFO: Getting media stream metadata for $prog{$pid}{name} - $prog{$pid}{episode}, $verpid\n";
 	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
+	logger "\n$xml\n" if $opt{debug};
 	# flatten
 	$xml =~ s/\n/ /g;
 
-	# Get the RTMP stream URL if provided
-	my ($server, $authstring, $identifier);
+	my ($server, $authstring, $identifier, $href);
 
+	# h.264 high quality stream
 	#	<media kind="video"
 	#        width="640"
 	#        height="360"
@@ -1429,13 +1454,13 @@ sub get_media_stream_data {
 	#                identifier="mp4:b000zxf4-H26490898078"
 	#                authString="d52f77fede048f1ffd6587fd47446dee"
 	#        />
-	# h.264 high quality stream
 	if ( $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		logger "INFO: RTMP high quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
 	}
 
+	# h.264 normal quality stream
 	#	<media kind="video"
 	#        width="512"
 	#        height="288"
@@ -1450,33 +1475,53 @@ sub get_media_stream_data {
 	#        />
 	#	</media>
 	#
-	# h.264 normal quality stream
 	if ( $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		logger "INFO: RTMP normal quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
 	}
 
-	#<media kind="audio"
-	#        type="audio/mpeg"
-	#        encoding="mp3"  >
+	# Wii h.264 standard quality stream
+	#<media kind="video"
+	#        width="512"
+	#        height="288"
+	#        type="video/x-flv"
+	#        encoding="spark"  >
 	#        <connection
 	#                priority="10"
 	#                kind="akamai"
-	#                server="cp48181.edgefcs.net"
-	#                identifier="mp3:secure/radio1/RBN2_mashup_b00d67h9_2008_09_05_22_14_25"
-	#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
+	#                server="cp41752.edgefcs.net"
+	#                identifier="secure/5242138581547639062"
+	#                authString="daEd8dLbGaPaZdzdNcwd.auaydJcxcHandp-biX5YL-cCp-BqsECnxnGEsHwyE"
 	#        />
 	#</media>
-	# Audio rtmp mp3
-	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+	if ( $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		# Remove offending mp3: at the start of the identifier
-		$identifier =~ s/^mp3://;
-		logger "INFO: MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		logger "INFO: MP3 stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+		logger "INFO: Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: Wii normal quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
 	}
 
+	# iPhone h.264 stream
+	#<media kind="video"
+	#        width="480"
+	#        height="272"
+	#        type="video/mp4"
+	#        encoding="h264"  >
+	#        <connection
+	#                priority="10"
+	#                kind="sis"
+	#                server="http://www.bbc.co.uk/mediaselector/3/auth/stream/"
+	#                identifier="5242138581547639062"
+	#                href="http://www.bbc.co.uk/mediaselector/3/auth/stream/5242138581547639062.mp4"
+	#        />
+	#</media>
+	if ( $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $1, $2, $3 );
+		logger "INFO: iPhone h.264 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		logger "INFO: iPhone h.264 stream URL: ${href}\n";
+	}
+
+	# Nokia N96 h.264 low quality stream
 	#<media kind="video"
 	#        type="video/mpeg"
 	#        encoding="h264"  >
@@ -1489,12 +1534,35 @@ sub get_media_stream_data {
 	#        />
 	#</media>
 	if ( $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier ) = ( $1, $2 );
-		my $href = $3;
-		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\n" if $opt{verbose};
-		logger "INFO: Nokia N96 h.264 low quality stream URL: ${href}\n";
+		( $server, $identifier, $href ) = ( $1, $2, $3 );
+		$opt{quiet} = 1;
+		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+		$opt{quiet} = 0;
+		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		logger "INFO: Nokia N96 h.264 low quality stream URL: ${rtsp}\n";
 	}
 
+	# Audio rtmp mp3
+	#<media kind="audio"
+	#        type="audio/mpeg"
+	#        encoding="mp3"  >
+	#        <connection
+	#                priority="10"
+	#                kind="akamai"
+	#                server="cp48181.edgefcs.net"
+	#                identifier="mp3:secure/radio1/RBN2_mashup_b00d67h9_2008_09_05_22_14_25"
+	#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
+	#        />
+	#</media>
+	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+		# Remove offending mp3: at the start of the identifier
+		$identifier =~ s/^mp3://;
+		logger "INFO: MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: MP3 stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+	}
+
+	# ReadAudio stream
 	#<media kind="audio"
 	#       type="audio/real"
 	#        encoding="real"  >
@@ -1506,7 +1574,34 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
 	#        />
 	#</media>
+	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/real".+?encoding="real".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $1, $2, $3 );
+		$opt{quiet} = 1;
+		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+		$opt{quiet} = 0;
+		logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		logger "INFO: RealAudio RTSP stream URL: ${rtsp}\n";
+	}
 
+	# Subtitles stream
+	#<media kind="captions"
+	#        type="application/ttaf+xml"   >
+	#        <connection
+	#                priority="10"
+	#                kind="http"
+	#                server="http://www.bbc.co.uk/iplayer/subtitles/"
+	#                identifier="b0008dc8rstreaming89808204.xml"
+	#                href="http://www.bbc.co.uk/iplayer/subtitles/b0008dc8rstreaming89808204.xml"
+	#        />
+	#</media>
+	if ( $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $1, $2, $3 );
+		logger "INFO: Subtitles stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		logger "INFO: Subtitles stream URL: ${href}\n";
+	}
+
+	logger "\n";
+	$opt{quiet} = 1;
 }
 
 
@@ -2286,7 +2381,7 @@ sub download_block {
 		   
 	# Memory Block
 	} else {
-		logger "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{verbose};
+		logger "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt{debug};
 		$res = $ua->request($req, $callback_memory);
 		if ( (! $res->is_success) ) {
 			logger "ERROR: Failed to Download block\n\n";
