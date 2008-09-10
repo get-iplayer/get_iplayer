@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 8th 2008
+# Date: September 9th 2008
 #
-my $version = 0.63;
+my $version = 0.66;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
@@ -19,7 +19,7 @@ my $version = 0.63;
 # * Resume downloads of partially downloaded mov and podcast files
 # * Indexing of all available Podcast, Radio and TV (i.e. listed) iplayer programs using Atom and RSS feeds
 # * Info option (--info) to get full programme metadata
-# * Caching of Programme Index (default 4hrs)
+# * Caching of Programme Index (default 6hrs)
 # * Creation of a basic html index file (--html <file>)
 # * Execution of a custom user command after every successful download (--command)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
@@ -28,8 +28,8 @@ my $version = 0.63;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian, Unslung/NSLU2), 
-# * Tested on MacOSX, and Windows ActivePerl (no radio to stdout and no mp3 transcode), cygwin
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian, Unslung/NSLU2)
+# * Tested on MacOSX, and Windows ActivePerl (no radio to stdout), cygwin
 #
 # Requires:
 # * perl 5.8
@@ -41,6 +41,21 @@ my $version = 0.63;
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+#
+#
+# Changes 0.66 - 20080909
+# * Changed --rtmp to --streaminfo
+# * --streaminfo now gets Nokia N96 rtsp stream URL also
+#
+# Changes 0.65 - 20080909
+# * Created ability to have system-wide default configs for options (/etc/get_iplayer/ and '<allusersprofile>\get_iplayer\' on Win32)
+# * Moved windows system/personal config dirs to <allusersprofile>\get_iplayer\ and <profile>\.get_iplayer\
+# * System-wide options can be overridden by the personal options and cmdline options
+#
+# Changes 0.64 - 20080909
+# * Tweaked to get home directory (USERPROFILE) in ActivePerl
+# * Renamed --freevo as --symlink (still backwards compatable)
+# * Added ability for ActivePerl/Windows to transcode radio programmes to mp3 after downloading (thanks Simon Dible)
 #
 # Changes 0.63 - 20080908
 # * Added code to resolve rtmp url for future use (--rtmp returns the urls)
@@ -78,7 +93,6 @@ use strict;
 use Time::Local;
 use URI;
 
-my $DEBUG = 0;
 $|=1;
 my %opt = ();
 
@@ -129,7 +143,7 @@ Output Options:
 Config Options:
  -f, --flush                   Flush cache
  -e, --expiry <secs>           Cache expiry in seconds (default 12hrs)
- --freevo <file>               Create symlink to <file> once we have the header of the download
+ --symlink <file>              Create symlink to <file> once we have the header of the download
  --fxd <file>                  Create Freevo FXD XML in specified file
  --mythtv <file>               Create Mythtv streams XML in specified file
  --xml-channels                Create freevo/Mythtv menu of channels -> programme names -> episodes
@@ -155,37 +169,54 @@ EOF
 # Get cmdline params
 my $save;
 # This is where all profile data/caches/cookies etc goes
-my $profile_dir = "$ENV{HOME}/.get_iplayer";
+my $profile_dir;
+# This is where system-wide default options are specified
+my $optfile_system;
+# Options on unix-like systems
+if ( defined $ENV{HOME} ) {
+	$profile_dir = $ENV{HOME}.'/.get_iplayer';
+	$optfile_system = '/etc/get_iplayer/options';
+
+# Otherwise look for windows style file locations
+} elsif ( defined $ENV{USERPROFILE} ) {
+	$profile_dir = $ENV{USERPROFILE}.'/.get_iplayer';
+	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+}
 # Make profile dir if it doesnt exist
 mkdir $profile_dir if ! -d $profile_dir;
+# Personal options go here
 my $optfile = "${profile_dir}/options";
 
-# Parse options if we're not saving options
-read_options_file() if ! grep /\-\-save/, @ARGV;
+# Parse options if we're not saving options (system-wide options are overridden by personal options)
+if ( ! grep /\-\-save/, @ARGV ) {
+	$opt{debug} = 1 if grep /\-\-debug/, @ARGV;
+	read_options_file($optfile_system);
+	read_options_file($optfile);
+}
 
 # Allow bundling of single char options
 Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
-        "help|h"                        => \$opt{help},
-        "get|g"				=> \$opt{get},
-        "long|l"                        => \$opt{long},
-        "verbose|v"                     => \$opt{verbose},
-        "flush|f"                       => \$opt{flush},
-        "output|o=s"                    => \$opt{output},
-        "proxy|p=s"                     => \$opt{proxy},
-        "stdout|stream|x"               => \$opt{stdout},
-        "subdirs|subdir|s"              => \$opt{subdir},
-        "no-write|nowrite|n"            => \$opt{nowrite},
-        "expiry|e=n"                    => \$opt{expiry},
-        "test|t"                        => \$opt{test},
-        "whitespace|ws|w"               => \$opt{whitespace},
-        "update|u"                      => \$opt{update},
-        "debug"                         => \$opt{debug},
+	"help|h"                        => \$opt{help},
+	"get|g"				=> \$opt{get},
+	"long|l"                        => \$opt{long},
+	"verbose|v"                     => \$opt{verbose},
+	"flush|f"                       => \$opt{flush},
+	"output|o=s"                    => \$opt{output},
+	"proxy|p=s"                     => \$opt{proxy},
+	"stdout|stream|x"               => \$opt{stdout},
+	"subdirs|subdir|s"              => \$opt{subdir},
+	"no-write|nowrite|n"            => \$opt{nowrite},
+	"expiry|e=n"                    => \$opt{expiry},
+	"test|t"                        => \$opt{test},
+	"whitespace|ws|w"               => \$opt{whitespace},
+	"update|u"                      => \$opt{update},
+	"debug"                         => \$opt{debug},
 	"channel=s"			=> \$opt{channel},
 	"category=s"			=> \$opt{category},
 	"q|quiet"			=> \$opt{quiet},
-	"freevo=s"			=> \$opt{freevo},
+	"symlink|freevo=s"		=> \$opt{symlink},
 	"fxd=s"				=> \$opt{fxd},
 	"mythtv=s"			=> \$opt{mythtv},
 	"xml-channels|fxd-channels"	=> \$opt{xmlchannels},
@@ -206,14 +237,13 @@ GetOptions(
         "bandwidth=n"			=> \$opt{bandwidth},
 	"subtitles"			=> \$opt{subtitles},
 	"suboffset=n"			=> \$opt{suboffset},
-	"rtmp"				=> \$opt{rtmp},
+	"streaminfo|rtmp"		=> \$opt{streaminfo},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
-my $DEBUG = $opt{debug};
 
 # Save opts if specified
-save_options_file() if $save;
+save_options_file($optfile) if $save;
 
 # Default to type=tv
 $opt{type} = 'tv' if ! $opt{type};
@@ -947,6 +977,7 @@ sub get_podcast_links {
 
 
 # Feed info:
+#	# Also see http://derivadow.com/2008/07/18/interesting-bbc-data-to-hack-with/
 #	# All podcasts menu (iphone)
 #	http://www.bbc.co.uk/radio/podcasts/ip/
 #	# All radio1 podcasts
@@ -955,6 +986,8 @@ sub get_podcast_links {
 #	http://www.bbc.co.uk/radio/podcasts/moyles/assets/iphone_keepnet.sssi
 #	# RSS Feed (indexed from?)
 #	http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml
+#	# aod by channel see http://docs.google.com/View?docid=d9sxx7p_38cfsmxfcq
+#	# http://www.bbc.co.uk/radio/aod/availability/<channel>.xml
 #	# aod index
 #	http://www.bbc.co.uk/radio/aod/index_noframes.shtml
 # 	# schedule feeds
@@ -1168,7 +1201,7 @@ sub download_programme {
 		}
 
 		# Display RTMP stream data if required
-		get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{rtmp};
+		get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
 
 		# Skip from here if we are only testing downloads
 		return 0 if $opt{test};
@@ -1243,7 +1276,7 @@ sub download_programme {
 	}
 
 	# Display RTMP stream data if required
-	get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{rtmp};
+	get_media_stream_data( $ua, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -1444,6 +1477,24 @@ sub get_media_stream_data {
 		logger "INFO: MP3 stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
 	}
 
+	#<media kind="video"
+	#        type="video/mpeg"
+	#        encoding="h264"  >
+	#        <connection
+	#                priority="10"
+	#                kind="sis"
+	#                server="http://www.bbc.co.uk/mediaselector/4/sdp/"
+	#                identifier="b00108ld/iplayer_streaming_n95_wifi"
+	#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b00108ld/iplayer_streaming_n95_wifi"
+	#        />
+	#</media>
+	if ( $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier ) = ( $1, $2 );
+		my $href = $3;
+		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\n" if $opt{verbose};
+		logger "INFO: Nokia N96 h.264 low quality stream URL: ${href}\n";
+	}
+
 	#<media kind="audio"
 	#       type="audio/real"
 	#        encoding="real"  >
@@ -1601,10 +1652,10 @@ sub download_h264_stream {
 	}
 
 	# Create symlink for freevo if required
-	if ( $opt{freevo} ) {
+	if ( $opt{symlink} ) {
 		# remove old symlink
-		unlink $opt{freevo} if -l $opt{freevo};
-		symlink $file, $opt{freevo};
+		unlink $opt{symlink} if -l $opt{symlink};
+		symlink $file, $opt{symlink};
 	}
 
 	# Download mdat in 32MB blocks
@@ -1641,7 +1692,11 @@ sub download_rtsp_stream {
 	my $childpid;
 
 	# Create named pipe
-	mkfifo($namedpipe, 0700) if (! $opt{wav}) && (! $opt{raw});
+	if ( $^O !~ /^MSWin32$/ ) {
+		mkfifo($namedpipe, 0700) if (! $opt{wav}) && (! $opt{raw});
+	} else {
+		logger "WARNING: fifos/named pipes are not supported\n" if $opt{verbose};
+	}
 	
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -1658,28 +1713,45 @@ sub download_rtsp_stream {
 
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
-	# Fallback to wav mode if no named pipe and raw not specified
-	if ( (! -p $namedpipe) && ! $opt{raw} ) {
+	# Create ID3 tagging options for lame (escape " for shell)
+	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
+	$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
+	$lame_opts .= "--ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
+
+	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
+	# (Fallback if no namedpipe support and raw/wav not specified)
+	if ( (! -p $namedpipe) && ! ( $opt{raw} || $opt{wav} ) ) {
+		# Remove filename extension
+		$file =~ s/\.mp3$//gi;
 		# Remove named pipe
 		unlink $namedpipe;
-		$opt{wav} = 1;
-		# Write out to .wav ext instead
-		$file =~ s/mp3$/wav/gi;
-		$file_done =~ s/mp3$/wav/gi;
-	}
+		logger "INFO: Downloading wav format (followed by transcoding)\n";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=${file}.wav \"$rtsp\" 1>&2";
+		if ( system($cmd) ) {
+			return 2;
+		}
+		# Transcode
+		logger "INFO: Transcoding ${file}.wav\n";
+		my $cmd = "$lame $lame_opts \"${file}.wav\" \"${file}.mp3\" 1>&2";
+		logger "DEGUG: Running $cmd\n" if $opt{debug};
+		if ( system($cmd) ) {
+			return 2;
+		}
+		unlink "${file}.wav";
+		move "${file}.mp3", $file_done;
 
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
 	# else do direct mplayer write to wav file if:
 	#  1) we don't have a named pipe available (e.g. in activeperl)
 	#  2) --wav was specified to write file only
-	if ( $opt{wav} && ! $opt{stdout} ) {
+	} elsif ( $opt{wav} && ! $opt{stdout} ) {
 		logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
 		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
-		};
+		}
 		# Move file to done state
 		move $file, $file_done if ! $opt{nowrite};
 
@@ -1692,22 +1764,17 @@ sub download_rtsp_stream {
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
-		};
+		}
 		# Move file to done state
 		move $file, $file_done if ! $opt{nowrite};
 
-	# Use transcoding and named pipes
+	# Use transcoding via named pipes
 	} else {
 		$childpid = fork();
 		if (! $childpid) {
 			# Child starts here
 			$| = 1;
 			logger "INFO: Transcoding $file\n";
-
-			# Create ID3 tagging options for lame (escape " for shell)
-			my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
-			$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
-			$lame_opts .= "--ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
 
 			# Stream mp3 to file and stdout simultaneously
 			if ( $opt{stdout} && ! $opt{nowrite} ) {
@@ -1757,7 +1824,7 @@ sub download_rtsp_stream {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				return 2;
-			};
+			}
 		# WAV / mp3 mode
 		} else {
 			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
@@ -1765,7 +1832,7 @@ sub download_rtsp_stream {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				return 2;
-			};
+			}
 		}
 		# Wait for child processes to prevent zombies
 		wait;
@@ -2336,6 +2403,7 @@ sub update_script {
 					# Need to purge the cache as this changes between versions
 					unlink($cachefile_tv);
 					unlink($cachefile_radio);
+					unlink($cachefile_podcast);
 				}
 			}
 		} else {
@@ -2527,11 +2595,14 @@ sub create_html {
 
 # Save options to file
 sub save_options_file {
+	my $optfile = shift;
 	unlink $optfile;
+	logger "DEBUG: Saving options to $optfile:\n" if $opt{debug};
 	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
 	# Save all opts except for these
 	for (grep !/(help|test|debug|get)/, keys %opt) {
 		print OPT "$_ $opt{$_}\n"  if defined $opt{$_};
+		logger "DEBUG: Setting option $_ = $opt{$_}\n" if $opt{debug} && defined $opt{$_};
 	}
 	close OPT;
 	logger "INFO: Options saved as defult in $optfile\n";
@@ -2541,11 +2612,14 @@ sub save_options_file {
 
 # Load default options from file
 sub read_options_file {
+	my $optfile = shift;
 	return 0 if ! -f $optfile;
+	logger "DEBUG: Parsing options from $optfile:\n" if $opt{debug};
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
 		chomp( $opt{$1} = $2 );
+		logger "DEBUG: Setting option $1 = $2\n" if $opt{debug};
 	}
 	close OPT;
 }
