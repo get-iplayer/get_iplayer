@@ -8,16 +8,16 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 9th 2008
+# Date: September 11th 2008
 #
-my $version = 0.67;
+my $version = 0.68;
 #
 # Supports: 
-# * Downloading h.264/Mov/Quicktime Video and RTSP Audio streams and podcasts from BBC iplayer site
-# * Downloads streams from BBC iplayer site (--get)
+# * Downloading h.264/Mov/Quicktime Video and RTSP Audio/Video streams and podcasts from BBC iPlayer site
+# * Downloads streams from BBC iPlayer site (--get)
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
 # * Resume downloads of partially downloaded mov and podcast files
-# * Indexing of all available Podcast, Radio and TV (i.e. listed) iplayer programs using Atom and RSS feeds
+# * Indexing of all available Podcast, Radio and TV (i.e. listed) iPlayer programs using Atom and RSS feeds
 # * Info option (--info) to get full programme metadata
 # * Caching of Programme Index (default 6hrs)
 # * Creation of a basic html index file (--html <file>)
@@ -28,7 +28,7 @@ my $version = 0.67;
 # * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, Ubuntu, Xebian, Unslung/NSLU2)
+# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, *Ubuntu, Xebian, Unslung/NSLU2)
 # * Tested on MacOSX, and Windows ActivePerl (no radio to stdout), cygwin
 #
 # Requires:
@@ -42,6 +42,14 @@ my $version = 0.67;
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 #
+# Known Issues:
+# * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
+# * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
+#
+# Changes 0.68 - 20080911
+# * Added quotes to file= arg of mplayer for post-transcode wav option - breaks if there is a space in the path
+# * Added rudimentary support for vlc to download/stream N96 iPlayer streams (lower quality 192kbps streams) using --n96 option
+# * Added --vlc option to specify path to vlc (for N96 streams)
 #
 # Changes 0.67 - 20080910
 # * streaminfo option now gets Nokia N96 rtsp stream URL (not just the URl that points to it)
@@ -159,8 +167,10 @@ Config Options:
  --html <file>                 Create basic HTML index of programmes in specified file
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
+ --vlc <path>                  Location of vlc binary
  --wav                         In radio mode output as wav and don't transcode to mp3
  --raw                         In radio mode output as raw realaudio and don't transcode to mp3
+ --n96                         In TV mode download/stream low quality Nokia N96 H.264 stream (alpha)
  --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
@@ -239,6 +249,8 @@ GetOptions(
 	"c|command=s"			=> \$opt{command},
 	"mplayer=s"			=> \$opt{mplayer},
 	"lame=s"			=> \$opt{lame},
+	"vlc=s"				=> \$opt{vlc},
+	"n96"				=> \$opt{n96},
 	"wav"				=> \$opt{wav},
         "raw"                           => \$opt{raw},
         "bandwidth=n"			=> \$opt{bandwidth},
@@ -272,6 +284,8 @@ $mplayer_opts		.= ' -really-quiet' if $opt{quiet};
 my $lame		= $opt{lame} || 'lame';
 my $lame_opts		= '-f ';
 $lame_opts		.= '--quiet ' if $opt{quiet};
+my $vlc			= $opt{vlc} || 'cvlc';
+my $vlc_opts		= '-vv';
 my $tee			= 'tee';
 my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 # Set quiet, test and get options if we're asked for streaminfo
@@ -1218,7 +1232,7 @@ sub download_programme {
 		}
 
 		# Display RTMP stream data if required
-		get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
+		get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
 
 		# Skip from here if we are only testing downloads
 		return 0 if $opt{test};
@@ -1226,6 +1240,12 @@ sub download_programme {
 		# Do the audio download
 		return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
 	}
+
+	# Check if we have vlc - if not use iPhone mode
+	if ( $opt{n96} && (! exists_in_path($vlc)) ) {
+		logger "\nWARNING: Required $vlc does not exist, falling back to iPhone mode\n";
+		$opt{n96} = 0;
+	}		
 
 	# Parse if programme available
 	#    iplayer_streaming_http_mp4 : [
@@ -1293,7 +1313,7 @@ sub download_programme {
 	}
 
 	# Display RTMP stream data if required
-	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} } ) if $opt{streaminfo};
+	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -1307,11 +1327,21 @@ sub download_programme {
 		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
 	}
 
-	# Do the h.264 download
-	return download_h264_stream( $ua, $url_2, $file, $file_done );
+	# Do the N96 h.264 download
+	my $return;
+	if ( $opt{n96} ) {
+		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n96' );
+		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
+	# Do the iPhone h.264 download
+	} else {
+		$return = download_h264_stream( $ua, $url_2, $file, $file_done );
+	}
+	
 	# Rename the subtitle file accordingly
 	move($subfile, $subfile_done) if $opt{subtitles} && -f $subfile;
+
+	return $return;
 }
 
 
@@ -1424,14 +1454,16 @@ sub subtitle_offset {
 
 
 # Gets media streams data for this version pid
+# $media = all|flashhigh|flashnormal|iphone|flashwii|flashaudio|realaudio|subtitles
 sub get_media_stream_data {
-	my ( $pid, $verpid ) = @_;
+	my ( $pid, $verpid, $media ) = @_;
+	my $url;
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
-	$opt{quiet} = 0;
+	$opt{quiet} = 0 if $opt{streaminfo};
 	logger "INFO: Getting media stream metadata for $prog{$pid}{name} - $prog{$pid}{episode}, $verpid\n";
 	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
 	logger "\n$xml\n" if $opt{debug};
@@ -1440,7 +1472,7 @@ sub get_media_stream_data {
 
 	my ($server, $authstring, $identifier, $href);
 
-	# h.264 high quality stream
+	# h.264 iphone high quality stream
 	#	<media kind="video"
 	#        width="640"
 	#        height="360"
@@ -1454,10 +1486,11 @@ sub get_media_stream_data {
 	#                identifier="mp4:b000zxf4-H26490898078"
 	#                authString="d52f77fede048f1ffd6587fd47446dee"
 	#        />
-	if ( $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+	if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		logger "INFO: RTMP high quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP high quality stream URL: $url\n";
 	}
 
 	# h.264 normal quality stream
@@ -1475,10 +1508,11 @@ sub get_media_stream_data {
 	#        />
 	#	</media>
 	#
-	if ( $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+	if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		logger "INFO: RTMP normal quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP normal quality stream URL: $url\n";
 	}
 
 	# Wii h.264 standard quality stream
@@ -1495,10 +1529,11 @@ sub get_media_stream_data {
 	#                authString="daEd8dLbGaPaZdzdNcwd.auaydJcxcHandp-biX5YL-cCp-BqsECnxnGEsHwyE"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+	if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		logger "INFO: Wii normal quality stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: Wii normal quality stream URL: $url\n";
 	}
 
 	# iPhone h.264 stream
@@ -1515,10 +1550,11 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/mediaselector/3/auth/stream/5242138581547639062.mp4"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+	if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
 		logger "INFO: iPhone h.264 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		logger "INFO: iPhone h.264 stream URL: ${href}\n";
+		$url = "$href";
+		logger "INFO: iPhone h.264 stream URL: $url\n";
 	}
 
 	# Nokia N96 h.264 low quality stream
@@ -1533,13 +1569,14 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b00108ld/iplayer_streaming_n95_wifi"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+	if ( $media =~ /^(n96|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		$opt{quiet} = 1;
+		$opt{quiet} = 1 if $opt{streaminfo};
 		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
-		$opt{quiet} = 0;
+		$opt{quiet} = 0 if $opt{streaminfo};
 		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		logger "INFO: Nokia N96 h.264 low quality stream URL: ${rtsp}\n";
+		$url = "$rtsp";
+		logger "INFO: Nokia N96 h.264 low quality stream URL: $url\n";
 	}
 
 	# Audio rtmp mp3
@@ -1554,12 +1591,13 @@ sub get_media_stream_data {
 	#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+	if ( $media =~ /^(flashaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		# Remove offending mp3: at the start of the identifier
 		$identifier =~ s/^mp3://;
 		logger "INFO: MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		logger "INFO: MP3 stream URL: rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}\n";
+		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: MP3 stream URL: $url\n";
 	}
 
 	# ReadAudio stream
@@ -1574,13 +1612,14 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="audio".+?type="audio/real".+?encoding="real".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+	if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/real".+?encoding="real".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		$opt{quiet} = 1;
+		$opt{quiet} = 1 if $opt{streaminfo};
 		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
-		$opt{quiet} = 0;
+		$opt{quiet} = 0 if $opt{streaminfo};
 		logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		logger "INFO: RealAudio RTSP stream URL: ${rtsp}\n";
+		$url = "$rtsp";
+		logger "INFO: RealAudio RTSP stream URL: $url\n";
 	}
 
 	# Subtitles stream
@@ -1594,14 +1633,16 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/iplayer/subtitles/b0008dc8rstreaming89808204.xml"
 	#        />
 	#</media>
-	if ( $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+	if ( $media =~ /^(subtitles|all)$/ && $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
 		logger "INFO: Subtitles stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		logger "INFO: Subtitles stream URL: ${href}\n";
+		$url = "$href";
+		logger "INFO: Subtitles stream URL: $url\n";
 	}
 
-	logger "\n";
-	$opt{quiet} = 1;
+	logger "\n" if $opt{streaminfo};
+	$opt{quiet} = 1 if $opt{streaminfo};
+	return $url if ! $opt{streaminfo};
 }
 
 
@@ -1781,6 +1822,37 @@ sub download_h264_stream {
 }
 
 
+# Actually do the N96 h.264 downloading
+sub download_h264_low_stream {
+	my ( $ua, $url_2, $file, $file_done ) = @_;
+
+	# Change filename extension
+	$file =~ s/mov$/mpg/gi;
+	$file_done =~ s/mov$/mpg/gi;
+
+	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
+	if ( ! $opt{stdout} ) {
+		logger "INFO: Downloading Low Quality H.264 stream\n";
+		my $cmd = "$vlc $vlc_opts --sout file/ts:${file} $url_2 1>&2";
+		if ( system($cmd) ) {
+			return 2;
+		}
+
+	# to STDOUT
+	} else {
+		logger "INFO: Streaming Low Quality H.264 stream to stdout\n";
+		my $cmd = "$vlc $vlc_opts --sout file/ts:- $url_2 1>&2";
+		if ( system($cmd) ) {
+			return 2;
+		}	
+	}
+	logger "INFO: Downloaded $file_done\n";
+	# Moving file into place as complete (if not stdout)
+	move($file, $file_done) if ! $opt{stdout};
+	return 0;
+}
+
+
 # Actually do the rtsp downloading
 sub download_rtsp_stream {
 	my ( $ua, $url_2, $file, $file_done, $pid ) = @_;
@@ -1821,7 +1893,7 @@ sub download_rtsp_stream {
 		# Remove named pipe
 		unlink $namedpipe;
 		logger "INFO: Downloading wav format (followed by transcoding)\n";
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=${file}.wav \"$rtsp\" 1>&2";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$rtsp\" 1>&2";
 		if ( system($cmd) ) {
 			return 2;
 		}
