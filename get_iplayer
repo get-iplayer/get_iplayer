@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 11th 2008
+# Date: September 15th 2008
 #
-my $version = 0.68;
+my $version = 0.70;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio/Video streams and podcasts from BBC iPlayer site
@@ -46,46 +46,8 @@ my $version = 0.68;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
-# Changes 0.68 - 20080911
-# * Added quotes to file= arg of mplayer for post-transcode wav option - breaks if there is a space in the path
-# * Added rudimentary support for vlc to download/stream N96 iPlayer streams (lower quality 192kbps streams) using --n96 option
-# * Added --vlc option to specify path to vlc (for N96 streams)
-#
-# Changes 0.67 - 20080910
-# * streaminfo option now gets Nokia N96 rtsp stream URL (not just the URl that points to it)
-# * streaminfo option now makes all other functions quiet and sets --get and --test
-# * Added all audio, subtitles, iphone and wii stream info to streaminfo option
-# * quiet option can now be overridden by verbose or debug options
-#
-# Changes 0.66 - 20080909
-# * Changed --rtmp to --streaminfo
-# * --streaminfo now gets Nokia N96 rtsp stream URL also
-#
-# Changes 0.65 - 20080909
-# * Created ability to have system-wide default configs for options (/etc/get_iplayer/ and '<allusersprofile>\get_iplayer\' on Win32)
-# * Moved windows system/personal config dirs to <allusersprofile>\get_iplayer\ and <profile>\.get_iplayer\
-# * System-wide options can be overridden by the personal options and cmdline options
-#
-# Changes 0.64 - 20080909
-# * Tweaked to get home directory (USERPROFILE) in ActivePerl
-# * Renamed --freevo as --symlink (still backwards compatable)
-# * Added ability for ActivePerl/Windows to transcode radio programmes to mp3 after downloading (thanks Simon Dible)
-#
-# Changes 0.63 - 20080908
-# * Added code to resolve rtmp url for future use (--rtmp returns the urls)
-#
-# Changes 0.62 - 20080902
-# * Added ID3 tagging for radio downloads (uses lame)
-#
-# Changes 0.61 - 20080901
-# * Subtitles can now be downloaded if available using --subtitles option and are converted automatically into SubRip (.srt) format
-# * Subtitles can be offset by a number of milliseconds using --suboffset <ms> (the H.264 streams seem to start a little earlier than the flash video versions)
-#
-# Changes 0.60 - 20080824
-# * Now can create MythTV streams XML file aswell as Freevo fxd XML (thanks to ear9mrn)
-# * Added --bandwidth option for rtsp streams (thanks to nrq)
-# * Removed world writable perms on cache files
-# * quiet option now works properly with radio downloads
+# Changes 0.70 - 20080916
+# * Added BBC World Service to iPlayer radio channels list
 #
 
 use Env qw[@PATH];
@@ -114,7 +76,9 @@ my %opt = ();
 # Print to STDERR if not quiet unless verbose or debug
 sub logger(@) {
 	# Make sure quiet can be overridden by verbose and debug options
-	print STDERR @_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
+	print STDERR @_[0] if $opt{stdout} && ( (! $opt{quiet}) || $opt{verbose} || $opt{debug} );
+	# Use stdout if were not piping programme to stdout
+	print @_[0] if (! $opt{stdout}) && ( (! $opt{quiet}) || $opt{verbose} || $opt{debug} );
 }
 
 sub usage {
@@ -345,6 +309,7 @@ my %channels_radio = (
 	'bbc_radio_scotland'			=> 'radio|BBC Radio Scotland',
 	'bbc_radio_ulster'			=> 'radio|BBC Radio Ulster',
 	'bbc_radio_wales'			=> 'radio|BBC Radio Wales',
+	'bbc_world_service'			=> 'radio|BBC World Service',
 #	'categories/radio'			=> 'radio|All',
 );
 
@@ -1760,6 +1725,7 @@ sub download_h264_stream {
 		logger "WARNING: Bad file download, deleting cookie                 \n";
 		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 		unlink $cookiejar;
+		unlink $file;
 		return 'retry';
 	}
 
