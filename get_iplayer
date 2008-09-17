@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 15th 2008
+# Date: September 16th 2008
 #
-my $version = 0.70;
+my $version = 0.71;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio/Video streams and podcasts from BBC iPlayer site
@@ -45,6 +45,11 @@ my $version = 0.70;
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
+#
+# Changes 0.71 - 20080916
+# * Workaround BBC World Service using non-standard PID format (not starting with b0)
+# * Workaround BBC World Service HTTP redirects which contain extra whitespace and newlines around RTSP urls which mplayer does not like
+# * Workaround BBC World Service where mediaselector metadata sets XML element kind="" instead of kind="audio"
 #
 # Changes 0.70 - 20080916
 # * Added BBC World Service to iPlayer radio channels list
@@ -1843,7 +1848,8 @@ sub download_rtsp_stream {
 	my $req = HTTP::Request->new ('GET', $url_2, $h);
 	my $res = $ua->request($req);
 	chomp( my $rtsp = $res->content );
-
+	# String trailing/leading whitespace and newlines
+	$rtsp =~ s/(^\s+|\s+$|\n)//g;
 	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
 
 	# Create ID3 tagging options for lame (escape " for shell)
@@ -2051,6 +2057,19 @@ sub get_video_stream_download_url {
 #                href="http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"
 #        />
 #</media>
+# OR
+#<media kind=""
+#        type="audio/real"
+#        encoding="real"  >
+#        <connection
+#                priority="10"
+#                kind="edgesuite"
+#                server="http://http-ws.bbc.co.uk.edgesuite.net"
+#                identifier="/generatecssram.esi?file=/worldservice/css/nb/410591221152760.ra"
+#                href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssram.esi?file=/worldservice/css/nb/410591221152760.ra"
+#        />
+#</media>
+#
 sub get_audio_stream_download_url {
 		my $ua = shift;
 		my $url_1 = shift;
@@ -2079,7 +2098,7 @@ sub get_audio_stream_download_url {
 			return '';
 		}
 		# extract ram URL
-		$url_2 = $1 if $content =~ m{<media kind="audio"\s*type="audio/real".*href="(.+?)"\s*};
+		$url_2 = $2 if $content =~ m{<media kind="(|audio)"\s*type="audio/real".*href="(.+?)"\s*};
 
 		# If we cannot see 'encoding="real"...' then we don't have real audio transcoded format then skip
 		if ( ! $url_2 ) {
@@ -2108,7 +2127,7 @@ sub get_version_pids {
 	# Extract pid versions 
 	chomp( my $pid = (grep /iplayer\.episode\.setPidData/, @content)[0] );
 	# Remove tags
-	$pid =~ s/^.*\"(b0\w{6})\"\).*$/$1/g;
+	$pid =~ s/^.*\"([\w\d]+)\"\).*$/$1/g;
 	# Get hash of pid => version
 	my %version_pids;
 	$version_pids{'Original'} = $pid;
