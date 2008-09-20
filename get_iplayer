@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 16th 2008
+# Date: September 19th 2008
 #
-my $version = 0.71;
+my $version = 0.72;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and RTSP Audio/Video streams and podcasts from BBC iPlayer site
@@ -19,7 +19,8 @@ my $version = 0.71;
 # * Resume downloads of partially downloaded mov and podcast files
 # * Indexing of all available Podcast, Radio and TV (i.e. listed) iPlayer programs using Atom and RSS feeds
 # * Info option (--info) to get full programme metadata
-# * Caching of Programme Index (default 6hrs)
+# * Caching of Programme Index (default 4hrs)
+# * Lists programmes added since last cache refresh
 # * Creation of a basic html index file (--html <file>)
 # * Execution of a custom user command after every successful download (--command)
 # * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
@@ -45,6 +46,11 @@ my $version = 0.71;
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
+#
+# Changes 0.72 - 20080919
+# * time stamping of cache entries
+# * Added --since option to see what was added since a number of hours ago (using above time stamps)
+# * --flush now refreshes the cache rather than simply deleting it (retains timestamps)
 #
 # Changes 0.71 - 20080916
 # * Workaround BBC World Service using non-standard PID format (not starting with b0)
@@ -103,6 +109,7 @@ Search Options:
  --exclude-channel <regex>     Narrow search to exclude matched channel(s)
  --exclude-category <regex>    Narrow search to exclude matched catogories
  --type <radio|tv|podcast|all> Only search in these types of programmes (tv is default)
+ --since <hours>               Limit search to programmes added to the cache in the last N hours
 
 Display Options:
  -l, --long                    Display long programme descriptions / episode names and other data
@@ -125,8 +132,8 @@ Output Options:
  -c, --command <command>       Run user command after successful download using args such as <pid>, <name> etc
  
 Config Options:
- -f, --flush                   Flush cache
- -e, --expiry <secs>           Cache expiry in seconds (default 12hrs)
+ -f, --flush                   Refresh cache
+ -e, --expiry <secs>           Cache expiry in seconds (default 4hrs)
  --symlink <file>              Create symlink to <file> once we have the header of the download
  --fxd <file>                  Create Freevo FXD XML in specified file
  --mythtv <file>               Create Mythtv streams XML in specified file
@@ -226,6 +233,7 @@ GetOptions(
 	"subtitles"			=> \$opt{subtitles},
 	"suboffset=n"			=> \$opt{suboffset},
 	"streaminfo|rtmp"		=> \$opt{streaminfo},
+	"since=n"			=> \$opt{since},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -353,6 +361,7 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'categories'	=> <Categories>
 # 	'type'		=> <Type: tv or radio>
 #	'filename'	=> <Filename of saved file - set only while downloading>
+#	'timeadded'	=> <timestamp when programme was added to cache>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -486,12 +495,24 @@ sub list_progs {
 		}
 	}
 
-
 	for (@_) {
 		my $pid = $index_pid{$_};
 		# Skip if this is a radio programme and --type=radio not set
 		next if ( $opt{type} =~ /radio/i && $prog{$pid}{type} !~ /radio/i );
 		next if ( $opt{type} =~ /tv/i && $prog{$pid}{type} !~ /tv/i );
+		list_prog_entry( $pid );
+		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
+	}
+	logger "\n";
+
+	return 0;
+}
+
+
+
+# Display a line containing programme info (using long, terse, and type options)
+sub list_prog_entry {
+		my ( $pid, $prefix ) = ( @_ );
 		my $type;
 		$type = "$prog{$pid}{type}, " if $opt{type} =~ /all/i;
 		# Remove some info depending on type
@@ -501,18 +522,15 @@ sub list_progs {
 		$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
 		# Display based on output options
 		if ( $opt{long} ) {
-			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional} - $prog{$pid}{desc}\n";
+			my @time = gmtime( time() - $prog{$pid}{timeadded} );
+			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
 		} elsif ( $opt{terse} ) {
-			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
+			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
 		} else {
-			logger "$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
+			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
 		}
-		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
-	}
-	logger "\n";
-
-	return 0;
 }
+
 
 
 # Get matching programme index numbers using supplied regex
@@ -523,15 +541,18 @@ sub get_regex_matches {
 	my $category_regex = $opt{category} || '.*';
 	my $channel_exclude_regex = $opt{excludechannel} || '^ROGUE$';
 	my $category_exclude_regex = $opt{excludecategory} || '^ROGUE$';
-
+	my $since = $opt{since} || 99999;
+	my $now = time();
+		
 	for (keys %index_pid) {
 		my $pid = $index_pid{$_};
 
-		# Only include programmes matching channels and catoegory regexes
+		# Only include programmes matching channels and category regexes
 		if ( $prog{$pid}{channel} =~ /$channel_regex/i
 		  && $prog{$pid}{categories} =~ /$category_regex/i
 		  && $prog{$pid}{channel} !~ /$channel_exclude_regex/i
 		  && $prog{$pid}{categories} !~ /$category_exclude_regex/i
+		  && $prog{$pid}{timeadded} >= $now - ($since * 3600)
 		) {
 
 			# Search prognames/pids while excluding channel_regex and category_regex
@@ -1018,50 +1039,22 @@ sub get_links {
 	my $type = shift;
 	my %channels = %{$_[0]};
 
-	# Flush cache file if specified
-	unlink ($cachefile) if $opt{flush};
-
 	# Open cache file (need to verify we can even read this)
 	if ( open(CACHE, "< $cachefile") ) {
 		@cache = <CACHE>;
 		close (CACHE);
 	}
 
-	# if a cache file doesn't exist/corrupted or original file is older than $cache_sec then download new data
-	if ( (! @cache) || (! -f $cachefile) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
-
-		# Podcast only
-		get_podcast_links() if $type =~ /podcast/;
-
-		# Radio and TV
-		get_links_atom(\%channels) if $type =~ /(tv|radio)/;
-
-		# Sort indexes
-		sort_indexes();
-		
-		# Open cache file for writing
-		if ( open(CACHE, "> $cachefile") ) {
-			for (sort {$a <=> $b} keys %index_pid) {
-				my $pid = $index_pid{$_};
-				# Only write entries for corect prog type
-				if ($prog{$pid}{type} eq $type) {
-					print CACHE "$_|$prog{$pid}{type}|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}\n";
-				}
-			}
-			close (CACHE);
-		} else {
-			logger "WARNING: Couldn't open cache file for writing\n";
-		}
-
-
-	# Else read from cache
-	} else {
+	# Read cache into %pid_old and %index_pid_old if cache exists
+	my %prog_old;
+	my %index_pid_old;
+	if (@cache) {
 		for (@cache) {
 			# Populate %prog from cache
 			chomp();
-			my ($index, $type, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories, $thumbnail) = split /\|/;
+			my ($index, $type, $name, $pid, $available, $episode, $versions, $duration, $desc, $channel, $categories, $thumbnail, $timeadded) = split /\|/;
 			# Create data structure with prog data
-			$prog{$pid} = {
+			$prog_old{$pid} = {
 				'index'		=> $index,
 				'name'		=> $name,
 				'episode'	=> $episode,
@@ -1073,9 +1066,55 @@ sub get_links {
 				'categories'	=> $categories,
 				'thumbnail'	=> $thumbnail,
 				'type'		=> $type,
+				'timeadded'	=> $timeadded,
 			};
-			$index_pid{$index}	= $pid;
+			$index_pid_old{$index}	= $pid;
 		}
+	}
+
+	# if a cache file doesn't exist/corrupted, flush option is specified or original file is older than $cache_sec then download new data
+	if ( (! @cache) || (! -f $cachefile) || $opt{flush} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
+
+		# Podcast only
+		get_podcast_links() if $type =~ /podcast/;
+
+		# Radio and TV
+		get_links_atom(\%channels) if $type =~ /(tv|radio)/;
+
+		# Sort indexes
+		sort_indexes();
+		
+		# Open cache file for writing
+		unlink $cachefile;
+		my $now = time();
+		if ( open(CACHE, "> $cachefile") ) {
+			for (sort {$a <=> $b} keys %index_pid) {
+				my $pid = $index_pid{$_};
+				# Only write entries for correct prog type
+				if ($prog{$pid}{type} eq $type) {
+					# Merge old and new data to retain timestamps
+		                	# if the entry was in old cache then retain timestamp from old entry
+					if ( $prog_old{$pid}{timeadded} ) {
+						$prog{$pid}{timeadded} = $prog_old{$pid}{timeadded};
+					# Else this is a new entry
+					} else {
+						$prog{$pid}{timeadded} = $now;
+						list_prog_entry( $pid, 'Added: ' );
+					}
+                			# write to cache file
+					print CACHE "$_|$prog{$pid}{type}|$prog{$pid}{name}|$pid|$prog{$pid}{available}|$prog{$pid}{episode}|$prog{$pid}{versions}|$prog{$pid}{duration}|$prog{$pid}{desc}|$prog{$pid}{channel}|$prog{$pid}{categories}|$prog{$pid}{thumbnail}|$prog{$pid}{timeadded}\n";
+				}
+			}
+			close (CACHE);
+		} else {
+			logger "WARNING: Couldn't open cache file for writing\n";
+		}
+
+
+	# Else copy from old cache
+	} else {
+		%prog = %prog_old;
+		%index_pid = %index_pid_old;
 	}
 	return 0;
 }
