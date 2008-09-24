@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 24th 2008
 #
-my $version = 0.75;
+my $version = 0.76;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -48,6 +48,11 @@ my $version = 0.75;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.76 - 20080924
+# * A few cosmetic tweaks like the 'number of matches' appearing at the end on the programme listing
+# * Set the 'type' option according to the index number specified (i.e. 1xxxx => radio, < 10000 => tv and > 19999 => podcast)
+# * The programme cache is additionally read if an index is specified in its number range
 #
 # Changes 0.75 - 20080924
 # * If an MP3 version of a radio programme is not available the default is to try to use the realaudio stream
@@ -471,19 +476,16 @@ if ( $opt{pid} ) {
 	exit 0;
 }
 
-# Print list of programmes if we're not downloading anything
-if ( ! $ARGV[0] ) {
-	list_progs( get_regex_matches( '.*' ) );
-	exit 0;
-}
+# Assume search term is '.*' if nothing is specified - i.e. lists all programmes
+push @ARGV, '.*' if ! $ARGV[0];
 
 # Parse remaining args
 my @match_list;
 for ( @ARGV ) {
 	chomp();
 
-	# If Numerical value
-	if ( /^[\d]+$/ ) {
+	# If Numerical value < 30000
+	if ( /^[\d]+$/ && $_ < 30000) {
 		push @match_list, $_;
 
 	# If PID then find matching programmes with this PID
@@ -502,9 +504,29 @@ my %seen = ();
 my @unique = grep { ! $seen{ $_ }++ } @match_list;
 @match_list = @unique;
 
+# Go get the cached data for other programme types if the index numbers require it
+my %require;
+if ( $opt{type} !~ /all/i ) {
+	for ( @match_list ) {
+		$require{tv} = 1 if $_ >= 1 && $_ < 10000 && ( ! $require{tv} ) && $opt{type} !~ /tv/i;
+		$require{radio} = 1 if $_ >= 10000 && $_ < 20000 && ( ! $require{radio} ) && $opt{type} !~ /radio/i;
+		$require{podcast} = 1 if $_ >= 20000 && $_ < 30000 && ( ! $require{podcast} ) && $opt{type} !~ /podcast/i;
+	}
+}
+# Get extra required programme caches
+logger "INFO: Additionally getting cached programme data for ".(join ', ', keys %require)."\n" if %require > 0;
+# Get stream links from BBC iplayer site or from cache (also populates all hashes)
+get_links($cachefile_tv, 'tv', \%channels_tv) if $require{tv};
+# Only get radio stream links
+get_links($cachefile_radio, 'radio', \%channels_radio) if $require{radio};
+# Only get podcast links (dummy channels hash)
+get_links($cachefile_podcast, 'podcast', \%channels_radio) if $require{podcast};
+# Add new prog types to the type option
+$opt{type} .= ",$_" for (keys %require);
+
 # Display list for download
 logger "Matches:\n" if @match_list;
-list_progs( @match_list );
+@match_list = list_progs( @match_list );
 
 # Do the downloads based on list of index numbers if required
 if ( $opt{get} || $opt{stdout} ) {
@@ -535,12 +557,10 @@ exit 0;
 
 
 
-# Lists progs given an array of index numbers
+# Lists progs given an array of index numbers, also retuens an array with non-existent entries removed
 sub list_progs {
 	my $ua;
-
-	logger "INFO: ".($#_ + 1)." Matching Programmes\n";
-
+	my @checked;
 	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt{info} ) {
 		$ua = LWP::UserAgent->new;
@@ -557,15 +577,15 @@ sub list_progs {
 
 	for (@_) {
 		my $pid = $index_pid{$_};
-		# Skip if this is a radio programme and --type=radio not set
-		next if ( $opt{type} =~ /radio/i && $prog{$pid}{type} !~ /radio/i );
-		next if ( $opt{type} =~ /tv/i && $prog{$pid}{type} !~ /tv/i );
+		next if ! $pid;
 		list_prog_entry( $pid );
+		push @checked, $_;
 		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
 	}
 	logger "\n";
 
-	return 0;
+	logger "INFO: ".($#checked + 1)." Matching Programmes\n";
+	return @checked;
 }
 
 
@@ -574,7 +594,7 @@ sub list_progs {
 sub list_prog_entry {
 		my ( $pid, $prefix ) = ( @_ );
 		my $type;
-		$type = "$prog{$pid}{type}, " if $opt{type} =~ /all/i;
+		$type = "$prog{$pid}{type}, " if $opt{type} !~ /^(tv|radio|podcast)$/i;
 		# Remove some info depending on type
 		my $optional;
 		$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv';
