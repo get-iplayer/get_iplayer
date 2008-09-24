@@ -2,7 +2,7 @@
 #
 # get_iplayer
 #
-# Lists and downloads BBC iplayer audio and video streams
+# Lists and downloads BBC iPlayer audio and video streams
 #
 # Author: Phil Lewis
 # Email: iplayer (at sign) linuxcentre.net
@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 24th 2008
 #
-my $version = 0.74;
+my $version = 0.75;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -30,12 +30,12 @@ my $version = 0.74;
 # * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
 # * Save default options in ~/.get_iplayer/config (--save)
 # * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, *Ubuntu, Xebian, Unslung/NSLU2)
-# * Tested on MacOSX, and Windows ActivePerl (no radio to stdout), cygwin
+# * Tested on MacOSX, and Windows ActivePerl (no realaudio radio to stdout), cygwin
 #
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
-# * mplayer, lame and tee (for radio/mp3 stdout support only)
+# * mplayer, lame and tee (for realaudio radio transcoded mp3 stdout support only)
 #
 # Todo:
 # ** Use non-shell tee?
@@ -48,6 +48,18 @@ my $version = 0.74;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.75 - 20080924
+# * If an MP3 version of a radio programme is not available the default is to try to use the realaudio stream
+# * --realaudio option prevents the downloading of radio MP3 streams
+# * --mp3audio option ensures that realaudio stream is not used as a fallback for radio
+# * A few cosmetic bug fixes
+# * Check for existence of a PID when an index number is specified
+# * Don't add empty pids to download_history file
+# * Added --force-download option to override download history
+# * Report final average download speed / bitrate / duration after successful downloads (not for rtsp streams)
+# * Remove stdout logs - messes with stdout streaming in too many strange ways
+# * Does not check download history if nowrite & stdout options are specified
 #
 # Changes 0.74 - 20080924
 # * Changed --list-categories and --list-channels to use --list <element_name> where element name can be any element name in the %prog hash
@@ -102,9 +114,7 @@ my %opt = ();
 # Print to STDERR if not quiet unless verbose or debug
 sub logger(@) {
 	# Make sure quiet can be overridden by verbose and debug options
-	print STDERR @_[0] if $opt{stdout} && ( (! $opt{quiet}) || $opt{verbose} || $opt{debug} );
-	# Use stdout if were not piping programme to stdout
-	print @_[0] if (! $opt{stdout}) && ( (! $opt{quiet}) || $opt{verbose} || $opt{debug} );
+	print STDERR @_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
 }
 
 sub usage {
@@ -130,15 +140,24 @@ Display Options:
  -l, --long                    Display long programme descriptions / episode names and other data
  --terse                       Only show terse programme info (does not affect searching)
  -i, --info                    Show full programme metadata (only if number of matches < 50)
- --list [categories|channel]   Show a list of available categories/channels for the selected type and exit
+ --list <categories|channel>   Show a list of available categories/channels for the selected type and exit
 
 Download Options:
  -g, --get                     Download matching programmes
  -x, --stdout                  Additionally stream to STDOUT (so you can pipe output to a player)
  -p, --proxy <url>             Web proxy URL spec
  --pid <pid|url>               Download an arbitrary pid that does not appear in the index
+ --force-download              Ignore download history
+ --realaudio                   Use the RealAudio radio stream and not the MP3 stream
+ --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
+ --wav                         In radio realaudio mode output as wav and don't transcode to mp3
+ --raw                         In radio realaudio mode output as raw realaudio and don't transcode to mp3
+ --n96                         In TV mode download/stream low quality Nokia N96 H.264 stream (alpha)
+ --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
+ --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
+ --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
  -t, --test                    Test only - no download (will show programme type)
-
+ 
 Output Options:
  -o, --output <dir>            Default Download output directory for all downloads
  --outputradio <dir>           Download output directory for radio
@@ -151,7 +170,7 @@ Output Options:
  -c, --command <command>       Run user command after successful download using args such as <pid>, <name> etc
  
 Config Options:
- -f, --flush                   Refresh cache
+ -f, --flush, --refresh        Refresh cache
  -e, --expiry <secs>           Cache expiry in seconds (default 4hrs)
  --symlink <file>              Create symlink to <file> once we have the header of the download
  --fxd <file>                  Create Freevo FXD XML in specified file
@@ -163,13 +182,6 @@ Config Options:
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
  --vlc <path>                  Location of vlc binary
- --realaudio                   Use the RealAudio radio stream for radio and not the mp3 stream
- --wav                         In radio mode output as wav and don't transcode to mp3
- --raw                         In radio mode output as raw realaudio and don't transcode to mp3
- --n96                         In TV mode download/stream low quality Nokia N96 H.264 stream (alpha)
- --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
- --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
- --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
  --streaminfo                  Returns all of the media stream urls of the programme(s)
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
@@ -215,7 +227,7 @@ GetOptions(
 	"get|g"				=> \$opt{get},
 	"long|l"			=> \$opt{long},
 	"verbose|v"			=> \$opt{verbose},
-	"flush|f"			=> \$opt{flush},
+	"flush|refresh|f"		=> \$opt{flush},
 	"output|o=s"			=> \$opt{output},
 	"outputtv|o=s"			=> \$opt{outputtv},
 	"outputradio|o=s"		=> \$opt{outputradio},
@@ -251,12 +263,14 @@ GetOptions(
 	"vlc=s"				=> \$opt{vlc},
 	"n96"				=> \$opt{n96},
 	"realaudio"			=> \$opt{realaudio},
+	"mp3audio"			=> \$opt{mp3audio},
+	"force-download"		=> \$opt{forcedownload},
 	"wav"				=> \$opt{wav},
 	"raw"				=> \$opt{raw},
 	"bandwidth=n"			=> \$opt{bandwidth},
 	"subtitles"			=> \$opt{subtitles},
 	"suboffset=n"			=> \$opt{suboffset},
-	"streaminfo|rtmp"		=> \$opt{streaminfo},
+	"streaminfo"			=> \$opt{streaminfo},
 	"since=n"			=> \$opt{since},
 	"list=s"			=> \$opt{list},
 	"save"				=> \$save,
@@ -444,7 +458,7 @@ if ( $opt{pid} ) {
 	my $count;
 	my $retries = 3;
 	my $retcode;
-	return 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
+	exit 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
 	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) =~ /retry/ ) {
 		logger "WARNING: Retrying download for PID $opt{pid}\n";
 		$count++;
@@ -500,7 +514,12 @@ if ( $opt{get} || $opt{stdout} ) {
 		my $retries = 3;
 		my $retcode;
 		next if ( ! $opt{streaminfo} ) && check_download_history( $index_pid{$_} );
-		while ( $count < $retries && ($retcode = download_programme( $index_pid{$_} )) =~ /retry/ ) {
+		# Skip and warn if there is no pid
+		if ( ! $index_pid{$_} ) {
+			logger "ERROR: No PID for index $_ (try using --type option ?)\n";
+			next;
+		}
+		while ( $count < $retries && $index_pid{$_} && ($retcode = download_programme( $index_pid{$_} )) =~ /retry/ ) {
 			logger "WARNING: Retrying download for '$prog{$index_pid{$_}}{name} - $prog{$index_pid{$_}}{episode}'\n";
 			$count++;
 		}
@@ -1190,7 +1209,7 @@ sub download_programme {
 		my $file = "${dir}/${file_prefix}.partial.$ext";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
-			logger "ERROR: File $file_done already exists\n\n";
+			logger "WARNING: File $file_done already exists\n\n";
 			return 1;
 		}
 
@@ -1216,95 +1235,149 @@ sub download_programme {
 	#	exit 3;
 	#}
 
+	#embeddedMedia.semp.data = {
+	#        pid: "b00dcqnk",
+	#        availability: 0,
+	#        mode: 1,
+	#
+	#        title: "The Chris Moyles Show: 17/09/2008",
+	#        width: 640,
+	#        height: 395,
+	#        visualisation : {
+	#                metaFile: "http://www.bbc.co.uk/iplayer/playlist/b00dcqnk"
+	#        },
+	#        flash: {
+	#                configFile: "http://www.bbc.co.uk/emp/iplayer/config.xml",
+	#                metaFile: "http://www.bbc.co.uk/iplayer/playlist/b00dcqnk"
+	#        },
+	#        real: {
+	#                metaFile: "http://www.bbc.co.uk/iplayer/aod/playlists/pn/nc/d0/0b/RadioBridge_0530_bbc_radio_one.ram"
+	#        },
+	#        wmp: {
+	#                metaFile: ""
+	#        }
+	#};
+
 	# If we have the following then this is audio
 	#real: {
 	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
-	# If we have the following then this is audio
-	#real: {
-	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
-	if ( ( ! $opt{realaudio} ) && grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+
+	# Detect if this content is for radio
+	my $usemp3 = 0;
+	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+
+		# Type is definitely radio
 		$prog{$pid}{type} = 'radio';
-		$ext = 'mp3';
+		$dir = $download_dir{ $prog{$pid}{type} };
+
+		# Do we have an mp3 stream? (check for flash: metafile: "") - unless realaudio option is specified
+		if ( $opt{realaudio} ) {
+			logger "INFO: RealAudio stream media is available\n" if $opt{verbose};
+
+		# Else check if mp3 stream available
+		} else {
+			if (  grep /flash:\s+.\s+configFile:\s+".+?",\s+metaFile:\s*"http.+?"/, (join ' ', @content) ) {
+				$usemp3 = 1;
+				$ext = 'mp3';
+				logger "INFO: MP3 stream media is available\n" if $opt{verbose};
+
+			# if mp3audio option is specified do not fallback to realaudio
+			} elsif ( $opt{mp3audio} ) {
+				logger "ERROR: No MP3 stream media is available - not falling back to RealAudio\n";
+				return 1;
+
+			# if not then force realaudio option as fallback
+			} else {
+				$opt{realaudio} = 1;
+				logger "INFO: No MP3 stream media is available - falling back to RealAudio\n" if $opt{verbose};
+			}
+		}
+
+		# Use realplayer stream
+		if ( $opt{realaudio} ) {
+
+			# Check dependancies for radio programme transcoding / streaming
+			# Check if we need 'tee'
+			if ( (! exists_in_path($tee)) && $opt{stdout} && (! $opt{nowrite}) ) {
+				logger "\nERROR: $tee does not exist in path, skipping\n";
+				return 20;
+			}
+			# Check if we have mplayer and lame
+			if ( (! $opt{wav}) && (! $opt{raw}) && (! exists_in_path($lame)) ) {
+				logger "\nWARNING: Required $lame does not exist, falling back to wav mode\n";
+				$opt{wav} = 1;
+			}		
+			if (! exists_in_path($mplayer)) {
+				logger "\nERROR: Required $mplayer does not exist, skipping\n";
+				return 20;
+			}
+
+			# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
+			chomp( my $title = ( grep /title:\s+/, @content)[0] );
+			$title =~ s/^\s*title:\s\"\s*(.+)\s*\".*$/$1/g;
+			# Strip off the episode name
+			$title =~ m{^(.+):\s*(.*?)$};
+			$prog{$pid}{longname} = $1;
+			$prog{$pid}{episode} = $2;
+
+			# Get version => pid
+			my %version_pids = get_version_pids( @content );
+			my $url_2;
+	
+			logger "\nINFO: Checking existence of programme\n";
+			$prog{$pid}{version} = 'Original';
+			# Create url with appended 6 digit random number
+			my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
+		
+			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
+			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
+
+			# Get these web bugs to whitelist our cookie if we don't have one already
+			if ( get_web_bugs($ua, @content) ) {
+				logger "ERROR: Could not whitelist cookie\n";
+				return 'retry';
+			} 
+
+			$url_2 = get_audio_stream_download_url( $ua, $url_1 );
+
+			# Report error if no versions are available
+			if ( ! $url_2 ) {
+				logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
+				return 15;
+			}
+
+			# Determine the correct filenames for this download
+			my $ext = 'mp3';
+			$ext = 'ra'  if $opt{raw};
+			$ext = 'wav' if $opt{wav};
+			my $file_prefix = generate_download_filename_prefix( $pid, ${dir}, "<longname> - <episode> <pid>" );
+			logger "\rINFO: File name prefix = $file_prefix                 \n";
+			my $file_done = "${dir}/${file_prefix}.${ext}";
+			my $file = "${dir}/${file_prefix}.partial.${ext}";
+			$prog{$pid}{filename} = $file_done;
+			if ( -f $file_done ) {
+				logger "WARNING: File $file_done already exists\n\n";
+				return 1;
+			}
+
+			# Display RTMP stream data if required
+			get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
+
+			# Skip from here if we are only testing downloads
+			return 0 if $opt{test};
+
+			# Do the audio download
+			return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
+		}
+
+	} else {
+		# Type is definitely tv
+		$prog{$pid}{type} = 'tv';
 		$dir = $download_dir{ $prog{$pid}{type} };
 	}
 
-	# This section is obselete for now - old realplayer
-	if ( $opt{realaudio} && grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
 
-		# Check dependancies for radio programme transcoding / streaming
-		# Check if we need 'tee'
-		if ( (! exists_in_path($tee)) && $opt{stdout} && (! $opt{nowrite}) ) {
-			logger "\nERROR: $tee does not exist in path, skipping\n";
-			return 20;
-		}
-		# Check if we have mplayer and lame
-		if ( (! $opt{wav}) && (! $opt{raw}) && (! exists_in_path($lame)) ) {
-			logger "\nWARNING: Required $lame does not exist, falling back to wav mode\n";
-			$opt{wav} = 1;
-		}		
-		if (! exists_in_path($mplayer)) {
-			logger "\nERROR: Required $mplayer does not exist, skipping\n";
-			return 20;
-		}
-
-		# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
-		chomp( my $title = ( grep /title:\s+/, @content)[0] );
-		$title =~ s/^\s*title:\s\"\s*(.+)\s*\".*$/$1/g;
-		# Strip off the episode name
-		$title =~ m{^(.+):\s*(.*?)$};
-		$prog{$pid}{longname} = $1;
-		$prog{$pid}{episode} = $2;
-
-		# Get version => pid
-		my %version_pids = get_version_pids( @content );
-		my $url_2;
-	
-		logger "\nINFO: Checking existence of programme\n";
-		$prog{$pid}{version} = 'Original';
-		# Create url with appended 6 digit random number
-		my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
-
-		logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-		logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
-
-		# Get these web bugs to whitelist our cookie if we don't have one already
-		if ( get_web_bugs($ua, @content) ) {
-			logger "ERROR: Could not whitelist cookie\n";
-			return 'retry';
-		} 
-
-		$url_2 = get_audio_stream_download_url( $ua, $url_1 );
-
-		# Report error if no versions are available
-		if ( ! $url_2 ) {
-			logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
-			return 15;
-		}
-
-		# Determine the correct filenames for this download
-		my $ext = 'mp3';
-		$ext = 'ra'  if $opt{raw};
-		$ext = 'wav' if $opt{wav};
-		my $file_prefix = generate_download_filename_prefix( $pid, $download_dir{radio}, "<longname> - <episode> <pid>" );
-		logger "\rINFO: File name prefix = $file_prefix                 \n";
-		my $file_done = "$download_dir{radio}/${file_prefix}.${ext}";
-		my $file = "$download_dir{radio}/${file_prefix}.partial.${ext}";
-		$prog{$pid}{filename} = $file_done;
-		if ( -f $file_done ) {
-			logger "ERROR: File $file_done already exists\n\n";
-			return 1;
-		}
-
-		# Display RTMP stream data if required
-		get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
-
-		# Skip from here if we are only testing downloads
-		return 0 if $opt{test};
-
-		# Do the audio download
-		return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
-	}
-
+	# iPhone mp3/h.264 stream downloading...
 
 	# Check if we have vlc - if not use iPhone mode
 	if ( $opt{n96} && (! exists_in_path($vlc)) ) {
@@ -1363,6 +1436,11 @@ sub download_programme {
 	# Report error if failed to get URL for version
 	if ( $got_url && ! $url_2 ) {
 		logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
+		# If mp3 audio stream does not exist force realaudio mode and retry
+		if ( $usemp3 && ! $opt{mp3audio}) {
+			$opt{realaudio} = 1;
+			return 'retry';
+		}
 		return 15;
 	}
 	
@@ -1376,7 +1454,7 @@ sub download_programme {
 	my $file = "${dir}/${file_prefix}.partial.$ext";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
-		logger "ERROR: File $file_done already exists\n\n";
+		logger "WARNING: File $file_done already exists\n\n";
 		return 1;
 	}
 
@@ -1405,6 +1483,8 @@ sub download_programme {
 	# Do the iPhone mp3 download
 	} elsif ( $prog{$pid}{type} eq 'radio' ) {
 		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 0 );
+		# If the iphone mp3 download fails then it's probably not ready yet so retry using realaudio
+		$opt{realaudio} = 1 if $return eq 'retry';
 	}
 	
 	# Rename the subtitle file accordingly
@@ -1557,7 +1637,7 @@ sub get_media_stream_data {
 	#        />
 	if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 		logger "INFO: RTMP high quality stream URL: $url\n";
 	}
@@ -1579,7 +1659,7 @@ sub get_media_stream_data {
 	#
 	if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 		logger "INFO: RTMP normal quality stream URL: $url\n";
 	}
@@ -1600,9 +1680,9 @@ sub get_media_stream_data {
 	#</media>
 	if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: Wii normal quality stream URL: $url\n";
+		logger "INFO: RTMP Wii normal quality stream URL: $url\n";
 	}
 
 	# iPhone h.264/mp3 stream
@@ -1664,9 +1744,9 @@ sub get_media_stream_data {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		# Remove offending mp3: at the start of the identifier
 		$identifier =~ s/^mp3://;
-		logger "INFO: MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		logger "INFO: RTMP MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: MP3 stream URL: $url\n";
+		logger "INFO: RTMP stream URL: $url\n";
 	}
 
 	# ReadAudio stream
@@ -1874,6 +1954,9 @@ sub download_iphone_stream {
 		symlink $file, $opt{symlink};
 	}
 
+	# Start marker
+	my $start_time = time();
+
 	# Download mdat in 16MB blocks
 	my $chunk_size = 0x1000000;
 	for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
@@ -1893,9 +1976,17 @@ sub download_iphone_stream {
 		}
 	}
 
+	# end marker
+	my $end_time = time();
+
 	# Should now be able to concatenate header.block + mdat.block + moov.block to get movie!
-	logger "INFO: Downloaded $file_done\n";
-	#unlink $cookiejar;
+	# Calculate average speed, duration and total bytes downloaded
+	logger sprintf("INFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+		($moov_start - 1 - $restart_offset) / (1024.0 * 1024.0),
+		sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
+		( $moov_start - 1 - $restart_offset ) / ($end_time - $start_time) / 1024.0 * 8.0, 
+		$file_done );
+
 	# Moving file into place as complete (if not stdout)
 	move($file, $file_done) if ! $opt{stdout};
 	return 0;
@@ -2094,6 +2185,8 @@ sub download_rtsp_stream {
 # Actually do the podcast downloading
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
+	my $start_time = time();
+
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
 	# Resume partial download?
@@ -2109,7 +2202,17 @@ sub download_podcast_stream {
 		logger "ERROR: Download failed\n";
 		return 22;
 	} else {
-		logger "INFO: Downloaded $file_done\n";
+
+		# end marker
+		my $end_time = time();
+		# Final file size
+		my $size = stat($file)->size;
+		# Calculate average speed, duration and total bytes downloaded
+		logger sprintf("INFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+			($size - $start) / (1024.0 * 1024.0),
+			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
+			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0, 
+			$file_done );
 		move $file, $file_done;
 	}
 	return 0;
@@ -2123,7 +2226,7 @@ sub get_iphone_stream_download_url {
 
 		# Create url with appended 6 digit random number
 		my $url_1 = ${video_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
-		logger "INFO: video stream download URL = $url_1\n" if $opt{verbose};
+		logger "INFO: media stream download URL = $url_1\n" if $opt{verbose};
 		
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
@@ -3089,32 +3192,39 @@ sub run_user_command {
 # Adds pid to history file (with a timestamp) so that it is not redownloaded after deletion
 sub add_to_download_history {
 	my $pid = shift;
+	# Only add if a pid is specified
+	return 0 if ! $pid;
 	# Don't add to history if stdout streaming is used
-	if ( (! $opt{stdout}) && (! $opt{streaminfo}) ) {
-		if ( ! open(HIST, ">> $historyfile") ) {
-			logger "WARNING: Cannot write or append to $historyfile\n\n";
-			return 1;
-		}
+	return 0 if ( $opt{stdout} && $opt{nowrite} ) || $opt{streaminfo};
+
+	# Add to history
+	if ( ! open(HIST, ">> $historyfile") ) {
+		logger "WARNING: Cannot write or append to $historyfile\n\n";
+		return 1;
 	}
-	print HIST "$pid|".time()."\n";
+	print HIST "$pid|$prog{$pid}{name}|$prog{$pid}{episode}|$prog{$pid}{type}|".time()."\n";
 	close HIST;
+	return 0;
 }
 
 
 # Checks history for previous download of this pid
 sub check_download_history {
 	my $pid = shift;
-	# Don't add to history if stdout streaming is used
-	if ( ! $opt{stdout} ) {
-		if ( ! open(HIST, "< $historyfile") ) {
-			logger "WARNING: Cannot read $historyfile\n\n";
-			return 0;
-		}
+
+	# Return if force-download option specified or stdout streaming only
+	return 0 if $opt{forcedownload} || $opt{stdout} || $opt{nowrite};
+	
+	if ( ! open(HIST, "< $historyfile") ) {
+		logger "WARNING: Cannot read $historyfile\n\n";
+		return 0;
 	}
+
 	if ( $pid && grep /^$pid/, <HIST>) {
 		logger "INFO: $pid Already in download history ($historyfile)\n";
 		close HIST;
 		return 1;
+
 	} else {
 		logger "INFO: PID not in download history\n" if $opt{verbose};
 		close HIST;
