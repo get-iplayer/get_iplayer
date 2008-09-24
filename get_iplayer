@@ -10,13 +10,13 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 22nd 2008
 #
-my $version = 0.73;
+my $version = 0.74;
 #
 # Supports: 
-# * Downloading h.264/Mov/Quicktime Video and RTSP Audio/Video streams and podcasts from BBC iPlayer site
+# * Downloading h.264/Mov/Quicktime Video and mp3 Audio streams and podcasts from BBC iPlayer site
 # * Downloads streams from BBC iPlayer site (--get)
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
-# * Resume downloads of partially downloaded mov and podcast files
+# * Resume downloads of partially downloaded files
 # * Indexing of all available Podcast, Radio and TV (i.e. listed) iPlayer programs using Atom and RSS feeds
 # * Info option (--info) to get full programme metadata
 # * Caching of Programme Index (default 4hrs)
@@ -46,6 +46,12 @@ my $version = 0.73;
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
+#
+# Changes 0.74 - 20080923
+# * Changed --list-categories and --list-channels to use --list <element_name> where element name can be any element name in the %prog hash
+# * Bugfix --streaminfo doesn't add to download history
+# * Allow h.264 download subroutines to now also download mp3 audio for iphone radio
+# * Removed all mplayer and lame dross
 #
 # Changes 0.73 - 20080922
 # * Now remembers which PIDs/programmes have already been downloaded and will prevent downloading them after you delete the programme
@@ -249,8 +255,7 @@ GetOptions(
 	"suboffset=n"			=> \$opt{suboffset},
 	"streaminfo|rtmp"		=> \$opt{streaminfo},
 	"since=n"			=> \$opt{since},
-	"list-categories"		=> \$opt{listcategories},
-	"list-channels"			=> \$opt{listchannels},
+	"list=s"			=> \$opt{list},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -417,15 +422,9 @@ get_links($cachefile_radio, 'radio', \%channels_radio) if $opt{type} =~ /(radio|
 # Only get podcast links (dummy channels hash)
 get_links($cachefile_podcast, 'podcast', \%channels_radio) if $opt{type} =~ /(podcast|all)/i;
 
-# List channels if required and exit
-if ( $opt{listchannels} ) {
-	list_channels();
-	exit 0;
-}
-
-# List categories if required and exit
-if ( $opt{listcategories} ) {
-	list_categories();
+# List elements (i.e. 'channel' 'categories') if required and exit
+if ( $opt{list} ) {
+	list_unique_element_counts( $opt{list} );
 	exit 0;
 }
 
@@ -1214,7 +1213,13 @@ sub download_programme {
 	# If we have the following then this is audio
 	#real: {
 	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
+	my $ext = 'mov';
 	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+		$ext = 'mp3';
+	}
+
+	# This section is obselete for now - old realplayer
+	if ( 1 == 2 && grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
 
 		# Check dependancies for radio programme transcoding / streaming
 		# Check if we need 'tee'
@@ -1290,6 +1295,7 @@ sub download_programme {
 		return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
 	}
 
+
 	# Check if we have vlc - if not use iPhone mode
 	if ( $opt{n96} && (! exists_in_path($vlc)) ) {
 		logger "\nWARNING: Required $vlc does not exist, falling back to iPhone mode\n";
@@ -1353,8 +1359,8 @@ sub download_programme {
 	# Determine the correct filenames for this download
 	my $file_prefix = generate_download_filename_prefix( $pid, $download_dir{tv} );
 	logger "\rINFO: File name prefix = $file_prefix                 \n";
-	my $file_done = "$download_dir{tv}/${file_prefix}.mov";
-	my $file = "$download_dir{tv}/${file_prefix}.partial.mov";
+	my $file_done = "$download_dir{tv}/${file_prefix}.$ext";
+	my $file = "$download_dir{tv}/${file_prefix}.partial.$ext";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
 		logger "ERROR: File $file_done already exists\n\n";
@@ -1383,8 +1389,12 @@ sub download_programme {
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
 	# Do the iPhone h.264 download
-	} else {
-		$return = download_h264_stream( $ua, $url_2, $file, $file_done );
+	} elsif ($ext eq 'mov') {
+		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 1 );
+
+	# Do the iPhone mp3 download
+	} elsif ($ext eq 'mp3') {
+		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 0 );
 	}
 	
 	# Rename the subtitle file accordingly
@@ -1717,10 +1727,10 @@ sub download_stage_1 {
 }
 
 
-
-# Actually do the h.264 downloading
-sub download_h264_stream {
-	my ( $ua, $url_2, $file, $file_done ) = @_;
+# Actually do the h.264/mp3 downloading
+# ( $ua, $url_2, $file, $file_done, '0|1 == rearrange moov' )
+sub download_iphone_stream {
+	my ( $ua, $url_2, $file, $file_done, $rearrange ) = @_;
 
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -1738,32 +1748,38 @@ sub download_h264_stream {
 	$file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
 	logger "INFO: Download File Length $file_len\n" if $opt{verbose};
 
-	# Get ftyp+wide header etc
-	my $mdat_start = 0x1c;
-	my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
-	# Get bytes upto (but not including) mdat atom start -> $header
-	my $header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
+	# Only do this if we're rearranging QT streams
+	my $mdat_start = 0;
+	my $moov_start = $file_len + 1;
+	my $header;
+	if ($rearrange) {
+		# Get ftyp+wide header etc
+		$mdat_start = 0x1c;
+		my $buffer = download_block(undef, $url_2, $ua, 0, $mdat_start + 4);
+		# Get bytes upto (but not including) mdat atom start -> $header
+		$header = download_block(undef, $url_2, $ua, 0, $mdat_start - 1, $file_len);
 
-	# Detemine moov start
-	# Get mdat_end_offset_chars from downloaded block
-	my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
-	my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-	logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
-	logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
-	# The MOOV box starts one byte after MDAT box ends
-	my $moov_start = $mdat_start + $mdat_end_offset;
+		# Detemine moov start
+		# Get mdat_end_offset_chars from downloaded block
+		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
+		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
+		logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
+		logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
+		# The MOOV box starts one byte after MDAT box ends
+		$moov_start = $mdat_start + $mdat_end_offset;
 
 
-	## scan 2nd level atoms in moov atom until we get stco atom(s)
-	# We can skip first 8 bytes (moov atom header)
-	#my $i = 8;
-	#while( $i < $moov_length - 4 ) {
-	#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
-	#  my $atom_name = substr($moovdata, $i+4, 4);
-	#  logger "Parsing atom: $atom_name, length: $atom_len\n";
-	#  # Increment $i by atom_len to get next atom
-	#  $i += $atom_len;
-	#}
+		## scan 2nd level atoms in moov atom until we get stco atom(s)
+		# We can skip first 8 bytes (moov atom header)
+		#my $i = 8;
+		#while( $i < $moov_length - 4 ) {
+		#  my $atom_len = bytestring_to_int( substr($moovdata, $i, 4) );
+		#  my $atom_name = substr($moovdata, $i+4, 4);
+		#  logger "Parsing atom: $atom_name, length: $atom_len\n";
+		#  # Increment $i by atom_len to get next atom
+		#  $i += $atom_len;
+		#}
+	}
 
 	# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
 	# Sanity check - we cannot support downloading of partial content if we're streaming also. 
@@ -1799,18 +1815,21 @@ sub download_h264_stream {
 	# If the partial file already exists, then resume from the correct mdat/download offset
 	my $restart_offset = $mdat_start;
 	my $moovdata;
+	my $moov_length = 0;
 
-	# if cookie fails then trigger a retry after deleting cookiejar
-	# Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
-	my $moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
-	logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
-	# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
-	if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
-		logger "WARNING: Bad file download, deleting cookie                 \n";
-		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
-		unlink $cookiejar;
-		unlink $file;
-		return 'retry';
+	if ($rearrange) {
+		# if cookie fails then trigger a retry after deleting cookiejar
+		# Determine moov atom length so we can work out if the partially downloaded file has the moov atom in it already
+		$moov_length = bytestring_to_int( download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
+		logger "INFO: moov atom length = $moov_length                          \n" if $opt{verbose};
+		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
+		if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
+			logger "WARNING: Bad file download, deleting cookie                 \n";
+			$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
+			unlink $cookiejar;
+			unlink $file;
+			return 'retry';
+		}
 	}
 
 	# If we have a too-small-sized file and not stdout and not no-write then this is a partial download
@@ -1820,21 +1839,22 @@ sub download_h264_stream {
 		logger "INFO: Resuming download from $restart_offset                        \n";
 	}
 
-
-	# If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
-	if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
-		# get moov chunk into memory
-		$moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
-		# Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
-		$moov_length = relocate_moov_chunk_offsets( $moovdata );
-		# write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
-		logger "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
-		# Write moov atom
-		print $fh $moovdata if ! $opt{nowrite};
-		print STDOUT $moovdata if $opt{stdout};
-		# Write header atoms (ftyp, wide)
-		print $fh $header if ! $opt{nowrite};
-		print STDOUT $header if $opt{stdout};
+	if ($rearrange) {
+		# If we have no existing file, a file which doesn't yet even have the moov atom, or using stdout (or no-write option)
+		if ( $opt{stdout} || $opt{nowrite} || stat($file)->size < ($moov_length+$mdat_start) ) {
+			# get moov chunk into memory
+			$moovdata = download_block( undef, $url_2, $ua, $moov_start, (${file_len}-1) );
+			# Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
+			$moov_length = relocate_moov_chunk_offsets( $moovdata );
+			# write moov atom to file next (yes - were rearranging the file - moov+header+mdat - not header+mdat+moov)
+			logger "INFO: Appending moov+ftype+wide atoms to $file\n" if $opt{verbose};
+			# Write moov atom
+			print $fh $moovdata if ! $opt{nowrite};
+			print STDOUT $moovdata if $opt{stdout};
+			# Write header atoms (ftyp, wide)
+			print $fh $header if ! $opt{nowrite};
+			print STDOUT $header if $opt{stdout};
+		}
 	}
 
 	# Create symlink for freevo if required
@@ -1844,8 +1864,8 @@ sub download_h264_stream {
 		symlink $file, $opt{symlink};
 	}
 
-	# Download mdat in 32MB blocks
-	my $chunk_size = 0x2000000;
+	# Download mdat in 16MB blocks
+	my $chunk_size = 0x1000000;
 	for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
 		# get mdat chunk into file
 		my $retcode;
@@ -2088,6 +2108,43 @@ sub download_podcast_stream {
 
 # Get streaming video URL
 sub get_video_stream_download_url {
+		my $ua = shift;
+		my $pid = shift;
+
+		# Create url with appended 6 digit random number
+		my $url_1 = ${video_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+		logger "INFO: video stream download URL = $url_1\n" if $opt{verbose};
+		
+		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
+		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
+		my $h = new HTTP::Headers(
+			'User-Agent'	=> $user_agent{coremedia},
+			'Accept'	=> '*/*',
+			'Range'		=> 'bytes=0-1',
+		);
+		my $req = HTTP::Request->new ('GET', $url_1, $h);
+		# send request
+		my $res = $ua->request($req);
+		# Get resulting Location header (i.e. redirect URL)
+		my $url_2 = $res->header("location");
+		if ( ! $res->is_redirect ) {
+			logger "ERROR: Failed to get redirect from iplayer site\n\n";
+			return '';
+		}
+		# Extract redirection Location URL
+		$url_2 =~ s/^Location: (.*)$/$1/g;
+		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
+		if ( $url_2 =~ /statuscode=404/ ) {
+			logger "\rERROR: Programme is not yet ready for download\n";
+			return '';
+		}
+
+		return $url_2;
+}
+
+
+# Get streaming mp3 URL
+sub get_iphone_mp3_stream_download_url {
 		my $ua = shift;
 		my $pid = shift;
 
@@ -3060,7 +3117,7 @@ sub run_user_command {
 sub add_to_download_history {
 	my $pid = shift;
 	# Don't add to history if stdout streaming is used
-	if ( ! $opt{stdout} ) {
+	if ( (! $opt{stdout}) && (! $opt{streaminfo}) ) {
 		if ( ! open(HIST, ">> $historyfile") ) {
 			logger "WARNING: Cannot write or append to $historyfile\n\n";
 			return 1;
@@ -3094,40 +3151,18 @@ sub check_download_history {
 
 
 # Show channels for specified type if required
-sub list_channels {
-	my $channel;
-	if ( $opt{type} =~ /(tv|all)/ ) {
-		logger "INFO: TV Channels List:\n";
-		for (sort keys %channels_tv) {
-			$channel = $channels_tv{$_};
-			$channel =~ s/^tv\|//ig;
-			logger "$channel ($_)\n"
-		}		
-	} elsif ( $opt{type} =~ /(radio|all)/ ) {
-		logger "INFO: Radio Channels List:\n";
-		for (sort keys %channels_radio) {
-			$channel = $channels_radio{$_};
-			$channel =~ s/^radio\|//ig;
-			logger "$channel ($_)\n"
-		}		
-	}
-	return 0;
-}
-
-
-# Show categories for specified type if required
-sub list_categories {
-	my %categories;
-	logger "INFO: $opt{type} Categories List:\n";
-	# Create unique hash of categories
+sub list_unique_element_counts {
+	my $element_name = shift;
+	my %elements;
+	logger "INFO: $opt{type} $element_name List:\n" if $opt{verbose};
 	for my $pid (keys %prog) {
-		for my $cat ( split /,/, $prog{$pid}{categories} ) {
-			chomp($cat);
-			$categories{$cat}++;
+		for my $element ( split /,/, $prog{$pid}{$element_name} ) {
+			$elements{ $element }++;
 		}
 	}
-	# display category + prog count
-	logger "$_ ($categories{$_})\n" for sort keys %categories;
+	# display element + prog count
+	logger "$_ ($elements{$_})\n" for sort keys %elements;
+	return 0;
 }
 
 
