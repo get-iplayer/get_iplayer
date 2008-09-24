@@ -8,12 +8,12 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 22nd 2008
+# Date: September 24th 2008
 #
 my $version = 0.74;
 #
 # Supports: 
-# * Downloading h.264/Mov/Quicktime Video and mp3 Audio streams and podcasts from BBC iPlayer site
+# * Downloading h.264/Mov/Quicktime Video and mp3 radio streams and podcasts from BBC iPlayer site
 # * Downloads streams from BBC iPlayer site (--get)
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
 # * Resume downloads of partially downloaded files
@@ -35,10 +35,8 @@ my $version = 0.74;
 # Requires:
 # * perl 5.8
 # * LWP (libwww-perl)
-# * mplayer, lame and tee (for radio/mp3 stdout support only)
 #
 # Todo:
-# ** Use non-shell tee?
 # ** Fix non-uk detection - iphone auth?
 # ** Index/Download live radio streams w/schedule feeds to assist timing
 # ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
@@ -47,11 +45,11 @@ my $version = 0.74;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
-# Changes 0.74 - 20080923
+# Changes 0.74 - 20080924
 # * Changed --list-categories and --list-channels to use --list <element_name> where element name can be any element name in the %prog hash
 # * Bugfix --streaminfo doesn't add to download history
 # * Allow h.264 download subroutines to now also download mp3 audio for iphone radio
-# * Removed all mplayer and lame dross
+# * Removed all mplayer/lame/tee dross
 #
 # Changes 0.73 - 20080922
 # * Now remembers which PIDs/programmes have already been downloaded and will prevent downloading them after you delete the programme
@@ -159,13 +157,8 @@ Config Options:
  --xml-names                   Create freevo/Mythtv menu of programme names -> episodes
  --xml-alpha                   Create freevo/Mythtv menu sorted alphabetically by programme name
  --html <file>                 Create basic HTML index of programmes in specified file
- --mplayer <path>              Location of mplayer binary
- --lame <path>                 Location of lame binary
  --vlc <path>                  Location of vlc binary
- --wav                         In radio mode output as wav and don't transcode to mp3
- --raw                         In radio mode output as raw realaudio and don't transcode to mp3
  --n96                         In TV mode download/stream low quality Nokia N96 H.264 stream (alpha)
- --bandwidth                   In radio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
  --streaminfo                  Returns all of the media stream urls of the programme(s)
@@ -244,13 +237,8 @@ GetOptions(
 	"exclude-channel=s"		=> \$opt{excludechannel},
 	"i|info"			=> \$opt{info},
 	"c|command=s"			=> \$opt{command},
-	"mplayer=s"			=> \$opt{mplayer},
-	"lame=s"			=> \$opt{lame},
 	"vlc=s"				=> \$opt{vlc},
 	"n96"				=> \$opt{n96},
-	"wav"				=> \$opt{wav},
-	"raw"				=> \$opt{raw},
-	"bandwidth=n"			=> \$opt{bandwidth},
 	"subtitles"			=> \$opt{subtitles},
 	"suboffset=n"			=> \$opt{suboffset},
 	"streaminfo|rtmp"		=> \$opt{streaminfo},
@@ -282,16 +270,8 @@ my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
-my $mplayer		= $opt{mplayer} || 'mplayer';
-my $mplayer_opts	= '-nolirc';
-$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
-my $lame		= $opt{lame} || 'lame';
-my $lame_opts		= '-f ';
-$lame_opts		.= '--quiet ' if $opt{quiet};
 my $vlc			= $opt{vlc} || 'cvlc';
 my $vlc_opts		= '-vv';
-my $tee			= 'tee';
-my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 # Set quiet, test and get options if we're asked for streaminfo
 if ( $opt{streaminfo} ) {
 	$opt{test} = 1;
@@ -441,7 +421,7 @@ if ( $opt{pid} ) {
 	my $count;
 	my $retries = 3;
 	my $retcode;
-	return 1 if ( check_download_history( $opt{pid} ) );
+	return 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
 	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) =~ /retry/ ) {
 		logger "WARNING: Retrying download for PID $opt{pid}\n";
 		$count++;
@@ -496,7 +476,7 @@ if ( $opt{get} || $opt{stdout} ) {
 		my $count;
 		my $retries = 3;
 		my $retcode;
-		next if ( check_download_history( $index_pid{$_} ) );
+		next if ( ! $opt{streaminfo} ) && check_download_history( $index_pid{$_} );
 		while ( $count < $retries && ($retcode = download_programme( $index_pid{$_} )) =~ /retry/ ) {
 			logger "WARNING: Retrying download for '$prog{$index_pid{$_}}{name} - $prog{$index_pid{$_}}{episode}'\n";
 			$count++;
@@ -1171,17 +1151,20 @@ sub download_programme {
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
+	my $dir = $download_dir{ $prog{$pid}{type} };
+	my $ext = 'mov';
+
 	# If were a podcast...
 	if ( $prog{$pid}{type} eq 'podcast' ) {
 		# Determine the correct filename and extension for this download
 		my $filename_orig = $pid;
-		my $extension = $pid;
+		my $ext = $pid;
 		$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
-		$extension =~ s|^.*\.(\w+)$|$1|g;
-		my $file_prefix = generate_download_filename_prefix($pid, $download_dir{podcast}, "<longname> - <episode> $filename_orig");
+		$ext =~ s|^.*\.(\w+)$|$1|g;
+		my $file_prefix = generate_download_filename_prefix($pid, $dir, "<longname> - <episode> $filename_orig");
 		logger "\rINFO: File name prefix = $file_prefix                  \n";
-		my $file_done = "$download_dir{podcast}/${file_prefix}.$extension";
-		my $file = "$download_dir{podcast}/${file_prefix}.partial.$extension";
+		my $file_done = "${dir}/${file_prefix}.$ext";
+		my $file = "${dir}/${file_prefix}.partial.$ext";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
 			logger "ERROR: File $file_done already exists\n\n";
@@ -1213,88 +1196,11 @@ sub download_programme {
 	# If we have the following then this is audio
 	#real: {
 	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
-	my $ext = 'mov';
 	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+		$prog{$pid}{type} = 'radio';
 		$ext = 'mp3';
+		$dir = $download_dir{ $prog{$pid}{type} };
 	}
-
-	# This section is obselete for now - old realplayer
-	if ( 1 == 2 && grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
-
-		# Check dependancies for radio programme transcoding / streaming
-		# Check if we need 'tee'
-		if ( (! exists_in_path($tee)) && $opt{stdout} && (! $opt{nowrite}) ) {
-			logger "\nERROR: $tee does not exist in path, skipping\n";
-			return 20;
-		}
-		# Check if we have mplayer and lame
-		if ( (! $opt{wav}) && (! $opt{raw}) && (! exists_in_path($lame)) ) {
-			logger "\nWARNING: Required $lame does not exist, falling back to wav mode\n";
-			$opt{wav} = 1;
-		}		
-		if (! exists_in_path($mplayer)) {
-			logger "\nERROR: Required $mplayer does not exist, skipping\n";
-			return 20;
-		}
-
-		# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
-		chomp( my $title = ( grep /title:\s+/, @content)[0] );
-		$title =~ s/^\s*title:\s\"\s*(.+)\s*\".*$/$1/g;
-		# Strip off the episode name
-		$title =~ m{^(.+):\s*(.*?)$};
-		$prog{$pid}{longname} = $1;
-		$prog{$pid}{episode} = $2;
-
-		# Get version => pid
-		my %version_pids = get_version_pids( @content );
-		my $url_2;
-	
-		logger "\nINFO: Checking existence of programme\n";
-		$prog{$pid}{version} = 'Original';
-		# Create url with appended 6 digit random number
-		my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
-
-		logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-		logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
-
-		# Get these web bugs to whitelist our cookie if we don't have one already
-		if ( get_web_bugs($ua, @content) ) {
-			logger "ERROR: Could not whitelist cookie\n";
-			return 'retry';
-		} 
-
-		$url_2 = get_audio_stream_download_url( $ua, $url_1 );
-
-		# Report error if no versions are available
-		if ( ! $url_2 ) {
-			logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
-			return 15;
-		}
-
-		# Determine the correct filenames for this download
-		my $ext = 'mp3';
-		$ext = 'ra'  if $opt{raw};
-		$ext = 'wav' if $opt{wav};
-		my $file_prefix = generate_download_filename_prefix( $pid, $download_dir{radio}, "<longname> - <episode> <pid>" );
-		logger "\rINFO: File name prefix = $file_prefix                 \n";
-		my $file_done = "$download_dir{radio}/${file_prefix}.${ext}";
-		my $file = "$download_dir{radio}/${file_prefix}.partial.${ext}";
-		$prog{$pid}{filename} = $file_done;
-		if ( -f $file_done ) {
-			logger "ERROR: File $file_done already exists\n\n";
-			return 1;
-		}
-
-		# Display RTMP stream data if required
-		get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
-
-		# Skip from here if we are only testing downloads
-		return 0 if $opt{test};
-
-		# Do the audio download
-		return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
-	}
-
 
 	# Check if we have vlc - if not use iPhone mode
 	if ( $opt{n96} && (! exists_in_path($vlc)) ) {
@@ -1338,7 +1244,7 @@ sub download_programme {
 				logger "ERROR: Could not whitelist cookie\n";
 				return 16;
 			} 
-			$url_2 = get_video_stream_download_url( $ua, $version_pids{$version} );
+			$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			$got_url = 1;
 		}
 		# Break out of loop if we have an actual URL
@@ -1355,20 +1261,20 @@ sub download_programme {
 		logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
 		return 15;
 	}
+	
+	# Display media stream data if required
+	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
 
 	# Determine the correct filenames for this download
-	my $file_prefix = generate_download_filename_prefix( $pid, $download_dir{tv} );
+	my $file_prefix = generate_download_filename_prefix( $pid, $dir );
 	logger "\rINFO: File name prefix = $file_prefix                 \n";
-	my $file_done = "$download_dir{tv}/${file_prefix}.$ext";
-	my $file = "$download_dir{tv}/${file_prefix}.partial.$ext";
+	my $file_done = "${dir}/${file_prefix}.$ext";
+	my $file = "${dir}/${file_prefix}.partial.$ext";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
 		logger "ERROR: File $file_done already exists\n\n";
 		return 1;
 	}
-	
-	# Display RTMP stream data if required
-	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
 
 	# Skip from here if we are only testing downloads
 	return 0 if $opt{test};
@@ -1377,8 +1283,8 @@ sub download_programme {
 	my $subfile_done;
 	my $subfile;
 	if ( $opt{subtitles} ) {
-		$subfile_done = "$download_dir{tv}/${file_prefix}.srt";
-		$subfile = "$download_dir{tv}/${file_prefix}.partial.srt";
+		$subfile_done = "${dir}/${file_prefix}.srt";
+		$subfile = "${dir}/${file_prefix}.partial.srt";
 		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
 	}
 
@@ -1389,11 +1295,11 @@ sub download_programme {
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
 	# Do the iPhone h.264 download
-	} elsif ($ext eq 'mov') {
+	} elsif ( $prog{$pid}{type} eq 'tv' ) {
 		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 1 );
 
 	# Do the iPhone mp3 download
-	} elsif ($ext eq 'mp3') {
+	} elsif ( $prog{$pid}{type} eq 'radio' ) {
 		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 0 );
 	}
 	
@@ -1531,7 +1437,7 @@ sub get_media_stream_data {
 
 	my ($server, $authstring, $identifier, $href);
 
-	# h.264 iphone high quality stream
+	# h.264 high quality stream
 	#	<media kind="video"
 	#        width="640"
 	#        height="360"
@@ -1595,7 +1501,7 @@ sub get_media_stream_data {
 		logger "INFO: Wii normal quality stream URL: $url\n";
 	}
 
-	# iPhone h.264 stream
+	# iPhone h.264/mp3 stream
 	#<media kind="video"
 	#        width="480"
 	#        height="272"
@@ -1611,9 +1517,9 @@ sub get_media_stream_data {
 	#</media>
 	if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		logger "INFO: iPhone h.264 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		logger "INFO: iPhone stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
 		$url = "$href";
-		logger "INFO: iPhone h.264 stream URL: $url\n";
+		logger "INFO: iPhone stream URL: $url\n";
 	}
 
 	# Nokia N96 h.264 low quality stream
@@ -1923,164 +1829,6 @@ sub download_h264_low_stream {
 }
 
 
-# Actually do the rtsp downloading
-sub download_rtsp_stream {
-	my ( $ua, $url_2, $file, $file_done, $pid ) = @_;
-	my $childpid;
-
-	# Create named pipe
-	if ( $^O !~ /^MSWin32$/ ) {
-		mkfifo($namedpipe, 0700) if (! $opt{wav}) && (! $opt{raw});
-	} else {
-		logger "WARNING: fifos/named pipes are not supported\n" if $opt{verbose};
-	}
-	
-	# Stage 3a: Download 1st byte to get exact file length
-	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
-
-	# Determine offset for resuming download
-	my $h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{coremedia},
-		'Accept'	=> '*/*',
-		'Range'		=> 'bytes=0-',
-	);
-	my $req = HTTP::Request->new ('GET', $url_2, $h);
-	my $res = $ua->request($req);
-	chomp( my $rtsp = $res->content );
-	# String trailing/leading whitespace and newlines
-	$rtsp =~ s/(^\s+|\s+$|\n)//g;
-	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
-
-	# Create ID3 tagging options for lame (escape " for shell)
-	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
-	$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
-	$lame_opts .= "--ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
-
-	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
-	# (Fallback if no namedpipe support and raw/wav not specified)
-	if ( (! -p $namedpipe) && ! ( $opt{raw} || $opt{wav} ) ) {
-		# Remove filename extension
-		$file =~ s/\.mp3$//gi;
-		# Remove named pipe
-		unlink $namedpipe;
-		logger "INFO: Downloading wav format (followed by transcoding)\n";
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$rtsp\" 1>&2";
-		if ( system($cmd) ) {
-			return 2;
-		}
-		# Transcode
-		logger "INFO: Transcoding ${file}.wav\n";
-		my $cmd = "$lame $lame_opts \"${file}.wav\" \"${file}.mp3\" 1>&2";
-		logger "DEGUG: Running $cmd\n" if $opt{debug};
-		if ( system($cmd) ) {
-			return 2;
-		}
-		unlink "${file}.wav";
-		move "${file}.mp3", $file_done;
-
-	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
-	# else do direct mplayer write to wav file if:
-	#  1) we don't have a named pipe available (e.g. in activeperl)
-	#  2) --wav was specified to write file only
-	} elsif ( $opt{wav} && ! $opt{stdout} ) {
-		logger "INFO: Writing wav format\n";
-		# Start the mplayer process and write to wav file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
-		logger "DEGUG: Running $cmd\n" if $opt{debug};
-		if ( system($cmd) ) {
-			return 2;
-		}
-		# Move file to done state
-		move $file, $file_done if ! $opt{nowrite};
-
-	# No transcoding if --raw was specified
-	} elsif ( $opt{raw} && ! $opt{stdout} ) {
-		# Write out to .ra ext instead (used on fallback if no fifo support)
-		logger "INFO: Writing raw realaudio stream\n";
-		# Start the mplayer process and write to raw file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2";
-		logger "DEGUG: Running $cmd\n" if $opt{debug};
-		if ( system($cmd) ) {
-			return 2;
-		}
-		# Move file to done state
-		move $file, $file_done if ! $opt{nowrite};
-
-	# Use transcoding via named pipes
-	} else {
-		$childpid = fork();
-		if (! $childpid) {
-			# Child starts here
-			$| = 1;
-			logger "INFO: Transcoding $file\n";
-
-			# Stream mp3 to file and stdout simultaneously
-			if ( $opt{stdout} && ! $opt{nowrite} ) {
-				if ( $opt{wav} || $opt{raw} ) {
-					# Race condition - closes named pipe immediately unless we wait
-					sleep 5;
-					tee($namedpipe, $file);
-					#system( "cat $namedpipe 2>/dev/null| $tee $file");
-				} else {
-					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null| $tee \"$file\"";
-					logger "DEGUG: Running $cmd\n" if $opt{debug};
-					system($cmd);
-				}
-
-			# Stream mp3 stdout only
-			} elsif ( $opt{stdout} && $opt{nowrite} ) {
-				if ( $opt{wav} || $opt{raw} ) {
-					sleep 5;
-					tee($namedpipe);
-					#system( "cat $namedpipe 2>/dev/null");
-				} else {
-					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null";
-					logger "DEGUG: Running $cmd\n" if $opt{debug};
-					system( "$lame $lame_opts $namedpipe - 2>/dev/null");
-				}
-
-			# Stream mp3 to file directly
-			} elsif ( ! $opt{stdout} ) {
-				my $cmd = "$lame $lame_opts $namedpipe \"$file\" >/dev/null 2>/dev/null";
-				logger "DEGUG: Running $cmd\n" if $opt{debug};
-				system($cmd);
-			}
-			# Remove named pipe
-			unlink $namedpipe;
-
-			# Move file to done state
-			move $file, $file_done if ! $opt{nowrite};
-			logger "INFO: Transcoding thread has completed\n";
-			exit 0;
-		}
-		# Start the mplayer process and write to named pipe
-		# Raw mode
-		if ( $opt{raw} ) {
-			my $cmd = "$mplayer $mplayer_opts -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2";
-			logger "DEGUG: Running $cmd\n" if $opt{debug};
-			if ( system($cmd) ) {
-				# If we fail then kill off child processes
-				kill 9, $childpid;
-				return 2;
-			}
-		# WAV / mp3 mode
-		} else {
-			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
-			if ( system($cmd) ) {
-				# If we fail then kill off child processes
-				kill 9, $childpid;
-				return 2;
-			}
-		}
-		# Wait for child processes to prevent zombies
-		wait;
-	}
-	logger "INFO: Downloaded $file_done\n";
-
-	return 0;
-}
-
-
 # Actually do the podcast downloading
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
@@ -2107,7 +1855,7 @@ sub download_podcast_stream {
 
 
 # Get streaming video URL
-sub get_video_stream_download_url {
+sub get_iphone_stream_download_url {
 		my $ua = shift;
 		my $pid = shift;
 
@@ -2141,110 +1889,6 @@ sub get_video_stream_download_url {
 
 		return $url_2;
 }
-
-
-# Get streaming mp3 URL
-sub get_iphone_mp3_stream_download_url {
-		my $ua = shift;
-		my $pid = shift;
-
-		# Create url with appended 6 digit random number
-		my $url_1 = ${video_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
-		logger "INFO: video stream download URL = $url_1\n" if $opt{verbose};
-		
-		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
-		my $h = new HTTP::Headers(
-			'User-Agent'	=> $user_agent{coremedia},
-			'Accept'	=> '*/*',
-			'Range'		=> 'bytes=0-1',
-		);
-		my $req = HTTP::Request->new ('GET', $url_1, $h);
-		# send request
-		my $res = $ua->request($req);
-		# Get resulting Location header (i.e. redirect URL)
-		my $url_2 = $res->header("location");
-		if ( ! $res->is_redirect ) {
-			logger "ERROR: Failed to get redirect from iplayer site\n\n";
-			return '';
-		}
-		# Extract redirection Location URL
-		$url_2 =~ s/^Location: (.*)$/$1/g;
-		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
-		if ( $url_2 =~ /statuscode=404/ ) {
-			logger "\rERROR: Programme is not yet ready for download\n";
-			return '';
-		}
-
-		return $url_2;
-}
-
-
-
-# Get streaming audio URL (Real => rtsp)
-#<media kind="audio"
-#        type="audio/real"
-#        encoding="real"  >
-#        <connection
-#                priority="10"
-#                kind="sis"
-#                server="http://www.bbc.co.uk"
-#                identifier="/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two"
-#                href="http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"
-#        />
-#</media>
-# OR
-#<media kind=""
-#        type="audio/real"
-#        encoding="real"  >
-#        <connection
-#                priority="10"
-#                kind="edgesuite"
-#                server="http://http-ws.bbc.co.uk.edgesuite.net"
-#                identifier="/generatecssram.esi?file=/worldservice/css/nb/410591221152760.ra"
-#                href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssram.esi?file=/worldservice/css/nb/410591221152760.ra"
-#        />
-#</media>
-#
-sub get_audio_stream_download_url {
-		my $ua = shift;
-		my $url_1 = shift;
-		my $url_2;
-		
-		logger "\rGetting iplayer download URL         " if ! $opt{verbose};
-		my $h = new HTTP::Headers(
-			'User-Agent'	=> $user_agent{coremedia},
-			'Accept'	=> '*/*',
-			'Range'		=> 'bytes=0-',
-		);
-		my $req = HTTP::Request->new ('GET', $url_1, $h);
-		# send request
-		my $res = $ua->request($req);
-		# Get resulting content 
-		my $content = $res->content;
-		# Flatten
-		$content =~ s/\n/ /g;
-		if ( ! $res->is_success ) {
-			logger "ERROR: Failed to get audio url from iplayer site\n\n";
-			return '';
-		}
-		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
-		if ( $content =~ /statuscode=404/ ) {
-			logger "\rERROR: Programme is not yet ready for download\n";
-			return '';
-		}
-		# extract ram URL
-		$url_2 = $2 if $content =~ m{<media kind="(|audio)"\s*type="audio/real".*href="(.+?)"\s*};
-
-		# If we cannot see 'encoding="real"...' then we don't have real audio transcoded format then skip
-		if ( ! $url_2 ) {
-			logger "\rERROR: Programme is not yet ready for download in RealAudio format\n";
-			return '';
-		}
-
-		return $url_2;
-}
-
 
 
 # Given page content, extract the Versions and Pids and return in a hash: Versions => Pid
@@ -2609,38 +2253,6 @@ sub bytestring_to_int {
         }
         #logger "DEBUG: Decimal value = $dec\n" if $opt{verbose};
         return $dec;
-}
-
-
-# version of unix tee
-# Usage tee ($infile, $outfile)
-# If $outfile is undef then just cat file to STDOUT
-sub tee {
-	my ( $infile, $outfile ) = @_;
-	# Open $outfile for writing, $infile for reading
-	if ( $outfile) {
-		if ( ! open( OUT, "> $outfile" ) ) {
-			logger "ERROR: Could not open $outfile for writing\n";
-			return 1;
-		} else {
-			logger "INFO: Opened $outfile for writing\n" if $opt{verbose};
-		}
-	}
-	if ( ! open( IN, "< $infile" ) ) {
-		logger "ERROR: Could not open $infile for reading\n";
-		return 2;
-	} else {
-		logger "INFO: Opened $infile for reading\n" if $opt{verbose};
-	}
-	# Read and redirect IN
-	while ( <IN> ) {
-		print $_;
-		print OUT $_ if $outfile;
-	}
-	# Close output file
-	close OUT if $outfile;
-	close IN;
-	return 0;
 }
 
 
