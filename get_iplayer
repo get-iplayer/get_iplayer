@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 26th 2008
 #
-my $version = 0.77;
+my $version = 0.78;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -48,6 +48,11 @@ my $version = 0.77;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.78 - 20080926
+# * Cleaned up some more perl warnings after turning on this feature - now disabled
+# * Behave better when a programme is listed but unavailable
+# * Improve reporting of prgramme name when pid is already in download history
 #
 # Changes 0.77 - 20080926
 # * Added non-mandatory idv3 tagging support for MP3 files downloaded by new iPhone method using external id3 tools if available
@@ -116,7 +121,7 @@ use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use strict;
-use warnings;
+#use warnings;
 use Time::Local;
 use URI;
 
@@ -561,7 +566,7 @@ if ( $opt{get} || $opt{stdout} ) {
 			$count++;
 		}
 		# Add to history, tag file, and run post download command if download was successful
-		if ($retcode == 0) {
+		if ($retcode eq '0') {
 			add_to_download_history( $pid );
 			tag_file( $pid );
 			run_user_command( $pid, $opt{command} ) if $opt{command};
@@ -892,7 +897,6 @@ sub get_podcast_links {
 	# All channels with RSS feeds have an element like: <outline text="scotland" fullname="BBC Radio Nan Gaidheal">
 	my @channel_data = split /(<outline\s+text="[^"]+?"\s+fullname="[^"]+?"\s*>.*?<\/outline>)/, $opmldata;
 
-	my $service;
 	for (@channel_data) {
 		# Extract channel name, service and rss feed data
 		my ($channel, $data);
@@ -949,12 +953,12 @@ sub get_podcast_links {
 			my $url = $podcast_channel_prog{$_};
 	
 			logger "DEBUG: Getting podcast feed $url\n" if $opt{verbose};
-			$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $service / $_ from iplayer site\n") if $opt{verbose};
+			$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt{verbose};
 			$xml = request_url_retry($ua, $url, 3, '.', '') if ! $opt{verbose};
 			# Dirty hack cos some progs are under service=radio :-|
 			if (! $xml) {
 				my $url = "http://downloads.bbc.co.uk/podcasts/radio/$_/rss.xml";
-				$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for radio / $_ from iplayer site\n") if $opt{verbose};
+				$xml = request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt{verbose};
 				$xml = request_url_retry($ua, $url, 3, '.', '') if ! $opt{verbose};
 			}
 			# skip if no data
@@ -1883,8 +1887,12 @@ sub download_iphone_stream {
 	);
 	my $req = HTTP::Request->new ('GET', $url_2, $h);
 	my $res = $ua->request($req);
-	# e.g. Content-Range: bytes 0-1/181338136
+	# e.g. Content-Range: bytes 0-1/181338136 (return if no content length returned)
 	my $file_len = $res->header("Content-Range");
+	if ( ! $file_len ) {
+		logger "ERROR: No Content-Range was obtained\n" if $opt{verbose};
+		return 'retry'
+	}
 	$file_len =~ s|^bytes 0-1/(\d+).*$|$1|;
 	logger "INFO: Download File Length $file_len\n" if $opt{verbose};
 
@@ -1903,8 +1911,8 @@ sub download_iphone_stream {
 		# Get mdat_end_offset_chars from downloaded block
 		my $mdat_end_offset_chars = substr($buffer, $mdat_start, 4);
 		my $mdat_end_offset = bytestring_to_int($mdat_end_offset_chars);
-		logger "mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{verbose};
-		logger "mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{verbose};
+		logger "DEBUG: mdat_end_offset = ".get_hex($mdat_end_offset_chars)." = $mdat_end_offset\n" if $opt{debug};
+		logger "DEBUG: mdat_end_offset (decimal) = $mdat_end_offset\n" if $opt{debug};
 		# The MOOV box starts one byte after MDAT box ends
 		$moov_start = $mdat_start + $mdat_end_offset;
 
@@ -2725,8 +2733,8 @@ sub download_block {
 
 # Converts a string of chars to it's HEX representation
 sub get_hex {
-        my $buf = shift;
-        my $ret;
+        my $buf = shift || '';
+        my $ret = '';
         for (my $i=0; $i<length($buf); $i++) {
                 $ret .= " ".sprintf("%02lx", ord substr($buf, $i, 1) );
         }
@@ -2740,7 +2748,7 @@ sub get_hex {
 sub bytestring_to_int {
 	# Reverse to LSB order
         my $buf = reverse shift;
-        my $dec;
+        my $dec = 0;
         for (my $i=0; $i<length($buf); $i++) {
 		# Multiply byte value by 256^$i then accumulate
                 $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
@@ -3284,7 +3292,9 @@ sub add_to_download_history {
 # Checks history for previous download of this pid
 sub check_download_history {
 	my $pid = shift;
-
+	my ($matchedpid, $name, $episode);
+	return 0 if ! $pid;
+		
 	# Return if force-download option specified or stdout streaming only
 	return 0 if $opt{forcedownload} || $opt{stdout} || $opt{nowrite};
 	
@@ -3293,13 +3303,17 @@ sub check_download_history {
 		return 0;
 	}
 
-	if ( $pid && grep /^$pid/, <HIST>) {
-		logger "INFO: $pid Already in download history ($historyfile)\n";
+	# Find and parse first matching line
+	($matchedpid, $name, $episode) = ( split /\|/, (grep /^$pid/, <HIST>)[0] )[0,1,2];
+	if ( $matchedpid ) {
+		chomp $name;
+		chomp $episode;
+		logger "INFO: $name - $episode ($pid) Already in download history ($historyfile)\n";
 		close HIST;
 		return 1;
 
 	} else {
-		logger "INFO: PID not in download history\n" if $opt{verbose};
+		logger "INFO: Programme not in download history\n" if $opt{verbose};
 		close HIST;
 		return 0;
 	}
@@ -3359,7 +3373,7 @@ sub esc_chars {
 
 # Signal handler to clean up after a ctrl-c or kill
 sub cleanup {
-	logger "Cleaning up\n" if $opt{verbose};
+	logger "INFO: Cleaning up\n" if $opt{verbose};
 	unlink $namedpipe;
 	exit 1;
 }
