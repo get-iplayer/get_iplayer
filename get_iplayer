@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 24th 2008
+# Date: September 26th 2008
 #
-my $version = 0.76;
+my $version = 0.77;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -48,6 +48,13 @@ my $version = 0.76;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.77 - 20080926
+# * Added non-mandatory idv3 tagging support for MP3 files downloaded by new iPhone method using external id3 tools if available
+# * Added --id3v2 option to specify non-default location of id3v2 binary
+# * Added <fileprefix>, <ext> and <dir> to %prog so that it can be used in --command option
+# * Tidied up definition of cache files
+# * Cache files no longer get deleted upon get_iplayer upgrade
 #
 # Changes 0.76 - 20080924
 # * A few cosmetic tweaks like the 'number of matches' appearing at the end on the programme listing
@@ -109,6 +116,7 @@ use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use strict;
+use warnings;
 use Time::Local;
 use URI;
 
@@ -119,7 +127,7 @@ my %opt = ();
 # Print to STDERR if not quiet unless verbose or debug
 sub logger(@) {
 	# Make sure quiet can be overridden by verbose and debug options
-	print STDERR @_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
+	print STDERR $_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
 }
 
 sub usage {
@@ -186,6 +194,7 @@ Config Options:
  --html <file>                 Create basic HTML index of programmes in specified file
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
+ --id3v2 <path>                Location of id3v2 binary
  --vlc <path>                  Location of vlc binary
  --streaminfo                  Returns all of the media stream urls of the programme(s)
  -v, --verbose                 Verbose
@@ -265,6 +274,7 @@ GetOptions(
 	"c|command=s"			=> \$opt{command},
 	"mplayer=s"			=> \$opt{mplayer},
 	"lame=s"			=> \$opt{lame},
+	"id3v2=s"			=> \$opt{id3v2},
 	"vlc=s"				=> \$opt{vlc},
 	"n96"				=> \$opt{n96},
 	"realaudio"			=> \$opt{realaudio},
@@ -287,19 +297,25 @@ save_options_file($optfile) if $save;
 
 # Default to type=tv
 $opt{type} = 'tv' if ! $opt{type};
+# Expand 'all' to various prog types
+$opt{type} = 'tv,radio,podcast' if $opt{type} =~ /(all|any)/i;
+# Ensure lowercase
+$opt{type} = lc( $opt{type} );
 
 # Options
 my %download_dir	= (
-	'tv'		=> $opt{outputtv} || $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.',
-	'radio'		=> $opt{outputradio} || $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.',
-	'podcast'	=> $opt{outputpodcast} || $opt{output} || "$ENV{IPLAYER_OUTDIR}" || '.',
+	'tv'		=> $opt{outputtv} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+	'radio'		=> $opt{outputradio} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+	'podcast'	=> $opt{outputpodcast} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+);
+my %cachefile = (
+	'tv'		=> "${profile_dir}/tv.cache",
+	'radio'		=> "${profile_dir}/radio.cache",
+	'podcast'	=> "${profile_dir}/podcast.cache",
 );
 my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
 my $historyfile		= "${profile_dir}/download_history";
 my $cookiejar		= "${profile_dir}/cookies";
-my $cachefile_tv	= "${profile_dir}/tv.cache";
-my $cachefile_radio	= "${profile_dir}/radio.cache";
-my $cachefile_podcast	= "${profile_dir}/podcast.cache"; 
 my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $cache_secs 		= $opt{expiry} || 14400;
 my $lwp_request_timeout	= 20;
@@ -312,6 +328,7 @@ my $lame_opts		= '-f ';
 $lame_opts		.= '--quiet ' if $opt{quiet};
 my $vlc			= $opt{vlc} || 'cvlc';
 my $vlc_opts		= '-vv';
+my $id3v2		= $opt{id3v2} || 'id3v2';
 my $tee			= 'tee';
 my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 # Set quiet, test and get options if we're asked for streaminfo
@@ -336,7 +353,8 @@ my $podcast_index_url		= 'http://www.bbc.co.uk/radio/opml/bbc_podcast_opml.xml';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
 
-my %channels_tv = (
+my %channels;
+$channels{tv} = {
 	'bbc_one'				=> 'tv|BBC One',
 	'bbc_two'				=> 'tv|BBC Two',
 	'bbc_three'				=> 'tv|BBC Three',
@@ -354,9 +372,9 @@ my %channels_tv = (
 	'categories/sport/tv'			=> 'tv|BBC Sport',
 #	'categories/tv'				=> 'tv|All',
 #	'categories/signed/tv'			=> 'tv|Signed',
-);
+};
 
-my %channels_radio = (
+$channels{radio} = {
 	'bbc_1xtra'				=> 'radio|BBC 1Xtra',
 	'bbc_radio_one'				=> 'radio|BBC Radio 1',
 	'bbc_radio_two'				=> 'radio|BBC Radio 2',
@@ -373,7 +391,7 @@ my %channels_radio = (
 	'bbc_radio_wales'			=> 'radio|BBC Radio Wales',
 	'bbc_world_service'			=> 'radio|BBC World Service',
 #	'categories/radio'			=> 'radio|All',
-);
+};
 
 
 # User Agents
@@ -395,22 +413,25 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 }
 
 # Programme data structure
-# $prog{$urlpid} = {
+# $prog{$pid} = {
 #	'index'		=> <index number>,
 #	'name'		=> <programme short name>,
 #	'episode'	=> <Episode info>,
 #	'desc'		=> <Long Description>,
 #	'available'	=> <Date/Time made available or remaining>,
-#	'longname'	=> <Long name (only parsed in stage 1 download)>,
 #	'duration'	=> <duration in HH:MM:SS>
 #	'versions'	=> <comma separated list of versions, e.g Original, Signed>
-#	'version'	=> <selected version e.g Original, Signed, etc - only set before d/load>
 #	'thumbnail'	=> <programme thumbnail url>
-#	'channel	=> <TV channel>
-#	'categories'	=> <Categories>
+#	'channel	=> <channel>
+#	'categories'	=> <Comma separtaed list of categories>
 # 	'type'		=> <Type: tv, radio or podcast>
-#	'filename'	=> <Filename of saved file - set only while downloading>
 #	'timeadded'	=> <timestamp when programme was added to cache>
+#	'longname'	=> <Long name (only parsed in stage 1 download)>,
+#	'version'	=> <selected version e.g Original, Signed, etc - only set before d/load>
+#	'filename'	=> <Path and Filename of saved file - set only while downloading>
+#	'dir'		=> <Filename Directory of saved file - set only while downloading>
+#	'fileprefix'	=> <Filename Prefix of saved file - set only while downloading>
+#	'ext'		=> <Filename Extension of saved file - set only while downloading>
 #};
 my %prog;
 # Hash to obtain pid given an index
@@ -435,14 +456,10 @@ for ( keys %download_dir ) {
 	}
 }
 
-# Get stream links from BBC iplayer site or from cache (also populates all hashes)
-get_links($cachefile_tv, 'tv', \%channels_tv) if $opt{type} =~ /(tv|all)/i;
 
-# Only get radio stream links
-get_links($cachefile_radio, 'radio', \%channels_radio) if $opt{type} =~ /(radio|all)/i;
+# Get stream links from BBC iplayer site or from cache (also populates all hashes) specified in --type option
+get_links( $_ ) for split /,/, $opt{type};
 
-# Only get podcast links (dummy channels hash)
-get_links($cachefile_podcast, 'podcast', \%channels_radio) if $opt{type} =~ /(podcast|all)/i;
 
 # List elements (i.e. 'channel' 'categories') if required and exit
 if ( $opt{list} ) {
@@ -452,8 +469,8 @@ if ( $opt{list} ) {
 
 # Write HTML and XML files if required
 create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
-create_xml ( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
-create_xml ( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
+create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
 
 # Get arbitrary pid
 if ( $opt{pid} ) {
@@ -464,7 +481,7 @@ if ( $opt{pid} ) {
 	my $retries = 3;
 	my $retcode;
 	exit 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
-	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) =~ /retry/ ) {
+	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) eq 'retry' ) {
 		logger "WARNING: Retrying download for PID $opt{pid}\n";
 		$count++;
 	}
@@ -506,23 +523,20 @@ my @unique = grep { ! $seen{ $_ }++ } @match_list;
 
 # Go get the cached data for other programme types if the index numbers require it
 my %require;
-if ( $opt{type} !~ /all/i ) {
-	for ( @match_list ) {
-		$require{tv} = 1 if $_ >= 1 && $_ < 10000 && ( ! $require{tv} ) && $opt{type} !~ /tv/i;
-		$require{radio} = 1 if $_ >= 10000 && $_ < 20000 && ( ! $require{radio} ) && $opt{type} !~ /radio/i;
-		$require{podcast} = 1 if $_ >= 20000 && $_ < 30000 && ( ! $require{podcast} ) && $opt{type} !~ /podcast/i;
-	}
+for ( @match_list ) {
+	$require{tv} = 1 if $_ >= 1 && $_ < 10000 && ( ! $require{tv} ) && $opt{type} !~ /tv/;
+	$require{radio} = 1 if $_ >= 10000 && $_ < 20000 && ( ! $require{radio} ) && $opt{type} !~ /radio/;
+	$require{podcast} = 1 if $_ >= 20000 && $_ < 30000 && ( ! $require{podcast} ) && $opt{type} !~ /podcast/;
 }
 # Get extra required programme caches
 logger "INFO: Additionally getting cached programme data for ".(join ', ', keys %require)."\n" if %require > 0;
 # Get stream links from BBC iplayer site or from cache (also populates all hashes)
-get_links($cachefile_tv, 'tv', \%channels_tv) if $require{tv};
-# Only get radio stream links
-get_links($cachefile_radio, 'radio', \%channels_radio) if $require{radio};
-# Only get podcast links (dummy channels hash)
-get_links($cachefile_podcast, 'podcast', \%channels_radio) if $require{podcast};
-# Add new prog types to the type option
-$opt{type} .= ",$_" for (keys %require);
+for (keys %require) {
+	# Get $_ stream links
+	get_links( $_ );
+	# Add new prog types to the type option
+	$opt{type} .= ",$_";
+}
 
 # Display list for download
 logger "Matches:\n" if @match_list;
@@ -532,28 +546,31 @@ logger "Matches:\n" if @match_list;
 if ( $opt{get} || $opt{stdout} ) {
 	for (@match_list) {
 		# Retry loop
-		my $count;
+		my $count = 0;
 		my $retries = 3;
 		my $retcode;
-		next if ( ! $opt{streaminfo} ) && check_download_history( $index_pid{$_} );
+		my $pid = $index_pid{$_};
+		next if ( ! $opt{streaminfo} ) && check_download_history( $pid );
 		# Skip and warn if there is no pid
-		if ( ! $index_pid{$_} ) {
+		if ( ! $pid ) {
 			logger "ERROR: No PID for index $_ (try using --type option ?)\n";
 			next;
 		}
-		while ( $count < $retries && $index_pid{$_} && ($retcode = download_programme( $index_pid{$_} )) =~ /retry/ ) {
-			logger "WARNING: Retrying download for '$prog{$index_pid{$_}}{name} - $prog{$index_pid{$_}}{episode}'\n";
+		while ( $count < $retries && $pid && ($retcode = download_programme( $pid )) eq 'retry' ) {
+			logger "WARNING: Retrying download for '$prog{$pid}{name} - $prog{$pid}{episode}'\n";
 			$count++;
 		}
-		# Run post download command if download was successful
+		# Add to history, tag file, and run post download command if download was successful
 		if ($retcode == 0) {
-			add_to_download_history( $index_pid{$_} );
-			run_user_command( $index_pid{$_}, $opt{command} ) if $opt{command};
+			add_to_download_history( $pid );
+			tag_file( $pid );
+			run_user_command( $pid, $opt{command} ) if $opt{command};
 		}
 	}
 }
 
 exit 0;
+
 
 
 
@@ -578,7 +595,7 @@ sub list_progs {
 	for (@_) {
 		my $pid = $index_pid{$_};
 		next if ! $pid;
-		list_prog_entry( $pid );
+		list_prog_entry( $pid, '' );
 		push @checked, $_;
 		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
 	}
@@ -592,24 +609,24 @@ sub list_progs {
 
 # Display a line containing programme info (using long, terse, and type options)
 sub list_prog_entry {
-		my ( $pid, $prefix ) = ( @_ );
-		my $type;
-		$type = "$prog{$pid}{type}, " if $opt{type} !~ /^(tv|radio|podcast)$/i;
-		# Remove some info depending on type
-		my $optional;
-		$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv';
-		$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'radio';
-		$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
-		# Display based on output options
-		if ( $opt{long} ) {
-			my @time = gmtime( time() - $prog{$pid}{timeadded} );
-			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
-		} elsif ( $opt{terse} ) {
-			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
-		} else {
-			logger "${prefix}$_:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
-		}
-		return 0;
+	my ( $pid, $prefix ) = ( @_ );
+	my $type = '';
+	$type = "$prog{$pid}{type}, " if $opt{type} !~ /^(tv|radio|podcast)$/i;
+	# Remove some info depending on type
+	my $optional;
+	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv';
+	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'radio';
+	$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
+	# Display based on output options
+	if ( $opt{long} ) {
+		my @time = gmtime( time() - $prog{$pid}{timeadded} );
+		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
+	} elsif ( $opt{terse} ) {
+		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
+	} else {
+		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
+	}
+	return 0;
 }
 
 
@@ -658,12 +675,13 @@ sub get_regex_matches {
 
 # get_links_atom (%channels)
 sub get_links_atom {
+	my $type = shift;
 	my %channels = %{$_[0]};
 
 	my $xml;
 	my $feed_data;
 	my $res;
-	logger "INFO: Getting Index Feeds\n";
+	logger "INFO: Getting $type Index Feeds\n";
 	# Setup User agent
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
@@ -792,6 +810,7 @@ sub get_links_atom {
 }
 
 
+
 # Populates the index field of the prog hash as well as creating the %index_pid hash
 # Should be run after getting any link lists
 sub sort_indexes {
@@ -824,10 +843,10 @@ sub sort_indexes {
 }
 
 
+
 # Uses: $podcast_index_url
 # get_podcast_links ()
 sub get_podcast_links {
-	#my %channels = %{$_[0]};
 
 	my $xml;
 	my $res;
@@ -1075,6 +1094,7 @@ sub get_podcast_links {
 }
 
 
+
 # Feed info:
 #	# Also see http://derivadow.com/2008/07/18/interesting-bbc-data-to-hack-with/
 #	# All podcasts menu (iphone)
@@ -1112,16 +1132,14 @@ sub get_podcast_links {
 #	http://www.bbc.co.uk/cbbc/programmes/genres/childrens/player
 #	http://www.bbc.co.uk/programmes/genres/childrens/schedules/upcoming.ics
 #
-# get_links( $cachefile, <radio|tv|podcast>, \%channels )
+# get_links( <radio|tv|podcast> )
 sub get_links {
 	my @cache;
 	my $now = time();
-	my $cachefile = shift;
 	my $type = shift;
-	my %channels = %{$_[0]};
 
 	# Open cache file (need to verify we can even read this)
-	if ( open(CACHE, "< $cachefile") ) {
+	if ( open(CACHE, "< $cachefile{$type}") ) {
 		@cache = <CACHE>;
 		close (CACHE);
 	}
@@ -1154,21 +1172,21 @@ sub get_links {
 	}
 
 	# if a cache file doesn't exist/corrupted, flush option is specified or original file is older than $cache_sec then download new data
-	if ( (! @cache) || (! -f $cachefile) || $opt{flush} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
+	if ( (! @cache) || (! -f $cachefile{$type}) || $opt{flush} || ($now >= ( stat($cachefile{$type})->mtime + $cache_secs )) ) {
 
 		# Podcast only
-		get_podcast_links() if $type =~ /podcast/;
+		get_podcast_links() if $type eq 'podcast';
 
 		# Radio and TV
-		get_links_atom(\%channels) if $type =~ /(tv|radio)/;
+		get_links_atom( $type, \%{$channels{$type}} ) if $type =~ /(tv|radio)/;
 
 		# Sort indexes
 		sort_indexes();
 		
 		# Open cache file for writing
-		unlink $cachefile;
+		unlink $cachefile{$type};
 		my $now = time();
-		if ( open(CACHE, "> $cachefile") ) {
+		if ( open(CACHE, "> $cachefile{$type}") ) {
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
 				# Only write entries for correct prog type
@@ -1188,7 +1206,7 @@ sub get_links {
 			}
 			close (CACHE);
 		} else {
-			logger "WARNING: Couldn't open cache file for writing\n";
+			logger "WARNING: Couldn't open cache file '$cachefile{$type}' for writing\n";
 		}
 
 
@@ -1199,6 +1217,7 @@ sub get_links {
 	}
 	return 0;
 }
+
 
 
 # Usage: download_programme (<pid>)
@@ -1214,19 +1233,21 @@ sub download_programme {
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 
 	my $dir = $download_dir{ $prog{$pid}{type} };
-	my $ext = 'mov';
+	$prog{$pid}{ext} = 'mov';
 
 	# If were a podcast...
 	if ( $prog{$pid}{type} eq 'podcast' ) {
 		# Determine the correct filename and extension for this download
 		my $filename_orig = $pid;
-		my $ext = $pid;
+		$prog{$pid}{ext} = $pid;
 		$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
-		$ext =~ s|^.*\.(\w+)$|$1|g;
+		$prog{$pid}{ext} =~ s|^.*\.(\w+)$|$1|g;
 		my $file_prefix = generate_download_filename_prefix($pid, $dir, "<longname> - <episode> $filename_orig");
+		$prog{$pid}{fileprefix} = $file_prefix;
+		$prog{$pid}{dir} = $dir;
 		logger "\rINFO: File name prefix = $file_prefix                  \n";
-		my $file_done = "${dir}/${file_prefix}.$ext";
-		my $file = "${dir}/${file_prefix}.partial.$ext";
+		my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
+		my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
 			logger "WARNING: File $file_done already exists\n\n";
@@ -1298,7 +1319,7 @@ sub download_programme {
 		} else {
 			if (  grep /flash:\s+.\s+configFile:\s+".+?",\s+metaFile:\s*"http.+?"/, (join ' ', @content) ) {
 				$usemp3 = 1;
-				$ext = 'mp3';
+				$prog{$pid}{ext} = 'mp3';
 				logger "INFO: MP3 stream media is available\n" if $opt{verbose};
 
 			# if mp3audio option is specified do not fallback to realaudio
@@ -1367,13 +1388,15 @@ sub download_programme {
 			}
 
 			# Determine the correct filenames for this download
-			my $ext = 'mp3';
-			$ext = 'ra'  if $opt{raw};
-			$ext = 'wav' if $opt{wav};
+			$prog{$pid}{ext} = 'mp3';
+			$prog{$pid}{ext} = 'ra'  if $opt{raw};
+			$prog{$pid}{ext} = 'wav' if $opt{wav};
 			my $file_prefix = generate_download_filename_prefix( $pid, ${dir}, "<longname> - <episode> <pid>" );
 			logger "\rINFO: File name prefix = $file_prefix                 \n";
-			my $file_done = "${dir}/${file_prefix}.${ext}";
-			my $file = "${dir}/${file_prefix}.partial.${ext}";
+			$prog{$pid}{fileprefix} = $file_prefix;
+			$prog{$pid}{dir} = $dir;
+			my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
+			my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
 			$prog{$pid}{filename} = $file_done;
 			if ( -f $file_done ) {
 				logger "WARNING: File $file_done already exists\n\n";
@@ -1470,8 +1493,10 @@ sub download_programme {
 	# Determine the correct filenames for this download
 	my $file_prefix = generate_download_filename_prefix( $pid, $dir );
 	logger "\rINFO: File name prefix = $file_prefix                 \n";
-	my $file_done = "${dir}/${file_prefix}.$ext";
-	my $file = "${dir}/${file_prefix}.partial.$ext";
+	$prog{$pid}{fileprefix} = $file_prefix;
+	$prog{$pid}{dir} = $dir;
+	my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
+	my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
 		logger "WARNING: File $file_done already exists\n\n";
@@ -1512,6 +1537,7 @@ sub download_programme {
 
 	return $return;
 }
+
 
 
 # Download Subtitles
@@ -1605,6 +1631,7 @@ sub download_subtitles {
 }
 
 
+
 # Returns an offset timestamp given an srt begin or end timestamp and offset in ms
 sub subtitle_offset {
 	my ( $timestamp, $offset ) = @_;
@@ -1620,6 +1647,7 @@ sub subtitle_offset {
 	$ms = $ts;
 	return "$hr:$min:$sec,$ms";
 }
+
 
 
 # Gets media streams data for this version pid
@@ -1815,6 +1843,7 @@ sub get_media_stream_data {
 }
 
 
+
 # Get stage 1 content
 sub download_stage_1 {
 	my ( $ua, $page ) = @_;
@@ -1835,6 +1864,7 @@ sub download_stage_1 {
 	}
 	return split /\n/, $res->content;
 }
+
 
 
 # Actually do the h.264/mp3 downloading
@@ -2013,6 +2043,7 @@ sub download_iphone_stream {
 }
 
 
+
 # Actually do the N96 h.264 downloading
 sub download_h264_low_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
@@ -2042,6 +2073,7 @@ sub download_h264_low_stream {
 	move($file, $file_done) if ! $opt{stdout};
 	return 0;
 }
+
 
 
 # Actually do the rtsp downloading
@@ -2080,24 +2112,26 @@ sub download_rtsp_stream {
 	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
 	if ( (! -p $namedpipe) && ! ( $opt{raw} || $opt{wav} ) ) {
+		my $cmd;
 		# Remove filename extension
 		$file =~ s/\.mp3$//gi;
 		# Remove named pipe
 		unlink $namedpipe;
 		logger "INFO: Downloading wav format (followed by transcoding)\n";
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$rtsp\" 1>&2";
+		$cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$rtsp\" 1>&2";
 		if ( system($cmd) ) {
 			return 2;
 		}
 		# Transcode
 		logger "INFO: Transcoding ${file}.wav\n";
-		my $cmd = "$lame $lame_opts \"${file}.wav\" \"${file}.mp3\" 1>&2";
+		$cmd = "$lame $lame_opts \"${file}.wav\" \"${file}.mp3\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
 		}
 		unlink "${file}.wav";
 		move "${file}.mp3", $file_done;
+		$prog{$pid}{ext} = 'mp3';
 
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
 	# else do direct mplayer write to wav file if:
@@ -2202,6 +2236,7 @@ sub download_rtsp_stream {
 }
 
 
+
 # Actually do the podcast downloading
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
@@ -2237,6 +2272,7 @@ sub download_podcast_stream {
 	}
 	return 0;
 }
+
 
 
 # Get streaming video URL
@@ -2368,6 +2404,7 @@ sub get_version_pids {
 }
 
 
+
 # Generate the download filename prefix given a pid and optional format such as '<longname> - <episode> <pid> <version>'
 sub generate_download_filename_prefix {
 	my $pid = shift;
@@ -2410,7 +2447,10 @@ sub generate_download_filename_prefix {
 sub get_web_bugs {
 	my $ua = shift;
 	my @content = @_;
-
+	my $h;
+	my $req;
+	my $res;
+	
 	# Load cookies and check if we have a BBC-UID cookie in there
 	my $cookies = HTTP::Cookies->new;
 	$cookies->load( $cookiejar );
@@ -2437,13 +2477,13 @@ sub get_web_bugs {
 	#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
 	#Connection: keep-alive
 	#Host: stats.bbc.co.uk
-	my $h = new HTTP::Headers(
+	$h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{safari},
 		'Accept'	=> '*/*',
 	);
-	my $req = HTTP::Request->new ('GET', $url_1b, $h);
+	$req = HTTP::Request->new ('GET', $url_1b, $h);
 	# send request
-	my $res = $ua->request($req);
+	$res = $ua->request($req);
 	# Get resulting Location header (i.e. redirect URL)
 	if ( ! $res->is_success ) {
 		logger "ERROR: Failed to get o.gif web bug from iplayer site\n";
@@ -2466,13 +2506,13 @@ sub get_web_bugs {
         #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
         #Connection: keep-alive
         #Host: www.bbc.co.uk
-	my $h = new HTTP::Headers(
+	$h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{safari},
 		'Accept'	=> '*/*',
 	);
-	my $req = HTTP::Request->new ('GET', $url_1c, $h);
+	$req = HTTP::Request->new ('GET', $url_1c, $h);
 	# send request
-	my $res = $ua->request($req);
+	$res = $ua->request($req);
 	# Get resulting Location header (i.e. redirect URL)
 	if ( ! $res->is_success ) {
 		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n";
@@ -2489,7 +2529,7 @@ sub get_web_bugs {
 
 # Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
 sub relocate_moov_chunk_offsets {
-	my $moovdata = @_[0];
+	my $moovdata = $_[0];
 	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
 	# get moov atom length
 	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
@@ -2519,7 +2559,7 @@ sub relocate_moov_chunk_offsets {
 		$i += $stco_len;
 	}
 	# Write $moovdata back to calling string
-	@_[0] = $moovdata;
+	$_[0] = $moovdata;
 	return $moov_length;
 }
 
@@ -2682,6 +2722,7 @@ sub download_block {
 }
 
 
+
 # Converts a string of chars to it's HEX representation
 sub get_hex {
         my $buf = shift;
@@ -2692,6 +2733,7 @@ sub get_hex {
 	logger "DEBUG: HEX string value = $ret\n" if $opt{verbose};
         return $ret;
 }
+
 
 
 # Converts a string of chars to it's MSB decimal value
@@ -2706,6 +2748,7 @@ sub bytestring_to_int {
         #logger "DEBUG: Decimal value = $dec\n" if $opt{verbose};
         return $dec;
 }
+
 
 
 # version of unix tee
@@ -2740,6 +2783,7 @@ sub tee {
 }
 
 
+
 # Usage: $fh = open_file_append($filename);
 sub open_file_append {
 	local *FH;
@@ -2756,6 +2800,7 @@ sub open_file_append {
 	binmode FH;
 	return *FH;
 }
+
 
 
 # Updates and overwrites this script - makes backup as <this file>.old
@@ -2784,10 +2829,6 @@ sub update_script {
 					move($script_file.'.tmp', $script_file);
 					chmod 0755, $script_file;
 					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
-					# Need to purge the cache as this changes between versions
-					unlink($cachefile_tv);
-					unlink($cachefile_radio);
-					unlink($cachefile_podcast);
 				}
 			}
 		} else {
@@ -2801,8 +2842,9 @@ sub update_script {
 }
 
 
+
 # Creates the Freevo FXD or MythTV Streams meta data (and pre-downloads graphics - todo)
-sub create_xml() {
+sub create_xml {
 	my $xmlfile = shift;
 	if ( ! open(XML, "> $xmlfile") ) {
 		logger "ERROR: Couldn't open xml file $xmlfile for writing\n";
@@ -2947,6 +2989,7 @@ sub create_xml() {
 }
 
 
+
 sub create_html {
 	# Create local web page
 	if ( open(HTML, "> $opt{html}") ) {
@@ -2977,6 +3020,7 @@ sub create_html {
 }
 
 
+
 # Save options to file
 sub save_options_file {
 	my $optfile = shift;
@@ -2994,6 +3038,7 @@ sub save_options_file {
 }
 
 
+
 # Load default options from file
 sub read_options_file {
 	my $optfile = shift;
@@ -3009,6 +3054,7 @@ sub read_options_file {
 }
 
 
+
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
 sub get_available_time_string {
 	my $datestring = shift;
@@ -3019,6 +3065,8 @@ sub get_available_time_string {
 	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
 	return "$time[7] days $time[2] hours ago";
 }
+
+
 
 # get full episode metadata given pid and ua. Uses two different urls to get data
 sub get_pid_metadata {
@@ -3144,6 +3192,7 @@ sub get_pid_metadata {
 }
 
 
+
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
 sub request_url_retry {
@@ -3168,6 +3217,7 @@ sub request_url_retry {
 }
 
 
+
 # Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
 	my $file = shift;
@@ -3179,6 +3229,7 @@ sub exists_in_path {
 	}
 	return 0;
 }
+
 
 
 # Run a user specified command
@@ -3209,6 +3260,7 @@ sub run_user_command {
 }
 
 
+
 # Adds pid to history file (with a timestamp) so that it is not redownloaded after deletion
 sub add_to_download_history {
 	my $pid = shift;
@@ -3226,6 +3278,7 @@ sub add_to_download_history {
 	close HIST;
 	return 0;
 }
+
 
 
 # Checks history for previous download of this pid
@@ -3253,6 +3306,31 @@ sub check_download_history {
 }
 
 
+
+# Add id3 tag to MP3 files if required
+sub tag_file {
+	my $pid = shift;
+	if ( $prog{$pid}{ext} eq 'mp3' ) {
+		# Create ID3 tagging options for external tagger program (escape " for shell)
+		my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
+		$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
+		# Only tag if the required tool exists
+		if ( exists_in_path($id3v2) ) {
+			logger "INFO: id3 tagging MP3 file\n";
+			my $cmd = "$id3v2 --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." $prog{$pid}{filename} 1>&2";
+			logger "DEGUG: Running $cmd\n" if $opt{debug};
+			if ( system($cmd) ) {
+				logger "WARNING: Failed to tag MP3 file\n";
+				return 2;
+			}
+		} else {
+			logger "WARNING: Cannot tag MP3 file\n" if $opt{verbose};
+		}
+	}
+}
+
+
+
 # Show channels for specified type if required
 sub list_unique_element_counts {
 	my $element_name = shift;
@@ -3269,12 +3347,14 @@ sub list_unique_element_counts {
 }
 
 
+
 # Escape chars in string for shell use
 sub esc_chars {
 	# will change, for example, a!!a to a\!\!a
 	s/([;<>\*\|&\$!#\(\)\[\]\{\}:'"])/\\$1/g;
 	return $_;
 }
+
 
 
 # Signal handler to clean up after a ctrl-c or kill
