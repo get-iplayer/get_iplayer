@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: September 29th 2008
 #
-my $version = 0.82;
+my $version = 0.83;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -49,6 +49,13 @@ my $version = 0.82;
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 #
+# Changes 0.83 - 20080929
+# * Remove 16MB block downloads for iphone mp3 radio - does not appear to be unnecessary
+# * Improved and simplified metadata --info collection using new prog feed
+# * Improved channel feed parser for TV so that Sign Zone progs are correctly detected
+# * Added --version-list option so that the preferred version(s) of a programme can be specified e.g. --version-list=signed,default
+# * Added --versions option to narraw search to specific programme versions (e.g. default or signed or any regex)
+# 
 # Changes 0.82 - 20080929
 # * Some code simplification
 # * Remove web bug and cookie whitelisting crud
@@ -109,6 +116,7 @@ Search Options:
  -l, --long                    Additionally search in long programme descriptions / episode names
  --channel <regex>             Narrow search to matched channel(s)
  --category <regex>            Narrow search to matched categories
+ --versions <regex>            Narrow search to matched programme version(s)
  --exclude-channel <regex>     Narrow search to exclude matched channel(s)
  --exclude-category <regex>    Narrow search to exclude matched catogories
  --type <radio|tv|podcast|all> Only search in these types of programmes (tv is default)
@@ -134,6 +142,7 @@ Download Options:
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
+ --version-list <versions>     Override the version of programme to download (e.g. '--version-list signed,default')
  -t, --test                    Test only - no download (will show programme type)
  
 Output Options:
@@ -252,6 +261,8 @@ GetOptions(
 	"suboffset=n"			=> \$opt{suboffset},
 	"streaminfo"			=> \$opt{streaminfo},
 	"since=n"			=> \$opt{since},
+	"versionlist|version-list=s"	=> \$opt{versionlist},
+	"versions=s"			=> \$opt{versions},
 	"list=s"			=> \$opt{list},
 	"save"				=> \$save,
 ) || die usage();
@@ -296,6 +307,10 @@ my $vlc_opts		= '-vv';
 my $id3v2		= $opt{id3v2} || 'id3v2';
 my $tee			= 'tee';
 my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
+my $iphone_block_size	= 0x2000000; # 32MB
+# Order with which to search for programme versions (can be overridden by --versionlist option)
+my @version_search_list = qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+@version_search_list = split /,/, $opt{versionlist} if $opt{versionlist};
 # Set quiet, test and get options if we're asked for streaminfo
 if ( $opt{streaminfo} ) {
 	$opt{test} = 1;
@@ -305,6 +320,7 @@ if ( $opt{streaminfo} ) {
 
 # URLs
 my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/400
+my $prog_feed_url		= 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 my $prog_iplayer_metadata	= 'http://www.bbc.co.uk/iplayer/playlist/'; # $pid
 my $media_stream_data_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
 my $iphone_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
@@ -334,7 +350,7 @@ $channels{tv} = {
 	'categories/news/tv'			=> 'tv|BBC News',
 	'categories/sport/tv'			=> 'tv|BBC Sport',
 #	'categories/tv'				=> 'tv|All',
-#	'categories/signed/tv'			=> 'tv|Signed',
+	'categories/signed'			=> 'tv|Signed',
 };
 
 $channels{radio} = {
@@ -384,14 +400,14 @@ if ($opt{nowrite} && (!$opt{stdout})) {
 #	'desc'		=> <Long Description>,
 #	'available'	=> <Date/Time made available or remaining>,
 #	'duration'	=> <duration in HH:MM:SS>
-#	'versions'	=> <comma separated list of versions, e.g Original, Signed>
+#	'versions'	=> <comma separated list of versions, e.g default, signed>
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <channel>
 #	'categories'	=> <Comma separtaed list of categories>
 # 	'type'		=> <Type: tv, radio or podcast>
 #	'timeadded'	=> <timestamp when programme was added to cache>
 #	'longname'	=> <Long name (only parsed in stage 1 download)>,
-#	'version'	=> <selected version e.g Original, Signed, etc - only set before d/load>
+#	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
 #	'filename'	=> <Path and Filename of saved file - set only while downloading>
 #	'dir'		=> <Filename Directory of saved file - set only while downloading>
 #	'fileprefix'	=> <Filename Prefix of saved file - set only while downloading>
@@ -601,6 +617,7 @@ sub get_regex_matches {
 	my %download_hash;
 	my $channel_regex = $opt{channel} || '.*';
 	my $category_regex = $opt{category} || '.*';
+	my $versions_regex = $opt{versions} || '.*';
 	my $channel_exclude_regex = $opt{excludechannel} || '^ROGUE$';
 	my $category_exclude_regex = $opt{excludecategory} || '^ROGUE$';
 	my $since = $opt{since} || 99999;
@@ -612,6 +629,7 @@ sub get_regex_matches {
 		# Only include programmes matching channels and category regexes
 		if ( $prog{$pid}{channel} =~ /$channel_regex/i
 		  && $prog{$pid}{categories} =~ /$category_regex/i
+		  && $prog{$pid}{versions} =~ /$versions_regex/i
 		  && $prog{$pid}{channel} !~ /$channel_exclude_regex/i
 		  && $prog{$pid}{categories} !~ /$category_exclude_regex/i
 		  && $prog{$pid}{timeadded} >= $now - ($since * 3600)
@@ -714,7 +732,7 @@ sub get_links_atom {
 		# Discard first element == header
 		shift @entries;
 
-		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $type );
+		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $type, $versions );
 		foreach my $entry (@entries) {
 
 			my $entry_flat = $entry;
@@ -723,11 +741,6 @@ sub get_links_atom {
 			# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
 			$pid = $1 if $entry =~ m{<id>.*PIPS:(.+?)</id>};
 
-			# Skip if this pid is a duplicate
-			if ( defined $prog{$pid} ) {
-				logger "WARNING: '$pid, $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{channel}' already exists (this channel = $_)\n" if $opt{verbose};
-				next;
-			}
 
 			# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
 			$name = $1 if $entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
@@ -754,10 +767,36 @@ sub get_links_atom {
 
 			logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt{debug};
 
+			# Merge and Skip if this pid is a duplicate
+			if ( defined $prog{$pid} ) {
+				logger "WARNING: '$pid, $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{channel}' already exists (this channel = $channel)\n" if $opt{verbose};
+				# Since we use the 'Signed' channel to get sign zone data, merge the categories from this entry to the existing entry
+				if ( $prog{$pid}{categories} ne join(',', @category) ) {
+					my %cats;
+					$cats{$_} = 1 for ( split /,/, $prog{$pid}{categories} );
+					$cats{$_} = 1 for ( @category );
+					logger "INFO: Merged categories for $pid from $prog{$pid}{categories} to ".join(',', sort keys %cats)."\n" if $opt{verbose};
+					$prog{$pid}{categories} = join(',', sort keys %cats);
+				}
+				# If this is a dupicate pid and the channel is now Signed then both versions are available
+				$prog{$pid}{versions} = 'default,signed' if $channel eq 'Signed';
+				next;
+			}
+
+			# Check for signed-only version from Channel
+			if ($channel eq 'Signed') {
+				$versions = 'signed';
+			# Else if not channel 'Signed' then this must also have both versions available
+			} elsif ( grep /Sign Zone/, @category ) {
+				$versions = 'default,signed';
+			} else {
+				$versions = 'default';
+			}
+			
 			# build data structure
 			$prog{$pid} = {
 				'name'		=> $name,
-				'versions'	=> 'Original',
+				'versions'	=> $versions,
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'available'	=> 'Unknown',
@@ -991,7 +1030,7 @@ sub get_podcast_links {
 			# build data structure
 			$prog{$pid} = {
 				'name'		=> $name,
-				'versions'	=> 'Original',
+				'versions'	=> 'default',
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'available'	=> $available,
@@ -1292,7 +1331,7 @@ sub download_programme {
 	my $got_url;
 	
 	# Do this for each version tried in this order (if they appaered in the content)
-	for my $version ( qw/ default original signed audiodescribed opensubtitled shortened lengthened other / ) {
+	for my $version ( @version_search_list ) {
 
 		# Change $verpid to 'default' type if it exists, then Used 'signed' otherwise
 		if ( $version_pids{$version} ) {
@@ -1559,6 +1598,8 @@ sub get_version_pids {
 		$version_pids{$version} = $verpid;
 		logger "INFO: Version: $version, VersionPid: $verpid\n" if $opt{verbose};  
 	}
+	# Add to prog hash
+	$prog{$pid}{versions} = join ',', keys %version_pids;
 	return ( $type, $title, %version_pids );
 }
 
@@ -1947,8 +1988,8 @@ sub download_iphone_stream {
 	# Start marker
 	my $start_time = time();
 
-	# Download mdat in 16MB blocks
-	my $chunk_size = 0x1000000;
+	# Download mdat in blocks
+	my $chunk_size = $iphone_block_size;
 	for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
 		# get mdat chunk into file
 		my $retcode;
@@ -2893,8 +2934,7 @@ sub get_pid_metadata {
 	my $ua = shift;
 	my $pid = shift;
 	my $metadata;
-	my $entry;
-	my $entry2;
+	my $entry3;
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -2905,107 +2945,104 @@ sub get_pid_metadata {
 	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/iplayer/widget/episodedetail/episode/${pid}/template/mobile/service_type/tv/
 
-	# Only supply this if a TV prog
-	if ( $prog{$pid}{type} =~ /tv/i ) {
-		logger "DEBUG: Getting episode data for ${pid}\n" if $opt{verbose};
-		$entry = request_url_retry($ua, "${metadata_xml_prefix}/${pid}.xml", 3, '', '');
-		decode_entities($entry);
-		# Flatten
-		$entry =~ s|\n| |g;
-		# Remove any related programme data
-		$entry =~ s|<relatedConcepts>.*$||gi;
-	}
+	# This URL works for tv/radio prog types:
+	# $prog_feed_url = http://feeds.bbc.co.uk/iplayer/episode/$pid
 
 	if ( $prog{$pid}{type} =~ /(tv|radio)/i ) {
-		$entry2 = request_url_retry($ua, "${metadata_mobile_prefix}/${pid}/template/mobile/service_type/tv/", 3, '', '');
-		decode_entities($entry2);
+		$entry3 = request_url_retry($ua, $prog_feed_url.$pid, 3, '', '');
+		decode_entities($entry3);
+		logger "DEBUG: $prog_feed_url.$pid:\n$entry3\n\n" if $opt{debug};
 		# Flatten
-		$entry2 =~ s|\n| |g;
-		# Remove any related programme data
-		$entry2 =~ s|<relatedConcepts>.*$||gi;
+		$entry3 =~ s|\n| |g;
 	}
 
+	# Entry3 format
+	#<?xml version="1.0" encoding="utf-8"?>                                      
+	#<?xml-stylesheet href="http://www.bbc.co.uk/iplayer/style/rss.css" type="text/css"?>
+	#<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-GB">
+	#  <title>BBC iPlayer - Episode Detail: Edith Bowman: 22/09/2008</title>                                                                          
+	#  <subtitle>Sara Cox sits in for Edith with another Cryptic Randomizer.</subtitle>
+	#  <updated>2008-09-29T10:59:45Z</updated>
+	#  <id>tag:feeds.bbc.co.uk,2008:/iplayer/feed/episode/b00djtfh</id>
+	#  <link rel="related" href="http://www.bbc.co.uk/iplayer" type="text/html" />
+	#  <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh" type="application/atom+xml" />
+	#  <author>
+	#    <name>BBC</name>
+	#    <uri>http://www.bbc.co.uk</uri>
+	#  </author>
+	#  <entry>
+	#    <title type="text">Edith Bowman: 22/09/2008</title>
+	#    <id>tag:feeds.bbc.co.uk,2008:PIPS:b00djtfh</id>
+	#    <updated>2008-09-15T01:28:36Z</updated>
+	#    <summary>Sara Cox sits in for Edith with another Cryptic Randomizer.</summary>
+	#    <content type="html">
+	#      &lt;p&gt;
+	#        &lt;a href=&quot;http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn30&quot;&gt;
+	#          &lt;img src=&quot;http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg&quot; alt=&quot;Edith Bowman: 22/09/2008&quot; /&gt;
+	#        &lt;/a&gt;
+	#      &lt;/p&gt;
+	#      &lt;p&gt;
+	#        Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.
+	#      &lt;/p&gt;
+	#    </content>
+	#    <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" type="text/html" title="Edith Bowman: 22/09/2008">
+	#      <media:content medium="audio" duration="10800">
+	#        <media:title>Edith Bowman: 22/09/2008</media:title>
+	#        <media:description>Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.</media:description>
+	#        <media:player url="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" />
+	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Entertainment">9100099</media:category>
+	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Music">9100006</media:category>
+	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Pop &amp; Chart">9200069</media:category>
+	#        <media:credit role="Production Department" scheme="urn:ebu">BBC Radio 1</media:credit>
+	#        <media:credit role="Publishing Company" scheme="urn:ebu">BBC Radio 1</media:credit>
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_86_48.jpg" width="86" height="48" />
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg" width="150" height="84" />
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_178_100.jpg" width="178" height="100" />
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_512_288.jpg" width="512" height="288" />
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_528_297.jpg" width="528" height="297" />
+	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_640_360.jpg" width="640" height="360" />
+	#        <dcterms:valid>
+	#          start=2008-09-22T15:44:20Z;
+	#          end=2008-09-29T15:02:00Z;
+	#          scheme=W3C-DTF
+	#        </dcterms:valid>
+	#      </media:content>
+	#    </link>
+	#    <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh?format=atom" type="application/atom+xml" title="22/09/2008" />
+	#    <link rel="related" href="http://www.bbc.co.uk/programmes/b006wks4/microsite" type="text/html" title="Edith Bowman" />
+	#    <link rel="parent" href="http://feeds.bbc.co.uk/iplayer/programme_set/b006wks4" type="application/atom+xml" title="Edith Bowman" />
+	#  </entry>
+	#</feed>
 
-	# entry Format:
-	# <?xml version="1.0" encoding="UTF-8"?> <iplayerMedia version="0.2">    <concept>          <pid>b00c7ytx</pid>
-	#     <url>http://www.bbc.co.uk/iplayer/page/item/b00c7ytx.shtml</url>     <title>Doctor Who: Series 4</title>
-	#     <subtitle>Turn Left</subtitle>     <thumbnail>    
-	#   <url>http://www.bbc.co.uk/iplayer/images/episode/b00c7ytx_512_288.jpg</url>   
-	#    <width>512</width>       <height>288</height>       <mediaType>image/jpeg</mediaType>     </thumbnail>  
-	#    <shortSynopsis>Can Donna and Rose stop the approaching Darkness?</shortSynopsis>  
-	#   <mediumSynopsis>As Donna's world collapses, she finds help from a mysterious blonde woman - but can Donna and Rose stop the approaching Darkness?</mediumSynopsis>  
-	#   <longSynopsis></longSynopsis>     <masterbrand id="bbc_one">  
-	#     <thumbnail>         <url>http://www.bbc.co.uk/iplayer/framework/img/ch/bbc_one.gif</url>         <width>54</width> 
-	#<!-- Note:these value are currently hard coded as they're not in the content package -->         <height>40</height>     
-	#     <mediaType>image/gif</mediaType>       </thumbnail>   
-	#    <ident>          <server>cp44293.edgefcs.net</server>          <identifier>public/bbc_one</identifier>    
-	#     <width>512</width>         <height>288</height>         <mediaType>video/x-flv</mediaType>       </ident>     </masterbrand>      
-	#   <versions><!-- there will only be one version for launch. This will be the first available version -->  
-	#      <version>           <name>AudioDescribed,Original</name>      
-	#     <pid>b00c7yq9</pid>           <guidance>             <text></text>           </guidance>     
-	#      <duration>00:45:00</duration>            <available>true</available>         </version>              </versions>
-	
-	# entry2 Format:
-	# 	<h1>Doctor Who: Series 4</h1>
-	#<div id="p-panel-episode">
-	#        <div id="episode-image">
-	#                <a href="#" id="version" pid="b00c7yq9"><img id="play-version" pid="b00c7yq9" src="img/click_to_play.png" /></a>
-	#                <img src="/iplayer/images/episode/b00c7ytx_314_176.jpg" />
-	#                <div id="player-container"></div>
-	#
-	#                <div id="info-message"></div>
-	#        </div>
-	#        <h2>Turn Left <span>-  45 mins</span></h2>
-	#        <p><img class="episode-masterbrand" src="img/bbc_one.png"> As Donna's world collapses, she finds help from a mysterious blonde woman - but can Donna and Rose stop the approaching Darkness?</p>
-	#        <p>Available till:  8:54pm Friday 11th July</p>
+	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $type, $categories);
 
-	# Format: http://www.bbc.co.uk/iplayer/playlist/b00c8ssg
-	#<?xml version="1.0" encoding="UTF-8"?>
-	#
-	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
-	#  <id>tag:bbc.co.uk,2008:iplayer:b00c8ssg:playlist</id>
-	#  <link rel="self" href="http://www.bbc.co.uk/iplayer/playlist/b00c8ssg"/>
-	#  <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00c8ssg"/>
-	#  <link rel="holding" href="http://www.bbc.co.uk/iplayer/images/episode/b00c8ssg_640_360.jpg" height="360" width="640" type="image/jpeg" />
-	#  <title>Eddie Halliwell: 03/07/2008</title>
-	#  <summary>With two hours of the best new trance and techno.</summary>
-	#  <updated>2008-06-26T01:01:37Z</updated>
-	#  <item kind="radioProgramme" duration="7200" identifier="b00c8smr" group="b00c8ssg" publisher="pips">
-	#    <title>Eddie Halliwell: 03/07/2008</title>
-	#    <broadcast>2008-07-03T23:00:00</broadcast>
-	#    <service id="bbc_radio_one" href="http://www.bbc.co.uk/iplayer/bbc_radio_one">BBC Radio 1</service>
-	#    <masterbrand id="bbc_radio_one" href="http://www.bbc.co.uk/iplayer/bbc_radio_one">BBC Radio 1</masterbrand>
-	#    <passionSite href="http://www.bbc.co.uk/programmes/b006wq9w/microsite">Eddie Halliwell</passionSite>
-	#    <mediator identifier="b00c8smr" name="pips"/>
-	#  </item>
-	#</playlist>
+	$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	$available = $1 if $entry3 =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
+	$duration = $1 if $entry3 =~ m{duration=\"(\d+?)\"};
+	$type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
+	$longdesc = $1 if $entry3 =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+	$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 
-	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance);
-
-	$expiry = $1 if $entry2 =~ m{<p>Available till:\s*(.*?)\s*</p>};
-	$duration = $1 if $entry =~ m{<duration>\s*(.*?)\s*</duration>};
-	$channel = $1 if $entry =~ m{<masterbrand id="\s*(.*?)\s*">};
-	$available = $1 if $entry =~ m{<available>\s*(.*?)\s*</available>};
-	$longdesc = $1 if $entry =~ m{<longSynopsis>\s*(.*?)\s*</longSynopsis>};
-	if (! $longdesc) {
-		$longdesc = $1 if $entry =~ m{<mediumSynopsis>\s*(.*?)\s*</mediumSynopsis>};
+	my @cats;
+	for (split /<media:category scheme=\".+?\"/, $entry3) {
+		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
 	}
-	if (! $longdesc) {
-		$longdesc = $1 if $entry =~ m{<shortSynopsis>\s*(.*?)\s*</shortSynopsis>};
-	}
-	$versions = $1 if $entry =~ m{<name>\s*(.*?)\s*</name>};
-	$guidance = $1 if $entry =~ m{<guidance>\s*<text>\s*(.*?)\s*</text>};
+	$categories = join ',', @cats;
+
+	# populate version pid metadata 
+	get_version_pids($ua, $pid);
 
 	# Fill in from cache if not got from metadata
 	$metadata .= "\nPid:\t\t$pid\n";
 	$metadata .= "Index:\t\t$prog{$pid}{index}\n";
+	$metadata .= "Type:\t\t".	($type || $prog{$pid}{type})		."\n";
 	$metadata .= "Duration:\t".	($duration || $prog{$pid}{duration})	."\n";
 	$metadata .= "Channel:\t".	($channel || $prog{$pid}{channel})	."\n";
 	$metadata .= "Available:\t".	($available || $prog{$pid}{available})	."\n";
 	$metadata .= "Expires:\t".	($expiry || $prog{$pid}{expiry})	."\n";
 	$metadata .= "Versions:\t".	($versions || $prog{$pid}{versions})	."\n";
 	$metadata .= "Guidance:\t".	($guidance || $prog{$pid}{guidance})	."\n";
-	$metadata .= "Categories:\t".	$prog{$pid}{categories}			."\n";
+	$metadata .= "Categories:\t".	($categories || $prog{$pid}{categories})."\n";
 	$metadata .= "Description:\t".	($longdesc || $prog{$pid}{desc})	."\n";
 
 	return $metadata;
