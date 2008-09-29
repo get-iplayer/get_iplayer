@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 27th 2008
+# Date: September 29th 2008
 #
-my $version = 0.80;
+my $version = 0.82;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -49,66 +49,20 @@ my $version = 0.80;
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 #
+# Changes 0.82 - 20080929
+# * Some code simplification
+# * Remove web bug and cookie whitelisting crud
+# * No more web scraping to get the version pids - use the iplayer metadata feed 
+# * Use the media stream metadata to determine if PID is for radio or tv
+# * Use the media stream metadata to determine subtitles url
+# * Fixed streaminfo option to also parse world service media stream data
+# * Added WMA audio into media stream data parser
+#
+# Changes 0.81 - 20080927
+# * Added get_iplayer user agent while getting podcasts as per request from James Cridland
+#
 # Changes 0.80 - 20080927
 # * Bugfixed -o option - it was incorrectly assigned to podcasts only
-#
-# Changes 0.79 - 20080927
-# * Use xml podcast feed - simpler to parse and contains a few additional progs
-#
-# Changes 0.78 - 20080926
-# * Cleaned up some more perl warnings after turning on this feature - now disabled
-# * Behave better when a programme is listed but unavailable
-# * Improve reporting of prgramme name when pid is already in download history
-#
-# Changes 0.77 - 20080926
-# * Added non-mandatory idv3 tagging support for MP3 files downloaded by new iPhone method using external id3 tools if available
-# * Added --id3v2 option to specify non-default location of id3v2 binary
-# * Added <fileprefix>, <ext> and <dir> to %prog so that it can be used in --command option
-# * Tidied up definition of cache files
-# * Cache files no longer get deleted upon get_iplayer upgrade
-#
-# Changes 0.76 - 20080924
-# * A few cosmetic tweaks like the 'number of matches' appearing at the end on the programme listing
-# * Set the 'type' option according to the index number specified (i.e. 1xxxx => radio, < 10000 => tv and > 19999 => podcast)
-# * The programme cache is additionally read if an index is specified in its number range
-#
-# Changes 0.75 - 20080924
-# * If an MP3 version of a radio programme is not available the default is to try to use the realaudio stream
-# * --realaudio option prevents the downloading of radio MP3 streams
-# * --mp3audio option ensures that realaudio stream is not used as a fallback for radio
-# * A few cosmetic bug fixes
-# * Check for existence of a PID when an index number is specified
-# * Don't add empty pids to download_history file
-# * Added --force-download option to override download history
-# * Report final average download speed / bitrate / duration after successful downloads (not for rtsp streams)
-# * Remove stdout logs - messes with stdout streaming in too many strange ways
-# * Does not check download history if nowrite & stdout options are specified
-#
-# Changes 0.74 - 20080924
-# * Changed --list-categories and --list-channels to use --list <element_name> where element name can be any element name in the %prog hash
-# * Bugfix --streaminfo doesn't add to download history
-# * Allow h.264 download subroutines to now also download mp3 audio for iphone radio
-# * Added --realaudio option for radio downloads where mp3 download is not available
-#
-# Changes 0.73 - 20080922
-# * Now remembers which PIDs/programmes have already been downloaded and will prevent downloading them after you delete the programme
-# * The PID download history file is in ~/.get_iplayer/download_history
-# * Added --outputradio --outputtv --outputpodcast to override --output so that different directories can be used for different programme types respectively
-# * Added --list-categories and --list-channels support
-# * Fixed a bug introduced in version 0.72 which --type=all would only result in --type=podcast
-#
-# Changes 0.72 - 20080919
-# * time stamping of cache entries
-# * Added --since option to see what was added since a number of hours ago (using above time stamps)
-# * --flush now refreshes the cache rather than simply deleting it (retains timestamps)
-#
-# Changes 0.71 - 20080916
-# * Workaround BBC World Service using non-standard PID format (not starting with b0)
-# * Workaround BBC World Service HTTP redirects which contain extra whitespace and newlines around RTSP urls which mplayer does not like
-# * Workaround BBC World Service where mediaselector metadata sets XML element kind="" instead of kind="audio"
-#
-# Changes 0.70 - 20080916
-# * Added BBC World Service to iPlayer radio channels list
 #
 
 use Env qw[@PATH];
@@ -350,17 +304,14 @@ if ( $opt{streaminfo} ) {
 }
 
 # URLs
-my $search_page_prefix		= 'http://www.bbc.co.uk/iplayer/atoz/?filter=azgroup%3A*&start=';
-my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/200
-my $pid_page_url_prefix		= 'http://www.bbc.co.uk/iplayer/episode/';
-my $web_bug_2_url		= 'http://www.bbc.co.uk/iplayer/framework/img/o.gif?';
-my $audio_download_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream';
-my $video_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
+my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/400
+my $prog_iplayer_metadata	= 'http://www.bbc.co.uk/iplayer/playlist/'; # $pid
+my $media_stream_data_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
+my $iphone_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 my $prog_page_prefix		= 'http://www.bbc.co.uk/programmes';
 my $thumbnail_prefix		= 'http://www.bbc.co.uk/iplayer/images/episode';
 my $metadata_xml_prefix		= 'http://www.bbc.co.uk/iplayer/metafiles/episode'; # /${pid}.xml
 my $metadata_mobile_prefix	= 'http://www.bbc.co.uk/iplayer/widget/episodedetail/episode'; # /${pid}/template/mobile/service_type/tv/
-my $podcast_index_url		= 'http://www.bbc.co.uk/radio/opml/bbc_podcast_opml.xml';
 my $podcast_index_feed_url	= 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
@@ -412,6 +363,7 @@ my %user_agent = (
   	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
   	update		=> "get_iplayer updater (v${version} - $^O)",
   	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
+  	get_iplayer	=> "get_iplayer/$version $^O",
 );
 
 # Setup signal handlers
@@ -867,7 +819,7 @@ sub get_podcast_links {
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
-	$ua->agent( $user_agent{safari} );
+	$ua->agent( $user_agent{get_iplayer} );
 	$ua->conn_cache(LWP::ConnCache->new());
 	
 	# Method
@@ -1217,69 +1169,40 @@ sub download_programme {
 		}
 
 		# Skip from here if we are only testing downloads
-		return 0 if $opt{test};
+		return 1 if $opt{test};
 
 		return download_podcast_stream( $ua, $pid, $file, $file_done );
 	}
 
-	# Create a full URL from the PID specified
-	my $page = $pid_page_url_prefix.$pid;
 	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
 
-	# Get stage_1 content
-	my @content = download_stage_1($ua, $page);
-	return 7 if ! @content;
+	# Get version => pid hash
+	my ( $type, $title, %version_pids ) = get_version_pids( $ua, $pid );
 
-	# Non-UK detection
-	# Need to check this again after iplayer2 release
-	#print @content;
-	#if ( grep /only available to play in the UK/i, @content ) {
-	#	logger "\nERROR: This service will only work from the UK or via a UK based web proxy.\n";
-	#	exit 3;
-	#}
+	# Extract Long Name, e.g.: iplayer.episode.setTitle("DIY SOS: Series 16: Swansea");
+	$prog{$pid}{longname} = $title;
 
-	#embeddedMedia.semp.data = {
-	#        pid: "b00dcqnk",
-	#        availability: 0,
-	#        mode: 1,
-	#
-	#        title: "The Chris Moyles Show: 17/09/2008",
-	#        width: 640,
-	#        height: 395,
-	#        visualisation : {
-	#                metaFile: "http://www.bbc.co.uk/iplayer/playlist/b00dcqnk"
-	#        },
-	#        flash: {
-	#                configFile: "http://www.bbc.co.uk/emp/iplayer/config.xml",
-	#                metaFile: "http://www.bbc.co.uk/iplayer/playlist/b00dcqnk"
-	#        },
-	#        real: {
-	#                metaFile: "http://www.bbc.co.uk/iplayer/aod/playlists/pn/nc/d0/0b/RadioBridge_0530_bbc_radio_one.ram"
-	#        },
-	#        wmp: {
-	#                metaFile: ""
-	#        }
-	#};
-
-	# If we have the following then this is audio
-	#real: {
-	#	metaFile: "http://www.bbc.co.uk/radio/aod/playlists/gs/5d/c0/0b/0900_bbc_radio_two.ram"	
+	# Strip off the episode name
+	$prog{$pid}{longname} =~ s/^(.+):.*?$/$1/g;
 
 	# Detect if this content is for radio
 	my $usemp3 = 0;
-	if ( grep /real:\s*.\s*metaFile:\s*".+?"/, (join ' ', @content) ) {
+	if ( $type eq 'radio' ) {
+
+		# Display media stream data if required
+		if ( $opt{streaminfo} ) {
+			get_media_stream_data( $pid, $version_pids{'default'}, 'all' );
+			return 1;
+		}
 
 		# Type is definitely radio
 		$prog{$pid}{type} = 'radio';
 		$dir = $download_dir{ $prog{$pid}{type} };
 
-		# Do we have an mp3 stream? (check for flash: metafile: "") - unless realaudio option is specified
-		if ( $opt{realaudio} ) {
-			logger "INFO: RealAudio stream media is available\n" if $opt{verbose};
-
-		# Else check if mp3 stream available
-		} else {
-			if (  grep /flash:\s+.\s+configFile:\s+".+?",\s+metaFile:\s*"http.+?"/, (join ' ', @content) ) {
+		# Check for mp3 stream  - unless realaudio option is specified
+		if ( ! $opt{realaudio} ) {
+			# Check for iphone mp3 radio stream
+			if ( get_media_stream_data( $pid, $version_pids{default}, 'iphone' ) ) {
 				$usemp3 = 1;
 				$prog{$pid}{ext} = 'mp3';
 				logger "INFO: MP3 stream media is available\n" if $opt{verbose};
@@ -1315,33 +1238,10 @@ sub download_programme {
 				return 20;
 			}
 
-			# Extract Long Name, e.g.: title: "Jonathan Ross: 05/07/2008",
-			chomp( my $title = ( grep /title:\s+/, @content)[0] );
-			$title =~ s/^\s*title:\s\"\s*(.+)\s*\".*$/$1/g;
-			# Strip off the episode name
-			$title =~ m{^(.+):\s*(.*?)$};
-			$prog{$pid}{longname} = $1;
-			$prog{$pid}{episode} = $2;
-
-			# Get version => pid
-			my %version_pids = get_version_pids( @content );
-			my $url_2;
+			my $url_2 = get_media_stream_data( $pid, $version_pids{default}, 'realaudio' );
 	
-			logger "\nINFO: Checking existence of programme\n";
-			$prog{$pid}{version} = 'Original';
-			# Create url with appended 6 digit random number
-			my $url_1 = ${audio_download_prefix}.'/'.$version_pids{Original};
-		
 			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-			logger "INFO: Stage 2 URL = $url_1\n" if $opt{verbose};
-
-			# Get these web bugs to whitelist our cookie if we don't have one already
-			if ( get_web_bugs($ua, @content) ) {
-				logger "ERROR: Could not whitelist cookie\n";
-				return 'retry';
-			} 
-
-			$url_2 = get_audio_stream_download_url( $ua, $url_1 );
+			logger "INFO: Stage 2 URL = $url_2\n" if $opt{verbose};
 
 			# Report error if no versions are available
 			if ( ! $url_2 ) {
@@ -1365,11 +1265,8 @@ sub download_programme {
 				return 1;
 			}
 
-			# Display RTMP stream data if required
-			get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
-
 			# Skip from here if we are only testing downloads
-			return 0 if $opt{test};
+			return 1 if $opt{test};
 
 			# Do the audio download
 			return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
@@ -1390,42 +1287,18 @@ sub download_programme {
 		$opt{n96} = 0;
 	}		
 
-	# Parse if programme available
-	#    iplayer_streaming_http_mp4 : [
-	#    ],  ### This part is empty == no mov version yet
-	if ( grep /iplayer_streaming_http_mp4 : \[\s+\],/i, @content ) {
-		logger "\rWARNING: Programme is reported as not yet ready for download\n";
-		# Will return from here once satisfied that this test is reliable
-		#return 11;
-	} else {
-		logger "\rINFO: Programme is reported as ready for download\n";
-	}
 
-	# Extract Long Name, e.g.: iplayer.episode.setTitle("DIY SOS: Series 16: Swansea");
-	chomp( $prog{$pid}{longname} = ( grep /iplayer\.episode\.setTitle/, @content)[0] );
-	$prog{$pid}{longname} =~ s/^\s*iplayer\.episode\.setTitle\(\"\s*(.+)\s*\".*$/$1/g;
-	# Strip off the episode name
-	$prog{$pid}{longname} =~ s/^(.+):.*?$/$1/g;
-
-	# Get type => verpid
-	my %version_pids = get_version_pids( @content );
 	my $url_2;
 	my $got_url;
 	
 	# Do this for each version tried in this order (if they appaered in the content)
-	for my $version ( qw/ Original Signed AudioDescribed OpenSubtitled Shortened Lengthened Other / ) {
+	for my $version ( qw/ default original signed audiodescribed opensubtitled shortened lengthened other / ) {
 
-		# Change $verpid to 'Original' type if it exists, then Used 'Signed' otherwise
-		if ( grep /^$version$/, keys %version_pids ) {
+		# Change $verpid to 'default' type if it exists, then Used 'signed' otherwise
+		if ( $version_pids{$version} ) {
 			logger "INFO: Checking existence of $version version\n";
 			$prog{$pid}{version} = $version;
 			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-
-			# Get these web bugs to whitelist our cookie if we don't have one already
-			if ( get_web_bugs($ua, @content) ) {
-				logger "ERROR: Could not whitelist cookie\n";
-				return 16;
-			} 
 			$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			$got_url = 1;
 		}
@@ -1438,6 +1311,13 @@ sub download_programme {
 		logger "ERROR: No versions exist for download\n";
 		return 14;
 	}
+
+	# Display media stream data if required
+	if ( $opt{streaminfo} ) {
+		get_media_stream_data( $pid, $version_pids{'default'}, 'all' );
+		return 1;
+	}
+
 	# Report error if failed to get URL for version
 	if ( $got_url && ! $url_2 ) {
 		logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
@@ -1449,9 +1329,6 @@ sub download_programme {
 		return 15;
 	}
 	
-	# Display media stream data if required
-	get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'all' ) if $opt{streaminfo};
-
 	# Determine the correct filenames for this download
 	my $file_prefix = generate_download_filename_prefix( $pid, $dir );
 	logger "\rINFO: File name prefix = $file_prefix                 \n";
@@ -1466,7 +1343,7 @@ sub download_programme {
 	}
 
 	# Skip from here if we are only testing downloads
-	return 0 if $opt{test};
+	return 1 if $opt{test};
 
 	# Get subtitles if they exist and are required
 	my $subfile_done;
@@ -1522,13 +1399,7 @@ sub download_subtitles {
 	my $suburl;
 	my $subs;
 	logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt{verbose};
-	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
-
-	# flatten
-	$xml =~ s/\n/ /g;
-
-	# Extract url
-	$suburl = $1 if $xml =~ m{<media\s+kind="captions".+?href="(.+?)".+?</media>};
+	$suburl = get_media_stream_data( undef, $verpid, 'subtitles' );
 
 	# Return if we have no url
 	if (! $suburl) {
@@ -1612,19 +1483,100 @@ sub subtitle_offset {
 
 
 
+# Return hash of version => verpid given a pid
+sub get_version_pids {
+	my ( $ua, $pid ) = @_;
+	my %version_pids;
+	my $url = $prog_iplayer_metadata.$pid;
+
+	logger "INFO: iPlayer metadata URL = $url\n" if $opt{verbose};
+	logger "INFO: Getting version pids for programme $pid        \n" if ! $opt{verbose};
+
+	# send request
+	my $res = $ua->request( HTTP::Request->new( GET => $url ) );
+	if ( ! $res->is_success ) {
+		logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
+		return %version_pids;
+	}
+
+	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
+	#<?xml version="1.0" encoding="UTF-8"?>                                   
+	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">       
+	#  <id>tag:bbc.co.uk,2008:pips:b00dlrc8:playlist</id>                     
+	#  <link rel="self" href="http://www.bbc.co.uk/iplayer/playlist/b00dlrc8"/>
+	#  <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00dlrc8"/>
+	#  <link rel="holding" href="http://www.bbc.co.uk/iplayer/images/episode/b00dlrc8_640_360.jpg" height="360" width="640" type="image/jpeg" />
+	#  <title>Amazon with Bruce Parry: Episode 1</title>                                                                                        
+	#  <summary>Bruce Parry begins an epic adventure in the Amazon following the river from source to sea, beginning  in the High Andes and visiting the Ashaninka tribe.</summary>                                                                                                        
+	#  <updated>2008-09-18T14:03:35Z</updated>                                                                                                  
+	#  <item kind="ident">                                                                                                                      
+	#    <id>tag:bbc.co.uk,2008:pips:bbc_two</id>                                                                                               
+	#    <mediator identifier="bbc_two" name="pips"/>                                                                                           
+	#  </item>                                                                                                                                  
+	#  <item kind="programme" duration="3600" identifier="b00dlr9p" group="b00dlrc8" publisher="pips">                                          
+	#    <tempav>1</tempav>                                                                                                                     
+	#    <id>tag:bbc.co.uk,2008:pips:b00dlr9p</id>                                                                                              
+	#    <service id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</service>                                                    
+	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>                                            
+	#
+	#    <alternate id="default" />
+	#    <guidance>Contains some strong language.</guidance>
+	#    <mediator identifier="b00dlr9p" name="pips"/>      
+	#  </item>
+	#  <item kind="programme" duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
+	#    <tempav>1</tempav>
+	#    <id>tag:bbc.co.uk,2008:pips:b00dp4xn</id>
+	#    <service id="bbc_one" href="http://www.bbc.co.uk/iplayer/bbc_one">BBC One</service>
+	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>
+	#
+	#    <alternate id="signed" />
+	#    <guidance>Contains some strong language.</guidance>
+	#    <mediator identifier="b00dp4xn" name="pips"/>
+	#  </item>
+
+	my $xml = $res->content;	
+	# flatten
+	$xml =~ s/\n/ /g;
+
+	# Get title
+	# <title>Amazon with Bruce Parry: Episode 1</title>
+	my ( $title, $type );
+	$title = $1 if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
+
+	# Get type
+	$type = 'tv' if grep /kind="programme"/, $xml;
+	$type = 'radio' if grep /kind="radioProgramme"/, $xml;
+
+	# Split into <item kind="programme"> sections
+	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
+		logger "DEBUG: Block: $_\n" if $opt{debug};
+		my ($verpid, $version);
+		#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
+		$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
+		# <alternate id="default" />
+		$version = lc($1) if m{<alternate\s+id="(.+?)"};
+		next if ! ($verpid && $version);
+		$version_pids{$version} = $verpid;
+		logger "INFO: Version: $version, VersionPid: $verpid\n" if $opt{verbose};  
+	}
+	return ( $type, $title, %version_pids );
+}
+
+
+
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashwii|flashaudio|realaudio|subtitles
+# $media = all|flashhigh|flashnormal|iphone|flashwii|flashaudio|realaudio|wma|subtitles
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media ) = @_;
-	my $url;
+	my %streams;
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 	$opt{quiet} = 0 if $opt{streaminfo};
-	logger "INFO: Getting media stream metadata for $prog{$pid}{name} - $prog{$pid}{episode}, $verpid\n";
-	my $xml = request_url_retry($ua, 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'.$verpid, 3, '', '');
+	logger "INFO: Getting media stream metadata for $prog{$pid}{name} - $prog{$pid}{episode}, $verpid\n" if $pid;
+	my $xml = request_url_retry($ua, $media_stream_data_prefix.$verpid, 3, '', '');
 	logger "\n$xml\n" if $opt{debug};
 	# flatten
 	$xml =~ s/\n/ /g;
@@ -1648,8 +1600,8 @@ sub get_media_stream_data {
 	if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: RTMP h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP high quality stream URL: $url\n";
+		$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
 	}
 
 	# h.264 normal quality stream
@@ -1670,8 +1622,8 @@ sub get_media_stream_data {
 	if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: RTMP h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP normal quality stream URL: $url\n";
+		$streams{'flashnormal'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP normal quality stream URL: $streams{'flashnormal'}\n";
 	}
 
 	# Wii h.264 standard quality stream
@@ -1691,8 +1643,8 @@ sub get_media_stream_data {
 	if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 		logger "INFO: RTMP Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP Wii normal quality stream URL: $url\n";
+		$streams{'flashwii'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP Wii normal quality stream URL: $streams{'flashwii'}\n";
 	}
 
 	# iPhone h.264/mp3 stream
@@ -1712,8 +1664,8 @@ sub get_media_stream_data {
 	if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
 		logger "INFO: iPhone stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$url = "$href";
-		logger "INFO: iPhone stream URL: $url\n";
+		$streams{'iphone'} = "$href";
+		logger "INFO: iPhone stream URL: $streams{'iphone'}\n";
 	}
 
 	# Nokia N96 h.264 low quality stream
@@ -1734,8 +1686,8 @@ sub get_media_stream_data {
 		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
 		$opt{quiet} = 0 if $opt{streaminfo};
 		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$url = "$rtsp";
-		logger "INFO: Nokia N96 h.264 low quality stream URL: $url\n";
+		$streams{'n96'} = "$rtsp";
+		logger "INFO: Nokia N96 h.264 low quality stream URL: $streams{'n96'}\n";
 	}
 
 	# Audio rtmp mp3
@@ -1755,8 +1707,8 @@ sub get_media_stream_data {
 		# Remove offending mp3: at the start of the identifier
 		$identifier =~ s/^mp3://;
 		logger "INFO: RTMP MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$url = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP stream URL: $url\n";
+		$streams{'flashaudio'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+		logger "INFO: RTMP stream URL: $streams{'flashaudio'}\n";
 	}
 
 	# ReadAudio stream
@@ -1771,15 +1723,57 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
 	#        />
 	#</media>
-	if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/real".+?encoding="real".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $1, $2, $3 );
+	# Realaudio for worldservice	
+	#<media kind=""
+        #type="audio/real"
+        #encoding="real"  >
+        #<connection
+        #        priority="10"
+        #        kind="edgesuite"
+        #        server="http://http-ws.bbc.co.uk.edgesuite.net"
+        #        identifier="/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
+        #        href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
+        #/>
+	#</media>
+	#</mediaSelection>
+	if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/real".+?encoding="real".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $3, $4, $5 );
 		$opt{quiet} = 1 if $opt{streaminfo};
 		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+		$rtsp =~ s/[\s\n]//g;
 		$opt{quiet} = 0 if $opt{streaminfo};
 		logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$url = "$rtsp";
-		logger "INFO: RealAudio RTSP stream URL: $url\n";
+		$streams{'realaudio'} = "$rtsp";
+		logger "INFO: RealAudio RTSP stream URL: $streams{'realaudio'}\n";
 	}
+
+
+	# Radio WMA (low quality)
+	#<mediaSelection xmlns="http://bbc.co.uk/2008/mp/mediaselection">
+	#<media kind=""
+	#        type="audio/wma"
+	#        encoding="wma"  >
+	#        <connection
+	#                priority="10"
+	#                kind="edgesuite"
+	#                server="http://http-ws.bbc.co.uk.edgesuite.net"
+	#                identifier="/generatecssasx.esi?file=/worldservice/css/nb/410060838"
+	#                href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssasx.esi?file=/worldservice/css/nb/410060838.wma"
+	#        />
+	#</media>
+	if ( $media =~ /^(wma|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/wma".+?encoding="wma".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $3, $4, $5 );
+		$opt{quiet} = 1 if $opt{streaminfo};
+		chomp( my $mms = download_block(undef, $href, $ua, 0, undef) );
+		$mms =~ s/[\n]//g;
+		# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
+		$mms =~ s/^.*href=\"(.+?)\".*$/$1/gi;
+		$opt{quiet} = 0 if $opt{streaminfo};
+		logger "INFO: WMA MMS stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		$streams{'wma'} = "$mms";
+		logger "INFO: WMA MMS stream URL: $streams{'wma'}\n";
+	}
+
 
 	# Subtitles stream
 	#<media kind="captions"
@@ -1795,36 +1789,16 @@ sub get_media_stream_data {
 	if ( $media =~ /^(subtitles|all)$/ && $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
 		logger "INFO: Subtitles stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$url = "$href";
-		logger "INFO: Subtitles stream URL: $url\n";
+		$streams{'subtitles'} = "$href";
+		logger "INFO: Subtitles stream URL: $streams{'subtitles'}\n";
 	}
 
 	logger "\n" if $opt{streaminfo};
 	$opt{quiet} = 1 if $opt{streaminfo};
-	return $url if ! $opt{streaminfo};
-}
 
-
-
-# Get stage 1 content
-sub download_stage_1 {
-	my ( $ua, $page ) = @_;
-
-	logger "INFO: Stage 1 URL = $page\n" if $opt{verbose};
-	logger "\rGetting iplayer programme page        " if ! $opt{verbose};
-
-	# Stage 1: get PID and set cookie
-	# This page Doesn't work with safari ua anymore....
-	# If this break in future, use http://www.bbc.co.uk/mediaselector/4/json/stream/<pid> However this
-	#   method does not provide anything except the next URL, cannot get other prog info from it
-	$ua->agent( );
-	# send request
-	my $res = $ua->request( HTTP::Request->new( GET => $page ) );
-	if ( ! $res->is_success ) {
-		logger "\rERROR: Failed to get programme ID from iplayer site\n\n";
-		return '';
-	}
-	return split /\n/, $res->content;
+	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
+	return %streams if $media eq 'all';
+	return $streams{$media};
 }
 
 
@@ -2044,7 +2018,7 @@ sub download_h264_low_stream {
 
 # Actually do the rtsp downloading
 sub download_rtsp_stream {
-	my ( $ua, $url_2, $file, $file_done, $pid ) = @_;
+	my ( $ua, $url, $file, $file_done, $pid ) = @_;
 	my $childpid;
 
 	# Create named pipe
@@ -2054,21 +2028,7 @@ sub download_rtsp_stream {
 		logger "WARNING: fifos/named pipes are not supported\n" if $opt{verbose};
 	}
 	
-	# Stage 3a: Download 1st byte to get exact file length
-	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
-
-	# Determine offset for resuming download
-	my $h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{coremedia},
-		'Accept'	=> '*/*',
-		'Range'		=> 'bytes=0-',
-	);
-	my $req = HTTP::Request->new ('GET', $url_2, $h);
-	my $res = $ua->request($req);
-	chomp( my $rtsp = $res->content );
-	# String trailing/leading whitespace and newlines
-	$rtsp =~ s/(^\s+|\s+$|\n)//g;
-	logger "INFO: Stage 4 URL = $rtsp\n" if $opt{verbose};
+	logger "INFO: Stage 3 URL = $url\n" if $opt{verbose};
 
 	# Create ID3 tagging options for lame (escape " for shell)
 	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
@@ -2084,7 +2044,7 @@ sub download_rtsp_stream {
 		# Remove named pipe
 		unlink $namedpipe;
 		logger "INFO: Downloading wav format (followed by transcoding)\n";
-		$cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$rtsp\" 1>&2";
+		$cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"${file}.wav\" \"$url\" 1>&2";
 		if ( system($cmd) ) {
 			return 2;
 		}
@@ -2106,7 +2066,7 @@ sub download_rtsp_stream {
 	} elsif ( $opt{wav} && ! $opt{stdout} ) {
 		logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$rtsp\" 1>&2";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$file\" \"$url\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
@@ -2119,7 +2079,7 @@ sub download_rtsp_stream {
 		# Write out to .ra ext instead (used on fallback if no fifo support)
 		logger "INFO: Writing raw realaudio stream\n";
 		# Start the mplayer process and write to raw file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$rtsp\" 1>&2";
+		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$file\" \"$url\" 1>&2";
 		logger "DEGUG: Running $cmd\n" if $opt{debug};
 		if ( system($cmd) ) {
 			return 2;
@@ -2177,7 +2137,7 @@ sub download_rtsp_stream {
 		# Start the mplayer process and write to named pipe
 		# Raw mode
 		if ( $opt{raw} ) {
-			my $cmd = "$mplayer $mplayer_opts -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$rtsp\" 1>&2";
+			my $cmd = "$mplayer $mplayer_opts -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$url\" 1>&2";
 			logger "DEGUG: Running $cmd\n" if $opt{debug};
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
@@ -2186,7 +2146,7 @@ sub download_rtsp_stream {
 			}
 		# WAV / mp3 mode
 		} else {
-			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$rtsp\" 1>&2";
+			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$url\" 1>&2";
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
@@ -2207,6 +2167,9 @@ sub download_rtsp_stream {
 sub download_podcast_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
 	my $start_time = time();
+
+	# Set user agent
+	$ua->agent( $user_agent{get_iplayer} );
 
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
@@ -2241,13 +2204,13 @@ sub download_podcast_stream {
 
 
 
-# Get streaming video URL
+# Get streaming iphone URL
 sub get_iphone_stream_download_url {
 		my $ua = shift;
 		my $pid = shift;
 
 		# Create url with appended 6 digit random number
-		my $url_1 = ${video_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+		my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
 		logger "INFO: media stream download URL = $url_1\n" if $opt{verbose};
 		
 		# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
@@ -2345,32 +2308,6 @@ sub get_audio_stream_download_url {
 
 
 
-# Given page content, extract the Versions and Pids and return in a hash: Versions => Pid
-#<!--
-#	iplayer.episode.setPidData("b0078vh4","b005rpmb");
-#	iplayer.episode.setTitle("Razzledazzle: Dog");
-#	iplayer.episode.setDownloadAvailability(1);
-#	iplayer.episode.init();	
-#		
-#		iplayer.episode.buildVideoPlayer();
-#		
-#		
-#//-->
-sub get_version_pids {
-	my @content = @_;
-	# Extract pid versions 
-	chomp( my $pid = (grep /iplayer\.episode\.setPidData/, @content)[0] );
-	# Remove tags
-	$pid =~ s/^.*\"([\w\d]+)\"\).*$/$1/g;
-	# Get hash of pid => version
-	my %version_pids;
-	$version_pids{'Original'} = $pid;
-	logger "INFO: Versions available: ".join(', ', %version_pids)."\n" if $opt{verbose};
-	return %version_pids;
-}
-
-
-
 # Generate the download filename prefix given a pid and optional format such as '<longname> - <episode> <pid> <version>'
 sub generate_download_filename_prefix {
 	my $pid = shift;
@@ -2406,89 +2343,6 @@ sub generate_download_filename_prefix {
         }
 
         return $file;
-}
-
-
-
-sub get_web_bugs {
-	my $ua = shift;
-	my @content = @_;
-	my $h;
-	my $req;
-	my $res;
-	
-	# Load cookies and check if we have a BBC-UID cookie in there
-	my $cookies = HTTP::Cookies->new;
-	$cookies->load( $cookiejar );
-	if ( $cookies->as_string =~ /BBC\-UID=/ ) {
-		logger "INFO: Cookie already exists\n" if $opt{verbose};
-		return 0;
-	}
-	
-	# Parse this to get o.gif for stats web bug
-	#var i = new Image(1,1); i.src = "http://stats.bbc.co.uk/o.gif?~RS~s~RS~iPlayer~RS~t~RS~Web_progi~RS~i~RS~b00cc05l~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/_proxy_/episode/b00cc05l~RS~r~RS~(none)~RS~q~RS~~RS~z~RS~17~RS~";
-        chomp( my $url_1b = (grep /i\.src\s*=\s*\"http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*\";/, @content)[0] );
-        $url_1b =~ s/^.*i\.src\s*=\s*\"(http:\/\/stats\.bbc\.co\.uk\/o\.gif.*b0\w{5}.*)\";.*$/$1/g;
-        logger "INFO: Web bug#1: $url_1b\n" if $opt{verbose};
-
-        # Stage 1b - get o.gif web bug to whitelist cookie
-        #my $url_1b = 'http://stats.bbc.co.uk/o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1';
-	logger "INFO: Getting iplayer 1st web bug              \r";
-	#GET /o.gif?~RS~s~RS~iplayer~RS~t~RS~Web_progi~RS~i~RS~b00c3rtd~RS~p~RS~0~RS~a~RS~0~RS~u~RS~/iplayer/page/item/b00c3rtd.shtml~RS~r~RS~(none)~RS~q~RS~q=graham+norton&amp;go=Find+Programmes&amp;scope=iplayersearch&amp;start=1&amp;version_pid=b00c3rrt~RS~z~RS~50~RS~ HTTP/1.1
-	#Accept: */*
-	#Accept-Language: en
-	#Accept-Encoding: gzip, deflate
-	#Cookie: BBC-UID=54xxxxxxxxx71ad6e33cfdf040e01b44068765f2a0b061b4447fe92f6528b1ae0Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29
-	#Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
-	#User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
-	#Connection: keep-alive
-	#Host: stats.bbc.co.uk
-	$h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{safari},
-		'Accept'	=> '*/*',
-	);
-	$req = HTTP::Request->new ('GET', $url_1b, $h);
-	# send request
-	$res = $ua->request($req);
-	# Get resulting Location header (i.e. redirect URL)
-	if ( ! $res->is_success ) {
-		logger "ERROR: Failed to get o.gif web bug from iplayer site\n";
-		# Better remove our cookie cos it probably isn't whitelisted
-		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
-		unlink $cookiejar;
-		return 2;
-	}
-
-
-	# Stage 1c - get o.gif framework web bug to whitelist cookie (5 digit random number appended)
-	my $url_1c = $web_bug_2_url.(sprintf "%05.0f", 100000*rand(0));
-	logger "INFO: Getting iplayer 2nd web bug             \r";
-        #GET /iplayer/framework/img/o.gif?90927 HTTP/1.1
-        #Accept: */*
-        #Accept-Language: en
-        #Accept-Encoding: gzip, deflate
-        #Cookie: BBC-UID=e4xxxxxx731e0ec0d34a019ab030cb2de22aef9c407041d4343f4937d42343d40Mozilla%2f5%2e0%20%28iPod%3b%20U%3b%20CPU%20like%20Mac%20OS%20X%3b%20en%29%20AppleWebKit%2f420%2e1%20%28KHTML%2c%20like%20Gecko%29%20Version%2f3%2e0%20Mobile%2f3B48b%20Safari%2f419%2e3
-        #Referer: http://www.bbc.co.uk/iplayer/page/item/b00c3rtd.shtml?q=graham+norton&go=Find+Programmes&scope=iplayersearch&start=1&version_pid=b00c3rrt
-        #User-Agent: Mozilla/5.0 (iPod; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3B48b Safari/419.3
-        #Connection: keep-alive
-        #Host: www.bbc.co.uk
-	$h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{safari},
-		'Accept'	=> '*/*',
-	);
-	$req = HTTP::Request->new ('GET', $url_1c, $h);
-	# send request
-	$res = $ua->request($req);
-	# Get resulting Location header (i.e. redirect URL)
-	if ( ! $res->is_success ) {
-		logger "ERROR: Failed to get 2nd o.gif web bug from iplayer site\n";
-		# Better remove our cookie cos it probably isn't whitelisted
-		$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
-		unlink $cookiejar;
-		return 2;
-	}
-
-	return 0;
 }
 
 
