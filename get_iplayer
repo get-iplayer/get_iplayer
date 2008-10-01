@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: October 1st 2008
 #
-my $version = 0.84;
+my $version = 0.85;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -49,6 +49,12 @@ my $version = 0.84;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.85 - 20081001
+# * Fixed --pvr-add so that options derrived from options files are not saved to the PVR search
+# * Options specified on the cmdline with --pvr option will override those options in the pvr searches
+# * All PVR searches will, by default, use the options from the saved options files
+# * Fixed bug where %prog hash was retained between pvr searches making the type option get ignored in some cases
 #
 # Changes 0.84 - 20080929
 # * New PVR functionality allows you to add a search criteria to a PVR search file for scheduled downloads
@@ -100,7 +106,8 @@ use URI;
 
 $|=1;
 my %opt = ();
-
+my %opt_cmdline = (); # a hash of which options came from the cmdline rather than the options files
+my %opt_file = (); # a hash of which options came from the options files rather than the cmdline
 
 # Print to STDERR if not quiet unless verbose or debug
 sub logger(@) {
@@ -223,66 +230,69 @@ if ( ! grep /\-\-save/, @ARGV ) {
 Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
-	"help|h"			=> \$opt{help},
-	"get|g"				=> \$opt{get},
-	"long|l"			=> \$opt{long},
-	"verbose|v"			=> \$opt{verbose},
-	"flush|refresh|f"		=> \$opt{flush},
-	"output|o=s"			=> \$opt{output},
-	"outputtv=s"			=> \$opt{outputtv},
-	"outputradio=s"			=> \$opt{outputradio},
-	"outputpodcast=s"		=> \$opt{outputpodcast},
-	"proxy|p=s"			=> \$opt{proxy},
-	"stdout|stream|x"		=> \$opt{stdout},
-	"subdirs|subdir|s"		=> \$opt{subdir},
-	"no-write|nowrite|n"		=> \$opt{nowrite},
-	"expiry|e=n"			=> \$opt{expiry},
-	"test|t"			=> \$opt{test},
-	"whitespace|ws|w"		=> \$opt{whitespace},
-	"update|u"			=> \$opt{update},
-	"debug"				=> \$opt{debug},
-	"channel=s"			=> \$opt{channel},
-	"category=s"			=> \$opt{category},
-	"q|quiet"			=> \$opt{quiet},
-	"symlink|freevo=s"		=> \$opt{symlink},
-	"fxd=s"				=> \$opt{fxd},
-	"mythtv=s"			=> \$opt{mythtv},
-	"xml-channels|fxd-channels"	=> \$opt{xmlchannels},
-	"xml-names|fxd-names"		=> \$opt{xmlnames},
-	"xml-alpha|fxd-alpha"		=> \$opt{xmlalpha},
-	"html=s"			=> \$opt{html},
-	"terse"				=> \$opt{terse},
-	"pid=s"				=> \$opt{pid},
-	"type=s"			=> \$opt{type},
-	"exclude-category=s"		=> \$opt{excludecategory},
-	"exclude-channel=s"		=> \$opt{excludechannel},
-	"i|info"			=> \$opt{info},
-	"c|command=s"			=> \$opt{command},
-	"mplayer=s"			=> \$opt{mplayer},
-	"lame=s"			=> \$opt{lame},
-	"id3v2=s"			=> \$opt{id3v2},
-	"vlc=s"				=> \$opt{vlc},
-	"n96"				=> \$opt{n96},
-	"realaudio"			=> \$opt{realaudio},
-	"mp3audio"			=> \$opt{mp3audio},
-	"force-download"		=> \$opt{forcedownload},
-	"wav"				=> \$opt{wav},
-	"raw"				=> \$opt{raw},
-	"bandwidth=n"			=> \$opt{bandwidth},
-	"subtitles"			=> \$opt{subtitles},
-	"suboffset=n"			=> \$opt{suboffset},
-	"streaminfo"			=> \$opt{streaminfo},
-	"since=n"			=> \$opt{since},
-	"versionlist|version-list=s"	=> \$opt{versionlist},
-	"versions=s"			=> \$opt{versions},
-	"list=s"			=> \$opt{list},
-	"pvr"				=> \$opt{pvr},
-	"pvradd|pvr-add=s"		=> \$opt{pvradd},
-	"pvrdel|pvr-del=s"		=> \$opt{pvrdel},
-	"pvrlist|pvr-list"		=> \$opt{pvrlist},
+	"help|h"			=> \$opt_cmdline{help},
+	"get|g"				=> \$opt_cmdline{get},
+	"long|l"			=> \$opt_cmdline{long},
+	"verbose|v"			=> \$opt_cmdline{verbose},
+	"flush|refresh|f"		=> \$opt_cmdline{flush},
+	"output|o=s"			=> \$opt_cmdline{output},
+	"outputtv=s"			=> \$opt_cmdline{outputtv},
+	"outputradio=s"			=> \$opt_cmdline{outputradio},
+	"outputpodcast=s"		=> \$opt_cmdline{outputpodcast},
+	"proxy|p=s"			=> \$opt_cmdline{proxy},
+	"stdout|stream|x"		=> \$opt_cmdline{stdout},
+	"subdirs|subdir|s"		=> \$opt_cmdline{subdir},
+	"no-write|nowrite|n"		=> \$opt_cmdline{nowrite},
+	"expiry|e=n"			=> \$opt_cmdline{expiry},
+	"test|t"			=> \$opt_cmdline{test},
+	"whitespace|ws|w"		=> \$opt_cmdline{whitespace},
+	"update|u"			=> \$opt_cmdline{update},
+	"debug"				=> \$opt_cmdline{debug},
+	"channel=s"			=> \$opt_cmdline{channel},
+	"category=s"			=> \$opt_cmdline{category},
+	"q|quiet"			=> \$opt_cmdline{quiet},
+	"symlink|freevo=s"		=> \$opt_cmdline{symlink},
+	"fxd=s"				=> \$opt_cmdline{fxd},
+	"mythtv=s"			=> \$opt_cmdline{mythtv},
+	"xml-channels|fxd-channels"	=> \$opt_cmdline{xmlchannels},
+	"xml-names|fxd-names"		=> \$opt_cmdline{xmlnames},
+	"xml-alpha|fxd-alpha"		=> \$opt_cmdline{xmlalpha},
+	"html=s"			=> \$opt_cmdline{html},
+	"terse"				=> \$opt_cmdline{terse},
+	"pid=s"				=> \$opt_cmdline{pid},
+	"type=s"			=> \$opt_cmdline{type},
+	"exclude-category=s"		=> \$opt_cmdline{excludecategory},
+	"exclude-channel=s"		=> \$opt_cmdline{excludechannel},
+	"i|info"			=> \$opt_cmdline{info},
+	"c|command=s"			=> \$opt_cmdline{command},
+	"mplayer=s"			=> \$opt_cmdline{mplayer},
+	"lame=s"			=> \$opt_cmdline{lame},
+	"id3v2=s"			=> \$opt_cmdline{id3v2},
+	"vlc=s"				=> \$opt_cmdline{vlc},
+	"n96"				=> \$opt_cmdline{n96},
+	"realaudio"			=> \$opt_cmdline{realaudio},
+	"mp3audio"			=> \$opt_cmdline{mp3audio},
+	"force-download"		=> \$opt_cmdline{forcedownload},
+	"wav"				=> \$opt_cmdline{wav},
+	"raw"				=> \$opt_cmdline{raw},
+	"bandwidth=n"			=> \$opt_cmdline{bandwidth},
+	"subtitles"			=> \$opt_cmdline{subtitles},
+	"suboffset=n"			=> \$opt_cmdline{suboffset},
+	"streaminfo"			=> \$opt_cmdline{streaminfo},
+	"since=n"			=> \$opt_cmdline{since},
+	"versionlist|version-list=s"	=> \$opt_cmdline{versionlist},
+	"versions=s"			=> \$opt_cmdline{versions},
+	"list=s"			=> \$opt_cmdline{list},
+	"pvr"				=> \$opt_cmdline{pvr},
+	"pvradd|pvr-add=s"		=> \$opt_cmdline{pvradd},
+	"pvrdel|pvr-del=s"		=> \$opt_cmdline{pvrdel},
+	"pvrlist|pvr-list"		=> \$opt_cmdline{pvrlist},
 	"save"				=> \$save,
 ) || die usage();
-usage() if $opt{help};
+usage() if $opt_cmdline{help};
+
+# Copy options to %opt
+%opt = %opt_cmdline;
 
 # Save opts if specified
 save_options_file($optfile) if $save;
@@ -439,7 +449,7 @@ if ( $opt{pvradd} ) {
 	# For each PVR search
 	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
 		logger "\nRunning PVR Search: $name:\n";
-		# Load options for specified pvr search name
+		# Clear then Load options for specified pvr search name
 		pvr_load_options($name);
 		# Do the downloads (force --get option)
 		$opt{get} = 1;
@@ -457,6 +467,8 @@ exit 0;
 # Use the specified options to process the matches in specified array
 sub process_matches {
 	my @search_args = @_;
+	# Clear prog hash
+	%prog = ();
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt{verbose};
 
 	# Option dependant vars
@@ -2983,6 +2995,8 @@ sub read_options_file {
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
 		chomp( $opt{$1} = $2 );
+		# keep track of which options came from files
+		chomp( $opt_file{$1} = $2 );
 		logger "DEBUG: Setting option $1 = $2\n" if $opt{debug};
 	}
 	close OPT;
@@ -2993,8 +3007,8 @@ sub read_options_file {
 # Display options
 sub display_options {
 	logger "Default options:\n";
-	for ( grep !/(help|debug|get|^pvr)/, sort keys %opt ) {
-		logger "\t$_ = $opt{$_}\n" if defined $opt{$_};
+	for ( grep !/(help|debug|get|^pvr)/, sort keys %opt_file ) {
+		logger "\t$_ = $opt_file{$_}\n" if defined $opt_file{$_};
 	}
 	logger "\n";
 	return 0;
@@ -3325,10 +3339,12 @@ sub pvr_add {
 		logger "ERROR: Invalid PVR search name '$name'\n";
 		return 1;
 	}
-	# Parse valid options and create array
-	for (grep /^(long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {$a <=> $b} keys %opt) {
-		push @options, "$_ $opt{$_}" if defined $opt{$_};
-		logger "DEBUG: Adding option $_ = $opt{$_}\n" if $opt{debug} && defined $opt{$_};
+	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
+	for (grep /^(long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {$a <=> $b} keys %opt_cmdline) {
+		if ( defined $opt_cmdline{$_} ) {
+				push @options, "$_ $opt_cmdline{$_}";
+				logger "DEBUG: Adding option $_ = $opt_cmdline{$_}\n" if $opt{debug};
+		}
 	}
 	# Add search args to array
 	for ( my $count = 0; $count <= $#search_args; $count++ ) {
@@ -3449,9 +3465,12 @@ sub pvr_save {
 # Clear all exisiting global args and opts then load the options specified in the default options and specified PVR search
 sub pvr_load_options {
 	my $name = shift;
-	# Re-read saved options
-	read_options_file($optfile_system);
-	read_options_file($optfile);
+	# Clear out existing options hash
+	%opt = ();
+	# Re-read options from the options files - these will act as defaults
+	for ( keys %opt_file ) {
+		$opt{$_} = $opt_file{$_} if defined $opt_file{$_};
+	}
 	# Clear search args
 	@search_args = ();
 	# Set each option from the search
@@ -3465,6 +3484,11 @@ sub pvr_load_options {
 			logger "INFO: Option: $_ = $pvrsearches{$name}{$_}\n" if $opt{verbose};
 			$opt{$_} = $pvrsearches{$name}{$_};
 		}
+	}
+	# Allow cmdline args to override those in the PVR search
+	# Re-read options from the cmdline
+	for ( keys %opt_cmdline ) {
+		$opt{$_} = $opt_cmdline{$_} if defined $opt_cmdline{$_};
 	}
 	return 0;
 }
