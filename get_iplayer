@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: October 1st 2008
 #
-my $version = 0.85;
+my $version = 0.86;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -49,6 +49,10 @@ my $version = 0.85;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.86 - 20081001
+# * Improved --symlink option to allow format subtitution from %prog fields
+# * Symlink option now works for radio and podcasts also
 #
 # Changes 0.85 - 20081001
 # * Fixed --pvr-add so that options derrived from options files are not saved to the PVR search
@@ -215,7 +219,7 @@ if ( defined $ENV{HOME} ) {
 	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
 }
 # Make profile dir if it doesnt exist
-mkdir $profile_dir if ! -d $profile_dir;
+mkpath $profile_dir if ! -d $profile_dir;
 # Personal options go here
 my $optfile = "${profile_dir}/options";
 
@@ -1296,7 +1300,14 @@ sub download_programme {
 		# Skip from here if we are only testing downloads
 		return 1 if $opt{test};
 
-		return download_podcast_stream( $ua, $pid, $file, $file_done );
+		# Create symlink filename if required
+		my $file_symlink;
+		if ( $opt{symlink} ) {
+			# Substitute the fields for the pid
+			$file_symlink = substitute_fields( $pid, $opt{symlink} );
+		}
+		
+		return download_podcast_stream( $ua, $pid, $file, $file_done, $file_symlink );
 	}
 
 	logger "INFO: Attempting to Download: $prog{$pid}{name} - $prog{$pid}{episode}\n";
@@ -1393,8 +1404,15 @@ sub download_programme {
 			# Skip from here if we are only testing downloads
 			return 1 if $opt{test};
 
+			# Create symlink filename if required
+			my $file_symlink;
+			if ( $opt{symlink} ) {
+				# Substitute the fields for the pid
+				$file_symlink = substitute_fields( $pid, $opt{symlink} );
+			}
+
 			# Do the audio download
-			return download_rtsp_stream( $ua, $url_2, $file, $file_done, $pid );
+			return download_rtsp_stream( $ua, $url_2, $file, $file_done, $file_symlink, $pid );
 		}
 
 	} else {
@@ -1467,6 +1485,13 @@ sub download_programme {
 		return 1;
 	}
 
+	# Create symlink filename if required
+	my $file_symlink;
+	if ( $opt{symlink} ) {
+		# Substitute the fields for the pid
+		$file_symlink = substitute_fields( $pid, $opt{symlink} );
+	}
+
 	# Skip from here if we are only testing downloads
 	return 1 if $opt{test};
 
@@ -1487,17 +1512,25 @@ sub download_programme {
 
 	# Do the iPhone h.264 download
 	} elsif ( $prog{$pid}{type} eq 'tv' ) {
-		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 1 );
+		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, $file_symlink, 1 );
 
 	# Do the iPhone mp3 download
 	} elsif ( $prog{$pid}{type} eq 'radio' ) {
-		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, 0 );
+		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, $file_symlink, 0 );
 		# If the iphone mp3 download fails then it's probably not ready yet so retry using realaudio
 		$opt{realaudio} = 1 if $return eq 'retry';
 	}
 	
 	# Rename the subtitle file accordingly
 	move($subfile, $subfile_done) if $opt{subtitles} && -f $subfile;
+
+	# Re-symlink file
+	if ( $opt{symlink} ) {
+		# remove old symlink
+		unlink $file_symlink if -l $file_symlink;
+		symlink $file_done, $file_symlink;
+		logger "INFO: Created symlink from '$file_symlink' -> '$file_done'\n" if $opt{verbose};
+	}
 
 	return $return;
 }
@@ -1931,9 +1964,9 @@ sub get_media_stream_data {
 
 
 # Actually do the h.264/mp3 downloading
-# ( $ua, $url_2, $file, $file_done, '0|1 == rearrange moov' )
+# ( $ua, $pid, $url_2, $file, $file_done, '0|1 == rearrange moov' )
 sub download_iphone_stream {
-	my ( $ua, $url_2, $file, $file_done, $rearrange ) = @_;
+	my ( $ua, $url_2, $file, $file_done, $file_symlink, $rearrange ) = @_;
 
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
@@ -2064,11 +2097,12 @@ sub download_iphone_stream {
 		}
 	}
 
-	# Create symlink for freevo if required
+	# Create symlink if required
 	if ( $opt{symlink} ) {
 		# remove old symlink
-		unlink $opt{symlink} if -l $opt{symlink};
-		symlink $file, $opt{symlink};
+		unlink $file_symlink if -l $file_symlink;
+		symlink $file, $file_symlink;
+		logger "INFO: Created symlink from '$file_symlink' -> '$file'\n" if $opt{verbose};
 	}
 
 	# Start marker
@@ -2145,7 +2179,7 @@ sub download_h264_low_stream {
 
 # Actually do the rtsp downloading
 sub download_rtsp_stream {
-	my ( $ua, $url, $file, $file_done, $pid ) = @_;
+	my ( $ua, $url, $file, $file_done, $file_symlink, $pid ) = @_;
 	my $childpid;
 
 	# Create named pipe
@@ -2285,6 +2319,14 @@ sub download_rtsp_stream {
 	}
 	logger "INFO: Downloaded $file_done\n";
 
+	# Create symlink if required
+	if ( $opt{symlink} ) {
+		# remove old symlink
+		unlink $file_symlink if -l $file_symlink;
+		symlink $file_done, $file_symlink;
+		logger "INFO: Created symlink from '$file_symlink' -> '$file_done'\n" if $opt{verbose};
+	}
+
 	return 0;
 }
 
@@ -2292,7 +2334,7 @@ sub download_rtsp_stream {
 
 # Actually do the podcast downloading
 sub download_podcast_stream {
-	my ( $ua, $url_2, $file, $file_done ) = @_;
+	my ( $ua, $url_2, $file, $file_done, $file_symlink ) = @_;
 	my $start_time = time();
 
 	# Set user agent
@@ -2313,7 +2355,6 @@ sub download_podcast_stream {
 		logger "ERROR: Download failed\n";
 		return 22;
 	} else {
-
 		# end marker
 		my $end_time = time();
 		# Final file size
@@ -2325,6 +2366,13 @@ sub download_podcast_stream {
 			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0, 
 			$file_done );
 		move $file, $file_done;
+		# re-symlink file
+		if ( $opt{symlink} ) {
+			# remove old symlink
+			unlink $file_symlink if -l $file_symlink;
+			symlink $file_done, $file_symlink;
+			logger "INFO: Created symlink from '$file_symlink' -> '$file_done'\n" if $opt{verbose};
+		}
 	}
 	return 0;
 }
@@ -2440,36 +2488,26 @@ sub generate_download_filename_prefix {
 	my $pid = shift;
 	my $dir = shift;
 	my $file = shift || "<longname> - <episode> <pid> <version>";
+
 	# If we dont have longname defined just set it to name
 	$prog{$pid}{longname} = $prog{$pid}{name} if ! $prog{$pid}{longname};
 
-	# Create a filename
-	# Tokenize and substitute $format
-	for my $key ( keys %{ $prog{$pid} } ) {
-		my $replace = $prog{$pid}{$key};
-		$file =~ s|\<$key\>|$replace|gi;
-	}
-	$file =~ s|<pid>|$pid|gi;
-	
-	# Replace slashes with _ regardless
-	$file =~ s/[\\\/]/_/g;
-	# Sanitize by default
-	$file =~ s/\s/_/g if ! $opt{whitespace};
-	$file =~ s/[^\w_-]//gi if ! $opt{whitespace};
+	# substitute fields and sanitize $file
+	$file = substitute_fields( $pid, $file );
+
+	# Spaces
+	$file =~ s/\s+/_/g if ! $opt{whitespace};
 
 	# Don't create subdir if we are only testing downloads
 	# Create a subdir for programme sorting option
 	if ( $opt{subdir} && ! $opt{test} ) {
-	        my $subdir = "$prog{$pid}{longname}";
-                $subdir =~ s/[\\\/]/_/g;
-                $subdir =~ s/\s/_/g if ! $opt{whitespace};
-                $subdir =~ s/[^\w_-]//gi if ! $opt{whitespace};
-                $file = "${subdir}/${file}";
-                # Create dir if it does not exist
-                mkdir("${dir}/${subdir}") if ! -d "${dir}/${subdir}";
-        }
+		my $subdir = substitute_fields( $pid, '<longname>' );
+		$file = "${subdir}/${file}";
+		# Create dir if it does not exist
+		mkpath("${dir}/${subdir}") if ! -d "${dir}/${subdir}";
+	}
 
-        return $file;
+	return $file;
 }
 
 
@@ -3196,11 +3234,8 @@ sub run_user_command {
 	my $pid = shift;
 	my $command = shift;
 
-	# Tokenize and substitute $format
-	for my $key ( keys %{ $prog{$pid} } ) {
-		$command =~ s|\<$key\>|$prog{$pid}{$key}|gi;
-	}
-	$command =~ s|<pid>|$pid|gi;
+	# Substitute the fields for the pid (don't sanitize)
+	$command = substitute_fields( $pid, $command, 1 );
 
 	# Escape chars in command for shell use
 	esc_chars(\$command);
@@ -3280,7 +3315,7 @@ sub tag_file {
 		# Only tag if the required tool exists
 		if ( exists_in_path($id3v2) ) {
 			logger "INFO: id3 tagging MP3 file\n";
-			my $cmd = "$id3v2 --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." $prog{$pid}{filename} 1>&2";
+			my $cmd = "$id3v2 --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." \"$prog{$pid}{filename}\" 1>&2";
 			logger "DEGUG: Running $cmd\n" if $opt{debug};
 			if ( system($cmd) ) {
 				logger "WARNING: Failed to tag MP3 file\n";
@@ -3325,6 +3360,53 @@ sub cleanup {
 	logger "INFO: Cleaning up\n" if $opt{verbose};
 	unlink $namedpipe;
 	exit 1;
+}
+
+
+
+# Return a string with formatting fields substituted for a given pid
+sub substitute_fields {
+	my $pid = shift;
+	my $string = shift;
+	my $no_sanitize = shift || 0;
+	my $replace;
+		
+	# Tokenize and substitute $format
+	for my $key ( keys %{ $prog{$pid} } ) {
+		# Remove/replace all non-nice-filename chars if required
+		if (! $no_sanitize) {
+			$replace = sanitize_path( $prog{$pid}{$key} );
+		} else {
+			$replace = $prog{$pid}{$key};
+		}
+		$string =~ s|\<$key\>|$replace|gi;
+	}
+	if (! $no_sanitize) {
+		$replace = sanitize_path( $pid );	
+	} else {
+		$replace = $pid;
+	}
+	$string =~ s|<pid>|$replace|gi;
+	# Remove/replace all non-nice-filename chars if required except for fwd slashes
+	return sanitize_path( $string, 1 );
+}
+
+
+
+# Make a filename/path sane (optionally allow fwd slashes)
+sub sanitize_path {
+	my $string = shift;
+	my $allow_fwd_slash = shift || 0;
+
+	# Remove fwd slash if reqd
+	$string =~ s/\//_/g if ! $allow_fwd_slash;
+
+	# Replace backslashes with _ regardless
+	$string =~ s/\\/_/g;
+	# Sanitize by default
+	$string =~ s/\s/_/g if (! $opt{whitespace}) && (! $allow_fwd_slash);
+	$string =~ s/[^\w_\-\.\/\s]//gi if ! $opt{whitespace};
+	return $string;
 }
 
 
