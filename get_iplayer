@@ -8,13 +8,14 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: September 29th 2008
+# Date: October 1st 2008
 #
-my $version = 0.83;
+my $version = 0.84;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
 # * Downloads streams from BBC iPlayer site (--get)
+# * PVR functionality allows predefined searches to be downloaded from a scheduler such as crond (--pvr)
 # * Re-jigs the mov file so that video can be streamed and start faster on some players
 # * Resume downloads of partially downloaded files
 # * Indexing of all available Podcast, Radio and TV (i.e. listed) iPlayer programs using Atom and RSS feeds
@@ -48,6 +49,11 @@ my $version = 0.83;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.84 - 20080929
+# * New PVR functionality allows you to add a search criteria to a PVR search file for scheduled downloads
+# * Added --pvr, --pvradd=<searchname>, --pvrdel=<searchname>, --pvrlist options
+# * e.g. Add the following line to your crontab: '0 * * * * /path/to/get_iplayer --pvr 2>>/tmp/get_iplayer.log'
 #
 # Changes 0.83 - 20080929
 # * Remove 16MB block downloads for iphone mp3 radio - does not appear to be unnecessary
@@ -145,6 +151,12 @@ Download Options:
  --version-list <versions>     Override the version of programme to download (e.g. '--version-list signed,default')
  -t, --test                    Test only - no download (will show programme type)
  
+PVR Options:
+ --pvr                         Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)
+ --pvradd <search name>        Add the current search terms to the named PVR search
+ --pvrdel <search name>        Remove the named search from the PVR searches
+ --pvrlist                     Show the PVR search list
+
 Output Options:
  -o, --output <dir>            Default Download output directory for all downloads
  --outputradio <dir>           Download output directory for radio
@@ -264,6 +276,10 @@ GetOptions(
 	"versionlist|version-list=s"	=> \$opt{versionlist},
 	"versions=s"			=> \$opt{versions},
 	"list=s"			=> \$opt{list},
+	"pvr"				=> \$opt{pvr},
+	"pvradd|pvr-add=s"		=> \$opt{pvradd},
+	"pvrdel|pvr-del=s"		=> \$opt{pvrdel},
+	"pvrlist|pvr-list"		=> \$opt{pvrlist},
 	"save"				=> \$save,
 ) || die usage();
 usage() if $opt{help};
@@ -271,54 +287,36 @@ usage() if $opt{help};
 # Save opts if specified
 save_options_file($optfile) if $save;
 
-# Default to type=tv
-$opt{type} = 'tv' if ! $opt{type};
-# Expand 'all' to various prog types
-$opt{type} = 'tv,radio,podcast' if $opt{type} =~ /(all|any)/i;
-# Ensure lowercase
-$opt{type} = lc( $opt{type} );
 
-# Options
-my %download_dir	= (
-	'tv'		=> $opt{outputtv} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
-	'radio'		=> $opt{outputradio} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
-	'podcast'	=> $opt{outputpodcast} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
-);
-my %cachefile = (
-	'tv'		=> "${profile_dir}/tv.cache",
-	'radio'		=> "${profile_dir}/radio.cache",
-	'podcast'	=> "${profile_dir}/podcast.cache",
-);
-my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
-my $historyfile		= "${profile_dir}/download_history";
-my $cookiejar		= "${profile_dir}/cookies";
-my $namedpipe 		= "${profile_dir}/namedpipe.$$";
-my $cache_secs 		= $opt{expiry} || 14400;
-my $lwp_request_timeout	= 20;
-my $info_limit		= 40;
-my $mplayer		= $opt{mplayer} || 'mplayer';
-my $mplayer_opts	= '-nolirc';
-$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
-my $lame		= $opt{lame} || 'lame';
-my $lame_opts		= '-f ';
-$lame_opts		.= '--quiet ' if $opt{quiet};
-my $vlc			= $opt{vlc} || 'cvlc';
-my $vlc_opts		= '-vv';
-my $id3v2		= $opt{id3v2} || 'id3v2';
-my $tee			= 'tee';
-my $bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
-my $iphone_block_size	= 0x2000000; # 32MB
-# Order with which to search for programme versions (can be overridden by --versionlist option)
-my @version_search_list = qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
-@version_search_list = split /,/, $opt{versionlist} if $opt{versionlist};
-# Set quiet, test and get options if we're asked for streaminfo
-if ( $opt{streaminfo} ) {
-	$opt{test} = 1;
-	$opt{get} = 1;
-	$opt{quiet} = 1;
-}
+# Global vars
 
-# URLs
+# Programme data structure
+# $prog{$pid} = {
+#	'index'		=> <index number>,
+#	'name'		=> <programme short name>,
+#	'episode'	=> <Episode info>,
+#	'desc'		=> <Long Description>,
+#	'available'	=> <Date/Time made available or remaining>,
+#	'duration'	=> <duration in HH:MM:SS>
+#	'versions'	=> <comma separated list of versions, e.g default, signed>
+#	'thumbnail'	=> <programme thumbnail url>
+#	'channel	=> <channel>
+#	'categories'	=> <Comma separtaed list of categories>
+# 	'type'		=> <Type: tv, radio or podcast>
+#	'timeadded'	=> <timestamp when programme was added to cache>
+#	'longname'	=> <Long name (only parsed in stage 1 download)>,
+#	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
+#	'filename'	=> <Path and Filename of saved file - set only while downloading>
+#	'dir'		=> <Filename Directory of saved file - set only while downloading>
+#	'fileprefix'	=> <Filename Prefix of saved file - set only while downloading>
+#	'ext'		=> <Filename Extension of saved file - set only while downloading>
+#};
+my %prog;
+my %index_pid; # Hash to obtain pid given an index
+my $now;
+my $childpid;
+
+# Static URLs
 my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/400
 my $prog_feed_url		= 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 my $prog_iplayer_metadata	= 'http://www.bbc.co.uk/iplayer/playlist/'; # $pid
@@ -332,6 +330,7 @@ my $podcast_index_feed_url	= 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
 
+# Static hash definitions
 my %channels;
 $channels{tv} = {
 	'bbc_one'				=> 'tv|BBC One',
@@ -372,7 +371,6 @@ $channels{radio} = {
 #	'categories/radio'			=> 'radio|All',
 };
 
-
 # User Agents
 my %user_agent = (
   	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
@@ -385,173 +383,249 @@ my %user_agent = (
 # Setup signal handlers
 $SIG{INT} = $SIG{PIPE} =\&cleanup;
 
-
-# Sanity check some conflicting options
-if ($opt{nowrite} && (!$opt{stdout})) {
-	logger "ERROR: Cannot download to nowhere\n";
-	exit 1;
-}
-
-# Programme data structure
-# $prog{$pid} = {
-#	'index'		=> <index number>,
-#	'name'		=> <programme short name>,
-#	'episode'	=> <Episode info>,
-#	'desc'		=> <Long Description>,
-#	'available'	=> <Date/Time made available or remaining>,
-#	'duration'	=> <duration in HH:MM:SS>
-#	'versions'	=> <comma separated list of versions, e.g default, signed>
-#	'thumbnail'	=> <programme thumbnail url>
-#	'channel	=> <channel>
-#	'categories'	=> <Comma separtaed list of categories>
-# 	'type'		=> <Type: tv, radio or podcast>
-#	'timeadded'	=> <timestamp when programme was added to cache>
-#	'longname'	=> <Long name (only parsed in stage 1 download)>,
-#	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
-#	'filename'	=> <Path and Filename of saved file - set only while downloading>
-#	'dir'		=> <Filename Directory of saved file - set only while downloading>
-#	'fileprefix'	=> <Filename Prefix of saved file - set only while downloading>
-#	'ext'		=> <Filename Extension of saved file - set only while downloading>
-#};
-my %prog;
-# Hash to obtain pid given an index
-my %index_pid;
-my $now;
-my $childpid;
-
-# Web proxy
-my $proxy_url = $opt{proxy} || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
-logger "INFO: Using Proxy $proxy_url\n" if $proxy_url;
-
-# Update this script if required
-if ($opt{update}) {
-	update_script();
-}
-
-# Check for valid dload dirs or create them
-for ( keys %download_dir ) {
-	if ( ! -d $download_dir{$_} ) {
-		logger "INFO: Created directory $download_dir{$_}\n";
-		mkpath($download_dir{$_});
-	}
-}
+# Other Non-option dependant vars
+my %cachefile = (
+	'tv'		=> "${profile_dir}/tv.cache",
+	'radio'		=> "${profile_dir}/radio.cache",
+	'podcast'	=> "${profile_dir}/podcast.cache",
+);
+my $get_iplayer_stream	= 'get_iplayer_freevo_wrapper';	# Location of wrapper script for streaming with mplayer/xine on freevo
+my $historyfile		= "${profile_dir}/download_history";
+my $pvr_dir		= "${profile_dir}/pvr/";
+my $cookiejar		= "${profile_dir}/cookies";
+my $namedpipe 		= "${profile_dir}/namedpipe.$$";
+my $lwp_request_timeout	= 20;
+my $info_limit		= 40;
+my $iphone_block_size	= 0x2000000; # 32MB
 
 
-# Get stream links from BBC iplayer site or from cache (also populates all hashes) specified in --type option
-get_links( $_ ) for split /,/, $opt{type};
-
-
-# List elements (i.e. 'channel' 'categories') if required and exit
-if ( $opt{list} ) {
-	list_unique_element_counts( $opt{list} );
-	exit 0;
-}
-
-# Write HTML and XML files if required
-create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
-create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
-create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
-
-# Get arbitrary pid
-if ( $opt{pid} ) {
-	# Remove any url parts from the pid
-	$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-	# Retry loop
-	my $count;
-	my $retries = 3;
-	my $retcode;
-	exit 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
-	while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) eq 'retry' ) {
-		logger "WARNING: Retrying download for PID $opt{pid}\n";
-		$count++;
-	}
-	# Add to history and Run post download command if download was successful
-	if ($retcode == 0) {
-		add_to_download_history( $opt{pid} );
-		run_user_command( $opt{pid}, $opt{command} ) if $opt{command};
-	}	
-	exit 0;
-}
-
+# Option dependant var definitions
+my %download_dir;
+my $cache_secs;
+my $mplayer;
+my $mplayer_opts;
+my $lame;
+my $lame_opts;
+my $vlc;
+my $vlc_opts;
+my $id3v2;
+my $tee;
+my $bandwidth;
+my @version_search_list;
+my $proxy_url;
+my @search_args = @ARGV;
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
-push @ARGV, '.*' if ! $ARGV[0];
+push @search_args, '.*' if ! $search_args[0];
 
-# Parse remaining args
-my @match_list;
-for ( @ARGV ) {
-	chomp();
 
-	# If Numerical value < 30000
-	if ( /^[\d]+$/ && $_ < 30000) {
-		push @match_list, $_;
+# PVR functions
+my %pvrsearches; # $pvrsearches{searchname}{<option>} = <value>;
+if ( $opt{pvradd} ) {
+	pvr_add( $opt{pvradd}, @search_args );
+	exit 0;
 
-	# If PID then find matching programmes with this PID
-	} elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
-		s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
-		push @match_list, get_regex_matches( $1 );
+} elsif ( $opt{pvrdel} ) {
+	pvr_del( $opt{pvrdel} );
+	exit 0;
 
-	# Else assume this is a programme name regex
-	} else {
-		push @match_list, get_regex_matches( $_ );
+} elsif ( $opt{pvrlist} ) {
+	pvr_display_list();
+	exit 0;
+
+# Load all PVR searches and run one-by-one
+} elsif ( $opt{pvr} ) {
+	# Load all PVR searches
+	pvr_load_list();
+	# For each PVR search
+	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
+		logger "\nRunning PVR Search: $name:\n";
+		# Load options for specified pvr search name
+		pvr_load_options($name);
+		# Do the downloads (force --get option)
+		$opt{get} = 1;
+		process_matches( @search_args );
 	}
+
+# Else just process command line args
+} else {
+	process_matches( @search_args );
 }
-
-# De-dup matches and retain order
-my %seen = ();
-my @unique = grep { ! $seen{ $_ }++ } @match_list;
-@match_list = @unique;
-
-# Go get the cached data for other programme types if the index numbers require it
-my %require;
-for ( @match_list ) {
-	$require{tv} = 1 if $_ >= 1 && $_ < 10000 && ( ! $require{tv} ) && $opt{type} !~ /tv/;
-	$require{radio} = 1 if $_ >= 10000 && $_ < 20000 && ( ! $require{radio} ) && $opt{type} !~ /radio/;
-	$require{podcast} = 1 if $_ >= 20000 && $_ < 30000 && ( ! $require{podcast} ) && $opt{type} !~ /podcast/;
-}
-# Get extra required programme caches
-logger "INFO: Additionally getting cached programme data for ".(join ', ', keys %require)."\n" if %require > 0;
-# Get stream links from BBC iplayer site or from cache (also populates all hashes)
-for (keys %require) {
-	# Get $_ stream links
-	get_links( $_ );
-	# Add new prog types to the type option
-	$opt{type} .= ",$_";
-}
-
-# Display list for download
-logger "Matches:\n" if @match_list;
-@match_list = list_progs( @match_list );
-
-# Do the downloads based on list of index numbers if required
-if ( $opt{get} || $opt{stdout} ) {
-	for (@match_list) {
-		# Retry loop
-		my $count = 0;
-		my $retries = 3;
-		my $retcode;
-		my $pid = $index_pid{$_};
-		next if ( ! $opt{streaminfo} ) && check_download_history( $pid );
-		# Skip and warn if there is no pid
-		if ( ! $pid ) {
-			logger "ERROR: No PID for index $_ (try using --type option ?)\n";
-			next;
-		}
-		while ( $count < $retries && $pid && ($retcode = download_programme( $pid )) eq 'retry' ) {
-			logger "WARNING: Retrying download for '$prog{$pid}{name} - $prog{$pid}{episode}'\n";
-			$count++;
-		}
-		# Add to history, tag file, and run post download command if download was successful
-		if ($retcode eq '0') {
-			add_to_download_history( $pid );
-			tag_file( $pid );
-			run_user_command( $pid, $opt{command} ) if $opt{command};
-		}
-	}
-}
-
 exit 0;
 
 
+
+# Use the specified options to process the matches in specified array
+sub process_matches {
+	my @search_args = @_;
+	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt{verbose};
+
+	# Option dependant vars
+	%download_dir	= (
+		'tv'		=> $opt{outputtv} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+		'radio'		=> $opt{outputradio} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+		'podcast'	=> $opt{outputpodcast} || $opt{output} || $ENV{IPLAYER_OUTDIR} || '.',
+	);
+	# Default to type=tv
+	$opt{type} 		= 'tv' if ! $opt{type};
+	# Expand 'all' to various prog types
+	$opt{type} 		= 'tv,radio,podcast' if $opt{type} =~ /(all|any)/i;
+	# Ensure lowercase
+	$opt{type} = lc( $opt{type} );
+	$cache_secs 		= $opt{expiry} || 14400;
+	$mplayer		= $opt{mplayer} || 'mplayer';
+	$mplayer_opts		= '-nolirc';
+	$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
+	$lame			= $opt{lame} || 'lame';
+	$lame_opts		= '-f ';
+	$lame_opts		.= '--quiet ' if $opt{quiet};
+	$vlc			= $opt{vlc} || 'cvlc';
+	$vlc_opts		= '-vv';
+	$id3v2			= $opt{id3v2} || 'id3v2';
+	$tee			= 'tee';
+	$bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
+	# Order with which to search for programme versions (can be overridden by --versionlist option)
+	@version_search_list 	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+	@version_search_list 	= split /,/, $opt{versionlist} if $opt{versionlist};
+	# Set quiet, test and get options if we're asked for streaminfo
+	if ( $opt{streaminfo} ) {
+		$opt{test} 	= 1;
+		$opt{get} 	= 1;
+		$opt{quiet} 	= 1;
+	}
+
+	# Sanity check some conflicting options
+	if ($opt{nowrite} && (!$opt{stdout})) {
+		logger "ERROR: Cannot download to nowhere\n";
+		exit 1;
+	}
+
+	# Web proxy
+	$proxy_url = $opt{proxy} || $ENV{HTTP_PROXY} || $ENV{http_proxy} || '';
+	logger "INFO: Using Proxy $proxy_url\n" if $proxy_url;
+
+	# Update this script if required
+	if ($opt{update}) {
+		update_script();
+	}
+
+	# Check for valid dload dirs or create them
+	for ( keys %download_dir ) {
+		if ( ! -d $download_dir{$_} ) {
+			logger "INFO: Created directory $download_dir{$_}\n";
+			mkpath($download_dir{$_});
+		}
+	}
+
+	# Get stream links from BBC iplayer site or from cache (also populates all hashes) specified in --type option
+	get_links( $_ ) for split /,/, $opt{type};
+
+	# List elements (i.e. 'channel' 'categories') if required and exit
+	if ( $opt{list} ) {
+		list_unique_element_counts( $opt{list} );
+		exit 0;
+	}
+
+	# Write HTML and XML files if required
+	create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
+	create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+	create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
+
+	# Get arbitrary pid
+	if ( $opt{pid} ) {
+		# Remove any url parts from the pid
+		$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+		# Retry loop
+		my $count;
+		my $retries = 3;
+		my $retcode;
+		exit 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
+		while ( $count < $retries && ($retcode = download_programme( $opt{pid} )) eq 'retry' ) {
+			logger "WARNING: Retrying download for PID $opt{pid}\n";
+			$count++;
+		}
+		# Add to history and Run post download command if download was successful
+		if ($retcode == 0) {
+			add_to_download_history( $opt{pid} );
+			run_user_command( $opt{pid}, $opt{command} ) if $opt{command};
+		}	
+		exit 0;
+	}
+
+	# Parse remaining args
+	my @match_list;
+	for ( @search_args ) {
+		chomp();
+	
+		# If Numerical value < 30000
+		if ( /^[\d]+$/ && $_ < 30000) {
+			push @match_list, $_;
+	
+		# If PID then find matching programmes with this PID
+		} elsif ( /^.*b0[a-z,0-9]{6}.*$/ ) {
+			s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
+			push @match_list, get_regex_matches( $1 );
+	
+		# Else assume this is a programme name regex
+		} else {
+			push @match_list, get_regex_matches( $_ );
+		}
+	}
+	
+	# De-dup matches and retain order
+	my %seen = ();
+	my @unique = grep { ! $seen{ $_ }++ } @match_list;
+	@match_list = @unique;
+	
+	# Go get the cached data for other programme types if the index numbers require it
+	my %require;
+	for ( @match_list ) {
+		$require{tv} = 1 if $_ >= 1 && $_ < 10000 && ( ! $require{tv} ) && $opt{type} !~ /tv/;
+		$require{radio} = 1 if $_ >= 10000 && $_ < 20000 && ( ! $require{radio} ) && $opt{type} !~ /radio/;
+		$require{podcast} = 1 if $_ >= 20000 && $_ < 30000 && ( ! $require{podcast} ) && $opt{type} !~ /podcast/;
+	}
+	# Get extra required programme caches
+	logger "INFO: Additionally getting cached programme data for ".(join ', ', keys %require)."\n" if %require > 0;
+	# Get stream links from BBC iplayer site or from cache (also populates all hashes)
+	for (keys %require) {
+		# Get $_ stream links
+		get_links( $_ );
+		# Add new prog types to the type option
+		$opt{type} .= ",$_";
+	}
+
+	# Display list for download
+	logger "Matches:\n" if @match_list;
+	@match_list = list_progs( @match_list );
+
+	# Do the downloads based on list of index numbers if required
+	if ( $opt{get} || $opt{stdout} ) {
+		for (@match_list) {
+			# Retry loop
+			my $count = 0;
+			my $retries = 3;
+			my $retcode;
+			my $pid = $index_pid{$_};
+			next if ( ! $opt{streaminfo} ) && check_download_history( $pid );
+			# Skip and warn if there is no pid
+			if ( ! $pid ) {
+				logger "ERROR: No PID for index $_ (try using --type option ?)\n";
+				next;
+			}
+			while ( $count < $retries && $pid && ($retcode = download_programme( $pid )) eq 'retry' ) {
+				logger "WARNING: Retrying download for '$prog{$pid}{name} - $prog{$pid}{episode}'\n";
+				$count++;
+			}
+			# Add to history, tag file, and run post download command if download was successful
+			if ($retcode eq '0') {
+				add_to_download_history( $pid );
+				tag_file( $pid );
+				run_user_command( $pid, $opt{command} ) if $opt{command};
+			}
+		}
+	}
+
+	return 0;
+}
 
 
 # Lists progs given an array of index numbers, also retuens an array with non-existent entries removed
@@ -2916,6 +2990,18 @@ sub read_options_file {
 
 
 
+# Display options
+sub display_options {
+	logger "Default options:\n";
+	for ( grep !/(help|debug|get|^pvr)/, sort keys %opt ) {
+		logger "\t$_ = $opt{$_}\n" if defined $opt{$_};
+	}
+	logger "\n";
+	return 0;
+}
+
+
+
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
 sub get_available_time_string {
 	my $datestring = shift;
@@ -3225,4 +3311,160 @@ sub cleanup {
 	logger "INFO: Cleaning up\n" if $opt{verbose};
 	unlink $namedpipe;
 	exit 1;
+}
+
+
+
+# Save the options on the cmdline as a PVR search with the specified name
+sub pvr_add {
+	my $name = shift;
+	my @search_args = @_;
+	my @options;
+	# validate name
+	if ( $name !~ m{[\w\-\+]+} ) {
+		logger "ERROR: Invalid PVR search name '$name'\n";
+		return 1;
+	}
+	# Parse valid options and create array
+	for (grep /^(long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {$a <=> $b} keys %opt) {
+		push @options, "$_ $opt{$_}" if defined $opt{$_};
+		logger "DEBUG: Adding option $_ = $opt{$_}\n" if $opt{debug} && defined $opt{$_};
+	}
+	# Add search args to array
+	for ( my $count = 0; $count <= $#search_args; $count++ ) {
+		push @options, "search${count} $search_args[$count]";
+		logger "DEBUG: Adding search${count} = $search_args[$count]\n" if $opt{debug};
+	}
+	# Save search to file
+	pvr_save( $name, @options );
+	logger "INFO: Added PVR search '$name':\n";
+	return 0;
+}
+
+
+
+# Delete the named PVR search
+sub pvr_del {
+	my $name = shift;
+	# validate name
+	if ( $name !~ m{[\w\-\+]+} ) {
+		logger "ERROR: Invalid PVR search name '$name'\n";
+		return 1;
+	}
+	# Delete pvr search file
+	if ( -f ${pvr_dir}.$name ) {
+		unlink ${pvr_dir}.$name;
+	} else {
+		logger "ERROR: PVR search '$name' does not exist\n";
+		return 1;
+	}
+	return 0;
+}
+
+
+
+# Display all the PVR searches
+sub pvr_display_list {
+	# Load all the PVR searches
+	pvr_load_list();
+	# Display default options
+	display_options();
+	# Print out list
+	logger "All PVR Searches:\n\n";
+	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
+		logger "PVR Search '$name':\n";
+		for ( sort keys %{ $pvrsearches{$name} } ) {
+			logger "\t$_ = $pvrsearches{$name}{$_}\n";
+		}
+		logger "\n";
+	}
+	return 0;
+}
+
+
+
+# Load all the PVR searches into %pvrsearches
+sub pvr_load_list {
+	# Make dir if not existing
+	mkpath $pvr_dir if ! -d $pvr_dir;
+	# Get list of files in pvr_dir
+	# open file with handle DIR
+	opendir( DIR, $pvr_dir );
+	if ( ! opendir( DIR, $pvr_dir) ) {
+		logger "ERROR: Cannot open directory $pvr_dir\n";
+		return 1;
+	}
+	# Get contents of directory (ignoring . .. and ~ files)
+	my @files = grep ! /(^\.{1,2}$|^.*~$)/, readdir DIR;
+	# Close the directory
+	closedir DIR;
+	# process each file
+	for my $file (@files) {
+		chomp($file);
+		# Re-add the dir
+		$file = "${pvr_dir}/$file";
+		next if ! -f $file;
+		if ( ! open (PVR, "< $file") ) {
+			logger "WARNING: Cannot read PVR search file $file\n";
+			next;
+		}
+		my @options = <PVR>;
+		close PVR;
+		# Get search name from filename
+		my $name = $file;
+		$name =~ s/^.*\/([^\/]+?)$/$1/g;
+		for (@options) {
+			/^\s*([\w\-_]+?)\s+(.*)\s*$/;
+			logger "DEBUG: PVR search '$name': option $1 = $2\n" if $opt{debug};
+			$pvrsearches{$name}{$1} = $2;
+		}
+		logger "INFO: Loaded PVR search '$name'\n" if $opt{verbose};
+	}
+	logger "INFO: Loaded PVR search list\n" if $opt{verbose};
+	return 0;
+}
+
+
+
+# Save the array options specified as a PVR search
+sub pvr_save {
+	my $name = shift;
+	my @options = @_;
+	# Open file
+	if ( ! open (PVR, "> ${pvr_dir}/${name}") ) { 
+		logger "ERROR: Cannot save PVR search to ${pvr_dir}.$name\n";
+		return 1;
+	}
+	# Write options array to file
+	for (@options) {
+		print PVR "$_\n";
+	}
+	close PVR;
+	logger "INFO: Saved PVR search '$name'\n";
+	return 0;
+}
+
+
+
+# Clear all exisiting global args and opts then load the options specified in the default options and specified PVR search
+sub pvr_load_options {
+	my $name = shift;
+	# Re-read saved options
+	read_options_file($optfile_system);
+	read_options_file($optfile);
+	# Clear search args
+	@search_args = ();
+	# Set each option from the search
+	for ( sort {$a <=> $b} keys %{ $pvrsearches{$name} } ) {
+		# Add to list of search args if this is not an option
+		if ( /^search\d+$/ ) {
+			logger "INFO: $_ = $pvrsearches{$name}{$_}\n" if $opt{verbose};
+			push @search_args, $pvrsearches{$name}{$_};
+		# Else populate options
+		} else {
+			logger "INFO: Option: $_ = $pvrsearches{$name}{$_}\n" if $opt{verbose};
+			$opt{$_} = $pvrsearches{$name}{$_};
+		}
+	}
+	return 0;
 }
