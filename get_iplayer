@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: October 2nd 2008
+# Date: October 3rd 2008
 #
-my $version = 0.87;
+my $version = 0.88;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -49,6 +49,11 @@ my $version = 0.87;
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
+#
+# Changes 0.88 - 20081003
+# * Fixed update_script function which was downloading the new version twice! (darn, it is half as popular as I thought)
+# * PVR enable/disable search support allows you to disable a search without deleting it. --pvr-enable=<searchname>, --pvr-disable=<searchname>
+# * Using the --test option with --pvr no longer uses the lockfile
 #
 # Changes 0.87 - 20081002
 # * using --test with --pvr allows user to see which programmes will match the PVR downloads
@@ -172,6 +177,8 @@ PVR Options:
  --pvr                         Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)
  --pvradd <search name>        Add the current search terms to the named PVR search
  --pvrdel <search name>        Remove the named search from the PVR searches
+ --pvr-enable <search name>    Enable a previously disabled named PVR search
+ --pvr-disable <search name>   Disable (not delete) a named PVR search
  --pvrlist                     Show the PVR search list
 
 Output Options:
@@ -184,7 +191,7 @@ Output Options:
  -w, --whitespace              Keep whitespace (and escape chars) in filenames
  -q, --quiet                   No logging output
  -c, --command <command>       Run user command after successful download using args such as <pid>, <name> etc
- 
+
 Config Options:
  -f, --flush, --refresh        Refresh cache
  -e, --expiry <secs>           Cache expiry in seconds (default 4hrs)
@@ -297,6 +304,8 @@ GetOptions(
 	"pvr"				=> \$opt_cmdline{pvr},
 	"pvradd|pvr-add=s"		=> \$opt_cmdline{pvradd},
 	"pvrdel|pvr-del=s"		=> \$opt_cmdline{pvrdel},
+	"pvrdisable|pvr-disable=s"	=> \$opt_cmdline{pvrdisable},
+	"pvrenable|pvr-enable=s"	=> \$opt_cmdline{pvrenable},
 	"pvrlist|pvr-list"		=> \$opt_cmdline{pvrlist},
 	"save"				=> \$save,
 ) || die usage();
@@ -449,6 +458,14 @@ if ( $opt{pvradd} ) {
 	pvr_del( $opt{pvrdel} );
 	exit 0;
 
+} elsif ( $opt{pvrdisable} ) {
+	pvr_disable( $opt{pvrdisable} );
+	exit 0;
+
+} elsif ( $opt{pvrenable} ) {
+	pvr_enable( $opt{pvrenable} );
+	exit 0;
+
 } elsif ( $opt{pvrlist} ) {
 	pvr_display_list();
 	exit 0;
@@ -457,11 +474,16 @@ if ( $opt{pvradd} ) {
 } elsif ( $opt{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	$lockfile = "${profile_dir}/pvr_lock";
-	lockfile(43200);
+	lockfile(43200) if ! $opt{test};
 	# Load all PVR searches
 	pvr_load_list();
 	# For each PVR search
 	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
+		# Ignore if this search is disabled
+		if ( $pvrsearches{$name}{disable} ) {
+			logger "\nSkipping disabled PVR Search '$name'\n" if $opt{verbose};
+			next;
+		}
 		logger "\nRunning PVR Search '$name'\n";
 		# Clear then Load options for specified pvr search name
 		pvr_load_options($name);
@@ -1197,7 +1219,8 @@ sub get_links {
 
 	# Open cache file (need to verify we can even read this)
 	if ( open(CACHE, "< $cachefile{$type}") ) {
-		@cache = <CACHE>;
+		# Get file contents less any comments
+		@cache = grep !/^[\#\s]/, <CACHE>;
 		close (CACHE);
 	}
 
@@ -1244,6 +1267,7 @@ sub get_links {
 		unlink $cachefile{$type};
 		my $now = time();
 		if ( open(CACHE, "> $cachefile{$type}") ) {
+			print CACHE "#Index|Type|Name|Pid|Available|Episode|Versions|Duration|Desc|Channel|Categories|Thumbnail|TimeAdded\n";
 			for (sort {$a <=> $b} keys %index_pid) {
 				my $pid = $index_pid{$_};
 				# Only write entries for correct prog type
@@ -2803,11 +2827,10 @@ sub update_script {
 		# Compare version numbers
 		if ( $latest_ver > $version ) {
 			logger "INFO: New version $latest_ver available, downloading\n";
-			my $res = $ua->request( HTTP::Request->new( GET => $update_url ) );		
 			my $req = HTTP::Request->new ('GET', $update_url);
 			# Save content into a $script_file
 			my $script_file = $0;
-			$ua->request($req, $script_file.'.tmp');
+			my $res = $ua->request($req, $script_file.'.tmp');
 			# If the download was successful then copy over this script and make executable after making a backup of this script
 			if ( $res->is_success ) {
 				if ( copy($script_file, $script_file.'.old') ) {
@@ -3471,7 +3494,12 @@ sub pvr_display_list {
 	# Print out list
 	logger "All PVR Searches:\n\n";
 	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
-		logger "PVR Search '$name':\n";
+		# Report whether disabled
+		if ( $pvrsearches{$name}{disable} ) {
+			logger "(Disabled) PVR Search '$name':\n";
+		} else {
+			logger "PVR Search '$name':\n";
+		}
 		for ( sort keys %{ $pvrsearches{$name} } ) {
 			logger "\t$_ = $pvrsearches{$name}{$_}\n";
 		}
@@ -3562,8 +3590,8 @@ sub pvr_load_options {
 		if ( /^search\d+$/ ) {
 			logger "INFO: $_ = $pvrsearches{$name}{$_}\n" if $opt{verbose};
 			push @search_args, $pvrsearches{$name}{$_};
-		# Else populate options
-		} else {
+		# Else populate options, ignore disable option
+		} elsif ( $_ ne 'disable' ) {
 			logger "INFO: Option: $_ = $pvrsearches{$name}{$_}\n" if $opt{verbose};
 			$opt{$_} = $pvrsearches{$name}{$_};
 		}
@@ -3573,6 +3601,38 @@ sub pvr_load_options {
 	for ( keys %opt_cmdline ) {
 		$opt{$_} = $opt_cmdline{$_} if defined $opt_cmdline{$_};
 	}
+	return 0;
+}
+
+
+
+# Disable a PVR search by adding 'disable 1' option
+sub pvr_disable {
+	my $name = shift;
+	pvr_load_list();
+	my @options;
+	for ( keys %{ $pvrsearches{$name} }) {
+		push @options, "$_ $pvrsearches{$name}{$_}";
+	}
+	# Add the disable option
+	push @options, 'disable 1';
+	pvr_save( $name, @options );
+	return 0;
+}
+
+
+
+# Re-enable a PVR search by removing 'disable 1' option
+sub pvr_enable {
+	my $name = shift;
+	pvr_load_list();
+	my @options;
+	for ( keys %{ $pvrsearches{$name} }) {
+		push @options, "$_ $pvrsearches{$name}{$_}";
+	}
+	# Remove the disable option
+	@options = grep !/^disable\s/, @options;
+	pvr_save( $name, @options );	
 	return 0;
 }
 
