@@ -10,7 +10,7 @@
 # License: GPLv3 (see LICENSE.txt)
 # Date: October 3rd 2008
 #
-my $version = 0.88;
+my $version = 0.89;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -50,6 +50,9 @@ my $version = 0.88;
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 #
+# Changes 0.89 - 20081004
+# * Fixed bug where <profile>/pvr/ dir not get created with --pvr-add
+# 
 # Changes 0.88 - 20081003
 # * Fixed update_script function which was downloading the new version twice! (darn, it is half as popular as I thought)
 # * PVR enable/disable search support allows you to disable a search without deleting it. --pvr-enable=<searchname>, --pvr-disable=<searchname>
@@ -3557,6 +3560,8 @@ sub pvr_load_list {
 sub pvr_save {
 	my $name = shift;
 	my @options = @_;
+	# Make dir if not existing
+	mkpath $pvr_dir if ! -d $pvr_dir;
 	# Open file
 	if ( ! open (PVR, "> ${pvr_dir}/${name}") ) { 
 		logger "ERROR: Cannot save PVR search to ${pvr_dir}.$name\n";
