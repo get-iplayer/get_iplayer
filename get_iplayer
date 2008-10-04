@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: October 3rd 2008
+# Date: October 4th 2008
 #
-my $version = 0.89;
+my $version = 0.90;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -50,6 +50,10 @@ my $version = 0.89;
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 #
+# Changes 0.90 - 20081004
+# * Allow user to specify filename prefix format (not pathname or extention) using %prog field names. e.g. --file-prefix='<name>-<episode>-<pid>-<type>'
+# * Fixed bug where saved options were ignored
+# 
 # Changes 0.89 - 20081004
 # * Fixed bug where <profile>/pvr/ dir not get created with --pvr-add
 # 
@@ -189,6 +193,7 @@ Output Options:
  --outputradio <dir>           Download output directory for radio
  --outputtv <dir>              Download output directory for tv
  --outputpodcast <dir>         Download output directory for podcasts
+ --file-prefix <format>        The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'
  -s, --subdir                  Downloaded files into Programme name subdirectory
  -n, --nowrite                 No writing of file to disk (use with -x to prevent a copy being stored on disk)
  -w, --whitespace              Keep whitespace (and escape chars) in filenames
@@ -260,6 +265,7 @@ GetOptions(
 	"outputtv=s"			=> \$opt_cmdline{outputtv},
 	"outputradio=s"			=> \$opt_cmdline{outputradio},
 	"outputpodcast=s"		=> \$opt_cmdline{outputpodcast},
+	"file-prefix|fileprefix=s"	=> \$opt_cmdline{fileprefix},
 	"proxy|p=s"			=> \$opt_cmdline{proxy},
 	"stdout|stream|x"		=> \$opt_cmdline{stdout},
 	"subdirs|subdir|s"		=> \$opt_cmdline{subdir},
@@ -314,11 +320,12 @@ GetOptions(
 ) || die usage();
 usage() if $opt_cmdline{help};
 
-# Copy options to %opt
-%opt = %opt_cmdline;
-
+# Merge cmdline options into %opt
+for ( keys %opt_cmdline ) {
+	$opt{$_} = $opt_cmdline{$_} if defined $opt_cmdline{$_};
+}
 # Save opts if specified
-save_options_file($optfile) if $save;
+save_options_file( $optfile ) if $save;
 
 
 # Global vars
@@ -508,6 +515,8 @@ exit 0;
 # Use the specified options to process the matches in specified array
 sub process_matches {
 	my @search_args = @_;
+	# Show options
+	display_current_options() if $opt{verbose};
 	# Clear prog hash
 	%prog = ();
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt{verbose};
@@ -1326,12 +1335,11 @@ sub download_programme {
 		$prog{$pid}{ext} = $pid;
 		$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
 		$prog{$pid}{ext} =~ s|^.*\.(\w+)$|$1|g;
-		my $file_prefix = generate_download_filename_prefix($pid, $dir, "<longname> - <episode> $filename_orig");
-		$prog{$pid}{fileprefix} = $file_prefix;
+		$prog{$pid}{fileprefix} = generate_download_filename_prefix($pid, $dir, $opt{fileprefix} || "<longname> - <episode> $filename_orig");
 		$prog{$pid}{dir} = $dir;
-		logger "\rINFO: File name prefix = $file_prefix                  \n";
-		my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
-		my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
+		logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                  \n";
+		my $file_done = "${dir}/$prog{$pid}{fileprefix}.$prog{$pid}{ext}";
+		my $file = "${dir}/$prog{$pid}{fileprefix}.partial.$prog{$pid}{ext}";
 		$prog{$pid}{filename} = $file_done;
 		if ( -f $file_done ) {
 			logger "WARNING: File $file_done already exists\n\n";
@@ -1430,12 +1438,11 @@ sub download_programme {
 			$prog{$pid}{ext} = 'mp3';
 			$prog{$pid}{ext} = 'ra'  if $opt{raw};
 			$prog{$pid}{ext} = 'wav' if $opt{wav};
-			my $file_prefix = generate_download_filename_prefix( $pid, ${dir}, "<longname> - <episode> <pid>" );
-			logger "\rINFO: File name prefix = $file_prefix                 \n";
-			$prog{$pid}{fileprefix} = $file_prefix;
+			$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, ${dir}, $opt{fileprefix} || "<longname> - <episode> <pid>" );
+			logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                 \n";
 			$prog{$pid}{dir} = $dir;
-			my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
-			my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
+			my $file_done = "${dir}/$prog{$pid}{fileprefix}.$prog{$pid}{ext}";
+			my $file = "${dir}/$prog{$pid}{fileprefix}.partial.$prog{$pid}{ext}";
 			$prog{$pid}{filename} = $file_done;
 			if ( -f $file_done ) {
 				logger "WARNING: File $file_done already exists\n\n";
@@ -1514,12 +1521,11 @@ sub download_programme {
 	}
 	
 	# Determine the correct filenames for this download
-	my $file_prefix = generate_download_filename_prefix( $pid, $dir );
-	logger "\rINFO: File name prefix = $file_prefix                 \n";
-	$prog{$pid}{fileprefix} = $file_prefix;
+	$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, $dir, $opt{fileprefix} || "<longname> - <episode> <pid> <version>" );
+	logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                 \n";
 	$prog{$pid}{dir} = $dir;
-	my $file_done = "${dir}/${file_prefix}.$prog{$pid}{ext}";
-	my $file = "${dir}/${file_prefix}.partial.$prog{$pid}{ext}";
+	my $file_done = "${dir}/$prog{$pid}{fileprefix}.$prog{$pid}{ext}";
+	my $file = "${dir}/$prog{$pid}{fileprefix}.partial.$prog{$pid}{ext}";
 	$prog{$pid}{filename} = $file_done;
 	if ( -f $file_done ) {
 		logger "WARNING: File $file_done already exists\n\n";
@@ -1540,8 +1546,8 @@ sub download_programme {
 	my $subfile_done;
 	my $subfile;
 	if ( $opt{subtitles} ) {
-		$subfile_done = "${dir}/${file_prefix}.srt";
-		$subfile = "${dir}/${file_prefix}.partial.srt";
+		$subfile_done = "${dir}/$prog{$pid}{fileprefix}.srt";
+		$subfile = "${dir}/$prog{$pid}{fileprefix}.partial.srt";
 		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
 	}
 
@@ -2512,9 +2518,7 @@ sub get_audio_stream_download_url {
 
 # Generate the download filename prefix given a pid and optional format such as '<longname> - <episode> <pid> <version>'
 sub generate_download_filename_prefix {
-	my $pid = shift;
-	my $dir = shift;
-	my $file = shift || "<longname> - <episode> <pid> <version>";
+	my ( $pid, $dir, $file ) = ( @_ );
 
 	# If we dont have longname defined just set it to name
 	$prog{$pid}{longname} = $prog{$pid}{name} if ! $prog{$pid}{longname};
@@ -3032,19 +3036,19 @@ sub create_html {
 
 
 
-# Save options to file
+# Save cmdline-only options to file
 sub save_options_file {
 	my $optfile = shift;
 	unlink $optfile;
 	logger "DEBUG: Saving options to $optfile:\n" if $opt{debug};
 	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
 	# Save all opts except for these
-	for (grep !/(help|test|debug|get)/, keys %opt) {
-		print OPT "$_ $opt{$_}\n"  if defined $opt{$_};
-		logger "DEBUG: Setting option $_ = $opt{$_}\n" if $opt{debug} && defined $opt{$_};
+	for (grep !/(help|test|debug|get)/, keys %opt_cmdline) {
+		print OPT "$_ $opt_cmdline{$_}\n"  if defined $opt_cmdline{$_};
+		logger "DEBUG: Setting cmdline option $_ = $opt_cmdline{$_}\n" if $opt{debug} && defined $opt_cmdline{$_};
 	}
 	close OPT;
-	logger "INFO: Options saved as defult in $optfile\n";
+	logger "INFO: Command Line Options saved as defult in $optfile\n";
 	exit 0;
 }
 
@@ -3073,6 +3077,18 @@ sub display_options {
 	logger "Default options:\n";
 	for ( grep !/(help|debug|get|^pvr)/, sort keys %opt_file ) {
 		logger "\t$_ = $opt_file{$_}\n" if defined $opt_file{$_};
+	}
+	logger "\n";
+	return 0;
+}
+
+
+
+# Display options
+sub display_current_options {
+	logger "Current options:\n";
+	for ( sort keys %opt ) {
+		logger "\t$_ = $opt{$_}\n" if defined $opt{$_};
 	}
 	logger "\n";
 	return 0;
