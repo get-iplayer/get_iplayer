@@ -8,9 +8,9 @@
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net
 # License: GPLv3 (see LICENSE.txt)
-# Date: October 4th 2008
+# Date: October 5th 2008
 #
-my $version = 0.90;
+my $version = 0.91;
 #
 # Supports: 
 # * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
@@ -50,60 +50,12 @@ my $version = 0.90;
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 #
+# Changes 0.91 - 20081005
+# * Allow cmdline args to override pvr search options
+#
 # Changes 0.90 - 20081004
 # * Allow user to specify filename prefix format (not pathname or extention) using %prog field names. e.g. --file-prefix='<name>-<episode>-<pid>-<type>'
 # * Fixed bug where saved options were ignored
-# 
-# Changes 0.89 - 20081004
-# * Fixed bug where <profile>/pvr/ dir not get created with --pvr-add
-# 
-# Changes 0.88 - 20081003
-# * Fixed update_script function which was downloading the new version twice! (darn, it is half as popular as I thought)
-# * PVR enable/disable search support allows you to disable a search without deleting it. --pvr-enable=<searchname>, --pvr-disable=<searchname>
-# * Using the --test option with --pvr no longer uses the lockfile
-#
-# Changes 0.87 - 20081002
-# * using --test with --pvr allows user to see which programmes will match the PVR downloads
-# * implemented locking to prevent >1 --pvr process from running (in ~/.get_iplayer/pvr_lock)
-# * When using --pvr option, a message is sent to STDOUT so that this can be piped to email for new programme downloads,
-# * Ignore the --flush option with --pvr - use the --expiry option instead (i.e. set to just less than the frequency of the pvr schedule)
-#
-# Changes 0.86 - 20081001
-# * Improved --symlink option to allow format subtitution from %prog fields
-# * Symlink option now works for radio and podcasts also
-#
-# Changes 0.85 - 20081001
-# * Fixed --pvr-add so that options derrived from options files are not saved to the PVR search
-# * Options specified on the cmdline with --pvr option will override those options in the pvr searches
-# * All PVR searches will, by default, use the options from the saved options files
-# * Fixed bug where %prog hash was retained between pvr searches making the type option get ignored in some cases
-#
-# Changes 0.84 - 20080929
-# * New PVR functionality allows you to add a search criteria to a PVR search file for scheduled downloads
-# * Added --pvr, --pvradd=<searchname>, --pvrdel=<searchname>, --pvrlist options
-# * e.g. Add the following line to your crontab: '0 * * * * /path/to/get_iplayer --pvr 2>>/tmp/get_iplayer.log'
-#
-# Changes 0.83 - 20080929
-# * Remove 16MB block downloads for iphone mp3 radio - does not appear to be unnecessary
-# * Improved and simplified metadata --info collection using new prog feed
-# * Improved channel feed parser for TV so that Sign Zone progs are correctly detected
-# * Added --version-list option so that the preferred version(s) of a programme can be specified e.g. --version-list=signed,default
-# * Added --versions option to narraw search to specific programme versions (e.g. default or signed or any regex)
-# 
-# Changes 0.82 - 20080929
-# * Some code simplification
-# * Remove web bug and cookie whitelisting crud
-# * No more web scraping to get the version pids - use the iplayer metadata feed 
-# * Use the media stream metadata to determine if PID is for radio or tv
-# * Use the media stream metadata to determine subtitles url
-# * Fixed streaminfo option to also parse world service media stream data
-# * Added WMA audio into media stream data parser
-#
-# Changes 0.81 - 20080927
-# * Added get_iplayer user agent while getting podcasts as per request from James Cridland
-#
-# Changes 0.80 - 20080927
-# * Bugfixed -o option - it was incorrectly assigned to podcasts only
 #
 
 use Env qw[@PATH];
@@ -487,6 +439,8 @@ if ( $opt{pvradd} ) {
 	lockfile(43200) if ! $opt{test};
 	# Load all PVR searches
 	pvr_load_list();
+	# Display default options
+	display_default_options();
 	# For each PVR search
 	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
 		# Ignore if this search is disabled
@@ -3072,8 +3026,8 @@ sub read_options_file {
 
 
 
-# Display options
-sub display_options {
+# Display options from files
+sub display_default_options {
 	logger "Default options:\n";
 	for ( grep !/(help|debug|get|^pvr)/, sort keys %opt_file ) {
 		logger "\t$_ = $opt_file{$_}\n" if defined $opt_file{$_};
@@ -3084,11 +3038,11 @@ sub display_options {
 
 
 
-# Display options
+# Display options currently set
 sub display_current_options {
 	logger "Current options:\n";
 	for ( sort keys %opt ) {
-		logger "\t$_ = $opt{$_}\n" if defined $opt{$_};
+		logger "\t$_ = $opt{$_}\n" if defined $opt{$_} && $opt{$_};
 	}
 	logger "\n";
 	return 0;
@@ -3508,8 +3462,6 @@ sub pvr_del {
 sub pvr_display_list {
 	# Load all the PVR searches
 	pvr_load_list();
-	# Display default options
-	display_options();
 	# Print out list
 	logger "All PVR Searches:\n\n";
 	for my $name ( sort {$a <=> $b} keys %pvrsearches ) {
@@ -3621,8 +3573,7 @@ sub pvr_load_options {
 	# Re-read options from the cmdline
 	for ( keys %opt_cmdline ) {
 		$opt{$_} = $opt_cmdline{$_} if defined $opt_cmdline{$_};
-	}
-	return 0;
+	}	return 0;
 }
 
 
