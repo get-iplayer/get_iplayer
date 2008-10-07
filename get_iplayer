@@ -6,56 +6,30 @@
 #
 # Author: Phil Lewis
 # Email: iplayer (at sign) linuxcentre.net
-# Web: http://linuxcentre.net
+# Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
-# Date: October 5th 2008
 #
-my $version = 0.91;
+my $version = 0.92;
 #
-# Supports: 
-# * Downloading h.264/Mov/Quicktime Video and mp3/realaudio Radio streams and podcasts from BBC iPlayer site
-# * Downloads streams from BBC iPlayer site (--get)
-# * PVR functionality allows predefined searches to be downloaded from a scheduler such as crond (--pvr)
-# * Re-jigs the mov file so that video can be streamed and start faster on some players
-# * Resume downloads of partially downloaded files
-# * Indexing of all available Podcast, Radio and TV (i.e. listed) iPlayer programs using Atom and RSS feeds
-# * Info option (--info) to get full programme metadata
-# * Caching of Programme Index (default 4hrs)
-# * Lists programmes added since last cache refresh (--since)
-# * Creation of a basic html index file (--html <file>)
-# * Execution of a custom user command after every successful download (--command)
-# * HTTP Proxy support (maybe broken for now on some proxies) (--proxy)
-# * Regex search on programme name capability (makes it useful to run this from crontab)
-# * Regex search on long programme description/episode capability (--long)
-# * Regex search on channel and category (--channel, --category, --exclude-channel, --exclude-category)
-# * Search by type 'tv', 'radio', 'podcast', or 'all' (default: --type=tv)
-# * Save default options in ~/.get_iplayer/config (--save)
-# * Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, *Ubuntu, Xebian, Unslung/NSLU2)
-# * Tested on MacOSX, and Windows ActivePerl (no realaudio radio to stdout), cygwin
+# Help:
+#	./get_iplayer --help
 #
-# Requires:
-# * perl 5.8
-# * LWP (libwww-perl)
-# * mplayer, lame and tee (for realaudio radio transcoded mp3 stdout support only)
+# Changelog:
+# 	http://linuxcentre.net/get_iplayer/CHANGELOG.txt
+#
+# Example Usage and Documentation:
+# 	http://linuxcentre.net/?page_id=20
 #
 # Todo:
-# ** Use non-shell tee?
-# ** Fix non-uk detection - iphone auth?
-# ** Index/Download live radio streams w/schedule feeds to assist timing
-# ** Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
-# ** Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
+# * Use non-shell tee?
+# * Fix non-uk detection - iphone auth?
+# * Index/Download live radio streams w/schedule feeds to assist timing
+# * Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
+# * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
-#
-#
-# Changes 0.91 - 20081005
-# * Allow cmdline args to override pvr search options
-#
-# Changes 0.90 - 20081004
-# * Allow user to specify filename prefix format (not pathname or extention) using %prog field names. e.g. --file-prefix='<name>-<episode>-<pid>-<type>'
-# * Fixed bug where saved options were ignored
 #
 
 use Env qw[@PATH];
@@ -91,7 +65,7 @@ sub logger(@) {
 
 sub usage {
 	logger <<EOF;
-get_iplayer v$version, Usage:
+get_iplayer v$version, Usage ( Also see http://linuxcentre.net/iplayer ):
 Search Programmes:  get_iplayer [<search options>] [<regex|index|pid|pidurl> ...]
 Download files:     get_iplayer --get [<search options>] <regex|index|pid|pidurl> ...
                     get_iplayer --pid <pid|pidurl> [<options>]
@@ -2776,11 +2750,13 @@ sub open_file_append {
 # Updates and overwrites this script - makes backup as <this file>.old
 sub update_script {
 	# Get version URL
+	my $script_file = $0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{update} );
 	$ua->conn_cache(LWP::ConnCache->new());
+	logger "INFO: Current version is $version\n";
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
 	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
 	chomp( my $latest_ver = $res->content );
@@ -2788,23 +2764,34 @@ sub update_script {
 		# Compare version numbers
 		if ( $latest_ver > $version ) {
 			logger "INFO: New version $latest_ver available, downloading\n";
+			# Check if we are writable
+			if ( ! -w $script_file ) {
+				logger "ERROR: $script_file is not writable by the current user - Update aborted\n";
+				exit 1;
+			}
 			my $req = HTTP::Request->new ('GET', $update_url);
 			# Save content into a $script_file
-			my $script_file = $0;
 			my $res = $ua->request($req, $script_file.'.tmp');
+			if ( ! -f $script_file.'.tmp' ) {
+				logger "ERROR: Could not download update to ${script_file}.tmp - Update aborted\n";
+				exit 1;
+			}
 			# If the download was successful then copy over this script and make executable after making a backup of this script
 			if ( $res->is_success ) {
 				if ( copy($script_file, $script_file.'.old') ) {
 					move($script_file.'.tmp', $script_file);
 					chmod 0755, $script_file;
 					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
+				} else {
+					logger "ERROR: Could not create backup file ${script_file}.old - Update aborted\n";
+					exit 1;
 				}
 			}
 		} else {
 			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
 		}
 	} else {
-		logger "ERROR: Failed to connect to update site\n";
+		logger "ERROR: Failed to connect to update site - Update aborted\n";
 		exit 2;
 	}
 	exit 0;
