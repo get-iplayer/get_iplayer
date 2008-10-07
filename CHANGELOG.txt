@@ -1,0 +1,399 @@
+Version 0.92 - 20081007
+* Added writable check for --update option
+* More checks around update file permissions
+
+Version 0.91 - 20081005
+* Allow cmdline args to override pvr search options
+
+Version 0.90 - 20081004
+* Allow user to specify filename prefix format (not pathname or extension) using %prog field names. e.g. --file-prefix='<name>-<episode>-<pid>-<type>'
+* Fixed bug where saved options were ignored
+ 
+Version 0.89 - 20081004
+* Fixed bug where <profile>/pvr/ dir not get created with --pvr-add
+ 
+Version 0.88 - 20081003
+* Fixed update_script function which was downloading the new version twice! (darn, it is half as popular as I thought)
+* PVR enable/disable search support allows you to disable a search without deleting it. --pvr-enable=<searchname>, --pvr-disable=<searchname>
+* Using the --test option with --pvr no longer uses the lockfile
+
+Version 0.87 - 20081002
+* using --test with --pvr allows user to see which programmes will match the PVR downloads
+* implemented locking to prevent >1 --pvr process from running (in ~/.get_iplayer/pvr_lock)
+* When using --pvr option, a message is sent to STDOUT so that this can be piped to email for new programme downloads,
+* Ignore the --flush option with --pvr - use the --expiry option instead (i.e. set to just less than the frequency of the pvr schedule)
+
+Version 0.86 - 20081001
+* Improved --symlink option to allow format subtitution from %prog fields
+* Symlink option now works for radio and podcasts also
+
+Version 0.85 - 20081001
+* Fixed --pvr-add so that options derrived from options files are not saved to the PVR search
+* Options specified on the cmdline with --pvr option will override those options in the pvr searches
+* All PVR searches will, by default, use the options from the saved options files
+* Fixed bug where %prog hash was retained between pvr searches making the type option get ignored in some cases
+
+Version 0.84 - 20080929
+* New PVR functionality allows you to add a search criteria to a PVR search file for scheduled downloads
+* Added --pvr, --pvradd=<searchname>, --pvrdel=<searchname>, --pvrlist options
+* e.g. Add the following line to your crontab: '0 * * * * /path/to/get_iplayer --pvr 2>>/tmp/get_iplayer.log'
+
+Version 0.83 - 20080929
+* Remove 16MB block downloads for iphone mp3 radio - does not appear to be unnecessary
+* Improved and simplified metadata --info collection using new prog feed
+* Improved channel feed parser for TV so that Sign Zone progs are correctly detected
+* Added --version-list option so that the preferred version(s) of a programme can be specified e.g. --version-list=signed,default
+* Added --versions option to narraw search to specific programme versions (e.g. default or signed or any regex)
+ 
+Version 0.82 - 20080929
+* Some code simplification
+* Remove web bug and cookie whitelisting crud
+* No more web scraping to get the version pids - use the iplayer metadata feed 
+* Use the media stream metadata to determine if PID is for radio or tv
+* Use the media stream metadata to determine subtitles url
+* Fixed streaminfo option to also parse world service media stream data
+* Added WMA audio into media stream data parser
+
+Version 0.81 - 20080927
+* Added get_iplayer user agent while getting podcasts as per request from James Cridland
+
+Version 0.80 - 20080927
+* Bugfixed -o option - it was incorrectly assigned to podcasts only
+
+Version 0.79 - 20080927
+* Use xml podcast feed - simpler to parse and contains a few additional progs
+
+Version 0.78 - 20080926
+* Cleaned up some more perl warnings after turning on this feature - now disabled
+* Behave better when a programme is listed but unavailable
+* Improve reporting of prgramme name when pid is already in download history
+
+Version 0.77 - 20080926
+* Added non-mandatory idv3 tagging support for MP3 files downloaded by new iPhone method using external id3 tools if available
+* Added --id3v2 option to specify non-default location of id3v2 binary
+* Added <fileprefix>, <ext> and <dir> to %prog so that it can be used in --command option
+* Tidied up definition of cache files
+* Cache files no longer get deleted upon get_iplayer upgrade
+
+Version 0.76 - 20080924
+* A few cosmetic tweaks like the 'number of matches' appearing at the end on the programme listing
+* Set the 'type' option according to the index number specified (i.e. 1xxxx => radio, < 10000 => tv and > 19999 => podcast)
+* The programme cache is additionally read if an index is specified in its number range
+
+Version 0.75 - 20080924
+* If an MP3 version of a radio programme is not available the default is to try to use the realaudio stream
+* --realaudio option prevents the downloading of radio MP3 streams
+* --mp3audio option ensures that realaudio stream is not used as a fallback for radio
+* A few cosmetic bug fixes
+* Check for existence of a PID when an index number is specified
+* Don't add empty pids to download_history file
+* Added --force-download option to override download history
+* Report final average download speed / bitrate / duration after successful downloads (not for rtsp streams)
+* Remove stdout logs - messes with stdout streaming in too many strange ways
+* Does not check download history if nowrite & stdout options are specified
+
+Version 0.74 - 20080924
+* Changed --list-categories and --list-channels to use --list <element_name> where element name can be any element name in the %prog hash
+* Bugfix --streaminfo doesn't add to download history
+* Allow h.264 download subroutines to now also download mp3 audio for iphone radio
+* Added --realaudio option for radio downloads where mp3 download is not available
+
+Version 0.73 - 20080922
+* Now remembers which PIDs/programmes have already been downloaded and will prevent downloading them after you delete the programme
+* The PID download history file is in ~/.get_iplayer/download_history
+* Added --outputradio --outputtv --outputpodcast to override --output so that different directories can be used for different programme types respectively
+* Added --list-categories and --list-channels support
+* Fixed a bug introduced in version 0.72 which --type=all would only result in --type=podcast
+
+Version 0.72 - 20080919
+* time stamping of cache entries
+* Added --since option to see what was added since a number of hours ago (using above time stamps)
+* --flush now refreshes the cache rather than simply deleting it (retains timestamps)
+
+Version 0.71 - 20080916
+* Workaround BBC World Service using non-standard PID format (not starting with b0)
+* Workaround BBC World Service HTTP redirects which contain extra whitespace and newlines around RTSP urls which mplayer does not like
+* Workaround BBC World Service where mediaselector metadata sets XML element kind="" instead of kind="audio"
+
+Version 0.70 - 20080916
+* Added BBC World Service to iPlayer radio channels list
+
+Version 0.69 - 20080915
+* Remove empty download file if download fails
+* Make all program info output go to stdout unless --stdout is specified
+
+Version 0.68 - 20080911
+* Added quotes to file= arg of mplayer for post-transcode wav option - breaks if there is a space in the path
+* Added rudimentary support for vlc to download/stream N96 iPlayer streams (lower quality 192kbps streams) using --n96 option
+* Added --vlc option to specify path to vlc (for N96 streams)
+
+Version 0.67 - 20080910
+* streaminfo option now gets Nokia N96 rtsp stream URL (not just the URl that points to it)
+* streaminfo option now makes all other functions quiet and sets --get and --test
+* Added all audio, subtitles, iphone and wii stream info to streaminfo option
+* quiet option can now be overridden by verbose or debug options
+
+Version 0.66 - 20080909
+* Changed --rtmp to --streaminfo
+* --streaminfo now gets Nokia N96 rtsp stream URL also
+
+Version 0.65 - 20080909
+* Created ability to have system-wide default configs for options (/etc/get_iplayer/ and '<allusersprofile>\get_iplayer\' on Win32)
+* Moved windows system/personal config dirs to <allusersprofile>\get_iplayer\ and <profile>\.get_iplayer\
+* System-wide options can be overridden by the personal options and cmdline options
+
+Version 0.64 - 20080909
+* Tweaked to get home directory (USERPROFILE) in ActivePerl
+* Renamed --freevo as --symlink (still backwards compatable)
+* Added ability for ActivePerl/Windows to transcode radio programmes to mp3 after downloading (thanks Simon Dible)
+
+Version 0.63 - 20080908
+* Added code to resolve rtmp url for future use (--rtmp returns the urls)
+
+Version 0.62 - 20080902
+* Added ID3 tagging for radio downloads (uses lame)
+
+Version 0.61 - 20080901
+* Subtitles can now be downloaded if available using --subtitles option and are converted automatically into SubRip (.srt) format
+* Subtitles can be offset by a number of milliseconds using --suboffset <ms> (the H.264 streams seem to start a little earlier than the flash video versions)
+
+Version 0.60 - 20080824
+* Now can create MythTV streams XML file aswell as Freevo fxd XML (thanks to ear9mrn)
+* Added --bandwidth option for rtsp streams (thanks to nrq)
+* Removed world writable perms on cache files
+* quiet option now works properly with radio downloads
+
+Version 0.59 - 20080813
+* de-duplication of search/match results
+
+Version 0.58 - 20080813
+* quote filenames in helper apps to allow whitespace in filenames for mp3 transcoding
+* provide better debug output for radio downloading
+* Known issue: mplayer bug means that it cannot accept whitespace in filenames when dumping to wav/pcm files
+
+Version 0.57 - 20080805
+* Now use an OPML feed from BBC to get a list of all podcast RSS feeds - no more web scraping
+* Fixed thumbnail parsing for podcasts
+* Removed obsolete and broken --scrape option
+* Fixed category parsing for changed iplayer XML feed format
+* Show Categories in --info display
+
+Version 0.56 - 20080804
+* Added raw realaudio stream saving support (--raw) which does not require lame (thanks to nrq)
+* Added new BBC channel 'BBC HD'
+* Improved efficiency of stco atom searching to make slow machines start streaming faster
+* Known issue: stdout support for radio wav and raw support can be problematic due to named pipe closing
+
+Version 0.55 - 20080718
+* Detect and report lack fo realaudio format for radio programmes
+
+Version 0.54 - 20080717
+* Fix rename radio file bug under Activeperl
+* Do not catch sigchld, quits prog after first download
+
+Version 0.53 - 20080717
+* Fix mkfifo quit under Activeperl
+
+Version 0.52 - 20080716
+* Fix inverted logic bug in --wav option
+* Fix already exists bug for partially downloaded radio progs
+* Use dynamic fifo file so simultaneous downloads can occur for radio
+* Use signal handler to clean up temp named pipe file
+
+Version 0.51 - 20080716
+* Fallback to wav mod for type=radio if platform doesn't support fifos (e.g. ActivePerl/Windows)
+* Added --wav option for radio (i.e. don't transcode to mp3)
+
+Version 0.50 - 20080714
+* Removed available time of tv/radio programmes because it was misleading and wrong, --info option should be used instead
+* Changed progress calc using file pointer instead of file stat - better for cygwin
+* Allow option to specify location of mplayer and lame binaries if not in path (--mplayer and --lame)
+
+Version 0.49 - 20070713
+* Re-corrected bad display of download rate calcs (I had a hangover yesterday)
+
+Version 0.48 - 20070713
+* changed shell escaping from --command option
+
+Version 0.47 - 20070712
+* Corrected bad display of download rate and time remaining calcs => now uses less cpu
+* --command option allows user to run a custom command after every successful download using substitution variables (see README.txt)
+* Improved --info metadata
+
+Version 0.46 - 20070712
+* Can now Index and Download BBC podcast mp3/aac streams using --type=podcast
+* Check external programme dependancies
+* Use non-shell mknod (POSIX mkfifo)
+
+Version 0.45 - 20070710
+* Use HTTP pipelined requests for feeds
+* Added info option (--info/-i) to get full programme metadata on searches below 40 matches
+
+Version 0.44 - 20070709
+* Add radio one into channels list - sorry!
+
+Version 0.43 - 20070709
+* Bugfixed stdout support for radio
+
+Version 0.42 - 20070709
+* Now uses channel specific atom feeds from iplayer site by default - scrape is still optional for TV index
+* Relocated all cache, cookies, config and namedpipe files into $HOME/.get_iplayer/
+* Indexes iplayer Radio programmes
+* Added --type to limit search to radio, tv or all (tv is default)
+* Radio RTSP stream now transcoded on the fly to mp3 using named pipes
+* Added stdout support for radio - still only creates small mp3 file when stdout used?!
+* TV and Radio now use separate index cache files that are populated independantly
+* Added retry loop for bad cookie detection - dont just fail
+* Added --exclude-channel/--exclude-category support
+* Added channel name to html output
+* Known issue: BBC has an error in their atom feeds which says that the programme has been available longer than it has.
+* Known issue: stdout support for radio only creates small mp3 file, lame stalls
+ 
+Version 0.41 - 20070708
+* Fixed cookie deletion bug
+
+Version 0.40 - 20080707
+* Fixed saving of thumbnail url in cache
+* Added audio pid download/convert support (downloads rtsp and converts to mp3)
+
+Version 0.39 - 20080707
+* Download File name fixed in scrape mode - episode appeared twice
+* Image thumbnail url was wrong in scrape mode
+* html option never looked for a filename
+
+Version 0.38 - 20080707
+* Updates to allow downloading after the BBC updated their website - kludged for now using scrape method until I can work out the atom feed again
+* Category/channel searching (and fxd channel menus) and duration listing will be broken until atom feeds get fixed.
+* Programme version is broken - different URL now used for signed versions etc. Only Original versions are listed for now.
+* Added --terse listing mode
+* Don't display version, duration, channel and categories if we use scrape mode
+
+Version 0.37 - 20080703
+* Made fxd and html output formats optional with ability to specify output filenames
+* --fxd output now has 3 menu modes channel->progname->episode (--fxd-channels), progname->episode (--fxd-names), alpha->progname-episode (--fxd-alpha)
+* removed type=video attribute from fxd container tags
+* Now encode/decode xml entities for output
+* --stdout option now implies --get
+
+Version 0.36 - 20080701
+* Now use the --get/-g option to get the selected files, without this we only list matches
+* Re-use cookie for faster connections (no need to get web bugs every time)
+* Fixed download rate calc on 32M block downloads
+* Increased LWP timeouts to 20 seconds
+* Checks for when we get a duff moov atom length (i.e. an XORed file) then deletes the cookie and quits
+* Removed XML::Twig parser - use perl regex instead
+* Now reports how long ago rather than date made available...
+
+Version 0.35 - 20080630
+* Restructured downloading code
+* Now handles different versions better (i.e. Original, Signed) - tries to download next avaiable version type if one fails
+* Freevo FXD now has programmes sorted by channel
+
+Version 0.34 - 20080629
+* Fixed duplicate listing bug when using --long
+* Added --quiet option
+* Added freevo symlink creation option --freevo
+* FXD file for freevo now uses standard Video plugin with a player wrapper script
+* Use logger function instead of print
+
+Version 0.33 - 20080627
+* Now gets programme categories and channel from Atom feed
+* Only write the fxd and html files when writing cache
+* Channel and category search (regex) --channel --category
+* Fixed options saving/reading
+* Added download progress for Atom feed and movie header
+
+Version 0.32 - 20080626
+* Now uses Atom feed rather than scraping website for programme info (much more reliable availability info)
+* Now requires Perl XML::Twig
+* Reduced cache expiry to 4 hrs (atom feed is now quicker to download and is more up to date)
+* version pid (pid) is no longer used for reference - only programme pid (urlpid) == $pid
+* Index now contains duration and start of availability date/time (Atom method only)
+* Allow fallback to scraping website for programme index
+* Removed deprecated XOR decoding
+
+Version 0.31 - 20080624
+* Allow user to save options and specify default options in $HOME/.iplayerrc
+* Now uses long options also
+
+Version 0.30 - 20080622
+* Generate FXD file for Freevo iplayer streaming plugin
+* Now can resume downloads and strema to STDOUT simultaneously (streaming always starts from beginning of programme)
+* Retry loop for getting index pages incase BBC site breaks like it just did
+ 
+Version 0.29 - 20080619:
+* Fixed streaming + file download mode
+* Added random numbers after some requests more like iphone
+* Added interrim checking of reported mp4 stream availability
+* Reduced index cacahe default to 12 hours
+
+Version 0.28 - 20080619:
+* Update get_iplayer option (-u)
+
+Version 0.27 - 20080619:
+* New option to allow streaming while downloading AND writing file to disk (allows you to watch while downloading while keeping a copy for later)
+* Sanity check to ensure we don't stream partially downloaded content
+
+Version 0.26 - 20080618:
+* Fixed partial download resuming
+* Changed file suffix for partially downloaded files to <prog>.partial.mov to ease playback of partially downloaded movies 
+
+Version 0.25 - 20080618:
+* Automatically re-arrange the atoms so that file can be streamed and start faster (used method from qt-faststart.c, v0.1 by Mike Melanson, melanson@pcisys.net)
+* Option -x allows STDOUT streaming during download (see usage)
+* All messages now go to STDERR
+
+Version 0.24 - 20080618:
+* Now supports downloading of *unencrypted* streams from BBC Iplayer site - no more XOR nonsense
+* Downloads web bugs to whitelist our cookies on BBC servers
+* Downloads the file in blocks to avoid XOR
+
+Version 0.23 - 20080617:
+* added binmode for decode sub also for windows to work properly
+
+Version 0.22 - 20080616:
+* Detect null Content-Length header upon download - doesn't replace a partially d/loaded file if there is a failure
+
+Version 0.21 - 20080616:
+* Added binmode for Windows file writing - fixes bug where windows would not decode properly
+
+Version 0.20 - 20080615:
+* Remaining time reported in hrs/mins/secs
+* Added sort-into-subdirectories option to create subdirectories for programmes
+
+Version 0.19 - 20080614:
+* Fixed PID searching
+* Now supports restarting downloads of incomplete files
+* Fixed swap detection bug where moov atom started on even byte offset
+* Remaining time added
+* Fixed kbps (not misreported kBps anymore)
+
+Version 0.18 - 20080613:
+* Auto detection of byte-swapping
+* Auto detection of XOR sequence
+
+Version 0.17 - 20080612:
+* Non-UK error detection
+* Not available error detection
+
+Version 0.16 - 20080612:
+* Fixed HTML output links 
+* Sanitized data structures
+* Now parses days/hours left
+* Fixed XOR % completion calculation
+* Reads IPLAYER_OUTDIR environment
+
+Version 0.15 - 20080611:
+* Fixed duplicate programme removal
+* Now supports different programme type downloads (i.e. Original, Signed, etc)
+* Changes hashes to give more meaningful names
+* Test option (-t) will now determine the programme type
+* Increased speed of XOR decoder by reading in 1024 blocks at a time
+
+Version 0.14 - 20080611:
+* Not using curl anymore - seems to fail through some firewalls mysteriously and will not work on Ubuntu
+* Using LWP for all http requests
+* Fixed indexing sort bug
+
+Version 0.01 - 20080312
+* Initial Release
