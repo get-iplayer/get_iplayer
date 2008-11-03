@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.93;
+my $version = 0.94;
 #
 # Help:
 #	./get_iplayer --help
@@ -29,7 +29,7 @@ my $version = 0.93;
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
-# * vlc does not quit after downloading an rtsp N96 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
+# * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 #
 
 use Env qw[@PATH];
@@ -99,7 +99,7 @@ Download Options:
  --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
  --raw                         In radio realaudio mode output as raw realaudio and don't transcode to mp3
- --n96                         In TV mode download/stream low quality Nokia N96 H.264 stream (alpha)
+ --n95                         In TV mode download/stream low quality Nokia N95 H.264 stream (alpha)
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
@@ -222,7 +222,7 @@ GetOptions(
 	"lame=s"			=> \$opt_cmdline{lame},
 	"id3v2=s"			=> \$opt_cmdline{id3v2},
 	"vlc=s"				=> \$opt_cmdline{vlc},
-	"n96"				=> \$opt_cmdline{n96},
+	"n95"				=> \$opt_cmdline{n95},
 	"realaudio"			=> \$opt_cmdline{realaudio},
 	"mp3audio"			=> \$opt_cmdline{mp3audio},
 	"force-download"		=> \$opt_cmdline{forcedownload},
@@ -1402,9 +1402,9 @@ sub download_programme {
 	# iPhone mp3/h.264 stream downloading...
 
 	# Check if we have vlc - if not use iPhone mode
-	if ( $opt{n96} && (! exists_in_path($vlc)) ) {
+	if ( $opt{n95} && (! exists_in_path($vlc)) ) {
 		logger "\nWARNING: Required $vlc does not exist, falling back to iPhone mode\n";
-		$opt{n96} = 0;
+		$opt{n95} = 0;
 	}		
 
 
@@ -1480,10 +1480,10 @@ sub download_programme {
 		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
 	}
 
-	# Do the N96 h.264 download
+	# Do the N95 h.264 download
 	my $return;
-	if ( $opt{n96} ) {
-		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n96' );
+	if ( $opt{n95} ) {
+		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n95' );
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
 	# Do the iPhone h.264 download
@@ -1687,7 +1687,7 @@ sub get_version_pids {
 
 
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashwii|flashaudio|realaudio|wma|subtitles
+# $media = all|flashhigh|flashnormal|iphone|flashwii|n95|mobile|flashaudio|realaudio|wma|subtitles
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media ) = @_;
 	my %streams;
@@ -1790,7 +1790,7 @@ sub get_media_stream_data {
 		logger "INFO: iPhone stream URL: $streams{'iphone'}\n";
 	}
 
-	# Nokia N96 h.264 low quality stream
+	# Nokia N95 h.264 low quality stream
 	#<media kind="video"
 	#        type="video/mpeg"
 	#        encoding="h264"  >
@@ -1802,14 +1802,40 @@ sub get_media_stream_data {
 	#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b00108ld/iplayer_streaming_n95_wifi"
 	#        />
 	#</media>
-	if ( $media =~ /^(n96|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+	if ( $media =~ /^(n95|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 		( $server, $identifier, $href ) = ( $1, $2, $3 );
 		$opt{quiet} = 1 if $opt{streaminfo};
 		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
 		$opt{quiet} = 0 if $opt{streaminfo};
-		logger "INFO: Nokia N96 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'n96'} = "$rtsp";
-		logger "INFO: Nokia N96 h.264 low quality stream URL: $streams{'n96'}\n";
+		logger "INFO: Nokia N95 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		$streams{'n95'} = "$rtsp";
+		logger "INFO: Nokia N95 h.264 low quality stream URL: $streams{'n95'}\n";
+	}
+
+	# Mobile WMV DRM
+	#<media kind="video"
+	#        expires="2008-10-20T21:59:00+01:00"
+	#        type="video/wmv"   >
+	#        <connection
+	#                priority="10"
+	#                kind="licence"
+	#                server="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx"
+	#                identifier="0A1CA43B-98A8-43EA-B684-DA06672C0575"
+	#                href="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx/0A1CA43B-98A8-43EA-B684-DA06672C0575"
+	#        />
+	#<connection
+	#                priority="10"
+	#                kind="sis"
+	#                server="http://directdl.iplayer.bbc.co.uk/windowsmedia/"
+	#                identifier="AmazonwithBruceParry_Episode5_200810132100_mobile"
+	#                href="http://directdl.iplayer.bbc.co.uk/windowsmedia/AmazonwithBruceParry_Episode5_200810132100_mobile.wmv"
+	#        />
+	#</media>
+	if ( $media =~ /^(mobile|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/wmv".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+		( $server, $identifier, $href ) = ( $1, $2, $3 );
+		logger "INFO: Mobile WMV DRM stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+		$streams{'mobile'} = "$href";
+		logger "INFO: Mobile WMV DRM stream URL: $streams{'mobile'}\n";
 	}
 
 	# Audio rtmp mp3
@@ -2107,7 +2133,7 @@ sub download_iphone_stream {
 
 
 
-# Actually do the N96 h.264 downloading
+# Actually do the N95 h.264 downloading
 sub download_h264_low_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
 
