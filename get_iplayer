@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.95;
+my $version = 0.96;
 #
 # Help:
 #	./get_iplayer --help
@@ -1483,7 +1483,7 @@ sub download_programme {
 	# Do the N95 h.264 download
 	my $return;
 	if ( $opt{n95} ) {
-		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n95' );
+		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n95_wifi' );
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
 	# Do the iPhone h.264 download
@@ -1687,7 +1687,7 @@ sub get_version_pids {
 
 
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashwii|n95|mobile|flashaudio|realaudio|wma|subtitles
+# $media = all|flashhigh|flashnormal|iphone|flashwii|n95_wifi|n95_3g|mobile|flashaudio|realaudio|wma|subtitles
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media ) = @_;
 	my %streams;
@@ -1698,249 +1698,277 @@ sub get_media_stream_data {
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 	$opt{quiet} = 0 if $opt{streaminfo};
 	logger "INFO: Getting media stream metadata for $prog{$pid}{name} - $prog{$pid}{episode}, $verpid\n" if $pid;
-	my $xml = request_url_retry($ua, $media_stream_data_prefix.$verpid, 3, '', '');
-	logger "\n$xml\n" if $opt{debug};
+	my $xml1 = request_url_retry($ua, $media_stream_data_prefix.$verpid, 3, '', '');
+	logger "\n$xml1\n" if $opt{debug};
 	# flatten
-	$xml =~ s/\n/ /g;
+	$xml1 =~ s/\n/ /g;
 
-	my ($server, $authstring, $identifier, $href);
+	for my $xml ( split /<media/, $xml1 ) {
+		$xml = "<media".$xml;
 
-	# h.264 high quality stream
-	#	<media kind="video"
-	#        width="640"
-	#        height="360"
-	#        type="video/mp4"
-	#        encoding="h264"  >
-	#        <connection
-	#                priority="10"
-	#                application="bbciplayertok"
-	#                kind="level3"
-	#                server="bbciplayertokfs.fplive.net"
-	#                identifier="mp4:b000zxf4-H26490898078"
-	#                authString="d52f77fede048f1ffd6587fd47446dee"
-	#        />
-	if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: RTMP h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
+		my ($server, $authstring, $identifier, $href);
+
+		# h.264 high quality stream
+		#	<media kind="video"
+		#        width="640"
+		#        height="360"
+		#        type="video/mp4"
+		#        encoding="h264"  >
+		#        <connection
+		#                priority="10"
+		#                application="bbciplayertok"
+		#                kind="level3"
+		#                server="bbciplayertokfs.fplive.net"
+		#                identifier="mp4:b000zxf4-H26490898078"
+		#                authString="d52f77fede048f1ffd6587fd47446dee"
+		#        />
+		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+			logger "INFO: RTMP h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
+		}
+	
+		# h.264 normal quality stream
+		#	<media kind="video"
+		#        width="512"
+		#        height="288"
+		#        type="video/x-flv"
+		#        encoding="vp6"  >
+		#        <connection
+		#                priority="10"
+		#                kind="akamai"
+		#                server="cp41752.edgefcs.net"
+		#                identifier="secure/b000zxf4-streaming90898078"
+		#                authString="daEdSdgbcaibFa7biaobCaYdadyaTamazbq-biXsum-cCp-FqrECnEoGBwFvwG"
+		#        />
+		#	</media>
+		#
+		if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+			logger "INFO: RTMP h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$streams{'flashnormal'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			logger "INFO: RTMP normal quality stream URL: $streams{'flashnormal'}\n";
+		}
+	
+		# Wii h.264 standard quality stream
+		#<media kind="video"
+		#        width="512"
+		#        height="288"
+		#        type="video/x-flv"
+		#        encoding="spark"  >
+		#        <connection
+		#                priority="10"
+		#                kind="akamai"
+		#                server="cp41752.edgefcs.net"
+		#                identifier="secure/5242138581547639062"
+		#                authString="daEd8dLbGaPaZdzdNcwd.auaydJcxcHandp-biX5YL-cCp-BqsECnxnGEsHwyE"
+		#        />
+		#</media>
+		if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+			logger "INFO: RTMP Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$streams{'flashwii'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			logger "INFO: RTMP Wii normal quality stream URL: $streams{'flashwii'}\n";
+		}
+	
+		# iPhone h.264/mp3 stream
+		#<media kind="video"
+		#        width="480"
+		#        height="272"
+		#        type="video/mp4"
+		#        encoding="h264"  >
+		#        <connection
+		#                priority="10"
+		#                kind="sis"
+		#                server="http://www.bbc.co.uk/mediaselector/3/auth/stream/"
+		#                identifier="5242138581547639062"
+		#                href="http://www.bbc.co.uk/mediaselector/3/auth/stream/5242138581547639062.mp4"
+		#        />
+		#</media>
+		if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $1, $2, $3 );
+			logger "INFO: iPhone stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'iphone'} = "$href";
+			logger "INFO: iPhone stream URL: $streams{'iphone'}\n";
+		}
+	
+		# Nokia N95 h.264 low quality stream (WiFi)
+		#<media kind="video"
+		#        type="video/mpeg"
+		#        encoding="h264"  >
+		#        <connection
+		#                priority="10"
+		#                kind="sis"
+		#                server="http://www.bbc.co.uk/mediaselector/4/sdp/"
+		#                identifier="b00108ld/iplayer_streaming_n95_wifi"
+		#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b00108ld/iplayer_streaming_n95_wifi"
+		#        />
+		#</media>
+		if ( $media =~ /^(n95_wifi|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $1, $2, $3 );
+			$opt{quiet} = 1 if $opt{streaminfo};
+			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			$opt{quiet} = 0 if $opt{streaminfo};
+			logger "INFO: Nokia N95 h.264 low quality WiFi stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'n95_wifi'} = "$rtsp";
+			logger "INFO: Nokia N95 h.264 low quality WiFi stream URL: $streams{'n95_wifi'}\n";
+		}
+	
+		# Nokia N95 h.264 low quality stream (3G)
+		#<media kind="" 
+		#        expires="2008-10-30T12:29:00+00:00"
+		#        type="video/mpeg"                  
+		#        encoding="h264"  >                 
+		#        <connection                        
+		#                priority="10"              
+		#                kind="sis"                 
+		#                server="http://www.bbc.co.uk/mediaselector/4/sdp/" 
+		#                identifier="b009tzxx/iplayer_streaming_n95_3g"     
+		#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b009tzxx/iplayer_streaming_n95_3g" 
+		#        />                                                                                        
+		#</media>    
+		if ( $media =~ /^(n95_3g|all)$/ && $xml =~ m{<media\s+kind="".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $1, $2, $3 );
+			$opt{quiet} = 1 if $opt{streaminfo};
+			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			$opt{quiet} = 0 if $opt{streaminfo};
+			logger "INFO: Nokia N95 h.264 low quality 3G stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'n95_3g'} = "$rtsp";
+			logger "INFO: Nokia N95 h.264 low quality 3G stream URL: $streams{'n95_3g'}\n";
+		}
+	
+	
+	
+		# Mobile WMV DRM
+		#<media kind="video"
+		#        expires="2008-10-20T21:59:00+01:00"
+		#        type="video/wmv"   >
+		#        <connection
+		#                priority="10"
+		#                kind="licence"
+		#                server="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx"
+		#                identifier="0A1CA43B-98A8-43EA-B684-DA06672C0575"
+		#                href="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx/0A1CA43B-98A8-43EA-B684-DA06672C0575"
+		#        />
+		#<connection
+		#                priority="10"
+		#                kind="sis"
+		#                server="http://directdl.iplayer.bbc.co.uk/windowsmedia/"
+		#                identifier="AmazonwithBruceParry_Episode5_200810132100_mobile"
+		#                href="http://directdl.iplayer.bbc.co.uk/windowsmedia/AmazonwithBruceParry_Episode5_200810132100_mobile.wmv"
+		#        />
+		#</media>
+		if ( $media =~ /^(mobile|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/wmv".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $1, $2, $3 );
+			logger "INFO: Mobile WMV DRM stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'mobile'} = "$href";
+			logger "INFO: Mobile WMV DRM stream URL: $streams{'mobile'}\n";
+		}
+	
+		# Audio rtmp mp3
+		#<media kind="audio"
+		#        type="audio/mpeg"
+		#        encoding="mp3"  >
+		#        <connection
+		#                priority="10"
+		#                kind="akamai"
+		#                server="cp48181.edgefcs.net"
+		#                identifier="mp3:secure/radio1/RBN2_mashup_b00d67h9_2008_09_05_22_14_25"
+		#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
+		#        />
+		#</media>
+		if ( $media =~ /^(flashaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
+			# Remove offending mp3: at the start of the identifier
+			$identifier =~ s/^mp3://;
+			logger "INFO: RTMP MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$streams{'flashaudio'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			logger "INFO: RTMP stream URL: $streams{'flashaudio'}\n";
+		}
+	
+		# ReadAudio stream
+		#<media kind="audio"
+		#       type="audio/real"
+		#        encoding="real"  >
+		#        <connection
+		#                priority="10"
+		#                kind="sis"
+		#                server="http://www.bbc.co.uk"
+		#                identifier="/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one"
+		#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
+		#        />
+		#</media>
+		# Realaudio for worldservice	
+		#<media kind=""
+		#type="audio/real"
+		#encoding="real"  >
+		#<connection
+		#        priority="10"
+		#        kind="edgesuite"
+		#        server="http://http-ws.bbc.co.uk.edgesuite.net"
+		#        identifier="/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
+		#        href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
+		#/>
+		#</media>
+		#</mediaSelection>
+		if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/real".+?encoding="real".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $3, $4, $5 );
+			$opt{quiet} = 1 if $opt{streaminfo};
+			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			$rtsp =~ s/[\s\n]//g;
+			$opt{quiet} = 0 if $opt{streaminfo};
+			logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'realaudio'} = "$rtsp";
+			logger "INFO: RealAudio RTSP stream URL: $streams{'realaudio'}\n";
+		}
+	
+	
+		# Radio WMA (low quality)
+		#<mediaSelection xmlns="http://bbc.co.uk/2008/mp/mediaselection">
+		#<media kind=""
+		#        type="audio/wma"
+		#        encoding="wma"  >
+		#        <connection
+		#                priority="10"
+		#                kind="edgesuite"
+		#                server="http://http-ws.bbc.co.uk.edgesuite.net"
+		#                identifier="/generatecssasx.esi?file=/worldservice/css/nb/410060838"
+		#                href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssasx.esi?file=/worldservice/css/nb/410060838.wma"
+		#        />
+		#</media>
+		if ( $media =~ /^(wma|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/wma".+?encoding="wma".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $3, $4, $5 );
+			$opt{quiet} = 1 if $opt{streaminfo};
+			chomp( my $mms = download_block(undef, $href, $ua, 0, undef) );
+			$mms =~ s/[\n]//g;
+			# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
+			$mms =~ s/^.*href=\"(.+?)\".*$/$1/gi;
+			$opt{quiet} = 0 if $opt{streaminfo};
+			logger "INFO: WMA MMS stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'wma'} = "$mms";
+			logger "INFO: WMA MMS stream URL: $streams{'wma'}\n";
+		}
+	
+	
+		# Subtitles stream
+		#<media kind="captions"
+		#        type="application/ttaf+xml"   >
+		#        <connection
+		#                priority="10"
+		#                kind="http"
+		#                server="http://www.bbc.co.uk/iplayer/subtitles/"
+		#                identifier="b0008dc8rstreaming89808204.xml"
+		#                href="http://www.bbc.co.uk/iplayer/subtitles/b0008dc8rstreaming89808204.xml"
+		#        />
+		#</media>
+		if ( $media =~ /^(subtitles|all)$/ && $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
+			( $server, $identifier, $href ) = ( $1, $2, $3 );
+			logger "INFO: Subtitles stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
+			$streams{'subtitles'} = "$href";
+			logger "INFO: Subtitles stream URL: $streams{'subtitles'}\n";
+		}
 	}
-
-	# h.264 normal quality stream
-	#	<media kind="video"
-	#        width="512"
-	#        height="288"
-	#        type="video/x-flv"
-	#        encoding="vp6"  >
-	#        <connection
-	#                priority="10"
-	#                kind="akamai"
-	#                server="cp41752.edgefcs.net"
-	#                identifier="secure/b000zxf4-streaming90898078"
-	#                authString="daEdSdgbcaibFa7biaobCaYdadyaTamazbq-biXsum-cCp-FqrECnEoGBwFvwG"
-	#        />
-	#	</media>
-	#
-	if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: RTMP h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$streams{'flashnormal'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP normal quality stream URL: $streams{'flashnormal'}\n";
-	}
-
-	# Wii h.264 standard quality stream
-	#<media kind="video"
-	#        width="512"
-	#        height="288"
-	#        type="video/x-flv"
-	#        encoding="spark"  >
-	#        <connection
-	#                priority="10"
-	#                kind="akamai"
-	#                server="cp41752.edgefcs.net"
-	#                identifier="secure/5242138581547639062"
-	#                authString="daEd8dLbGaPaZdzdNcwd.auaydJcxcHandp-biX5YL-cCp-BqsECnxnGEsHwyE"
-	#        />
-	#</media>
-	if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		logger "INFO: RTMP Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$streams{'flashwii'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP Wii normal quality stream URL: $streams{'flashwii'}\n";
-	}
-
-	# iPhone h.264/mp3 stream
-	#<media kind="video"
-	#        width="480"
-	#        height="272"
-	#        type="video/mp4"
-	#        encoding="h264"  >
-	#        <connection
-	#                priority="10"
-	#                kind="sis"
-	#                server="http://www.bbc.co.uk/mediaselector/3/auth/stream/"
-	#                identifier="5242138581547639062"
-	#                href="http://www.bbc.co.uk/mediaselector/3/auth/stream/5242138581547639062.mp4"
-	#        />
-	#</media>
-	if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		logger "INFO: iPhone stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'iphone'} = "$href";
-		logger "INFO: iPhone stream URL: $streams{'iphone'}\n";
-	}
-
-	# Nokia N95 h.264 low quality stream
-	#<media kind="video"
-	#        type="video/mpeg"
-	#        encoding="h264"  >
-	#        <connection
-	#                priority="10"
-	#                kind="sis"
-	#                server="http://www.bbc.co.uk/mediaselector/4/sdp/"
-	#                identifier="b00108ld/iplayer_streaming_n95_wifi"
-	#                href="http://www.bbc.co.uk/mediaselector/4/sdp/b00108ld/iplayer_streaming_n95_wifi"
-	#        />
-	#</media>
-	if ( $media =~ /^(n95|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		$opt{quiet} = 1 if $opt{streaminfo};
-		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
-		$opt{quiet} = 0 if $opt{streaminfo};
-		logger "INFO: Nokia N95 h.264 low quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'n95'} = "$rtsp";
-		logger "INFO: Nokia N95 h.264 low quality stream URL: $streams{'n95'}\n";
-	}
-
-	# Mobile WMV DRM
-	#<media kind="video"
-	#        expires="2008-10-20T21:59:00+01:00"
-	#        type="video/wmv"   >
-	#        <connection
-	#                priority="10"
-	#                kind="licence"
-	#                server="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx"
-	#                identifier="0A1CA43B-98A8-43EA-B684-DA06672C0575"
-	#                href="http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx/0A1CA43B-98A8-43EA-B684-DA06672C0575"
-	#        />
-	#<connection
-	#                priority="10"
-	#                kind="sis"
-	#                server="http://directdl.iplayer.bbc.co.uk/windowsmedia/"
-	#                identifier="AmazonwithBruceParry_Episode5_200810132100_mobile"
-	#                href="http://directdl.iplayer.bbc.co.uk/windowsmedia/AmazonwithBruceParry_Episode5_200810132100_mobile.wmv"
-	#        />
-	#</media>
-	if ( $media =~ /^(mobile|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/wmv".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		logger "INFO: Mobile WMV DRM stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'mobile'} = "$href";
-		logger "INFO: Mobile WMV DRM stream URL: $streams{'mobile'}\n";
-	}
-
-	# Audio rtmp mp3
-	#<media kind="audio"
-	#        type="audio/mpeg"
-	#        encoding="mp3"  >
-	#        <connection
-	#                priority="10"
-	#                kind="akamai"
-	#                server="cp48181.edgefcs.net"
-	#                identifier="mp3:secure/radio1/RBN2_mashup_b00d67h9_2008_09_05_22_14_25"
-	#                authString="daEbQa1c6cda6aHdudxagcCcUcVbvbncmdK-biXtzq-cCp-DnoFIpznNBqHnzF"
-	#        />
-	#</media>
-	if ( $media =~ /^(flashaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-		( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-		# Remove offending mp3: at the start of the identifier
-		$identifier =~ s/^mp3://;
-		logger "INFO: RTMP MP3 stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
-		$streams{'flashaudio'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
-		logger "INFO: RTMP stream URL: $streams{'flashaudio'}\n";
-	}
-
-	# ReadAudio stream
-	#<media kind="audio"
-	#       type="audio/real"
-	#        encoding="real"  >
-	#        <connection
-	#                priority="10"
-	#                kind="sis"
-	#                server="http://www.bbc.co.uk"
-	#                identifier="/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one"
-	#                href="http://www.bbc.co.uk/radio/aod/playlists/9h/76/d0/0b/2000_bbc_radio_one.ram"
-	#        />
-	#</media>
-	# Realaudio for worldservice	
-	#<media kind=""
-        #type="audio/real"
-        #encoding="real"  >
-        #<connection
-        #        priority="10"
-        #        kind="edgesuite"
-        #        server="http://http-ws.bbc.co.uk.edgesuite.net"
-        #        identifier="/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
-        #        href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssram.esi?file=/worldservice/css/nb/410060838.ra"
-        #/>
-	#</media>
-	#</mediaSelection>
-	if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/real".+?encoding="real".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $3, $4, $5 );
-		$opt{quiet} = 1 if $opt{streaminfo};
-		chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
-		$rtsp =~ s/[\s\n]//g;
-		$opt{quiet} = 0 if $opt{streaminfo};
-		logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'realaudio'} = "$rtsp";
-		logger "INFO: RealAudio RTSP stream URL: $streams{'realaudio'}\n";
-	}
-
-
-	# Radio WMA (low quality)
-	#<mediaSelection xmlns="http://bbc.co.uk/2008/mp/mediaselection">
-	#<media kind=""
-	#        type="audio/wma"
-	#        encoding="wma"  >
-	#        <connection
-	#                priority="10"
-	#                kind="edgesuite"
-	#                server="http://http-ws.bbc.co.uk.edgesuite.net"
-	#                identifier="/generatecssasx.esi?file=/worldservice/css/nb/410060838"
-	#                href="http://http-ws.bbc.co.uk.edgesuite.net/generatecssasx.esi?file=/worldservice/css/nb/410060838.wma"
-	#        />
-	#</media>
-	if ( $media =~ /^(wma|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/wma".+?encoding="wma".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $3, $4, $5 );
-		$opt{quiet} = 1 if $opt{streaminfo};
-		chomp( my $mms = download_block(undef, $href, $ua, 0, undef) );
-		$mms =~ s/[\n]//g;
-		# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
-		$mms =~ s/^.*href=\"(.+?)\".*$/$1/gi;
-		$opt{quiet} = 0 if $opt{streaminfo};
-		logger "INFO: WMA MMS stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'wma'} = "$mms";
-		logger "INFO: WMA MMS stream URL: $streams{'wma'}\n";
-	}
-
-
-	# Subtitles stream
-	#<media kind="captions"
-	#        type="application/ttaf+xml"   >
-	#        <connection
-	#                priority="10"
-	#                kind="http"
-	#                server="http://www.bbc.co.uk/iplayer/subtitles/"
-	#                identifier="b0008dc8rstreaming89808204.xml"
-	#                href="http://www.bbc.co.uk/iplayer/subtitles/b0008dc8rstreaming89808204.xml"
-	#        />
-	#</media>
-	if ( $media =~ /^(subtitles|all)$/ && $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
-		( $server, $identifier, $href ) = ( $1, $2, $3 );
-		logger "INFO: Subtitles stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
-		$streams{'subtitles'} = "$href";
-		logger "INFO: Subtitles stream URL: $streams{'subtitles'}\n";
-	}
-
 	logger "\n" if $opt{streaminfo};
 	$opt{quiet} = 1 if $opt{streaminfo};
 
