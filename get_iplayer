@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.97;
+my $version = 0.98;
 #
 # Help:
 #	./get_iplayer --help
@@ -86,6 +86,7 @@ Search Options:
 Display Options:
  -l, --long                    Display long programme descriptions / episode names and other data
  --terse                       Only show terse programme info (does not affect searching)
+ --tree                        Display Programme listings in a tree view
  -i, --info                    Show full programme metadata (only if number of matches < 50)
  --list <categories|channel>   Show a list of available categories/channels for the selected type and exit
 
@@ -212,6 +213,7 @@ GetOptions(
 	"xml-alpha|fxd-alpha"		=> \$opt_cmdline{xmlalpha},
 	"html=s"			=> \$opt_cmdline{html},
 	"terse"				=> \$opt_cmdline{terse},
+	"tree"				=> \$opt_cmdline{tree},
 	"pid=s"				=> \$opt_cmdline{pid},
 	"type=s"			=> \$opt_cmdline{type},
 	"exclude-category=s"		=> \$opt_cmdline{excludecategory},
@@ -621,10 +623,11 @@ sub process_matches {
 
 
 
-# Lists progs given an array of index numbers, also retuens an array with non-existent entries removed
+# Lists progs given an array of index numbers, also returns an array with non-existent entries removed
 sub list_progs {
 	my $ua;
 	my @checked;
+	my %names;
 	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt{info} ) {
 		$ua = LWP::UserAgent->new;
@@ -638,11 +641,15 @@ sub list_progs {
 			logger "WARNING: Only processing the first $info_limit matches\n";
 		}
 	}
-
 	for (@_) {
 		my $pid = $index_pid{$_};
 		next if ! $pid;
-		list_prog_entry( $pid, '' );
+		if (! defined $names{ $prog{$pid}{name} }) {
+			list_prog_entry( $pid, '' );
+		} else {
+			list_prog_entry( $pid, '', 1 );
+		}
+		$names{ $prog{$pid}{name} } = 1;
 		push @checked, $_;
 		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
 	}
@@ -656,22 +663,31 @@ sub list_progs {
 
 # Display a line containing programme info (using long, terse, and type options)
 sub list_prog_entry {
-	my ( $pid, $prefix ) = ( @_ );
+	my ( $pid, $prefix, $tree ) = ( @_ );
 	my $type = '';
 	$type = "$prog{$pid}{type}, " if $opt{type} !~ /^(tv|radio|podcast)$/i;
+	my $name;
+	# If tree view
+	if ( $opt{tree} ) {
+		$prefix = '  '.$prefix;
+		$name = '';
+	} else {
+		$name = "$prog{$pid}{name} - ";
+	}
 	# Remove some info depending on type
 	my $optional;
 	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv';
 	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'radio';
 	$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
+	logger "\n${type}$prog{$pid}{name}\n" if $opt{tree} && ! $tree;
 	# Display based on output options
 	if ( $opt{long} ) {
 		my @time = gmtime( time() - $prog{$pid}{timeadded} );
-		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
+		logger "${prefix}$prog{$pid}{index}:\t${type}${name}$prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
 	} elsif ( $opt{terse} ) {
-		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}\n";
+		logger "${prefix}$prog{$pid}{index}:\t${type}${name}$prog{$pid}{episode}\n";
 	} else {
-		logger "${prefix}$prog{$pid}{index}:\t${type}$prog{$pid}{name} - $prog{$pid}{episode}${optional}\n";
+		logger "${prefix}$prog{$pid}{index}:\t${type}${name}$prog{$pid}{episode}${optional}\n";
 	}
 	return 0;
 }
@@ -2840,6 +2856,7 @@ sub update_script {
 					move($script_file.'.tmp', $script_file);
 					chmod 0755, $script_file;
 					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
+					logger "INFO: Please see: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
 				} else {
 					logger "ERROR: Could not create backup file ${script_file}.old - Update aborted\n";
 					exit 1;
