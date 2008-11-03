@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.94;
+my $version = 0.95;
 #
 # Help:
 #	./get_iplayer --help
@@ -98,7 +98,7 @@ Download Options:
  --realaudio                   Use the RealAudio radio stream and not the MP3 stream
  --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
- --raw                         In radio realaudio mode output as raw realaudio and don't transcode to mp3
+ --raw                         In radio/realaudio or iPhone/video mode don't transcode or change the downloaded stream in any way
  --n95                         In TV mode download/stream low quality Nokia N95 H.264 stream (alpha)
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
@@ -1959,6 +1959,9 @@ sub download_iphone_stream {
 	# Stage 3a: Download 1st byte to get exact file length
 	logger "INFO: Stage 3 URL = $url_2\n" if $opt{verbose};
 
+	# Override the $rearrange value is --raw option is specified
+	$rearrange = 0 if $opt{raw};
+	
 	# Setup request header
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
