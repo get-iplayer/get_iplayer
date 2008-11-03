@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.96;
+my $version = 0.97;
 #
 # Help:
 #	./get_iplayer --help
@@ -18,7 +18,7 @@ my $version = 0.96;
 # 	http://linuxcentre.net/get_iplayer/CHANGELOG.txt
 #
 # Example Usage and Documentation:
-# 	http://linuxcentre.net/?page_id=20
+# 	http://linuxcentre.net/getiplayer/documentation
 #
 # Todo:
 # * Use non-shell tee?
@@ -1808,7 +1808,7 @@ sub get_media_stream_data {
 		if ( $media =~ /^(n95_wifi|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 			( $server, $identifier, $href ) = ( $1, $2, $3 );
 			$opt{quiet} = 1 if $opt{streaminfo};
-			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			chomp( my $rtsp = request_url_retry($ua, $href, 2, '', '') );
 			$opt{quiet} = 0 if $opt{streaminfo};
 			logger "INFO: Nokia N95 h.264 low quality WiFi stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
 			$streams{'n95_wifi'} = "$rtsp";
@@ -1831,7 +1831,7 @@ sub get_media_stream_data {
 		if ( $media =~ /^(n95_3g|all)$/ && $xml =~ m{<media\s+kind="".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 			( $server, $identifier, $href ) = ( $1, $2, $3 );
 			$opt{quiet} = 1 if $opt{streaminfo};
-			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			chomp( my $rtsp = request_url_retry($ua, $href, 2, '', '') );
 			$opt{quiet} = 0 if $opt{streaminfo};
 			logger "INFO: Nokia N95 h.264 low quality 3G stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
 			$streams{'n95_3g'} = "$rtsp";
@@ -1887,7 +1887,7 @@ sub get_media_stream_data {
 			logger "INFO: RTMP stream URL: $streams{'flashaudio'}\n";
 		}
 	
-		# ReadAudio stream
+		# RealAudio stream
 		#<media kind="audio"
 		#       type="audio/real"
 		#        encoding="real"  >
@@ -1915,7 +1915,7 @@ sub get_media_stream_data {
 		if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/real".+?encoding="real".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 			( $server, $identifier, $href ) = ( $3, $4, $5 );
 			$opt{quiet} = 1 if $opt{streaminfo};
-			chomp( my $rtsp = download_block(undef, $href, $ua, 0, undef) );
+			chomp( my $rtsp = request_url_retry($ua, $href, 2, '', '') );
 			$rtsp =~ s/[\s\n]//g;
 			$opt{quiet} = 0 if $opt{streaminfo};
 			logger "INFO: RealAudio RTSP stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  href=$href\n" if $opt{verbose};
@@ -1940,7 +1940,7 @@ sub get_media_stream_data {
 		if ( $media =~ /^(wma|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/wma".+?encoding="wma".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(.+?)"} ) {
 			( $server, $identifier, $href ) = ( $3, $4, $5 );
 			$opt{quiet} = 1 if $opt{streaminfo};
-			chomp( my $mms = download_block(undef, $href, $ua, 0, undef) );
+			chomp( my $mms = request_url_retry($ua, $href, 2, '', '') );
 			$mms =~ s/[\n]//g;
 			# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
 			$mms =~ s/^.*href=\"(.+?)\".*$/$1/gi;
