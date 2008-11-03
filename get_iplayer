@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.92;
+my $version = 0.93;
 #
 # Help:
 #	./get_iplayer --help
@@ -533,9 +533,10 @@ sub process_matches {
 			logger "WARNING: Retrying download for PID $opt{pid}\n";
 			$count++;
 		}
-		# Add to history and Run post download command if download was successful
+		# Add to history, tag and Run post download command if download was successful
 		if ($retcode == 0) {
 			add_to_download_history( $opt{pid} );
+			tag_file( $opt{pid} );
 			run_user_command( $opt{pid}, $opt{command} ) if $opt{command};
 		}	
 		exit 0;
