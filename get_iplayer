@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 0.99;
+my $version = 1.00;
 #
 # Help:
 #	./get_iplayer --help
@@ -82,20 +82,21 @@ Search Options:
  --exclude-category <regex>    Narrow search to exclude matched catogories
  --type <radio|tv|podcast|all> Only search in these types of programmes (tv is default)
  --since <hours>               Limit search to programmes added to the cache in the last N hours
-
+ 
 Display Options:
  -l, --long                    Display long programme descriptions / episode names and other data
  --terse                       Only show terse programme info (does not affect searching)
  --tree                        Display Programme listings in a tree view
  -i, --info                    Show full programme metadata (only if number of matches < 50)
  --list <categories|channel>   Show a list of available categories/channels for the selected type and exit
+ --hide                        Hide previously downloaded programmes
 
 Download Options:
  -g, --get                     Download matching programmes
  -x, --stdout                  Additionally stream to STDOUT (so you can pipe output to a player)
  -p, --proxy <url>             Web proxy URL spec
  --pid <pid|url>               Download an arbitrary pid that does not appear in the index
- --force-download              Ignore download history
+ --force-download              Ignore download history (unsets --hide option also)
  --realaudio                   Use the RealAudio radio stream and not the MP3 stream
  --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
@@ -183,68 +184,69 @@ if ( ! grep /\-\-save/, @ARGV ) {
 Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
-	"help|h"			=> \$opt_cmdline{help},
-	"get|g"				=> \$opt_cmdline{get},
-	"long|l"			=> \$opt_cmdline{long},
-	"verbose|v"			=> \$opt_cmdline{verbose},
-	"flush|refresh|f"		=> \$opt_cmdline{flush},
-	"output|o=s"			=> \$opt_cmdline{output},
-	"outputtv=s"			=> \$opt_cmdline{outputtv},
-	"outputradio=s"			=> \$opt_cmdline{outputradio},
-	"outputpodcast=s"		=> \$opt_cmdline{outputpodcast},
-	"file-prefix|fileprefix=s"	=> \$opt_cmdline{fileprefix},
-	"proxy|p=s"			=> \$opt_cmdline{proxy},
-	"stdout|stream|x"		=> \$opt_cmdline{stdout},
-	"subdirs|subdir|s"		=> \$opt_cmdline{subdir},
-	"no-write|nowrite|n"		=> \$opt_cmdline{nowrite},
-	"expiry|e=n"			=> \$opt_cmdline{expiry},
-	"test|t"			=> \$opt_cmdline{test},
-	"whitespace|ws|w"		=> \$opt_cmdline{whitespace},
-	"update|u"			=> \$opt_cmdline{update},
-	"debug"				=> \$opt_cmdline{debug},
-	"channel=s"			=> \$opt_cmdline{channel},
+	"bandwidth=n"			=> \$opt_cmdline{bandwidth},
 	"category=s"			=> \$opt_cmdline{category},
-	"q|quiet"			=> \$opt_cmdline{quiet},
-	"symlink|freevo=s"		=> \$opt_cmdline{symlink},
-	"fxd=s"				=> \$opt_cmdline{fxd},
-	"mythtv=s"			=> \$opt_cmdline{mythtv},
-	"xml-channels|fxd-channels"	=> \$opt_cmdline{xmlchannels},
-	"xml-names|fxd-names"		=> \$opt_cmdline{xmlnames},
-	"xml-alpha|fxd-alpha"		=> \$opt_cmdline{xmlalpha},
-	"html=s"			=> \$opt_cmdline{html},
-	"terse"				=> \$opt_cmdline{terse},
-	"tree"				=> \$opt_cmdline{tree},
-	"pid=s"				=> \$opt_cmdline{pid},
-	"type=s"			=> \$opt_cmdline{type},
+	"channel=s"			=> \$opt_cmdline{channel},
+	"c|command=s"			=> \$opt_cmdline{command},
+	"debug"				=> \$opt_cmdline{debug},
 	"exclude-category=s"		=> \$opt_cmdline{excludecategory},
 	"exclude-channel=s"		=> \$opt_cmdline{excludechannel},
-	"i|info"			=> \$opt_cmdline{info},
-	"c|command=s"			=> \$opt_cmdline{command},
-	"mplayer=s"			=> \$opt_cmdline{mplayer},
-	"lame=s"			=> \$opt_cmdline{lame},
-	"id3v2=s"			=> \$opt_cmdline{id3v2},
-	"vlc=s"				=> \$opt_cmdline{vlc},
-	"n95"				=> \$opt_cmdline{n95},
-	"realaudio"			=> \$opt_cmdline{realaudio},
-	"mp3audio"			=> \$opt_cmdline{mp3audio},
+	"expiry|e=n"			=> \$opt_cmdline{expiry},
+	"file-prefix|fileprefix=s"	=> \$opt_cmdline{fileprefix},
+	"flush|refresh|f"		=> \$opt_cmdline{flush},
 	"force-download"		=> \$opt_cmdline{forcedownload},
-	"wav"				=> \$opt_cmdline{wav},
-	"raw"				=> \$opt_cmdline{raw},
-	"bandwidth=n"			=> \$opt_cmdline{bandwidth},
-	"subtitles"			=> \$opt_cmdline{subtitles},
-	"suboffset=n"			=> \$opt_cmdline{suboffset},
-	"streaminfo"			=> \$opt_cmdline{streaminfo},
-	"since=n"			=> \$opt_cmdline{since},
-	"versionlist|version-list=s"	=> \$opt_cmdline{versionlist},
-	"versions=s"			=> \$opt_cmdline{versions},
+	"fxd=s"				=> \$opt_cmdline{fxd},
+	"get|g"				=> \$opt_cmdline{get},
+	"help|h"			=> \$opt_cmdline{help},
+	"hide"				=> \$opt_cmdline{hide},
+	"html=s"			=> \$opt_cmdline{html},
+	"id3v2=s"			=> \$opt_cmdline{id3v2},
+	"i|info"			=> \$opt_cmdline{info},
+	"lame=s"			=> \$opt_cmdline{lame},
 	"list=s"			=> \$opt_cmdline{list},
+	"long|l"			=> \$opt_cmdline{long},
+	"mp3audio"			=> \$opt_cmdline{mp3audio},
+	"mplayer=s"			=> \$opt_cmdline{mplayer},
+	"mythtv=s"			=> \$opt_cmdline{mythtv},
+	"n95"				=> \$opt_cmdline{n95},
+	"no-write|nowrite|n"		=> \$opt_cmdline{nowrite},
+	"output|o=s"			=> \$opt_cmdline{output},
+	"outputpodcast=s"		=> \$opt_cmdline{outputpodcast},
+	"outputradio=s"			=> \$opt_cmdline{outputradio},
+	"outputtv=s"			=> \$opt_cmdline{outputtv},
+	"pid=s"				=> \$opt_cmdline{pid},
+	"proxy|p=s"			=> \$opt_cmdline{proxy},
 	"pvr"				=> \$opt_cmdline{pvr},
 	"pvradd|pvr-add=s"		=> \$opt_cmdline{pvradd},
 	"pvrdel|pvr-del=s"		=> \$opt_cmdline{pvrdel},
 	"pvrdisable|pvr-disable=s"	=> \$opt_cmdline{pvrdisable},
 	"pvrenable|pvr-enable=s"	=> \$opt_cmdline{pvrenable},
 	"pvrlist|pvr-list"		=> \$opt_cmdline{pvrlist},
+	"q|quiet"			=> \$opt_cmdline{quiet},
+	"raw"				=> \$opt_cmdline{raw},
+	"realaudio"			=> \$opt_cmdline{realaudio},
 	"save"				=> \$save,
+	"since=n"			=> \$opt_cmdline{since},
+	"stdout|stream|x"		=> \$opt_cmdline{stdout},
+	"streaminfo"			=> \$opt_cmdline{streaminfo},
+	"subdirs|subdir|s"		=> \$opt_cmdline{subdir},
+	"suboffset=n"			=> \$opt_cmdline{suboffset},
+	"subtitles"			=> \$opt_cmdline{subtitles},
+	"symlink|freevo=s"		=> \$opt_cmdline{symlink},
+	"test|t"			=> \$opt_cmdline{test},
+	"terse"				=> \$opt_cmdline{terse},
+	"tree"				=> \$opt_cmdline{tree},
+	"type=s"			=> \$opt_cmdline{type},
+	"update|u"			=> \$opt_cmdline{update},
+	"versionlist|version-list=s"	=> \$opt_cmdline{versionlist},
+	"versions=s"			=> \$opt_cmdline{versions},
+	"verbose|v"			=> \$opt_cmdline{verbose},
+	"vlc=s"				=> \$opt_cmdline{vlc},
+	"wav"				=> \$opt_cmdline{wav},
+	"whitespace|ws|w"		=> \$opt_cmdline{whitespace},
+	"xml-channels|fxd-channels"	=> \$opt_cmdline{xmlchannels},
+	"xml-names|fxd-names"		=> \$opt_cmdline{xmlnames},
+	"xml-alpha|fxd-alpha"		=> \$opt_cmdline{xmlalpha},
 ) || die usage();
 usage() if $opt_cmdline{help};
 
@@ -280,6 +282,7 @@ save_options_file( $optfile ) if $save;
 #	'ext'		=> <Filename Extension of saved file - set only while downloading>
 #};
 my %prog;
+my %pids_history;
 my %index_pid; # Hash to obtain pid given an index
 my $now;
 my $childpid;
@@ -416,6 +419,8 @@ if ( $opt{pvradd} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	$lockfile = "${profile_dir}/pvr_lock";
 	lockfile(43200) if ! $opt{test};
+	# Don't attempt to download pids in download history
+	%pids_history = load_download_history();
 	# Load all PVR searches
 	pvr_load_list();
 	# Display default options
@@ -430,6 +435,8 @@ if ( $opt{pvradd} ) {
 		logger "\nRunning PVR Search '$name'\n";
 		# Clear then Load options for specified pvr search name
 		pvr_load_options($name);
+		# Switch on --hide option
+		$opt{hide} = 1;
 		# Dont allow --flush with --pvr
 		$opt{flush} = '';
 		# Do the downloads (force --get option)
@@ -439,6 +446,7 @@ if ( $opt{pvradd} ) {
 
 # Else just process command line args
 } else {
+	%pids_history = load_download_history() if $opt{hide};
 	process_matches( @search_args );
 }
 exit 0;
@@ -646,7 +654,10 @@ sub list_progs {
 	}
 	for (@_) {
 		my $pid = $index_pid{$_};
+		# Skip if pid isn't in index
 		next if ! $pid;
+		# Skip if already downloaded and --hide option is specified
+		next if $opt{hide} && $pids_history{$pid};
 		if (! defined $names{ $prog{$pid}{name} }) {
 			list_prog_entry( $pid, '' );
 		} else {
@@ -3330,6 +3341,27 @@ sub add_to_download_history {
 	print HIST "$pid|$prog{$pid}{name}|$prog{$pid}{episode}|$prog{$pid}{type}|".time()."\n";
 	close HIST;
 	return 0;
+}
+
+
+
+# returns a hash (<pid> => <data>) for all the pids in the history file
+sub load_download_history {
+	my %pids_downloaded;
+
+	# Return if force-download option specified or stdout streaming only
+	return %pids_downloaded if $opt{forcedownload} || $opt{stdout} || $opt{nowrite};
+
+	logger "INFO: Loading download history\n" if $opt{verbose};
+	if ( ! open(HIST, "< $historyfile") ) {
+		logger "WARNING: Cannot read $historyfile\n\n";
+		return 0;
+	}
+	while ( <HIST> ) {
+		$pids_downloaded{$1} = $2 if m{^(.+?)\|(.*)$};
+		logger "DEBUG: Loaded '$1' = '$2' from download history\n" if $opt{debug};
+	}
+	return %pids_downloaded;
 }
 
 
