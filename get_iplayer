@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 1.00;
+my $version = 1.01;
 #
 # Help:
 #	./get_iplayer --help
@@ -95,6 +95,7 @@ Download Options:
  -g, --get                     Download matching programmes
  -x, --stdout                  Additionally stream to STDOUT (so you can pipe output to a player)
  -p, --proxy <url>             Web proxy URL spec
+ --partial-proxy               Works around for some broken web proxies (try this extra option if your proxy fails)
  --pid <pid|url>               Download an arbitrary pid that does not appear in the index
  --force-download              Ignore download history (unsets --hide option also)
  --realaudio                   Use the RealAudio radio stream and not the MP3 stream
@@ -214,6 +215,7 @@ GetOptions(
 	"outputpodcast=s"		=> \$opt_cmdline{outputpodcast},
 	"outputradio=s"			=> \$opt_cmdline{outputradio},
 	"outputtv=s"			=> \$opt_cmdline{outputtv},
+	"partial-proxy"			=> \$opt_cmdline{partialproxy},
 	"pid=s"				=> \$opt_cmdline{pid},
 	"proxy|p=s"			=> \$opt_cmdline{proxy},
 	"pvr"				=> \$opt_cmdline{pvr},
@@ -1518,11 +1520,19 @@ sub download_programme {
 
 	# Do the iPhone h.264 download
 	} elsif ( $prog{$pid}{type} eq 'tv' ) {
+		# Disable proxy here if required
+		$ua->proxy( ['http'] => undef ) if $opt{partialproxy};
 		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, $file_symlink, 1 );
+		# Re-enable proxy here if required
+		$ua->proxy( ['http'] => $proxy_url ) if $opt{partialproxy};
 
 	# Do the iPhone mp3 download
 	} elsif ( $prog{$pid}{type} eq 'radio' ) {
+		# Disable proxy here if required
+		$ua->proxy( ['http'] => undef ) if $opt{partialproxy};
 		$return = download_iphone_stream( $ua, $url_2, $file, $file_done, $file_symlink, 0 );
+		# Re-enable proxy here if required
+		$ua->proxy( ['http'] => $proxy_url ) if $opt{partialproxy};
 		# If the iphone mp3 download fails then it's probably not ready yet so retry using realaudio
 		$opt{realaudio} = 1 if $return eq 'retry';
 	}
