@@ -9,7 +9,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 1.01;
+my $version = 1.02;
 #
 # Help:
 #	./get_iplayer --help
@@ -521,20 +521,6 @@ sub process_matches {
 		}
 	}
 
-	# Get stream links from BBC iplayer site or from cache (also populates all hashes) specified in --type option
-	get_links( $_ ) for split /,/, $opt{type};
-
-	# List elements (i.e. 'channel' 'categories') if required and exit
-	if ( $opt{list} ) {
-		list_unique_element_counts( $opt{list} );
-		exit 0;
-	}
-
-	# Write HTML and XML files if required
-	create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
-	create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
-	create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
-
 	# Get arbitrary pid
 	if ( $opt{pid} ) {
 		# Remove any url parts from the pid
@@ -556,6 +542,20 @@ sub process_matches {
 		}	
 		exit 0;
 	}
+
+	# Get stream links from BBC iplayer site or from cache (also populates all hashes) specified in --type option
+	get_links( $_ ) for split /,/, $opt{type};
+
+	# List elements (i.e. 'channel' 'categories') if required and exit
+	if ( $opt{list} ) {
+		list_unique_element_counts( $opt{list} );
+		exit 0;
+	}
+
+	# Write HTML and XML files if required
+	create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
+	create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
+	create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
 
 	# Parse remaining args
 	my @match_list;
