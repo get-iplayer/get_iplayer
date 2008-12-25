@@ -3,13 +3,14 @@
 # get_iplayer
 #
 # Lists and downloads BBC iPlayer audio and video streams
-#
+# 
 # Author: Phil Lewis
+# RTMP additions: Andrej Stepanchuk
 # Email: iplayer (at sign) linuxcentre.net
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $version = 1.03;
+my $version = 1.04;
 #
 # Help:
 #	./get_iplayer --help
@@ -26,11 +27,13 @@ my $version = 1.03;
 # * Index/Download live radio streams w/schedule feeds to assist timing
 # * Podcasts for 'local' stations are missing (only a handful). They use a number of different station ids which will involve reading html to determine rss feed. 
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
+# * Cope with radio via rtmp
+# * Stdout mode with rtmp
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
-#
+# * flv conversions from rtmp downloads aren't quite right yet. A/V sync issues?
 
 use Env qw[@PATH];
 use Fcntl;
@@ -103,6 +106,7 @@ Download Options:
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
  --raw                         In radio/realaudio or iPhone/video mode don't transcode or change the downloaded stream in any way
  --n95                         In TV mode download/stream low quality Nokia N95 H.264 stream (alpha)
+ --rtmp                        In TV mode download/stream high quality flash stream (alpha)
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
@@ -142,6 +146,7 @@ Config Options:
  --mplayer <path>              Location of mplayer binary
  --lame <path>                 Location of lame binary
  --id3v2 <path>                Location of id3v2 binary
+ --rtmpdump <path>             Location of rtmpdump binary
  --vlc <path>                  Location of vlc binary
  --streaminfo                  Returns all of the media stream urls of the programme(s)
  -v, --verbose                 Verbose
@@ -227,6 +232,8 @@ GetOptions(
 	"q|quiet"			=> \$opt_cmdline{quiet},
 	"raw"				=> \$opt_cmdline{raw},
 	"realaudio"			=> \$opt_cmdline{realaudio},
+	"rtmp"				=> \$opt_cmdline{rtmp},
+	"rtmpdump=s"			=> \$opt_cmdline{rtmpdump},
 	"save"				=> \$save,
 	"since=n"			=> \$opt_cmdline{since},
 	"stdout|stream|x"		=> \$opt_cmdline{stdout},
@@ -301,7 +308,7 @@ my $metadata_xml_prefix		= 'http://www.bbc.co.uk/iplayer/metafiles/episode'; # /
 my $metadata_mobile_prefix	= 'http://www.bbc.co.uk/iplayer/widget/episodedetail/episode'; # /${pid}/template/mobile/service_type/tv/
 my $podcast_index_feed_url	= 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
-my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer';
+my $update_url			= '--http://linuxcentre.net/get_iplayer/get_iplayer'; # disabled since this is a modified version
 
 # Static hash definitions
 my %channels;
@@ -419,6 +426,9 @@ my $iphone_block_size	= 0x2000000; # 32MB
 my %download_dir;
 my $cache_secs;
 my $mplayer;
+#my $mencoder;
+my $ffmpeg;
+my $rtmpdump;
 my $mplayer_opts;
 my $lame;
 my $lame_opts;
@@ -520,6 +530,11 @@ sub process_matches {
 	$mplayer		= $opt{mplayer} || 'mplayer';
 	$mplayer_opts		= '-nolirc';
 	$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
+	# Assume mencoder/ffmpeg is in the same path as mplayer
+#	$mencoder		= $mplayer;
+#	$mencoder		=~ s|^(.*?)mplayer|$1mencoder|g;
+	$ffmpeg			= $mplayer;
+	$ffmpeg			=~ s|^(.*?)mplayer|$1ffmpeg|g;
 	$lame			= $opt{lame} || 'lame';
 	$lame_opts		= '-f ';
 	$lame_opts		.= '--quiet ' if $opt{quiet};
@@ -527,6 +542,7 @@ sub process_matches {
 	$vlc_opts		= '-vv';
 	$id3v2			= $opt{id3v2} || 'id3v2';
 	$tee			= 'tee';
+	$rtmpdump		= $opt{rtmpdump} || 'rtmpdump';
 	$bandwidth		= $opt{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
 	# Order with which to search for programme versions (can be overridden by --versionlist option)
 	@version_search_list 	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
@@ -542,6 +558,12 @@ sub process_matches {
 	if ($opt{nowrite} && (!$opt{stdout})) {
 		logger "ERROR: Cannot download to nowhere\n";
 		exit 1;
+	}
+
+	# Disable rtmp mode if rtmpdump does not exist
+	if ( $opt{rtmp} && ! exists_in_path($rtmpdump)) {
+		logger "\nERROR: Required program $rtmpdump does not exist, falling back to iphone mode\n";
+		delete $opt{rtmp};
 	}
 
 	# Web proxy
@@ -707,7 +729,21 @@ sub list_progs {
 		}
 		$names{ $prog{$pid}{name} } = 1;
 		push @checked, $_;
-		logger get_pid_metadata( $ua, $pid )."\n" if $opt{info};
+		if ( $opt{info} ) {
+			my %metadata = get_pid_metadata( $ua, $pid );
+			logger "\nPid:\t\t$metadata{pid}\n";
+			logger "Index:\t\t$metadata{index}\n";
+			logger "Type:\t\t$metadata{type}\n";
+			logger "Duration:\t$metadata{duration}\n";
+			logger "Channel:\t$metadata{channel}\n";
+			logger "Available:\t$metadata{available}\n";
+			logger "Expires:\t$metadata{expiry}\n";
+			logger "Versions:\t$metadata{versions}\n";
+			logger "Guidance:\t$metadata{guidance}\n";
+			logger "Categories:\t$metadata{categories}\n";
+			logger "Description:\t$metadata{desc}\n";
+			logger "Player:\t\t$metadata{player}\n";
+		}
 	}
 	logger "\n";
 
@@ -879,7 +915,6 @@ sub get_links_atom {
 
 			# <id>tag:bbc.co.uk,2008:PIPS:b008pj3w</id>
 			$pid = $1 if $entry =~ m{<id>.*PIPS:(.+?)</id>};
-
 
 			# parse name: episode, e.g. Take a Bow: Street Feet on the Farm
 			$name = $1 if $entry =~ m{<title\s*.*?>\s*(.*?)\s*</title>};
@@ -1482,8 +1517,8 @@ sub download_programme {
 
 	my $url_2;
 	my $got_url;
-	
-	# Do this for each version tried in this order (if they appaered in the content)
+
+	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 
 		# Change $verpid to 'default' type if it exists, then Used 'signed' otherwise
@@ -1491,7 +1526,11 @@ sub download_programme {
 			logger "INFO: Checking existence of $version version\n";
 			$prog{$pid}{version} = $version;
 			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-			$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
+			if( ! $opt{rtmp} ) {
+				$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
+			} else {
+				$url_2 = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh' );
+			}
 			$got_url = 1;
 		}
 		# Break out of loop if we have an actual URL
@@ -1552,9 +1591,21 @@ sub download_programme {
 		download_subtitles( $ua, $subfile, $version_pids{ $prog{$pid}{version} } );
 	}
 
-	# Do the N95 h.264 download
 	my $return;
-	if ( $opt{n95} ) {
+	# Do rtmp download
+	if ( $opt{rtmp} ) {
+		# Get player url
+		my %metadata = get_pid_metadata( $ua, $pid );
+		# get this redirected page and find out where it is redirected to
+		my ($ub, $request, $response, $prog_url);
+		$ub = new LWP::UserAgent;
+		$request = new HTTP::Request HEAD => $metadata{player};
+		$response = $ub->request($request);
+		$prog_url = $response->request->url;
+		$return = download_h264_rtmp_stream( $ua, $url_2, $prog_url, $file, $file_done, $file_symlink );
+
+	# Do the N95 h.264 download
+	} elsif ( $opt{n95} ) {
 		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n95_wifi' );
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
@@ -1808,7 +1859,7 @@ sub get_media_stream_data {
 			$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
 		}
-	
+
 		# h.264 normal quality stream
 		#	<media kind="video"
 		#        width="512"
@@ -2239,6 +2290,50 @@ sub download_iphone_stream {
 
 	# Moving file into place as complete (if not stdout)
 	move($file, $file_done) if ! $opt{stdout};
+	return 0;
+}
+
+
+
+sub download_h264_rtmp_stream {
+        my ( $ua, $url_2, $prog_url, $file, $file_done, $file_symlink ) = @_;
+        my $file_flv = $file.'.flv';
+
+	logger "INFO: url: $url_2, prog_url: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
+
+	# Create symlink if required
+	if ( $opt{symlink} ) {
+		# remove old symlink
+		unlink $file_symlink if -l $file_symlink;
+		symlink $file_flv, $file_symlink;
+		logger "INFO: Created symlink from '$file_symlink' -> '$file_flv'\n" if $opt{verbose};
+	}
+
+	my $cmd = "$rtmpdump --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"bbciplayertok\" -o \"$file_flv\" >&2";
+	my $cmd2 = "$ffmpeg -i \"$file_flv\" -vcodec copy -acodec copy -f mp4 -y \"$file\" >&2";
+	#my $cmd2 = "$mencoder -oac copy -ovc copy -o \"$file\" \"$file_flv\" >&2";
+
+	logger "\n\nINFO: Command1: $cmd\nINFO: Command2: $cmd2\n\n" if $opt{verbose};
+	if ( system($cmd) ) {
+		logger "\nWARNING: Failed to download file $file via RTMP\n";
+		return 1;
+	}
+	# Only convert to mp4 if we have mencoder in path
+	# Disable rtmp mode if rtmpdump does not exist
+	if ( ! exists_in_path($ffmpeg)) {
+		logger "\nWARNING: $ffmpeg does not exist - not converting flv file to mp4\n";
+		move($file_flv, $file_done.'.flv') if ! $opt{stdout};
+	} else {
+		# Run flv conversion and delete source file on success
+		if ( ! system($cmd2) ) {
+			unlink( $file_flv );
+		} else {
+			logger "ERROR: flv to mp4 conversion failed\n";
+			return 2;
+		}
+		# Moving file into place as complete (if not stdout)
+		move($file, $file_done) if ! $opt{stdout};
+	}
 	return 0;
 }
 
@@ -3274,7 +3369,7 @@ sub get_pid_metadata {
 	#  </entry>
 	#</feed>
 
-	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $type, $categories);
+	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $type, $categories, $player, $thumbnail);
 
 	$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
 	$available = $1 if $entry3 =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
@@ -3282,7 +3377,9 @@ sub get_pid_metadata {
 	$type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
 	$longdesc = $1 if $entry3 =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
 	$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
-
+	$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+	$thumbnail = $1 if $entry3 =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
+	
 	my @cats;
 	for (split /<media:category scheme=\".+?\"/, $entry3) {
 		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
@@ -3293,19 +3390,22 @@ sub get_pid_metadata {
 	get_version_pids($ua, $pid);
 
 	# Fill in from cache if not got from metadata
-	$metadata .= "\nPid:\t\t$pid\n";
-	$metadata .= "Index:\t\t$prog{$pid}{index}\n";
-	$metadata .= "Type:\t\t".	($type || $prog{$pid}{type})		."\n";
-	$metadata .= "Duration:\t".	($duration || $prog{$pid}{duration})	."\n";
-	$metadata .= "Channel:\t".	($channel || $prog{$pid}{channel})	."\n";
-	$metadata .= "Available:\t".	($available || $prog{$pid}{available})	."\n";
-	$metadata .= "Expires:\t".	($expiry || $prog{$pid}{expiry})	."\n";
-	$metadata .= "Versions:\t".	($versions || $prog{$pid}{versions})	."\n";
-	$metadata .= "Guidance:\t".	($guidance || $prog{$pid}{guidance})	."\n";
-	$metadata .= "Categories:\t".	($categories || $prog{$pid}{categories})."\n";
-	$metadata .= "Description:\t".	($longdesc || $prog{$pid}{desc})	."\n";
+	my %metadata;
+	$metadata{pid}		= $pid;
+	$metadata{index}	= $prog{$pid}{index};
+	$metadata{type}		= $type || $prog{$pid}{type};
+	$metadata{duration}	= $duration || $prog{$pid}{duration};
+	$metadata{channel}	= $channel || $prog{$pid}{channel};
+	$metadata{available}	= $available || $prog{$pid}{available};
+	$metadata{expiry}	= $expiry || $prog{$pid}{expiry};
+	$metadata{versions}	= $versions || $prog{$pid}{versions};
+	$metadata{guidance}	= $guidance || $prog{$pid}{guidance};
+	$metadata{categories}	= $categories || $prog{$pid}{categories};
+	$metadata{desc}		= $longdesc || $prog{$pid}{desc};
+	$metadata{player}	= $player;
+	$metadata{thumbnail}	= $thumbnail || $prog{$pid}{thumbnail};
 
-	return $metadata;
+	return %metadata;
 }
 
 
@@ -3800,3 +3900,4 @@ sub lockfile {
 	close LOCKFILE;
 	return 0;
 }
+
