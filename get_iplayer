@@ -12,7 +12,7 @@
 # Other credits:
 # RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.05;
+my $version = 1.06;
 #
 # Help:
 #	./get_iplayer --help
@@ -62,10 +62,17 @@ my %opt = ();
 my %opt_cmdline = (); # a hash of which options came from the cmdline rather than the options files
 my %opt_file = (); # a hash of which options came from the options files rather than the cmdline
 
-# Print to STDERR if not quiet unless verbose or debug
+# Print to STDERR/STDOUT if not quiet unless verbose or debug
 sub logger(@) {
 	# Make sure quiet can be overridden by verbose and debug options
-	print STDERR $_[0] if (! $opt{quiet}) || $opt{verbose} || $opt{debug};
+	if ( $opt{verbose} || $opt{debug} || ! $opt{quiet} ) {
+		# Only send messages to STDERR if pvr or stdout options are being used.
+		if ( $opt{stdout} || $opt{pvr} ) {
+			print STDERR $_[0];
+		} else {
+			print STDOUT $_[0];
+		}
+	}
 }
 
 sub usage {
@@ -2818,7 +2825,7 @@ sub download_block {
 			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
 			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
 		}
-		printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
+		logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
 			$size / 1024.0 / 1024.0, 
 			$file_len / 1024.0 / 1024.0,
 			$rate,
@@ -2858,7 +2865,7 @@ sub download_block {
 				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
 			}
 			# time remaining
-			printf STDERR "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
+			logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
 				$size / 1024.0 / 1024.0,
 				$file_len / 1024.0 / 1024.0,
 				$rate,
@@ -2872,7 +2879,7 @@ sub download_block {
 			} else {
 				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $size / ($timecalled - $now) );
 			}
-			printf STDERR "%8.2fMB %s         \r", $size / 1024.0 / 1024.0, $rate;
+			logger sprintf "%8.2fMB %s         \r", $size / 1024.0 / 1024.0, $rate;
 		}
 	};
 
