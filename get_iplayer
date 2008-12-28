@@ -12,7 +12,7 @@
 # Other credits:
 # RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.04;
+my $version = 1.05;
 #
 # Help:
 #	./get_iplayer --help
@@ -1519,7 +1519,7 @@ sub download_programme {
 
 	my $url_2;
 	my $got_url;
-
+	my $application;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 
@@ -1531,7 +1531,7 @@ sub download_programme {
 			if( ! $opt{rtmp} ) {
 				$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			} else {
-				$url_2 = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh' );
+				($url_2, $application) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
 			}
 			$got_url = 1;
 		}
@@ -1604,7 +1604,7 @@ sub download_programme {
 		$request = new HTTP::Request HEAD => $metadata{player};
 		$response = $ub->request($request);
 		$prog_url = $response->request->url;
-		$return = download_h264_rtmp_stream( $ua, $url_2, $prog_url, $file, $file_done, $file_symlink );
+		$return = download_h264_rtmp_stream( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink );
 
 	# Do the N95 h.264 download
 	} elsif ( $opt{n95} ) {
@@ -1822,8 +1822,9 @@ sub get_version_pids {
 # Gets media streams data for this version pid
 # $media = all|flashhigh|flashnormal|iphone|flashwii|n95_wifi|n95_3g|mobile|flashaudio|realaudio|wma|subtitles
 sub get_media_stream_data {
-	my ( $pid, $verpid, $media ) = @_;
+	my ( $pid, $verpid, $media, $get_app ) = @_;
 	my %streams;
+	my $application;
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
@@ -1855,9 +1856,9 @@ sub get_media_stream_data {
 		#                identifier="mp4:b000zxf4-H26490898078"
 		#                authString="d52f77fede048f1ffd6587fd47446dee"
 		#        />
-		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-			logger "INFO: RTMP h.264 high quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			( $application, $server, $identifier, $authstring ) = ( $1, $2, $3, $4 );
+			logger "INFO: RTMP h.264 high quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
 		}
@@ -2106,8 +2107,13 @@ sub get_media_stream_data {
 	$opt{quiet} = 1 if $opt{streaminfo};
 
 	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
-	return %streams if $media eq 'all';
-	return $streams{$media};
+	if ( $media eq 'all' ) {
+		return %streams;
+	} elsif ( defined $get_app ) {
+		return ($streams{$media}, $application);
+	} else {
+		return $streams{$media};
+	}
 }
 
 
@@ -2298,7 +2304,7 @@ sub download_iphone_stream {
 
 
 sub download_h264_rtmp_stream {
-        my ( $ua, $url_2, $prog_url, $file, $file_done, $file_symlink ) = @_;
+        my ( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink ) = @_;
         my $file_flv = $file.'.flv';
 
 	logger "INFO: url: $url_2, prog_url: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
@@ -2311,7 +2317,7 @@ sub download_h264_rtmp_stream {
 		logger "INFO: Created symlink from '$file_symlink' -> '$file_flv'\n" if $opt{verbose};
 	}
 
-	my $cmd = "$rtmpdump --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"bbciplayertok\" -o \"$file_flv\" >&2";
+	my $cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"$application\" -o \"$file_flv\" >&2";
 	my $cmd2 = "$ffmpeg -i \"$file_flv\" -vcodec copy -acodec copy -f mp4 -y \"$file\" >&2";
 	#my $cmd2 = "$mencoder -oac copy -ovc copy -o \"$file\" \"$file_flv\" >&2";
 
