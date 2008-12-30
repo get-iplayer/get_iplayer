@@ -10,9 +10,9 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 # Other credits:
-# RTMP additions: Andrej Stepanchuk
+#  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.06;
+my $version = 1.07;
 #
 # Help:
 #	./get_iplayer --help
@@ -113,7 +113,7 @@ Download Options:
  --realaudio                   Use the RealAudio radio stream and not the MP3 stream
  --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
- --raw                         In radio/realaudio or iPhone/video mode don't transcode or change the downloaded stream in any way
+ --raw                         Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)
  --n95                         In TV mode download/stream low quality Nokia N95 H.264 stream (alpha)
  --rtmp                        In TV mode download/stream high quality flash stream (alpha)
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
@@ -153,6 +153,7 @@ Config Options:
  --xml-alpha                   Create freevo/Mythtv menu sorted alphabetically by programme name
  --html <file>                 Create basic HTML index of programmes in specified file
  --mplayer <path>              Location of mplayer binary
+ --ffmpeg <path>               Location of ffmpeg binary
  --lame <path>                 Location of lame binary
  --id3v2 <path>                Location of id3v2 binary
  --rtmpdump <path>             Location of rtmpdump binary
@@ -207,6 +208,7 @@ GetOptions(
 	"exclude-category=s"		=> \$opt_cmdline{excludecategory},
 	"exclude-channel=s"		=> \$opt_cmdline{excludechannel},
 	"expiry|e=n"			=> \$opt_cmdline{expiry},
+	"ffmpeg=s"			=> \$opt_cmdline{ffmpeg},
 	"file-prefix|fileprefix=s"	=> \$opt_cmdline{fileprefix},
 	"flush|refresh|f"		=> \$opt_cmdline{flush},
 	"force-download"		=> \$opt_cmdline{forcedownload},
@@ -437,6 +439,7 @@ my $cache_secs;
 my $mplayer;
 #my $mencoder;
 my $ffmpeg;
+my $ffmpeg_opts;
 my $rtmpdump;
 my $mplayer_opts;
 my $lame;
@@ -539,14 +542,11 @@ sub process_matches {
 	$mplayer		= $opt{mplayer} || 'mplayer';
 	$mplayer_opts		= '-nolirc';
 	$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
-	# Assume mencoder/ffmpeg is in the same path as mplayer
-#	$mencoder		= $mplayer;
-#	$mencoder		=~ s|^(.*?)mplayer|$1mencoder|g;
-	$ffmpeg			= $mplayer;
-	$ffmpeg			=~ s|^(.*?)mplayer|$1ffmpeg|g;
+	$ffmpeg			= $opt{ffmpeg} || 'ffmpeg';
+	$ffmpeg_opts		= '';
 	$lame			= $opt{lame} || 'lame';
-	$lame_opts		= '-f ';
-	$lame_opts		.= '--quiet ' if $opt{quiet};
+	$lame_opts		= '-f';
+	$lame_opts		.= ' --quiet ' if $opt{quiet};
 	$vlc			= $opt{vlc} || 'cvlc';
 	$vlc_opts		= '-vv';
 	$id3v2			= $opt{id3v2} || 'id3v2';
@@ -623,11 +623,6 @@ sub process_matches {
 		exit 0;
 	}
 
-	# Write HTML and XML files if required
-	create_html( sort {$a <=> $b} keys %index_pid ) if $opt{html};
-	create_xml( $opt{fxd}, sort {$a <=> $b} keys %index_pid ) if $opt{fxd};
-	create_xml( $opt{mythtv}, sort {$a <=> $b} keys %index_pid ) if $opt{mythtv};
-
 	# Parse remaining args
 	my @match_list;
 	for ( @search_args ) {
@@ -673,6 +668,11 @@ sub process_matches {
 	# Display list for download
 	logger "Matches:\n" if @match_list;
 	@match_list = list_progs( @match_list );
+
+	# Write HTML and XML files if required (with search options applied)
+	create_html( @match_list ) if $opt{html};
+	create_xml( $opt{fxd}, @match_list ) if $opt{fxd};
+	create_xml( $opt{mythtv}, @match_list ) if $opt{mythtv};
 
 	# Do the downloads based on list of index numbers if required
 	if ( $opt{get} || $opt{stdout} ) {
@@ -1566,12 +1566,17 @@ sub download_programme {
 			$opt{realaudio} = 1;
 			return 'retry';
 		}
+		# If rtmp flash video stream does not exist
+		if ( $opt{rtmp} ) {
+			logger "ERROR: RTMP Flash High Quality Version does not exist\n";
+		}
 		return 15;
 	}
 	
 	# Determine the correct filenames for this download
 	$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, $dir, $opt{fileprefix} || "<longname> - <episode> <pid> <version>" );
 	logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                 \n";
+	$prog{$pid}{ext} = 'flv' if $opt{raw};
 	$prog{$pid}{dir} = $dir;
 	my $file_done = "${dir}/$prog{$pid}{fileprefix}.$prog{$pid}{ext}";
 	my $file = "${dir}/$prog{$pid}{fileprefix}.partial.$prog{$pid}{ext}";
@@ -2311,8 +2316,20 @@ sub download_iphone_stream {
 
 
 sub download_h264_rtmp_stream {
-        my ( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink ) = @_;
-        my $file_flv = $file.'.flv';
+	my ( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink ) = @_;
+	my $file_tmp;
+
+	if ( ! exists_in_path($ffmpeg)) {
+		logger "\nWARNING: $ffmpeg does not exist - not converting flv file to mp4\n";
+		$opt{raw} = 1;
+		$file_done =~ s/mov/flv/;
+		$file =~ s/mov/flv/;
+	}
+	if ( $opt{raw} ) {
+		$file_tmp = $file;
+	} else {
+		$file_tmp = $file.'.flv'
+	}
 
 	logger "INFO: url: $url_2, prog_url: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
 
@@ -2320,35 +2337,34 @@ sub download_h264_rtmp_stream {
 	if ( $opt{symlink} ) {
 		# remove old symlink
 		unlink $file_symlink if -l $file_symlink;
-		symlink $file_flv, $file_symlink;
-		logger "INFO: Created symlink from '$file_symlink' -> '$file_flv'\n" if $opt{verbose};
+		symlink $file_tmp, $file_symlink;
+		logger "INFO: Created symlink from '$file_symlink' -> '$file_tmp'\n" if $opt{verbose};
 	}
 
-	my $cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"$application\" -o \"$file_flv\" >&2";
-	my $cmd2 = "$ffmpeg -i \"$file_flv\" -vcodec copy -acodec copy -f mp4 -y \"$file\" >&2";
-	#my $cmd2 = "$mencoder -oac copy -ovc copy -o \"$file\" \"$file_flv\" >&2";
-
-	logger "\n\nINFO: Command1: $cmd\nINFO: Command2: $cmd2\n\n" if $opt{verbose};
+	my $cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"$application\" -o \"$file_tmp\" >&2";
+	logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
 	if ( system($cmd) ) {
 		logger "\nWARNING: Failed to download file $file via RTMP\n";
 		return 1;
 	}
-	# Only convert to mp4 if we have mencoder in path
-	# Disable rtmp mode if rtmpdump does not exist
-	if ( ! exists_in_path($ffmpeg)) {
-		logger "\nWARNING: $ffmpeg does not exist - not converting flv file to mp4\n";
-		move($file_flv, $file_done.'.flv') if ! $opt{stdout};
+	
+	# Convert to mp4 if required
+	if ( $opt{raw} ) {
+		move($file_tmp, $file_done) if ! $opt{stdout};
 	} else {
+		my $cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f mp4 -y \"$file\" >&2";
+		logger "\n\nINFO: Command: $cmd\n\n" if $opt{verbose};
 		# Run flv conversion and delete source file on success
-		if ( ! system($cmd2) ) {
-			unlink( $file_flv );
+		if ( ! system($cmd) ) {
+			unlink( $file_tmp );
 		} else {
-			logger "ERROR: flv to mp4 conversion failed\n";
+			logger "ERROR: flv to mp4 conversion failed - retaining file '$file_tmp'\n";
 			return 2;
 		}
 		# Moving file into place as complete (if not stdout)
 		move($file, $file_done) if ! $opt{stdout};
 	}
+	
 	return 0;
 }
 
