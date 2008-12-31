@@ -12,7 +12,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.07;
+my $version = 1.08;
 #
 # Help:
 #	./get_iplayer --help
@@ -1527,6 +1527,7 @@ sub download_programme {
 	my $url_2;
 	my $got_url;
 	my $application;
+	my $tcurl;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 
@@ -1538,7 +1539,18 @@ sub download_programme {
 			if( ! $opt{rtmp} ) {
 				$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			} else {
-				($url_2, $application) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
+				$prog{$pid}{ext} = 'mp4';
+				($url_2, $application, $tcurl) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
+				if ( ! $url_2 ) {
+					logger "WARNING: No High Quality RTMP Flash Version available - falling back to Normal Quality Flash RTMP\n";
+					$prog{$pid}{ext} = 'avi';
+					($url_2, $application, $tcurl) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashnormal', 1 );
+				}
+				# Force raw mode if ffmpeg is not installed
+				if ( ! exists_in_path($ffmpeg)) {
+					logger "\nWARNING: $ffmpeg does not exist - not converting flv file\n";
+					$opt{raw} = 1;
+				}
 			}
 			$got_url = 1;
 		}
@@ -1616,7 +1628,7 @@ sub download_programme {
 		$request = new HTTP::Request HEAD => $metadata{player};
 		$response = $ub->request($request);
 		$prog_url = $response->request->url;
-		$return = download_h264_rtmp_stream( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink );
+		$return = download_h264_rtmp_stream( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $file, $file_done, $file_symlink );
 
 	# Do the N95 h.264 download
 	} elsif ( $opt{n95} ) {
@@ -1836,7 +1848,7 @@ sub get_version_pids {
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media, $get_app ) = @_;
 	my %streams;
-	my $application;
+	my ($application, $tcurl);
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
@@ -1868,8 +1880,11 @@ sub get_media_stream_data {
 		#                identifier="mp4:b000zxf4-H26490898078"
 		#                authString="d52f77fede048f1ffd6587fd47446dee"
 		#        />
+		# application: bbciplayertok
+		# tcURL: rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok
 		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			( $application, $server, $identifier, $authstring ) = ( $1, $2, $3, $4 );
+			$tcurl = "rtmp://${server}:80/${application}";
 			logger "INFO: RTMP h.264 high quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
@@ -1890,13 +1905,17 @@ sub get_media_stream_data {
 		#        />
 		#	</media>
 		#
+		# application (e.g.):            ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc2cL-bjw5rj-cCp-JnlDCnzn.MEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
+		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
 		if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-			logger "INFO: RTMP h.264 normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$application = "ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			$tcurl = "rtmp://${server}:80/${application}";
+			logger "INFO: RTMP h.264 normal quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashnormal'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP normal quality stream URL: $streams{'flashnormal'}\n";
 		}
-	
+
 		# Wii h.264 standard quality stream
 		#<media kind="video"
 		#        width="512"
@@ -2122,7 +2141,7 @@ sub get_media_stream_data {
 	if ( $media eq 'all' ) {
 		return %streams;
 	} elsif ( defined $get_app ) {
-		return ($streams{$media}, $application);
+		return ($streams{$media}, $application, $tcurl);
 	} else {
 		return $streams{$media};
 	}
@@ -2315,23 +2334,19 @@ sub download_iphone_stream {
 
 
 
+# Actually do the RTMP stream downloading
 sub download_h264_rtmp_stream {
-	my ( $ua, $url_2, $prog_url, $application, $file, $file_done, $file_symlink ) = @_;
+	my ( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $file, $file_done, $file_symlink ) = @_;
 	my $file_tmp;
-
-	if ( ! exists_in_path($ffmpeg)) {
-		logger "\nWARNING: $ffmpeg does not exist - not converting flv file to mp4\n";
-		$opt{raw} = 1;
-		$file_done =~ s/mov/flv/;
-		$file =~ s/mov/flv/;
-	}
+	my $cmd;
+	
 	if ( $opt{raw} ) {
 		$file_tmp = $file;
 	} else {
 		$file_tmp = $file.'.flv'
 	}
 
-	logger "INFO: url: $url_2, prog_url: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
+	logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, pageUrl: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
 
 	# Create symlink if required
 	if ( $opt{symlink} ) {
@@ -2341,7 +2356,7 @@ sub download_h264_rtmp_stream {
 		logger "INFO: Created symlink from '$file_symlink' -> '$file_tmp'\n" if $opt{verbose};
 	}
 
-	my $cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok\" --app \"$application\" -o \"$file_tmp\" >&2";
+	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
 	logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
 	if ( system($cmd) ) {
 		logger "\nWARNING: Failed to download file $file via RTMP\n";
@@ -2352,13 +2367,13 @@ sub download_h264_rtmp_stream {
 	if ( $opt{raw} ) {
 		move($file_tmp, $file_done) if ! $opt{stdout};
 	} else {
-		my $cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f mp4 -y \"$file\" >&2";
+		$cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" >&2";
 		logger "\n\nINFO: Command: $cmd\n\n" if $opt{verbose};
 		# Run flv conversion and delete source file on success
 		if ( ! system($cmd) ) {
 			unlink( $file_tmp );
 		} else {
-			logger "ERROR: flv to mp4 conversion failed - retaining file '$file_tmp'\n";
+			logger "ERROR: flv conversion failed - retaining file '$file_tmp'\n";
 			return 2;
 		}
 		# Moving file into place as complete (if not stdout)
