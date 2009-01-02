@@ -12,7 +12,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.08;
+my $version = 1.09;
 #
 # Help:
 #	./get_iplayer --help
@@ -35,7 +35,6 @@ my $version = 1.08;
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
-# * flv conversions from rtmp downloads aren't quite right yet. A/V sync issues?
 
 use Env qw[@PATH];
 use Fcntl;
@@ -1528,6 +1527,7 @@ sub download_programme {
 	my $got_url;
 	my $application;
 	my $tcurl;
+	my $authstring;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 
@@ -1540,11 +1540,11 @@ sub download_programme {
 				$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			} else {
 				$prog{$pid}{ext} = 'mp4';
-				($url_2, $application, $tcurl) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
+				($url_2, $application, $tcurl, $authstring) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
 				if ( ! $url_2 ) {
 					logger "WARNING: No High Quality RTMP Flash Version available - falling back to Normal Quality Flash RTMP\n";
 					$prog{$pid}{ext} = 'avi';
-					($url_2, $application, $tcurl) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashnormal', 1 );
+					($url_2, $application, $tcurl, $authstring) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashnormal', 1 );
 				}
 				# Force raw mode if ffmpeg is not installed
 				if ( ! exists_in_path($ffmpeg)) {
@@ -1628,7 +1628,7 @@ sub download_programme {
 		$request = new HTTP::Request HEAD => $metadata{player};
 		$response = $ub->request($request);
 		$prog_url = $response->request->url;
-		$return = download_h264_rtmp_stream( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $file, $file_done, $file_symlink );
+		$return = download_h264_rtmp_stream( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $authstring, $file, $file_done, $file_symlink );
 
 	# Do the N95 h.264 download
 	} elsif ( $opt{n95} ) {
@@ -1848,7 +1848,7 @@ sub get_version_pids {
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media, $get_app ) = @_;
 	my %streams;
-	my ($application, $tcurl);
+	my ($application, $tcurl, $authstring);
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
@@ -1864,7 +1864,7 @@ sub get_media_stream_data {
 	for my $xml ( split /<media/, $xml1 ) {
 		$xml = "<media".$xml;
 
-		my ($server, $authstring, $identifier, $href);
+		my ($server, $identifier, $href);
 
 		# h.264 high quality stream
 		#	<media kind="video"
@@ -2141,7 +2141,7 @@ sub get_media_stream_data {
 	if ( $media eq 'all' ) {
 		return %streams;
 	} elsif ( defined $get_app ) {
-		return ($streams{$media}, $application, $tcurl);
+		return ($streams{$media}, $application, $tcurl, $authstring);
 	} else {
 		return $streams{$media};
 	}
@@ -2336,7 +2336,7 @@ sub download_iphone_stream {
 
 # Actually do the RTMP stream downloading
 sub download_h264_rtmp_stream {
-	my ( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $file, $file_done, $file_symlink ) = @_;
+	my ( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $authstring, $file, $file_done, $file_symlink ) = @_;
 	my $file_tmp;
 	my $cmd;
 	
@@ -2356,7 +2356,7 @@ sub download_h264_rtmp_stream {
 		logger "INFO: Created symlink from '$file_symlink' -> '$file_tmp'\n" if $opt{verbose};
 	}
 
-	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
+	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
 	logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
 	if ( system($cmd) ) {
 		logger "\nWARNING: Failed to download file $file via RTMP\n";
