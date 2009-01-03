@@ -12,7 +12,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.09;
+my $version = 1.10;
 #
 # Help:
 #	./get_iplayer --help
@@ -101,6 +101,7 @@ Display Options:
  -i, --info                    Show full programme metadata (only if number of matches < 50)
  --list <categories|channel>   Show a list of available categories/channels for the selected type and exit
  --hide                        Hide previously downloaded programmes
+ --streaminfo                  Returns all of the media stream urls of the programme(s)
 
 Download Options:
  -g, --get                     Download matching programmes
@@ -109,12 +110,10 @@ Download Options:
  --partial-proxy               Works around for some broken web proxies (try this extra option if your proxy fails)
  --pid <pid|url>               Download an arbitrary pid that does not appear in the index
  --force-download              Ignore download history (unsets --hide option also)
- --realaudio                   Use the RealAudio radio stream and not the MP3 stream
- --mp3audio                    Use the MP3 radio stream for radio and dont fallback to the RealAudio stream
+ --amode <mode>                Download mode of Audio: mp3, or realaudio (default: mp3 fallback to realaudio)
+ --vmode <mode>                Download mode for Video: iphone, rtmp, n95, flashhigh, flashnormal, or flashwii (default: iphone)
  --wav                         In radio realaudio mode output as wav and don't transcode to mp3
  --raw                         Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)
- --n95                         In TV mode download/stream low quality Nokia N95 H.264 stream (alpha)
- --rtmp                        In TV mode download/stream high quality flash stream (alpha)
  --bandwidth                   In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
  --subtitles                   In TV mode, download subtitles into srt/SubRip format if available
  --suboffset <offset>          Offset the subtitle timestamps by the specified number of milliseconds
@@ -156,8 +155,7 @@ Config Options:
  --lame <path>                 Location of lame binary
  --id3v2 <path>                Location of id3v2 binary
  --rtmpdump <path>             Location of rtmpdump binary
- --vlc <path>                  Location of vlc binary
- --streaminfo                  Returns all of the media stream urls of the programme(s)
+ --vlc <path>                  Location of vlc or cvlc binary
  -v, --verbose                 Verbose
  -u, --update                  Update get_iplayer if a newer one exists
  -h, --help                    Help
@@ -199,6 +197,7 @@ if ( ! grep /\-\-save/, @ARGV ) {
 Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
+	"amode=s"			=> \$opt_cmdline{amode},
 	"bandwidth=n"			=> \$opt_cmdline{bandwidth},
 	"category=s"			=> \$opt_cmdline{category},
 	"channel=s"			=> \$opt_cmdline{channel},
@@ -261,6 +260,7 @@ GetOptions(
 	"versions=s"			=> \$opt_cmdline{versions},
 	"verbose|v"			=> \$opt_cmdline{verbose},
 	"vlc=s"				=> \$opt_cmdline{vlc},
+	"vmode=s"			=> \$opt_cmdline{vmode},
 	"wav"				=> \$opt_cmdline{wav},
 	"whitespace|ws|w"		=> \$opt_cmdline{whitespace},
 	"xml-channels|fxd-channels"	=> \$opt_cmdline{xmlchannels},
@@ -536,7 +536,7 @@ sub process_matches {
 	# Expand 'all' to various prog types
 	$opt{type} 		= 'tv,radio,podcast' if $opt{type} =~ /(all|any)/i;
 	# Ensure lowercase
-	$opt{type} = lc( $opt{type} );
+	$opt{type}		= lc( $opt{type} );
 	$cache_secs 		= $opt{expiry} || 14400;
 	$mplayer		= $opt{mplayer} || 'mplayer';
 	$mplayer_opts		= '-nolirc';
@@ -568,10 +568,16 @@ sub process_matches {
 		exit 1;
 	}
 
-	# Disable rtmp mode if rtmpdump does not exist
-	if ( $opt{rtmp} && ! exists_in_path($rtmpdump)) {
+	# Backward compatability options - to be removed eventually
+	$opt{vmode} = 'rtmp' if $opt{rtmp};
+	$opt{vmode} = 'n95' if $opt{n95};
+	$opt{amode} = 'realaudio' if $opt{realaudio};
+	$opt{amode} = 'iphone' if $opt{mp3audio};
+
+	# Disable rtmp modes if rtmpdump does not exist
+	if ( $opt{vmode} =~ /^(rtmp|flash)/ && ! exists_in_path($rtmpdump)) {
 		logger "\nERROR: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download), falling back to iphone mode\n";
-		delete $opt{rtmp};
+		$opt{vmode} = 'iphone';
 	}
 
 	# Web proxy
@@ -1429,7 +1435,7 @@ sub download_programme {
 		$dir = $download_dir{ $prog{$pid}{type} };
 
 		# Check for mp3 stream  - unless realaudio option is specified
-		if ( ! $opt{realaudio} ) {
+		if ( $opt{amode} ne 'realaudio' ) {
 			# Check for iphone mp3 radio stream
 			if ( get_media_stream_data( $pid, $version_pids{default}, 'iphone' ) ) {
 				$usemp3 = 1;
@@ -1437,19 +1443,19 @@ sub download_programme {
 				logger "INFO: MP3 stream media is available\n" if $opt{verbose};
 
 			# if mp3audio option is specified do not fallback to realaudio
-			} elsif ( $opt{mp3audio} ) {
+			} elsif ( $opt{amode} =~ /^(iphone|mp3)/ ) {
 				logger "ERROR: No MP3 stream media is available - not falling back to RealAudio\n";
 				return 1;
 
 			# if not then force realaudio option as fallback
 			} else {
-				$opt{realaudio} = 1;
+				$opt{amode} = 'realaudio';
 				logger "INFO: No MP3 stream media is available - falling back to RealAudio\n" if $opt{verbose};
 			}
 		}
 
 		# Use realplayer stream
-		if ( $opt{realaudio} ) {
+		if ( $opt{amode} eq 'realaudio' ) {
 
 			# Check dependancies for radio programme transcoding / streaming
 			# Check if we need 'tee'
@@ -1517,17 +1523,23 @@ sub download_programme {
 	# iPhone mp3/h.264 stream downloading...
 
 	# Check if we have vlc - if not use iPhone mode
-	if ( $opt{n95} && (! exists_in_path($vlc)) ) {
+	if ( $opt{vmode} eq 'n95' && (! exists_in_path($vlc)) ) {
 		logger "\nWARNING: Required $vlc does not exist, falling back to iPhone mode\n";
-		$opt{n95} = 0;
+		$opt{vmode} = 'iphone';
 	}		
-
 
 	my $url_2;
 	my $got_url;
 	my $application;
 	my $tcurl;
 	my $authstring;
+	my $swfurl;
+	# Lookup table to determine which ext to use for different download methods
+	my %stream_ext = (
+		flashhigh 	=> 'mp4',
+		flashnormal	=> 'avi',
+		flashwii	=> 'avi',
+	);
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 
@@ -1536,15 +1548,28 @@ sub download_programme {
 			logger "INFO: Checking existence of $version version\n";
 			$prog{$pid}{version} = $version;
 			logger "INFO: Version = $prog{$pid}{version}\n" if $opt{verbose};
-			if( ! $opt{rtmp} ) {
+			if( $opt{vmode} !~ /^(rtmp|flash)/ ) {
 				$url_2 = get_iphone_stream_download_url( $ua, $version_pids{$version} );
 			} else {
-				$prog{$pid}{ext} = 'mp4';
-				($url_2, $application, $tcurl, $authstring) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashhigh', 1 );
-				if ( ! $url_2 ) {
-					logger "WARNING: No High Quality RTMP Flash Version available - falling back to Normal Quality Flash RTMP\n";
-					$prog{$pid}{ext} = 'avi';
-					($url_2, $application, $tcurl, $authstring) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashnormal', 1 );
+				# Which d/l methods to use for rtmp
+				my @rtmplist;
+				# Try all if rtmp mode is used
+				if ( $opt{vmode} eq 'rtmp' ) {
+					@rtmplist = ( 'flashhigh', 'flashhigh', 'flashwii' );
+				# Otherwise use specified rtmp flash method only
+				} else {
+					push @rtmplist, $opt{vmode};
+				}
+				
+				for my $rtmpmethod (@rtmplist) {
+					logger "DEBUG: Trying to get media stream metadata for $rtmpmethod RTMP mode\n" if $opt{verbose};
+					$prog{$pid}{ext} = $stream_ext{$rtmpmethod};
+					($url_2, $application, $tcurl, $authstring, $swfurl) = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, $rtmpmethod, 1 );
+					if ( ! $url_2 ) {
+						logger "WARNING: No $rtmpmethod version available\n";
+					} else {
+						last;
+					}
 				}
 				# Force raw mode if ffmpeg is not installed
 				if ( ! exists_in_path($ffmpeg)) {
@@ -1574,13 +1599,13 @@ sub download_programme {
 	if ( $got_url && ! $url_2 ) {
 		logger "ERROR: No Stage 2 URL\n" if $opt{verbose};
 		# If mp3 audio stream does not exist force realaudio mode and retry
-		if ( $usemp3 && ! $opt{mp3audio}) {
-			$opt{realaudio} = 1;
+		if ( $usemp3 && $opt{amode} ne 'mp3audio' ) {
+			$opt{amode} = 'realaudio';
 			return 'retry';
 		}
 		# If rtmp flash video stream does not exist
-		if ( $opt{rtmp} ) {
-			logger "ERROR: RTMP Flash High Quality Version does not exist\n";
+		if ( $opt{vmode} =~ /^(rtmp|flash)/ ) {
+			logger "ERROR: No RTMP Flash versions exist\n";
 		}
 		return 15;
 	}
@@ -1619,19 +1644,11 @@ sub download_programme {
 
 	my $return;
 	# Do rtmp download
-	if ( $opt{rtmp} ) {
-		# Get player url
-		my %metadata = get_pid_metadata( $ua, $pid );
-		# get this redirected page and find out where it is redirected to
-		my ($ub, $request, $response, $prog_url);
-		$ub = new LWP::UserAgent;
-		$request = new HTTP::Request HEAD => $metadata{player};
-		$response = $ub->request($request);
-		$prog_url = $response->request->url;
-		$return = download_h264_rtmp_stream( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $authstring, $file, $file_done, $file_symlink );
+	if ( $opt{vmode} =~ /^(rtmp|flash)/ ) {
+		$return = download_h264_rtmp_stream( $ua, $url_2, $pid, $application, $tcurl, $authstring, $swfurl, $file, $file_done, $file_symlink );
 
 	# Do the N95 h.264 download
-	} elsif ( $opt{n95} ) {
+	} elsif ( $opt{vmode} eq 'n95' ) {
 		my $url = get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'n95_wifi' );
 		$return = download_h264_low_stream( $ua, $url, $file, $file_done );
 
@@ -1651,7 +1668,7 @@ sub download_programme {
 		# Re-enable proxy here if required
 		$ua->proxy( ['http'] => $proxy_url ) if $opt{partialproxy};
 		# If the iphone mp3 download fails then it's probably not ready yet so retry using realaudio
-		$opt{realaudio} = 1 if $return eq 'retry';
+		$opt{amode} = 'realaudio' if $return eq 'retry';
 	}
 	
 	# Rename the subtitle file accordingly
@@ -1848,7 +1865,7 @@ sub get_version_pids {
 sub get_media_stream_data {
 	my ( $pid, $verpid, $media, $get_app ) = @_;
 	my %streams;
-	my ($application, $tcurl, $authstring);
+	my ($application, $tcurl, $authstring, $swfurl);
 	my $ua = LWP::UserAgent->new();
 	# Setup user agent with redirection enabled
 	$ua->timeout([$lwp_request_timeout]);
@@ -1885,6 +1902,7 @@ sub get_media_stream_data {
 		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			( $application, $server, $identifier, $authstring ) = ( $1, $2, $3, $4 );
 			$tcurl = "rtmp://${server}:80/${application}";
+			$swfurl = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
 			logger "INFO: RTMP h.264 high quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashhigh'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP high quality stream URL: $streams{'flashhigh'}\n";
@@ -1892,8 +1910,8 @@ sub get_media_stream_data {
 
 		# h.264 normal quality stream
 		#	<media kind="video"
-		#        width="512"
-		#        height="288"
+		#        width="640"
+		#        height="360"
 		#        type="video/x-flv"
 		#        encoding="vp6"  >
 		#        <connection
@@ -1911,6 +1929,7 @@ sub get_media_stream_data {
 			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
 			$application = "ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			$tcurl = "rtmp://${server}:80/${application}";
+			$swfurl = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
 			logger "INFO: RTMP h.264 normal quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashnormal'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP normal quality stream URL: $streams{'flashnormal'}\n";
@@ -1930,9 +1949,15 @@ sub get_media_stream_data {
 		#                authString="daEd8dLbGaPaZdzdNcwd.auaydJcxcHandp-biX5YL-cCp-BqsECnxnGEsHwyE"
 		#        />
 		#</media>
+		# application (e.g.):               ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcpc6cYbhdIakdWduc6bJdPbydbazdmdp-bjxPBF-cCp-GptFAoDqJBnHvzC&aifp=v001&slist=secure/b000g884xstreaming101052333
+		# tcURL: rtmp: //88.221.26.173:1935/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcpc6cYbhdIakdWduc6bJdPbydbazdmdp-bjxPBF-cCp-GptFAoDqJBnHvzC&aifp=v001&slist=secure/b000g884xstreaming101052333
+		# swfUrl: http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897
 		if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			( $server, $identifier, $authstring ) = ( $1, $2, $3 );
-			logger "INFO: RTMP Wii normal quality stream:\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
+			$application = "ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
+			$tcurl = "rtmp://${server}:1935/${application}";
+			$swfurl = "http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897";
+			logger "INFO: RTMP Wii normal quality stream:\nINFO:  application=$application\nINFO:  server=$server\nINFO:  identifier=$identifier\nINFO:  authstring=$authstring\n" if $opt{verbose};
 			$streams{'flashwii'} = "rtmp://${server}:1935/ondemand?_fcs_vhost=${server}&auth=${authstring}&aifp=v001&slist=${identifier}";
 			logger "INFO: RTMP Wii normal quality stream URL: $streams{'flashwii'}\n";
 		}
@@ -2141,7 +2166,7 @@ sub get_media_stream_data {
 	if ( $media eq 'all' ) {
 		return %streams;
 	} elsif ( defined $get_app ) {
-		return ($streams{$media}, $application, $tcurl, $authstring);
+		return ($streams{$media}, $application, $tcurl, $authstring, $swfurl);
 	} else {
 		return $streams{$media};
 	}
@@ -2336,7 +2361,7 @@ sub download_iphone_stream {
 
 # Actually do the RTMP stream downloading
 sub download_h264_rtmp_stream {
-	my ( $ua, $url_2, $pid, $prog_url, $application, $tcurl, $authstring, $file, $file_done, $file_symlink ) = @_;
+	my ( $ua, $url_2, $pid, $application, $tcurl, $authstring, $swfurl, $file, $file_done, $file_symlink ) = @_;
 	my $file_tmp;
 	my $cmd;
 	
@@ -2346,7 +2371,7 @@ sub download_h264_rtmp_stream {
 		$file_tmp = $file.'.flv'
 	}
 
-	logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, pageUrl: $prog_url, file: $file, file_done: $file_done\n" if $opt{verbose};
+	logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $file, file_done: $file_done\n" if $opt{verbose};
 
 	# Create symlink if required
 	if ( $opt{symlink} ) {
@@ -2355,8 +2380,7 @@ sub download_h264_rtmp_stream {
 		symlink $file_tmp, $file_symlink;
 		logger "INFO: Created symlink from '$file_symlink' -> '$file_tmp'\n" if $opt{verbose};
 	}
-
-	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --pageUrl \"$prog_url\" --swfUrl \"http://www.bbc.co.uk/emp/9player.swf?revision=6928_7030\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
+	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
 	logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
 	if ( system($cmd) ) {
 		logger "\nWARNING: Failed to download file $file via RTMP\n";
@@ -2434,7 +2458,7 @@ sub download_rtsp_stream {
 	# Create ID3 tagging options for lame (escape " for shell)
 	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog{$pid}{name}, $prog{$pid}{episode}, $prog{$pid}{desc}, $prog{$pid}{channel} );
 	$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
-	$lame_opts .= "--ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
+	$lame_opts .= " --ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
 
 	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
@@ -2649,6 +2673,9 @@ sub get_iphone_stream_download_url {
 		# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 		if ( $url_2 =~ /statuscode=404/ ) {
 			logger "\rERROR: Programme is not yet ready for download\n";
+			## Now tell user what versions/streams are available:
+			#my %streams = get_media_stream_data( $pid, $pid, 'all' );
+			#logger "INFO: Other Streams Available: ".join( ',', keys %streams )."\n";
 			return '';
 		}
 
@@ -3712,7 +3739,7 @@ sub pvr_add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for (grep /^(long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {$a <=> $b} keys %opt_cmdline) {
+	for (grep /^(amode|vmode|long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {$a <=> $b} keys %opt_cmdline) {
 		if ( defined $opt_cmdline{$_} ) {
 				push @options, "$_ $opt_cmdline{$_}";
 				logger "DEBUG: Adding option $_ = $opt_cmdline{$_}\n" if $opt{debug};
