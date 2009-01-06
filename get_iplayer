@@ -13,7 +13,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.13;
+my $version = 1.14;
 #
 # Help:
 #	./get_iplayer --help
@@ -2890,9 +2890,11 @@ sub download_mms_video_stream {
 	my ( $ua, $urls, $file, $file_done, $pid ) = @_;
 	my $file_tmp;
 	my $cmd;
+	my $null;
 	my @url_list = split /\|/, $urls;
 	my @file_tmp_list;
-	
+	my %threadpid;
+		
 	logger "INFO: MMS_URLs: ".(join ', ', @file_tmp_list).", file: $file, file_done: $file_done\n" if $opt{verbose};
 	if ( $opt{raw} ) {
 		$prog{$pid}{ext} = 'asf';
@@ -2901,20 +2903,23 @@ sub download_mms_video_stream {
 	}
 
 
+	# Start marker
+	my $start_time = time();
 	# Download each mms url (multi-threaded to download in parallel)
+	my $file_part_prefix = "$prog{$pid}{dir}/$prog{$pid}{fileprefix}_part";
 	for ( my $count = 0; $count <= $#url_list; $count++ ) {
 
 		# Create temp download filename
-		$file_tmp = "$prog{$pid}{dir}/$prog{$pid}{fileprefix}_part".($count+1).".asf";
-		@file_tmp_list[$count] = $file_tmp;
-	
-		$cmd = "$mplayer -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" >&2";
+		$file_tmp = $file_part_prefix.($count+1).".asf";
+		$file_tmp_list[$count] = $file_tmp;
+		$null = " 2>/dev/null " if (! $opt{verbose}) && (! $opt{debug});
+		$cmd = "$mplayer -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null >&2 </dev/null";
 		logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
 
 		my $childpid = fork();
 		if (! $childpid) {
 			# Child starts here
-			logger "\nINFO: Downloading file $file_tmp\n";
+			logger "INFO: Downloading file $file_tmp\n";
 			if ( system($cmd) ) {
 				logger "\nWARNING: Failed to download file $file_tmp via MMS\n";
 				exit 1;
@@ -2922,11 +2927,51 @@ sub download_mms_video_stream {
 			logger "INFO: Download thread has completed for file $file_tmp\n";
 			exit 0;
 		}
+		# Create a hash of process_id => 'count'
+		$threadpid{$childpid} = $count;
 	}	
 	# Wait for all threads to complete
-	### Not working...prob need to specify all pids
-	wait;
-	
+	$| = 1;
+	# Autoreap zombies
+	$SIG{CHLD}='IGNORE';
+	my $done = 0;
+	while (keys %threadpid) {
+		my @sizes;
+		my $format = "Threads: ";
+		sleep 1;
+		#logger "DEBUG: ProcessIDs: ".(join ',', keys %threadpid)."\n";
+		for my $procid (sort keys %threadpid) {
+			my $size = 0;
+			# Is this child still alive?
+			if ( kill 0 => $procid ) {
+				logger "DEBUG Thread $threadpid{$procid} still alive ($file_tmp_list[$threadpid{$procid}])\n" if $opt{debug};
+				# Build the status string
+				$format .= "%d) %.3fMB   ";
+				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
+				push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
+			} else {
+				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
+				# end marker
+				my $end_time = time();
+				# Calculate average speed, duration and total bytes downloaded
+				logger sprintf("INFO: Thread #%d Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+					($threadpid{$procid}+1),
+					$size / (1024.0 * 1024.0),
+					sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
+					$size / ($end_time - $start_time) / 1024.0 * 8.0, 
+					$file_tmp_list[$threadpid{$procid}] );
+
+				#logger "INFO: Download Thread #".($threadpid{$procid}+1)." has finished - downloaded ${size}MB\n";
+				# Remove from thread test list
+				delete $threadpid{$procid};
+			}
+		}
+		$format .= " downloaded            \r";
+		logger sprintf $format, @sizes;
+	}
+	logger "INFO: All download threads completed\n";	
+	# Unset autoreap
+	delete $SIG{CHLD};
 	# Retain raw format if required
 	if ( $opt{raw} ) {
 		return 0;
