@@ -12,7 +12,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.11;
+my $version = 1.12;
 #
 # Help:
 #	./get_iplayer --help
@@ -603,6 +603,18 @@ sub process_matches {
 
 	# Get arbitrary pid
 	if ( $opt{pid} ) {
+
+		# Temporary hack to get 'ITV Catch-up' downloads
+		if ($opt{pid} =~ /^itv:/i ) {
+			exit 1 if ( ! $opt{streaminfo} ) && check_download_history( $opt{pid} );
+			# Remove leading itv: tag
+			$opt{pid} =~ s/^itv:(.+?)$/$1/ig;
+			# Force type to itv for now
+			$opt{type} = 'itv';
+			download_programme( $opt{pid} );
+			exit 0;
+		}
+
 		# Remove any url parts from the pid
 		$opt{pid} =~ s/^.*(b0[a-z,0-9]{6}).*$/$1/g;
 		# Retry loop
@@ -1398,6 +1410,94 @@ sub download_programme {
 	$prog{$pid}{ext} = 'mov';
 
 	# If were a podcast...
+	if ( $opt{type} eq 'itv' ) {
+		my ( $response, $url_1, $url_2, $url_3, $url_4 );
+		my $part;
+		my $duration;
+		my $filename;
+		my @url_list;
+		# Setup User agent (redirectable)
+		my $ua = LWP::UserAgent->new;
+		$ua->timeout([$lwp_request_timeout]);
+		$ua->proxy( ['http'] => $proxy_url );
+		$ua->agent( $user_agent{desktop} );
+		$ua->conn_cache(LWP::ConnCache->new());
+
+		# construct stage 1 request url
+		$url_1 = 'http://www.itv.com/_app/video/GetMediaItem.ashx?vodcrid=crid://itv.com/'.$pid.'&bitrate=384&adparams=SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO%20HTTP/1.1';
+
+		# Extract '<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>'
+		logger "INFO: ITV Video Stage 1 URL: $url_1\n" if $opt{verbose};
+		$response = request_url_retry($ua, $url_1, 2, '', '');
+		logger "DEBUG: Response data: $response\n" if $opt{debug};
+		$url_2 = $1 if $response =~ m{<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>};
+		# replace '&amp;' with '&' and append '%20HTTP/1.1'
+		$url_2 =~ s/&amp;/&/g;
+		$url_2 .= '%20HTTP/1.1';
+		logger "INFO: ITV Video Stage 2 URL: $url_2\n" if $opt{verbose};
+		$response = request_url_retry($ua, $url_2, 2, '', '');
+		logger "DEBUG: Response data: $response\n" if $opt{debug};
+
+		# Extract hrefs and names. There are multiple entries for parts of prog (due to ads):
+		# e.g. <asx><Title>Doctor Zhivago</Title><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO HTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=1/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" /><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEOHTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=LAST/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" />
+		$prog{$pid}{name} = $1 if $response =~ m{<Title>(.+?)<\/Title>};
+		for my $entry (split /<Entry><ref\s+href=/, $response) {
+			logger "DEBUG: Entry data: $entry\n" if $opt{debug};
+			$entry .= '<Entry><ref href='.$entry;
+
+			( $url_3, $part, $filename, $duration ) = ( $1, $2, $3, $4 ) if $entry =~ m{<Entry><ref\s+href="(.+?)"\s+\/><param\s+value="true"\s+name="Prebuffer"\s+\/>\s*<PARAM\s+NAME="PrgPartNumber"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="FileName"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="PrgLength"\s+VALUE="(.+?)"\s*\/>};
+			next if not $url_3;
+			# Replace '&amp;' with '&' in url
+			$url_3 =~ s/&amp;/&/g;
+			# Accumulate duration
+			#my @time = split /:/, $duration;
+			#$prog{$pid}{duration} += pop @time;
+			#$prog{$pid}{duration} += (pop @time) * 60;
+			#$prog{$pid}{duration} += (pop @time) * 3600;
+			logger "INFO: ITV Video Name: $part\n";
+
+			logger "INFO: ITV Video Stage 3 URL: $url_3\n" if $opt{verbose};
+			$entry = request_url_retry($ua, $url_3, 2, '', '');
+			logger "DEBUG: Response data: $entry\n" if $opt{debug};
+
+			# Extract mms (replace 'http' with 'mms') url: e.g.: Ref1=http://itvbrdbnd.wmod.llnwd.net/a1379/o21/ucontent/2007/6/22/1549_384_1_2.wmv?MSWMExt=.asf
+			chomp( $url_4 = 'mms'.$1 ) if $entry =~ m{Ref1=http(.+?)[\r\n]+};
+			logger "INFO: ITV Video URL: $url_4\n" if $opt{verbose};
+			push @url_list, $url_4;
+		}
+		#logger "INFO: ITV Video Total Duration: $prog{$pid}{duration}\n";
+
+		# Determine final filename
+		$prog{$pid}{ext} = 'mp4';
+
+		# Get and set more meta data
+		my %metadata = get_pid_metadata($ua, $pid);
+		#$prog{$pid}{name} = $metadata{name};
+		$prog{$pid}{episode} = $metadata{episode};
+		$prog{$pid}{available} = $metadata{available};
+		$prog{$pid}{duration} = $metadata{duration};
+		$prog{$pid}{thumbnail} = $metadata{thumbnail};
+		$prog{$pid}{desc} = $metadata{desc};
+
+		$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, ${dir}, $opt{fileprefix} || "<name> <pid>" );
+		logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                 \n";
+		$prog{$pid}{dir} = $download_dir{tv};
+		my $file_done = "$prog{$pid}{dir}/$prog{$pid}{fileprefix}.$prog{$pid}{ext}";
+		my $file = "$prog{$pid}{dir}/$prog{$pid}{fileprefix}.partial.$prog{$pid}{ext}";
+		$prog{$pid}{filename} = $file_done;
+	
+		# Display metadata
+		logger "\nPid:\t\t$metadata{pid}\n";
+		logger "Name:\t\t$metadata{name}\n";
+		logger "Duration:\t$metadata{duration}\n";
+		logger "Available:\t$metadata{available}\n";
+		logger "Expires:\t$metadata{expiry}\n";
+		logger "Description:\t$metadata{desc}\n";
+		return download_mms_video_stream( $ua, (join '|', @url_list), $file, $file_done, $pid );
+		exit 0;
+	}
+
+	# If were a podcast...
 	if ( $prog{$pid}{type} eq 'podcast' ) {
 		# Determine the correct filename and extension for this download
 		my $filename_orig = $pid;
@@ -1424,7 +1524,7 @@ sub download_programme {
 			# Substitute the fields for the pid
 			$file_symlink = substitute_fields( $pid, $opt{symlink} );
 		}
-		
+
 		return download_podcast_stream( $ua, $pid, $file, $file_done, $file_symlink );
 	}
 
@@ -2504,6 +2604,78 @@ sub download_rtmp_stream {
 
 
 
+# Actually do the MMS video stream downloading
+sub download_mms_video_stream {
+	my ( $ua, $urls, $file, $file_done, $pid ) = @_;
+	my $file_tmp;
+	my $cmd;
+	my @url_list = split /\|/, $urls;
+	my @file_tmp_list;
+	
+	logger "INFO: MMS_URLs: ".(join ', ', @file_tmp_list).", file: $file, file_done: $file_done\n" if $opt{verbose};
+	if ( $opt{raw} ) {
+		$prog{$pid}{ext} = 'asf';
+	} else {
+		$prog{$pid}{ext} = 'mp4';
+	}
+
+
+
+
+	# Download each mms url (multi-threaded to download in parallel)
+	for ( my $count = 0; $count <= $#url_list; $count++ ) {
+
+		# Create temp download filename
+		$file_tmp = "$prog{$pid}{dir}/$prog{$pid}{fileprefix}_part".($count+1).".asf";
+		@file_tmp_list[$count] = $file_tmp;
+	
+		$cmd = "$mplayer -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" >&2";
+		logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
+
+		my $childpid = fork();
+		if (! $childpid) {
+			# Child starts here
+			logger "\nINFO: Downloading file $file_tmp\n";
+			if ( system($cmd) ) {
+				logger "\nWARNING: Failed to download file $file_tmp via MMS\n";
+				exit 1;
+			}
+			logger "INFO: Download thread has completed for file $file_tmp\n";
+			exit 0;
+		}
+	}	
+	# Wait for all threads to complete
+	wait;
+	
+	# Retain raw format if required
+	if ( $opt{raw} ) {
+		return 0;
+	}
+
+#	# Convert video asf to mp4 if required - need to find a suitable converter...
+#	} else {
+#		# Create part of cmd that specifies each partial file
+#		my $filestring;
+#		$filestring .= " -i \"$_\" " for (@file_tmp_list);
+#		$cmd = "$ffmpeg $ffmpeg_opts $filestring -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" >&2";
+#	}
+#
+#	logger "\n\nINFO: Command: $cmd\n\n" if $opt{verbose};
+#	# Run asf conversion and delete source file on success
+#	if ( ! system($cmd) ) {
+#		unlink( @file_tmp_list );
+#	} else {
+#		logger "ERROR: asf conversion failed - retaining files ".(join ', ', @file_tmp_list)."\n";
+#		return 2;
+#	}
+#	# Moving file into place as complete (if not stdout)
+#	move($file, $file_done) if ! $opt{stdout};
+	
+	return 0;
+}
+
+
+
 # Actually do the N95 h.264 downloading
 sub download_h264_low_stream {
 	my ( $ua, $url_2, $file, $file_done ) = @_;
@@ -2975,9 +3147,9 @@ sub create_atom {
 	}
 	# prepend string length if this is a string type
 	if ( $type eq 'string' ) {
+		my $value = length($data);
 		$data = '1111'.$data;
 		# overwrite '1111' with total atom length in 2-byte MSB + 0x0 0x0
-		my $value = length($data);
 		substr($data, 0, 1) = chr( ($value >> 8) & 0xFF );
 		substr($data, 1, 1) = chr( ($value >> 0) & 0xFF );
 		substr($data, 2, 1) = chr(0);
@@ -3539,6 +3711,7 @@ sub get_pid_metadata {
 	my $pid = shift;
 	my $metadata;
 	my $entry3;
+	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $type, $categories, $player, $thumbnail);
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -3558,90 +3731,131 @@ sub get_pid_metadata {
 		logger "DEBUG: $prog_feed_url.$pid:\n$entry3\n\n" if $opt{debug};
 		# Flatten
 		$entry3 =~ s|\n| |g;
-	}
 
-	# Entry3 format
-	#<?xml version="1.0" encoding="utf-8"?>                                      
-	#<?xml-stylesheet href="http://www.bbc.co.uk/iplayer/style/rss.css" type="text/css"?>
-	#<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-GB">
-	#  <title>BBC iPlayer - Episode Detail: Edith Bowman: 22/09/2008</title>                                                                          
-	#  <subtitle>Sara Cox sits in for Edith with another Cryptic Randomizer.</subtitle>
-	#  <updated>2008-09-29T10:59:45Z</updated>
-	#  <id>tag:feeds.bbc.co.uk,2008:/iplayer/feed/episode/b00djtfh</id>
-	#  <link rel="related" href="http://www.bbc.co.uk/iplayer" type="text/html" />
-	#  <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh" type="application/atom+xml" />
-	#  <author>
-	#    <name>BBC</name>
-	#    <uri>http://www.bbc.co.uk</uri>
-	#  </author>
-	#  <entry>
-	#    <title type="text">Edith Bowman: 22/09/2008</title>
-	#    <id>tag:feeds.bbc.co.uk,2008:PIPS:b00djtfh</id>
-	#    <updated>2008-09-15T01:28:36Z</updated>
-	#    <summary>Sara Cox sits in for Edith with another Cryptic Randomizer.</summary>
-	#    <content type="html">
-	#      &lt;p&gt;
-	#        &lt;a href=&quot;http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn30&quot;&gt;
-	#          &lt;img src=&quot;http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg&quot; alt=&quot;Edith Bowman: 22/09/2008&quot; /&gt;
-	#        &lt;/a&gt;
-	#      &lt;/p&gt;
-	#      &lt;p&gt;
-	#        Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.
-	#      &lt;/p&gt;
-	#    </content>
-	#    <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" type="text/html" title="Edith Bowman: 22/09/2008">
-	#      <media:content medium="audio" duration="10800">
-	#        <media:title>Edith Bowman: 22/09/2008</media:title>
-	#        <media:description>Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.</media:description>
-	#        <media:player url="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" />
-	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Entertainment">9100099</media:category>
-	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Music">9100006</media:category>
-	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Pop &amp; Chart">9200069</media:category>
-	#        <media:credit role="Production Department" scheme="urn:ebu">BBC Radio 1</media:credit>
-	#        <media:credit role="Publishing Company" scheme="urn:ebu">BBC Radio 1</media:credit>
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_86_48.jpg" width="86" height="48" />
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg" width="150" height="84" />
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_178_100.jpg" width="178" height="100" />
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_512_288.jpg" width="512" height="288" />
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_528_297.jpg" width="528" height="297" />
-	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_640_360.jpg" width="640" height="360" />
-	#        <dcterms:valid>
-	#          start=2008-09-22T15:44:20Z;
-	#          end=2008-09-29T15:02:00Z;
-	#          scheme=W3C-DTF
-	#        </dcterms:valid>
-	#      </media:content>
-	#    </link>
-	#    <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh?format=atom" type="application/atom+xml" title="22/09/2008" />
-	#    <link rel="related" href="http://www.bbc.co.uk/programmes/b006wks4/microsite" type="text/html" title="Edith Bowman" />
-	#    <link rel="parent" href="http://feeds.bbc.co.uk/iplayer/programme_set/b006wks4" type="application/atom+xml" title="Edith Bowman" />
-	#  </entry>
-	#</feed>
-
-	my ($duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $type, $categories, $player, $thumbnail);
-
-	$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
-	$available = $1 if $entry3 =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
-	$duration = $1 if $entry3 =~ m{duration=\"(\d+?)\"};
-	$type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
-	$longdesc = $1 if $entry3 =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
-	$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
-	$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-	$thumbnail = $1 if $entry3 =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
+		# Entry3 format
+		#<?xml version="1.0" encoding="utf-8"?>                                      
+		#<?xml-stylesheet href="http://www.bbc.co.uk/iplayer/style/rss.css" type="text/css"?>
+		#<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-GB">
+		#  <title>BBC iPlayer - Episode Detail: Edith Bowman: 22/09/2008</title>                                                                          
+		#  <subtitle>Sara Cox sits in for Edith with another Cryptic Randomizer.</subtitle>
+		#  <updated>2008-09-29T10:59:45Z</updated>
+		#  <id>tag:feeds.bbc.co.uk,2008:/iplayer/feed/episode/b00djtfh</id>
+		#  <link rel="related" href="http://www.bbc.co.uk/iplayer" type="text/html" />
+		#  <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh" type="application/atom+xml" />
+		#  <author>
+		#    <name>BBC</name>
+		#    <uri>http://www.bbc.co.uk</uri>
+		#  </author>
+		#  <entry>
+		#    <title type="text">Edith Bowman: 22/09/2008</title>
+		#    <id>tag:feeds.bbc.co.uk,2008:PIPS:b00djtfh</id>
+		#    <updated>2008-09-15T01:28:36Z</updated>
+		#    <summary>Sara Cox sits in for Edith with another Cryptic Randomizer.</summary>
+		#    <content type="html">
+		#      &lt;p&gt;
+		#        &lt;a href=&quot;http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn30&quot;&gt;
+		#          &lt;img src=&quot;http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg&quot; alt=&quot;Edith Bowman: 22/09/2008&quot; /&gt;
+		#        &lt;/a&gt;
+		#      &lt;/p&gt;
+		#      &lt;p&gt;
+		#        Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.
+		#      &lt;/p&gt;
+		#    </content>
+		#    <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" type="text/html" title="Edith Bowman: 22/09/2008">
+		#      <media:content medium="audio" duration="10800">
+		#        <media:title>Edith Bowman: 22/09/2008</media:title>
+		#        <media:description>Sara Cox sits in for Edith with movie reviews and great new music, plus another Cryptic Randomizer.</media:description>
+		#        <media:player url="http://www.bbc.co.uk/iplayer/episode/b00djtfh?src=a_syn31" />
+		#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Entertainment">9100099</media:category>
+		#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Music">9100006</media:category>
+		#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Pop &amp; Chart">9200069</media:category>
+		#        <media:credit role="Production Department" scheme="urn:ebu">BBC Radio 1</media:credit>
+		#        <media:credit role="Publishing Company" scheme="urn:ebu">BBC Radio 1</media:credit>
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_86_48.jpg" width="86" height="48" />
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_150_84.jpg" width="150" height="84" />
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_178_100.jpg" width="178" height="100" />
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_512_288.jpg" width="512" height="288" />
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_528_297.jpg" width="528" height="297" />
+		#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_640_360.jpg" width="640" height="360" />
+		#        <dcterms:valid>
+		#          start=2008-09-22T15:44:20Z;
+		#          end=2008-09-29T15:02:00Z;
+		#          scheme=W3C-DTF
+		#        </dcterms:valid>
+		#      </media:content>
+		#    </link>
+		#    <link rel="self" href="http://feeds.bbc.co.uk/iplayer/episode/b00djtfh?format=atom" type="application/atom+xml" title="22/09/2008" />
+		#    <link rel="related" href="http://www.bbc.co.uk/programmes/b006wks4/microsite" type="text/html" title="Edith Bowman" />
+		#    <link rel="parent" href="http://feeds.bbc.co.uk/iplayer/programme_set/b006wks4" type="application/atom+xml" title="Edith Bowman" />
+		#  </entry>
+		#</feed>
+			
+		$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+		$available = $1 if $entry3 =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
+		$duration = $1 if $entry3 =~ m{duration=\"(\d+?)\"};
+		$type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
+		$longdesc = $1 if $entry3 =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+		$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
+		$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+		$thumbnail = $1 if $entry3 =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
 	
-	my @cats;
-	for (split /<media:category scheme=\".+?\"/, $entry3) {
-		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
-	}
-	$categories = join ',', @cats;
+		my @cats;
+		for (split /<media:category scheme=\".+?\"/, $entry3) {
+			push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
+		}
+		$categories = join ',', @cats;
 
-	# populate version pid metadata 
-	get_version_pids($ua, $pid);
+		# populate version pid metadata 
+		get_version_pids($ua, $pid);
+
+	# ITV Catch-Up metadata
+	} elsif ( $opt{type} eq 'itv' ) {
+		my $prog_metadata_url_itv = 'http://www.itv.com/_app/Dynamic/CatchUpData.ashx?ViewType=5&Filter='; # +<pid>
+		$entry3 = request_url_retry($ua, $prog_metadata_url_itv.$pid, 3, '', '');
+		decode_entities($entry3);
+		logger "DEBUG: $prog_metadata_url_itv.$pid:\n$entry3\n\n" if $opt{debug};
+		# Flatten
+		$entry3 =~ s|\n| |g;
+
+		#<div class="itvCatchUpPlayerPanel" xmlns:ms="urn:schemas-microsoft-com:xslt">
+		#  <div class="cu-sponsor"><a href="http://sam.itv.com/accipiter/adclick/CID=000040d70000000000000000/acc_random=1/SITE=CLICKTRACK/AREAITVCATCHUP.VIDEO=CLICKTRACK..FREEVIEW.SPONSORBUTTON.OCT08/AAMSZ=120X60/pageid=1" title="ITV Player in assocation with Freeview"><img src="/_app/img/catchup/catchup_video_freeview2.jpg" alt="ITV Player is sponsored by Freeview"></a></div>
+		#  <h2>Doctor Zhivago</h2>
+		#  <p>Part 1 of 3. Dramatisation of the epic novel by Boris Pasternak. Growing up in Moscow with his uncle, aunt and cousin Tonya, Yury is captivated by a stunning young girl called ...</p>
+		#  <p class="timings"><span class="date">Mon 29 Dec 2008</span><br /><br /><span>
+		#
+		#        Duration: 1hr 30 min |
+		#                                Expires in
+		#                                <strong>22</strong>
+		#                                                days
+		#                                        </span></p>
+		#  <p><a href="http://www.itv.com/CatchUp/Programmes/default.html?ViewType=1&amp;Filter=2352">3 Episodes Available
+		#        </a><br></br></p>
+		#  <p class="channelLogo"><img src="/_app/img/logos/itv3-black.gif" alt="ITV 4"></p>
+		#  <div id="cu-2-0-VideoID">33105</div>
+		#  <div id="cu-2-0-DentonId">17</div>
+		#  <div id="cu-2-0-ItemMediaUrl">http://www.itv.com//img/480x272/Doctor-Zhivago-c47828f8-a1af-4cd2-b5a2-40c18eb7e63c.jpg</div>
+		#</div><script language="javascript" type="text/javascript" xmlns:ms="urn:schemas-microsoft-com:xslt">
+		#                        SetCatchUpModuleID(0);
+		#</script>
+		#
+
+		#$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+		$available = $1 if $entry3 =~ m{<p\s+class="timings">\s*<span\s+class="date">(.+?)<\/span>};
+		$duration = $1 if $entry3 =~ m{Duration:\s*(.+?)\s+\|};
+		#$type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
+		$longdesc = $1 if $entry3 =~ m{<p>(.+?)<\/p>};
+		#$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
+		#$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+		$thumbnail = $1 if $entry3 =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
+		$name = $1 if $entry3 =~ m{<h2>(.+?)</h2>};
+	}
 
 	# Fill in from cache if not got from metadata
 	my %metadata;
 	$metadata{pid}		= $pid;
 	$metadata{index}	= $prog{$pid}{index};
+	$metadata{name}		= $name || $prog{$pid}{name};
+	$metadata{episode}	= $episode || $prog{$pid}{episode};
 	$metadata{type}		= $type || $prog{$pid}{type};
 	$metadata{duration}	= $duration || $prog{$pid}{duration};
 	$metadata{channel}	= $channel || $prog{$pid}{channel};
