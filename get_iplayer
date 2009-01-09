@@ -13,7 +13,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.16;
+my $version = 1.17;
 #
 # Help:
 #	./get_iplayer --help
@@ -32,7 +32,6 @@ my $version = 1.16;
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # * Stdout mode with rtmp
 # * Do subtitle downloading after programme download so that rtmp auth doesn't timeout
-# * Scrape and index ITVplayer Non-Catch-up programmes 
 
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
@@ -310,7 +309,7 @@ save_options_file( $optfile ) if $save;
 #};
 
 # Define cache file format
-my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded/;
+my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance/;
 
 # List of all types
 my @all_prog_types = qw/ tv radio podcast itv /;
@@ -435,6 +434,18 @@ $channels{radio} = {
 	'bbc_radio_guernsey'			=> 'radio|BBC Guernsey',
 	'bbc_radio_jersey'			=> 'radio|BBC Jersey',
 };
+
+$channels{itv} = {
+	'crime'					=> 'itv|TV Classics Crime Drama',
+	'perioddrama'				=> 'itv|TV Classics Period Drama',
+	'familydrama'				=> 'itv|TV Classics Family Drama',
+	'documentary'				=> 'itv|TV Classics Documentaries',
+	'comedy'				=> 'itv|TV Classics Comedy',
+	'kids'					=> 'itv|TV Classics Children\'s TV',
+	'soaps'					=> 'itv|TV Classics Soaps',
+	'/'					=> 'itv|TV Classics',
+};
+
 
 # User Agents
 my %user_agent = (
@@ -897,8 +908,8 @@ sub get_regex_matches {
 }
 
 
-# get_links_atom (%channels)
-sub get_links_atom {
+# get_links_bbciplayer (%channels)
+sub get_links_bbciplayer {
 	my $prog_type = shift;
 	my %channels = %{$_[0]};
 
@@ -1080,8 +1091,8 @@ sub sort_indexes {
 
 
 # Uses: $podcast_index_feed_url
-# get_podcast_links ()
-sub get_podcast_links {
+# get_links_bbcpodcast ()
+sub get_links_bbcpodcast {
 
 	my $xml;
 	my $res;
@@ -1277,9 +1288,9 @@ sub get_podcast_links {
 
 
 # Uses:
-# get_itv_links ()
-sub get_itv_links {
-
+# get_links_itv ()
+sub get_links_itv {
+	my %channels = %{$_[0]};
 	my $xml;
 	my $res;
 	my %series_pid;
@@ -1293,7 +1304,79 @@ sub get_itv_links {
 	#  =>
 	
 	# Download index feed
+	my $itv_index_shows_url = 'http://www.itv.com/ClassicTVshows/'; # $channel/default.html
 	my $itv_index_feed_url = 'http://www.itv.com/_data/xml/CatchUpData/CatchUp360/CatchUpMenu.xml';
+
+	# Sort feeds so that pages are done last - this makes sure that the channels get defined correctly if there are dups
+	my @channel_list;
+	push @channel_list, grep !/\//, keys %channels;
+	push @channel_list, grep  /\//, keys %channels;
+	# ITV ClassicShows parsing
+	for my $channel ( @channel_list ) {
+		# <li class="first-child"><a href="http://www.itv.com/ClassicTVshows/comedy/ABitofaDo/default.html">A Bit of a Do</a><br></li>
+		# <li><a href="http://www.itv.com/ClassicTVshows/familydrama/achristmascarol/default.html">A Christmas Carol</a><br></li>
+		# Get page, search for relevent lines which contain series links and loop through each matching line
+		for my $s_line ( grep /(<li><a\s+href=".+?"><img\s+src=".+?"\s+alt=".+?"><\/a><h4>|<li.*?><a href=".+?">.+?<\/a><br><\/li>)/, ( split /\n/, request_url_retry($ua, $itv_index_shows_url.${channel}.'/default.html', 3, '.', "WARNING: Failed to get itv ${channel} index from site\n") ) ) {
+			my ($url, $name);
+			# Extract series url + series description
+			($url, $name) = ($1, $2) if $s_line =~ m{<li><a\s+href="\s*(.+?)\s*"><img\s+src=".+?"\s+alt="\s*(.+?)\s*"><\/a><h4>};
+			($url, $name) = ($1, $2) if $s_line =~ m{<li.*?><a href="\s*(.+?)\s*">\s*(.+?)\s*<\/a><br><\/li>};
+			chomp($url);
+			chomp($name);
+			next if ! ($url && $name);
+			logger "DEBUG: Channel: '$channel' Series: '$name' URL: '$url'\n" if $opt{verbose};
+
+			# Get list of episodes for this series
+			# e.g. <li class="first-child"><a title="Play" href="?vodcrid=crid://itv.com/993&amp;DF=0">Episode one</a><br>The Sun in a Bottle</li>
+			#      <li><a title="Play" href="?vodcrid=crid://itv.com/994&amp;DF=0">Episode two</a><br>Castle Saburac</li>
+			#      <li class="first-child"><a class="nsat" title="This programme contains strong language and violence       " href="?vodcrid=crid://itv.com/588&amp;G=10&amp;DF=0">Episode one</a><br>The Dead of Jericho</li>
+			#
+			# e.g. <li><a class="playVideo" title="Play" href="?vodcrid=crid://itv.com/1232&amp;DF=0"><img src="img/60x45/Crossroads-Rosemary-shoots-David-efeef7cd-8d41-416c-9e30-26ce1b3d625c.jpg" alt="Crossroads: Rosemary shoots David"><span>Play</span></a><h4>
+			#      vodcrid=crid://itv.com/971&amp;DF=0"><img src="img/60x45/9d20fd47-5d4b-44f5-9188-856505de0d0f.jpg" alt="Emmerdale  2002 Louise kills Ray"
+			#
+			# e.g. <a class="playVideo" title="Play" href="?vodcrid=crid://itv.com/1854&amp;DF=1"><img src="img/157x104/140c456c-d8bd-49d5-90f8-f7cc6d86f132.jpg" alt="Soldier Soldier "><span>Play</span></a><h2>Soldier Soldier</h2>
+			#
+			for my $e_line ( grep /vodcrid=crid/, ( split /\n/, request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get ${name} index from site\n") ) ) {
+				my ($guidance, $pid, $episode, $thumbnail);
+				logger "DEBUG: Match Line: $e_line\n" if $opt{debug};
+				# Extract episode data
+				($guidance, $pid, $episode)  = ($2, $3, $4) if $e_line =~ m{<li.*?><a\s+(class="nsat"\s+)?title="\s*(.+?)\s*"\s+href="\?vodcrid=crid://itv.com/(\d+?)&.+?>\s*(.+?)\s*<};
+				($pid, $thumbnail, $episode) = ($1, $2, $3) if $e_line =~ m{vodcrid=crid://itv.com/(\d+?)&.+?><img\s+src="(.+?)"\s+alt="\s*(.+?)\s*"};
+				next if ! ($pid && $episode);
+				# Remove 'Play'
+				$guidance =~ s/^Play$//ig;
+				# Strip non-printables
+				$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
+				#$guidance =~ s|[^\w\s\-\!"£\$\\/%\^&\*\(\)\+=,\.\?':;@~\[\]]+||gi;
+				#$guidance =~ s/(\s\s)+//g;
+				logger "DEBUG: PID: '$pid' Episode: '$episode' Guidance: '$guidance'\n" if $opt{debug};
+
+				# Skip if this pid is a duplicate
+				if ( defined $prog{$pid} ) {
+					logger "WARNING: '$pid, $prog{$pid}{name} - $prog{$pid}{episode}, $prog{$pid}{channel}' already exists (this channel = $channel)\n" if $opt{verbose};
+					# Merge data (hack)
+					#$prog{$pid}{episode} .= ','.$episode;
+					my $oldname = $prog{$pid}{name};
+					$prog{$pid}{episode} = $episode if (! $prog{$pid}{episode}) || $prog{$pid}{episode} =~ /$oldname/i;
+					$prog{$pid}{thumbnail} = $thumbnail if ! $prog{$pid}{thumbnail};
+					$prog{$pid}{guidance} = $guidance if ! $prog{$pid}{guidance};
+					next;
+				}
+
+				# build data structure
+				$prog{$pid} = {
+					'name'		=> $name,
+					'versions'	=> 'default',
+					'episode'	=> $episode,
+					'channel'	=> (split /\|/, $channels{$channel})[1],
+					'guidance'	=> $guidance,
+					'categories'	=> (split /\|/, $channels{$channel})[1],
+					'type'		=> 'itv',
+				};
+			}
+		}
+	}
+
 	my $xmlindex = request_url_retry($ua, $itv_index_feed_url, 3, '.', "WARNING: Failed to get itv index from site\n");
 	$xmlindex =~ s/[\n\r]//g;
 
@@ -1343,15 +1426,8 @@ sub get_itv_links {
 			next if $episode_pid{$videoid};
 			$episode_pid{$videoid} = 1;
 			# Get metadata pages for episode
-#			logger "DEBUG: Getting episode metadata $url\n" if $opt{debug};
-#			$xml = request_url_retry($ua, $url, 2, '.', "WARNING: Failed to get itv episode data for ${videoid} from itv site\n") if $opt{verbose};
-#			$xml = request_url_retry($ua, $url, 2, '.', '') if ! $opt{verbose};
-#			next if ! $xml;
 
 			my ( $name, $guidance, $channel, $episode, $desc, $pid, $available, $duration, $thumbnail );
-#			decode_entities($xml);
-#			# Flatten
-#			$xml =~ s|[\n\r]||g;
 
 			$pid = $videoid;
 			$channel = 'ITV Catch-up';
@@ -1366,16 +1442,15 @@ sub get_itv_links {
 			$guidance = $1 if $feedxml =~ m{<DentonRating>\s*(.+?)\s*<\/DentonRating>};
 			$thumbnail = $1 if $feedxml =~ m{<ProgrammeMediaUrl>\s*(.+?)\s*<\/ProgrammeMediaUrl>};
 			$episode = $pid;
-#			$available = $1 if $xml =~ m{<p\s+class="timings">\s*<span\s+class="date">(.+?)<\/span>};
-#			$episode = $available;
-#			$duration = $1 if $xml =~ m{Duration:\s*(.+?)\s+\|};
-#			$desc = $1 if $xml =~ m{<p>(.+?)<\/p>};
+			# Strip non-printable chars
+			$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
 
 			# build data structure
 			$prog{$pid} = {
 				'name'		=> $name,
 				'versions'	=> 'default',
 				'episode'	=> $episode,
+				'guidance'	=> $guidance,
 				'desc'		=> $desc,
 				'available'	=> $available,
 				'duration'	=> $duration,
@@ -1480,6 +1555,7 @@ sub get_itv_links {
 				$desc = $1 if $xml =~ m{<p\s+class="progDesc">(.+?)\s*<\/p>};
 				$guidance = $1 if $feedxml =~ m{<DentonRating>\s*(.+?)\s*<\/DentonRating>};
 				$thumbnail = $1 if $feedxml =~ m{<ProgrammeMediaUrl>\s*(.+?)\s*<\/ProgrammeMediaUrl>};
+				$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
 
 				logger "DEBUG: name='$name' episode='$episode' pid=$pid available='$available' \n" if $opt{debug};	
 	
@@ -1488,6 +1564,7 @@ sub get_itv_links {
 					'name'		=> $name,
 					'versions'	=> 'default',
 					'episode'	=> $episode,
+					'guidance'	=> $guidance,
 					'desc'		=> $desc,
 					'available'	=> $available,
 					'duration'	=> $duration,
@@ -1496,13 +1573,6 @@ sub get_itv_links {
 					'categories'	=> 'TV',
 					'type'		=> 'itv',
 				};
-
-				# Dont get all metadata - use info in series page
-				#$url = "http://www.itv.com/_app/Dynamic/CatchUpData.ashx?ViewType=${viewtype}&Filter=${videoid}";
-				#logger "DEBUG: Getting episode metadata $url\n" if $opt{debug};
-				#$xml = request_url_retry($ua, $url, 2, '.', "WARNING: Failed to get itv episode data for ${videoid} from itv site\n") if $opt{verbose};
-				#$xml = request_url_retry($ua, $url, 2, '.', '') if ! $opt{verbose};
-				#push @entries, $xml if $xml;
 			}
 		}	
 
@@ -1584,13 +1654,13 @@ sub get_links {
 	if ( (! @cache) || (! -f $cachefile{$prog_type}) || $opt{flush} || ($now >= ( stat($cachefile{$prog_type})->mtime + $cache_secs )) ) {
 
 		# BBC Podcast only
-		get_podcast_links() if $prog_type eq 'podcast';
+		get_links_bbcpodcast() if $prog_type eq 'podcast';
 
 		# ITV only
-		get_itv_links() if $prog_type eq 'itv';
+		get_links_itv( \%{$channels{$prog_type}} ) if $prog_type eq 'itv';
 
 		# BBC Radio and TV
-		get_links_atom( $prog_type, \%{$channels{$prog_type}} ) if $prog_type =~ /^(tv|radio)$/;
+		get_links_bbciplayer( $prog_type, \%{$channels{$prog_type}} ) if $prog_type =~ /^(tv|radio)$/;
 
 		# Sort indexes
 		sort_indexes();
