@@ -13,7 +13,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.17;
+my $version = 1.18;
 #
 # Help:
 #	./get_iplayer --help
@@ -32,12 +32,12 @@ my $version = 1.17;
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # * Stdout mode with rtmp
 # * Do subtitle downloading after programme download so that rtmp auth doesn't timeout
+# * Playlist creation for multipart itv downloads
 
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed (remain with .partial.mov)
 # * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
-# * if ffmpeg trys to convert flv to mp3 it succeeds but => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
 # * resuming a flashaudio download fails
 
@@ -309,7 +309,7 @@ save_options_file( $optfile ) if $save;
 #};
 
 # Define cache file format
-my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance/;
+my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
 
 # List of all types
 my @all_prog_types = qw/ tv radio podcast itv /;
@@ -343,7 +343,8 @@ my $prog_feed_url		= 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 my $prog_iplayer_metadata	= 'http://www.bbc.co.uk/iplayer/playlist/'; # $pid
 my $media_stream_data_prefix	= 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
 my $iphone_download_prefix	= 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
-my $prog_page_prefix		= 'http://www.bbc.co.uk/programmes';
+my $bbc_prog_page_prefix	= 'http://www.bbc.co.uk/programmes'; # /$pid
+my $itv_catchup_page_prefix	= 'http://www.itv.com/CatchUp/Video/default.html?ViewType=5&amp;Filter='; # $pid
 my $thumbnail_prefix		= 'http://www.bbc.co.uk/iplayer/images/episode';
 my $metadata_xml_prefix		= 'http://www.bbc.co.uk/iplayer/metafiles/episode'; # /${pid}.xml
 my $metadata_mobile_prefix	= 'http://www.bbc.co.uk/iplayer/widget/episodedetail/episode'; # /${pid}/template/mobile/service_type/tv/
@@ -589,6 +590,7 @@ sub process_matches {
 	$cache_secs 		= $opt{expiry} || 14400;
 	$mplayer		= $opt{mplayer} || 'mplayer';
 	$mplayer_opts		= '-nolirc';
+	$mplayer_opts		.= ' -v' if $opt{debug};
 	$mplayer_opts		.= ' -really-quiet' if $opt{quiet};
 	$ffmpeg			= $opt{ffmpeg} || 'ffmpeg';
 	$ffmpeg_opts		= '';
@@ -596,7 +598,7 @@ sub process_matches {
 	$lame_opts		= '-f';
 	$lame_opts		.= ' --quiet ' if $opt{quiet};
 	$vlc			= $opt{vlc} || 'cvlc';
-	$vlc_opts		= '-vv';
+	$vlc_opts		= '-vv' if $opt{verbose} || $opt{debug};
 	$id3v2			= $opt{id3v2} || 'id3v2';
 	$tee			= 'tee';
 	$rtmpdump		= $opt{rtmpdump} || 'rtmpdump';
@@ -840,25 +842,28 @@ sub list_prog_entry {
 	} else {
 		$name = "$prog{$pid}{name} - ";
 	}
-	# Remove some info depending on prog_type
-	my $optional;
-	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}, $prog{$pid}{versions}" if $prog{$pid}{type} eq 'tv';
-	$optional = ", '$prog{$pid}{channel}'" if $prog{$pid}{type} eq 'itv';
-	$optional = ", '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'radio';
-	$optional = ", '$prog{$pid}{available}', '$prog{$pid}{channel}', $prog{$pid}{categories}" if $prog{$pid}{type} eq 'podcast';
+
+	# Add some info depending on prog_type
+	my %optional = (
+		tv	=> ", <channel>, <categories>, <guidance>, <versions>",
+		itv	=> ", <channel>, <categories>, <guidance>",
+		radio	=> ", <channel>, <categories>",
+		podcast	=> ", <available>, <channel>, <categories>",
+	);
+	$optional{$_} = substitute_fields( $pid, $optional{$_}, 2 ) for keys %optional;
+
 	logger "\n${prog_type}$prog{$pid}{name}\n" if $opt{tree} && ! $tree;
 	# Display based on output options
 	if ( $opt{long} ) {
 		my @time = gmtime( time() - $prog{$pid}{timeadded} );
-		logger "${prefix}$prog{$pid}{index}:\t${prog_type}${name}$prog{$pid}{episode}${optional}, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
+		logger "${prefix}$prog{$pid}{index}:\t${prog_type}${name}$prog{$pid}{episode}$optional{ $prog{$pid}{type} }, $time[7] days $time[2] hours ago - $prog{$pid}{desc}\n";
 	} elsif ( $opt{terse} ) {
 		logger "${prefix}$prog{$pid}{index}:\t${prog_type}${name}$prog{$pid}{episode}\n";
 	} else {
-		logger "${prefix}$prog{$pid}{index}:\t${prog_type}${name}$prog{$pid}{episode}${optional}\n";
+		logger "${prefix}$prog{$pid}{index}:\t${prog_type}${name}$prog{$pid}{episode}$optional{ $prog{$pid}{type} }\n";
 	}
 	return 0;
 }
-
 
 
 # Get matching programme index numbers using supplied regex
@@ -1053,6 +1058,7 @@ sub get_links_bbciplayer {
 				'channel'	=> $channel,
 				'categories'	=> join(',', @category),
 				'type'		=> $prog_type,
+				'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
 			};
 		}
 	}
@@ -1133,13 +1139,16 @@ sub get_links_bbcpodcast {
 	#  </program>
 	for ( split /<program/, $xmlindex ) {
 		# Extract channel name, rss feed data
-		my ($channel, $url);
+		my ($channel, $url, $web);
 
 		# <network id="radio1" name="BBC Radio 1" />
 		$channel = $1 if m{<network\s+id=".*?"\s+name="(.*?)"\s*\/>};
 
 		# <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
 		$url = $1 if m{<link\s+target="feed"\s+url="(.*?)"\s*\/>};
+
+		# <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
+		$web = $1 if m{<link\s+target="homepage"\s+url="(.*?)"\s*\/>};
 
 		# Skip if there is no feed data for channel
 		next if ! ($channel || $url);
@@ -1278,6 +1287,7 @@ sub get_links_bbcpodcast {
 				'channel'	=> $channel,
 				'categories'	=> join(',', @category),
 				'type'		=> 'podcast',
+				'web'		=> $web,
 			};
 		}
 	}
@@ -1372,6 +1382,7 @@ sub get_links_itv {
 					'guidance'	=> $guidance,
 					'categories'	=> (split /\|/, $channels{$channel})[1],
 					'type'		=> 'itv',
+					'web'		=> $url,
 				};
 			}
 		}
@@ -1458,6 +1469,7 @@ sub get_links_itv {
 				'channel'	=> $channel,
 				'categories'	=> 'TV',
 				'type'		=> 'itv',
+				'web'		=> ${itv_catchup_page_prefix}.${pid},
 			};
 
 
@@ -1572,6 +1584,7 @@ sub get_links_itv {
 					'channel'	=> $channel,
 					'categories'	=> 'TV',
 					'type'		=> 'itv',
+					'web'           => ${itv_catchup_page_prefix}.${pid},
 				};
 			}
 		}	
@@ -1752,6 +1765,7 @@ sub download_programme {
 		# Defaults
 		if ( $opt{vmode} eq 'auto' || ! $opt{vmode} ) {
 			if ( ! exists_in_path($rtmpdump) ) {
+				logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt{verbose};
 				$opt{vmode} = 'iphone';	
 			} else {
 				$opt{vmode} = 'iphone,flashhigh,flashnormal';
@@ -1796,6 +1810,14 @@ sub download_programme {
 		# Deal with radio fallback modes
 		# Valid modes are mp3|iphone,flash|rtmp,real|ra
 		# Defaults
+		if ( $opt{amode} eq 'auto' || ! $opt{amode} ) {
+			if ( ! exists_in_path($rtmpdump) ) {
+				logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt{verbose};
+				$opt{amode} = 'iphone,real';
+			} else {
+				$opt{amode} = 'iphone,flash,real';
+			}
+		}
 		$opt{amode} = 'iphone,flash,real' if $opt{amode} eq 'auto' || ! $opt{amode};
 
 		# Expand the modes into a loop
@@ -1857,7 +1879,7 @@ sub download_programme_itv {
 	$prog{$pid}{ext} = 'mp4';
 	$prog{$pid}{ext} = 'asf' if $opt{raw};
 	
-	my @url_list = %{get_media_stream_data( $pid, undef, 'itv')}->{streamurl};
+	my @url_list = split /\|/, %{get_media_stream_data( $pid, undef, 'itv')}->{streamurl};
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set
 	my %metadata = get_pid_metadata($ua, $pid);
@@ -1865,7 +1887,7 @@ sub download_programme_itv {
 		$prog{$pid}{$_} = $metadata{$_} if ! $prog{$pid}{$_};
 	}
 
-	$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, $prog{$pid}{dir}, $opt{fileprefix} || "<name> <pid>" );
+	$prog{$pid}{fileprefix} = generate_download_filename_prefix( $pid, $prog{$pid}{dir}, $opt{fileprefix} || "<name> <episode> <pid>" );
 	logger "\rINFO: File name prefix = $prog{$pid}{fileprefix}                 \n";
 	# Create a subdir if there are multiple parts
 	if ($#url_list > 0) {
@@ -2050,8 +2072,8 @@ sub download_programme_radio_flashaudio {
 	my $url_2;
 
 	# Force raw mode if ffmpeg is not installed
-	if ( ! exists_in_path($ffmpeg) ) {
-		logger "\nWARNING: $ffmpeg does not exist - not converting flv file\n";
+	if ( ! exists_in_path($mplayer) ) {
+		logger "\nWARNING: $mplayer does not exist - not converting flv file\n";
 		$opt{raw} = 1;
 	}
 	# Disable rtmp modes if rtmpdump does not exist
@@ -2068,7 +2090,7 @@ sub download_programme_radio_flashaudio {
 	%streamdata = %{ get_media_stream_data( $pid, $version_pids{ $prog{$pid}{version} }, 'flashaudio') };
 	$url_2 = $streamdata{streamurl};
 	if ( ! $url_2 ) {
-		logger "WARNING: No flashaudio version available\n";
+		logger "\nWARNING: No flashaudio version available\n";
 		return 'next';
 	}
 
@@ -2164,7 +2186,7 @@ sub download_programme_tv {
 
 	# Report error if no versions are available
 	if ( ! $url_2 ) {
-		logger "WARNING: No $mode versions available\n";
+		logger "\nWARNING: No $mode versions available\n";
 		return 'next';
 	}
 
@@ -3029,13 +3051,14 @@ sub download_stream_rtmp {
 		symlink $file_tmp, $file_symlink;
 		logger "INFO: Created symlink from '$file_symlink' -> '$file_tmp'\n" if $opt{verbose};
 	}
-	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" >&2";
-	logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
-	my $return = system($cmd);
+	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+	logger "\n\nINFO: Command: $cmd\n";
+	my $return = system($cmd) >> 8;
+	logger "INFO: Command exit code = $return\n" if $opt{verbose};
 	# Hack to get around rtmpdump prentending to fail on successful flash downloads
 	if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
-		logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
-		logger "\nWARNING: Failed to download file $file_tmp via RTMP\n";
+		logger "INFO: Command: $cmd\n" if $opt{verbose};
+		logger "WARNING: Failed to download file $file_tmp via RTMP\n";
 		unlink $file_tmp;
 		return 'next';
 	}
@@ -3045,19 +3068,25 @@ sub download_stream_rtmp {
 		move($file_tmp, $file_done) if ! $opt{stdout};
 		return 0;
 
-	# Convert flv to mp3 for flash audio
-	} elsif ( $mode eq 'flashaudio' ) {
-		# We could do id3 tagging here but id3v2 does this later anyway
-		$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$file\" >&2";
-
+	# Convert flv to mp3
+	} elsif ( $mode =~ /^flash/ ) {
+		# We could do id3 tagging here with ffmpeg but id3v2 does this later anyway
+		# This fails
+		#$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$file\" 1>&2";
+		# This works but it's really bad bacause it re-transcodes mp3 and takes forever :-(
+		# $cmd = "$ffmpeg -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$file\" 1>&2";
+		# At last this removes the flv container and dumps the mp3 stream! - mplayer dumps core but apparently succeeds
+		$cmd = "$mplayer $mplayer_opts -dumpaudio \"$file_tmp\" -dumpfile \"$file\" 1>&2";
 	# Convert video flv to mp4/avi if required
 	} else {
-		$cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" >&2";
+		$cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" 1>&2";
 	}
 
 	logger "\n\nINFO: Command: $cmd\n\n" if $opt{verbose};
 	# Run flv conversion and delete source file on success
-	if ( (! system($cmd)) && -f $file && stat($file)->size > $min_download_size ) {
+	my $return = system($cmd) >> 8;
+	logger "INFO: Command exit code = $return\n" if $opt{verbose};
+	if ( (! $return) && -f $file && stat($file)->size > $min_download_size ) {
 			unlink( $file_tmp );
 
 	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
@@ -3090,12 +3119,12 @@ sub download_stream_mms_video {
 	my ( $ua, $urls, $file, $file_done, $pid ) = @_;
 	my $file_tmp;
 	my $cmd;
-	my $null;
 	my @url_list = split /\|/, $urls;
 	my @file_tmp_list;
 	my %threadpid;
+	my $retries = 3;
 		
-	logger "INFO: MMS_URLs: ".(join ', ', @file_tmp_list).", file: $file, file_done: $file_done\n" if $opt{verbose};
+	logger "INFO: MMS_URLs: ".(join ', ', @url_list).", file: $file, file_done: $file_done\n" if $opt{verbose};
 
 	# Start marker
 	my $start_time = time();
@@ -3106,24 +3135,43 @@ sub download_stream_mms_video {
 		# Create temp download filename
 		$file_tmp = $file_part_prefix.($count+1).".asf";
 		$file_tmp_list[$count] = $file_tmp;
-		$null = " 2>/dev/null " if (! $opt{verbose}) && (! $opt{debug});
-		$cmd = "$mplayer -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null >&2 </dev/null";
-		logger "\n\nINFO: Command: $cmd\n" if $opt{verbose};
+		#my $null;
+		#$null = '-really-quiet' if ! $opt{quiet};
+		# Can also use 'mencoder mms://url/ -oac copy -ovc copy -o out.asf' - still gives zero exit code on failed stream...
+		# $cmd = "$mplayer $mplayer_opts -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
+		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
+		$cmd = "$mplayer $mplayer_opts -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
+		logger "INFO: Command: $cmd\n" if $opt{verbose};
 
 		my $childpid = fork();
 		if (! $childpid) {
 			# Child starts here
 			logger "INFO: Downloading file $file_tmp\n";
-			if ( system($cmd) ) {
-				logger "\nWARNING: Failed to download file $file_tmp via MMS\n";
-				exit 1;
+			# Remove old file
+			unlink $file_tmp;
+			# Retry loop
+			my $retry = $retries;
+			while ($retry) {
+				my $cmdoutput = `$cmd`;
+				my $exitcode = $?;
+				logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt{debug};
+				if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
+					# Failed, retry
+					logger "WARNING: Failed, retrying to download $file_tmp, exit code: $exitcode\n";
+					$retry--;
+				} else {
+					# Successfully downloaded
+					logger "INFO: Download thread has completed for file $file_tmp\n";
+					exit 0;
+				}
 			}
-			logger "INFO: Download thread has completed for file $file_tmp\n";
-			exit 0;
+			logger "ERROR: Download thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
+			move $file_tmp, "${file_tmp}.failed";
+			exit 1;
 		}
 		# Create a hash of process_id => 'count'
 		$threadpid{$childpid} = $count;
-	}	
+	}
 	# Wait for all threads to complete
 	$| = 1;
 	# Autoreap zombies
@@ -3146,6 +3194,7 @@ sub download_stream_mms_video {
 				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
 				push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
 				$total_size_new += $size;
+			# Thread has completed/failed
 			} else {
 				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
 				# end marker
@@ -3167,6 +3216,17 @@ sub download_stream_mms_video {
 	logger "INFO: All download threads completed\n";	
 	# Unset autoreap
 	delete $SIG{CHLD};
+
+	# If not all files > min_size then assume download failed
+	for (@file_tmp_list) {
+		# If file doesnt exist or too small then skip
+		if ( (! -f $_) || ( -f $_ && stat($_)->size < $min_download_size ) ) {
+			logger "ERROR: Download of programme failed, skipping\n" if $opt{verbose};
+			return 1;
+		}
+	}
+
+	$prog{$pid}{mode} = 'itv';
 	# Retain raw format if required
 	if ( $opt{raw} ) {
 		return 0;
@@ -3177,10 +3237,10 @@ sub download_stream_mms_video {
 #		# Create part of cmd that specifies each partial file
 #		my $filestring;
 #		$filestring .= " -i \"$_\" " for (@file_tmp_list);
-#		$cmd = "$ffmpeg $ffmpeg_opts $filestring -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" >&2";
+#		$cmd = "$ffmpeg $ffmpeg_opts $filestring -vcodec copy -acodec copy -f $prog{$pid}{ext} -y \"$file\" 1>&2";
 #	}
 #
-#	logger "\n\nINFO: Command: $cmd\n\n" if $opt{verbose};
+#	logger "INFO: Command: $cmd\n\n" if $opt{verbose};
 #	# Run asf conversion and delete source file on success
 #	if ( ! system($cmd) ) {
 #		unlink( @file_tmp_list );
@@ -3191,7 +3251,6 @@ sub download_stream_mms_video {
 #	# Moving file into place as complete (if not stdout)
 #	move($file, $file_done) if ! $opt{stdout};
 
-	$prog{$pid}{mode} = 'itv';
 	return 0;
 }
 
@@ -3836,6 +3895,7 @@ sub create_ua {
 	$ua->proxy( ['http'] => $proxy_url );
 	$ua->agent( $user_agent{$agent} );
 	$ua->conn_cache(LWP::ConnCache->new());
+	#$ua->conn_cache->total_capacity(50);
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
 	return $ua;
 };	
@@ -4119,32 +4179,63 @@ sub create_xml {
 
 
 sub create_html {
+	my %name_channel;
 	# Create local web page
 	if ( open(HTML, "> $opt{html}") ) {
 		print HTML '<html><head></head><body><table border=1>';
 		for (@_) {
 			my $pid = $index_pid{$_};
-			my $name = encode_entities( $prog{$pid}{name} );
-			my $episode = encode_entities( $prog{$pid}{episode} );
-			my $desc = encode_entities( $prog{$pid}{desc} );
-			my $channel = encode_entities( $prog{$pid}{channel} );
-			print HTML "<tr>
-					<td rowspan=2 width=150><a href=\"${prog_page_prefix}/${pid}.html\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
-					<td>$_</td>
-					<td><a href=\"${prog_page_prefix}/${pid}.html\">${name}</a></td>
-					<td>${episode}</td>
-					<td>${channel}</td>
-				</tr>
-				<tr>
-					<td colspan=5>${desc}</td>
-				</tr>
-			\n";
+			# Skip if pid isn't in index
+			next if ! $pid;
+			# Skip if already downloaded and --hide option is specified
+			next if $opt{hide} && $pids_history{$pid};
+			if (! defined $name_channel{ "$prog{$pid}{name}|$prog{$pid}{channel}" }) {
+				print HTML list_prog_entry_html( $pid );
+			} else {
+				print HTML list_prog_entry_html( $pid, 1 );
+			}
+			$name_channel{ "$prog{$pid}{name}|$prog{$pid}{channel}" } = 1;
 		}
 		print HTML '</table></body>';
 		close (HTML);
 	} else {
 		logger "Couldn't open html file $opt{html} for writing\n";
 	}
+}
+
+
+
+sub list_prog_entry_html {
+	my ($pid, $tree) = (@_);
+	my $html;
+	# If tree view
+	my $name = encode_entities( $prog{$pid}{name} );
+	my $episode = encode_entities( $prog{$pid}{episode} );
+	my $desc = encode_entities( $prog{$pid}{desc} );
+	my $channel = encode_entities( $prog{$pid}{channel} );
+	my $type = encode_entities( $prog{$pid}{type} );
+	my $categories = encode_entities( $prog{$pid}{categories} );
+
+	# Header
+	if ( not $tree ) {
+		# Assume all thumbnails for a prog name are the same
+		$html = "<tr bgcolor='#cccccc'>
+			<td rowspan=1 width=150><a href=\"$prog{$pid}{web}\"><img height=84 width=150 src=\"$prog{$pid}{thumbnail}\"></a></td>
+				<td><a href=\"$prog{$pid}{web}\">${name}</a></td>
+				<td>${channel}</td>
+				<td>${type}</td>
+				<td>${categories}</td>
+			</tr>
+		\n";
+	# Follow-on episodes
+	}
+		$html .= "<tr>
+				<td>$_</td>
+				<td><a href=\"$prog{$pid}{web}\">${episode}</a></td>
+				<td colspan=3>${desc}</td>
+			</tr>
+		\n";
+	return $html;
 }
 
 
@@ -4623,6 +4714,9 @@ sub cleanup {
 
 
 # Return a string with formatting fields substituted for a given pid
+# no_sanitize == 2 then just substitute only
+# no_sanitize == 1 then also sanitize '/' in field values
+# no_sanitize == 0 then dont sanitize '/' in field values
 sub substitute_fields {
 	my $pid = shift;
 	my $string = shift;
@@ -4632,21 +4726,25 @@ sub substitute_fields {
 	# Tokenize and substitute $format
 	for my $key ( keys %{ $prog{$pid} } ) {
 		# Remove/replace all non-nice-filename chars if required
-		if (! $no_sanitize) {
+		if ($no_sanitize == 0) {
 			$replace = sanitize_path( $prog{$pid}{$key} );
 		} else {
 			$replace = $prog{$pid}{$key};
 		}
 		$string =~ s|\<$key\>|$replace|gi;
 	}
-	if (! $no_sanitize) {
+	if ($no_sanitize == 0) {
 		$replace = sanitize_path( $pid );	
 	} else {
 		$replace = $pid;
 	}
 	$string =~ s|<pid>|$replace|gi;
 	# Remove/replace all non-nice-filename chars if required except for fwd slashes
-	return sanitize_path( $string, 1 );
+	if ($no_sanitize != 2) {
+		return sanitize_path( $string, 1 );
+	} else {
+		return $string;
+	}
 }
 
 
