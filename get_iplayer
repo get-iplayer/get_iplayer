@@ -13,7 +13,7 @@
 # Other credits:
 #  RTMP additions: Andrej Stepanchuk
 #
-my $version = 1.18;
+my $version = 1.19;
 #
 # Help:
 #	./get_iplayer --help
@@ -40,7 +40,8 @@ my $version = 1.18;
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
 # * resuming a flashaudio download fails
-
+# * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
+ 
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -2116,7 +2117,7 @@ sub download_programme_radio_flashaudio {
 	}
 
 	# Do the RTMP flashaudio download
-	return download_stream_rtmp( $ua, $streamdata{streamurl}, $pid, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl}, $file, $file_done, $file_symlink );
+	return download_stream_rtmp( $ua, $streamdata{streamurl}, $pid, 'flashaudio', $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl}, $file, $file_done, $file_symlink );
 }
 
 
@@ -3069,7 +3070,7 @@ sub download_stream_rtmp {
 		return 0;
 
 	# Convert flv to mp3
-	} elsif ( $mode =~ /^flash/ ) {
+	} elsif ( $mode eq 'flashaudio' ) {
 		# We could do id3 tagging here with ffmpeg but id3v2 does this later anyway
 		# This fails
 		#$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$file\" 1>&2";
