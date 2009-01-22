@@ -890,14 +890,14 @@ sub download_stream_subtitles {
 	my $suburl;
 	my $subs;
 	logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt->{verbose};
-	$suburl = %{ Programme::bbiplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
+	$suburl = %{ Programme::bbciplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
 	# Return if we have no url
 	if (! $suburl) {
-		logger "INFO: Subtitles not available\n";
+		logger "\nINFO: Subtitles not available\n";
 		return 2;
 	}
 
-	logger "INFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
+	logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
 
 	# Open subs file
 	unlink($file);
@@ -906,10 +906,10 @@ sub download_stream_subtitles {
 	# Download subs
 	$subs = request_url_retry($ua, $suburl, 2);
 	if (! $subs ) {
-		logger "ERROR: Subtitle Download failed\n";
+		logger "\nERROR: Subtitle Download failed\n";
 		return 1;
 	} else {
-		logger "INFO: Downloaded Subtitles\n";
+		logger "\nINFO: Downloaded Subtitles\n";
 	}
 
 	# Convert the format to srt
@@ -2351,15 +2351,16 @@ sub generate_filenames {
 
 	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}";
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
-	if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
-		main::logger("WARNING: File $prog->{filename} already exists\n\n");
-		return 1;
-	}
 
 	# Create symlink filename if required
 	if ( $opt->{symlink} ) {
 		# Substitute the fields for the pid
 		$prog->{symlink} = substitute( $prog, $opt->{symlink} );
+	}
+
+	if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
+		main::logger("WARNING: File $prog->{filename} already exists\n\n");
+		return 1;
 	}
 
 	return 0;
@@ -2458,6 +2459,21 @@ sub list_entry_html {
 			</tr>
 		\n";
 	return $html;
+}
+
+
+# Creates symlink
+# Usage: $prog->create_symlink( <symlink>, <target> );
+sub create_symlink {
+	my $prog = shift;
+	my $symlink = shift;
+	my $target = shift;
+
+	# remove old symlink
+	unlink $symlink if -l $symlink;
+	# Create symlink
+	symlink $target, $symlink;
+	main::logger "INFO: Created symlink from '$symlink' -> '$target'\n" if $opt->{verbose};
 }
 
 
@@ -3354,8 +3370,12 @@ sub download {
 	}
 
 	# Determine the correct filenames for this download
-	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
-
+	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
+		# Create symlink if required
+		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
+		return 'abort';
+	}
+	
 	# Skip from here if we are only testing downloads
 	return 'abort' if $opt->{test};
 
@@ -3394,14 +3414,6 @@ sub download {
 	
 	# Rename the subtitle file accordingly
 	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
-
-	# Re-symlink file
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $prog->{filename}, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filename}'\n" if $opt->{verbose};
-	}
 
 	return $return;
 }
@@ -3654,7 +3666,12 @@ sub download_iphone {
 	}
 
 	# Determine the correct filenames for this download
-	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
+	# Determine the correct filenames for this download
+	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
+		# Create symlink if required
+		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
+		return 'abort';
+	}
 
 	# Skip from here if we are only testing downloads
 	return 'abort' if $opt->{test};
@@ -4811,13 +4828,9 @@ sub get {
 		main::logger "INFO: Resuming download from $restart_offset                        \n";
 	}
 
+	# Not sure if this is already done in download method???
 	# Create symlink if required
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $prog->{filepart}, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filepart}'\n" if $opt->{verbose};
-	}
+	$prog->create_symlink( $opt->{symlink}, $prog->{filepart} ) if $opt->{symlink};
 
 	# Start marker
 	my $start_time = time();
@@ -4855,12 +4868,8 @@ sub get {
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 
 	# Re-symlink file
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $prog->{filename}, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filename}'\n" if $opt->{verbose};
-	}
+	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+
 	$prog->{mode} = 'iphone';
 	return 0;
 }
@@ -4921,12 +4930,8 @@ sub get {
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Create symlink if required
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $file_tmp, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$file_tmp'\n" if $opt->{verbose};
-	}
+	$prog->create_symlink( $opt->{symlink}, $file_tmp ) if $opt->{symlink};
+
 	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	main::logger "\n\nINFO: Command: $cmd\n";
 	my $return = system($cmd) >> 8;
@@ -4976,12 +4981,7 @@ sub get {
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 	
 	# Re-symlink file
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $prog->{filename}, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filename}'\n" if $opt->{verbose};
-	}
+	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 	$prog->{mode} = $mode;
@@ -5157,12 +5157,7 @@ sub get {
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 
 	# Create symlink if required
-	if ( $opt->{symlink} ) {
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
-		symlink $prog->{filename}, $prog->{symlink};
-		main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filename}'\n" if $opt->{verbose};
-	}
+	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	$prog->{mode} = 'realaudio';
 	return 0;
@@ -5363,6 +5358,8 @@ sub get {
 	$prog->{mode} = 'itv';
 	# Retain raw format if required
 	if ( $opt->{raw} ) {
+		# Create symlink to first part file
+		$prog->create_symlink( $opt->{symlink}, $file_tmp_list[0] ) if $opt->{symlink};
 		return 0;
 	}
 
@@ -5384,7 +5381,8 @@ sub get {
 #	}
 #	# Moving file into place as complete (if not stdout)
 #	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
-
+#	# Create symlink if required
+#	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	return 0;
 }
 
@@ -5441,6 +5439,8 @@ sub get {
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 	# Moving file into place as complete (if not stdout)
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
+
+	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	$prog->{mode} = $mode;
 	return 0;
@@ -5506,12 +5506,7 @@ sub get {
 			$prog->{filename} );
 		move $prog->{filepart}, $prog->{filename};
 		# re-symlink file
-		if ( $opt->{symlink} ) {
-			# remove old symlink
-			unlink $prog->{symlink} if -l $prog->{symlink};
-			symlink $prog->{filename}, $prog->{symlink};
-			main::logger "INFO: Created symlink from '$prog->{symlink}' -> '$prog->{filename}'\n" if $opt->{verbose};
-		}
+		$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	}
 
 	$prog->{mode} = 'podcast';
