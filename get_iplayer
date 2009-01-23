@@ -27,7 +27,7 @@ package main;
 my $version = 1.23;
 #
 # Help:
-#	./get_iplayer --help
+#	./get_iplayer --help | --longhelp
 #
 # Changelog:
 # 	http://linuxcentre.net/get_iplayer/CHANGELOG.txt
@@ -138,64 +138,66 @@ sub logger(@) {
 	}
 }
 
-# Define general 'option names' => ( <option cmdline format, <option help section>, <option help> )
+# Define general 'option names' => ( <advanced>, <option cmdline format>, <option help section>, <option help> )
+# If you want the option to be hidden then don't specify <option cmdline format>, use ''
 my %opt_format = (
-	amode 		=> ["amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaudio,realaudio (default: iphone,flashaudio,realaudio)"],
-	category 	=> ["category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
-	channel		=> ["channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
-	command		=> ["c|command=s", 'Output', '-c, --command <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
-	conditions	=> ["conditions", '', '', 'Shows GPL conditions'],
-	debug		=> ["debug", 'Config', '--debug', "Debug output"],
-	exclude		=> ["exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
-	excludecategory	=> ["exclude-category=s", 'Search', '--exclude-category <regex>', "Narrow search to exclude matched catogories"],
-	excludechannel	=> ["exclude-channel=s", 'Search', '--exclude-channel <regex>', "Narrow search to exclude matched channel(s)"],
-	expiry		=> ["expiry|e=n", 'Config', '-e, --expiry <secs>', "Cache expiry in seconds (default 4hrs)"],
-	fileprefix	=> ["file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
-	flush		=> ["flush|refresh|f", 'Config', '-f, --flush, --refresh', "Refresh cache"],
-	forcedownload	=> ["force-download", 'Download', '--force-download', "Ignore download history (unsets --hide option also)"],
-	fxd		=> ["fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
-	get		=> ["get|g", 'Download', '-g, --get', "Download matching programmes"],
-	help		=> ["help|h", 'Config', '-h, --help', "This help text"],
-	hide		=> ["hide", 'Display', '--hide', "Hide previously downloaded programmes"],
-	html		=> ["html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
-	id3v2		=> ["id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
-	info		=> ["i|info", 'Display', '-i, --info', "Show full programme metadata (only if number of matches < 50)"],
-	list		=> ["list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
-	listformat	=> ["listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
-	long		=> ["long|l", 'Search', '-l, --long', "Additionally search & display long programme descriptions / episode names"],
-	mp3audio	=> ["mp3audio", '', '', ""],
-	mplayer		=> ["mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
-	mythtv		=> ["mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
-	nowrite		=> ["no-write|nowrite|n", 'Output', '-n, --nowrite', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
-	output		=> ["output|o=s", 'Output', '-o, --output <dir>', "Default Download output directory for all downloads"],
-	partialproxy	=> ["partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
-	pid		=> ["pid=s", 'Download', '--pid <pid>|<type>:<pid>', "Download an arbitrary pid that does not necessarily appear in the index"],
-	proxy		=> ["proxy|p=s", 'Download', '-p, --proxy <url>', "Web proxy URL spec"],
-	quiet		=> ["q|quiet|silent", 'Output', '-q, --quiet', "No logging output"],
-	raw		=> ["raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
-	save 		=> ["save", 'Config', '--save', "Save specified options as default"],
-	showoptions	=> ["showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
-	since		=> ["since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
-	stdout		=> ["stdout|x", 'Download', '-x, --stdout', "Additionally stream to STDOUT (so you can pipe output to a player)"],
-	streaminfo	=> ["streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
-	subdir		=> ["subdirs|subdir|s", 'Output', '-s, --subdir', "Downloaded files into Programme name subdirectory"],
-	suboffset	=> ["suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> ["subtitles", 'Download', '--subtitles', "In TV mode, download subtitles into srt/SubRip format if available"],
-	symlink		=> ["symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
-	test		=> ["test|t", 'Download', '-t, --test', "Test only - no download (will show programme type)"],
-	terse		=> ["terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
-	tree		=> ["tree", 'Display', '--tree', "Display Programme listings in a tree view"],
-	type		=> ["type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio, tv, podcast, all, itv (tv is default)"],
-	update		=> ["update|u", 'Config', '-u, --update', "Update get_iplayer if a newer one exists"],
-	versionlist	=> ["versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
-	versions	=> ["versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
-	verbose		=> ["verbose|v", 'Config', '-v, --verbose', "Verbose"],
-	vmode		=> ["vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): TV: iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi (default: iphone,flashhigh,flashnormal)"],
-	warranty	=> ["warranty", '', '', 'Displays warranty section of GPL'],
-	whitespace	=> ["whitespace|ws|w", 'Output', '-w, --whitespace', "Keep whitespace (and escape chars) in filenames"],
-	xmlchannels	=> ["xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
-	xmlnames	=> ["xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
-	xmlalpha	=> ["xml-alpha|fxd-alpha", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
+	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaudio,realaudio (default: iphone,flashaudio,realaudio)"],
+	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
+	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
+	command		=> [ 1, "c|command=s", 'Output', '-c, --command <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
+	conditions	=> [ 0, "conditions", '', '', 'Shows GPL conditions'],
+	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
+	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
+	excludecategory	=> [ 1, "xcat|exclude-category=s", 'Search', '--exclude-category <regex>', "Narrow search to exclude matched catogories"],
+	excludechannel	=> [ 1, "xchan|exclude-channel=s", 'Search', '--exclude-channel <regex>', "Narrow search to exclude matched channel(s)"],
+	expiry		=> [ 1, "expiry|e=n", 'Config', '-e, --expiry <secs>', "Cache expiry in seconds (default 4hrs)"],
+	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
+	flush		=> [ 0, "flush|refresh|f", 'Config', '-f, --flush, --refresh', "Refresh cache"],
+	forcedownload	=> [ 1, "force-download", 'Download', '--force-download', "Ignore download history (unsets --hide option also)"],
+	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
+	get		=> [ 0, "get|g", 'Download', '-g, --get', "Download matching programmes"],
+	help		=> [ 0, "help|h", 'Config', '-h, --help', "This help text"],
+	helplong	=> [ 0, "help-long|advanced|long-help|helplong", 'Config', '--helplong', "Advanced options help text"],
+	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
+	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
+	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
+	info		=> [ 0, "i|info", 'Display', '-i, --info', "Show full programme metadata (only if number of matches < 50)"],
+	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
+	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
+	long		=> [ 0, "long|l", 'Search', '-l, --long', "Additionally search & display long programme descriptions / episode names"],
+	mp3audio	=> [ 0, "mp3audio", '', '', ""],
+	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
+	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
+	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '-n, --nowrite', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
+	output		=> [ 0, "output|o=s", 'Output', '-o, --output <dir>', "Default Download output directory for all downloads"],
+	partialproxy	=> [ 1, "partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
+	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>', "Download an arbitrary pid that does not necessarily appear in the index"],
+	proxy		=> [ 0, "proxy|p=s", 'Download', '-p, --proxy <url>', "Web proxy URL spec"],
+	quiet		=> [ 1, "q|quiet|silent", 'Output', '-q, --quiet', "No logging output"],
+	raw		=> [ 0, "raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
+	save 		=> [ 0, "save", 'Config', '--save', "Save specified options as default"],
+	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
+	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
+	stdout		=> [ 1, "stdout|x", 'Download', '-x, --stdout', "Additionally stream to STDOUT (so you can pipe output to a player)"],
+	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
+	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '-s, --subdir', "Downloaded files into Programme name subdirectory"],
+	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
+	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In TV mode, download subtitles into srt/SubRip format if available"],
+	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
+	test		=> [ 1, "test|t", 'Download', '-t, --test', "Test only - no download (will show programme type)"],
+	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
+	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
+	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio, tv, podcast, all, itv (tv is default)"],
+	update		=> [ 0, "update|u", 'Config', '-u, --update', "Update get_iplayer if a newer one exists"],
+	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
+	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
+	verbose		=> [ 1, "verbose|v", 'Config', '-v, --verbose', "Verbose"],
+	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): TV: iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
+	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '-w, --whitespace', "Keep whitespace (and escape chars) in filenames"],
+	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
+	xmlnames	=> [ 1, "xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
+	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
 );
 
 my $save;
@@ -240,7 +242,7 @@ Options->get_class_options( "Pvr", \%opt_format );
 
 # Parse the cmdline using the opt_format hash
 if ( not $opt_cmdline->parse( \%opt_format ) ) {
-	logger Options->usage( \%opt_format );
+	logger Options->usage( \%opt_format, 0 );
 	exit 1;
 }
 
@@ -250,6 +252,7 @@ if ( $opt_cmdline->{save} == 1 ) {
 	$save = 1;
 	delete $opt_cmdline->{save};
 	delete $opt_cmdline->{help};
+	delete $opt_cmdline->{helplong};
 	delete $opt_cmdline->{warranty};
 	delete $opt_cmdline->{conditions};
 }
@@ -261,7 +264,7 @@ $opt->copy_set_options_from( $opt_cmdline );
 $opt->save( $opt_cmdline, $optfile ) if $save;
 
 # Show copyright notice
-logger Options->copyright_notice if not $opt_cmdline->{quiet};
+logger Options->copyright_notice;
 
 # User Agents
 my %user_agent = (
@@ -273,8 +276,8 @@ my %user_agent = (
 );
 
 # Display Usage
-if ( $opt_cmdline->{help} ) {
-	logger Options->usage( \%opt_format );
+if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
+	logger Options->usage( \%opt_format, $opt_cmdline->{helplong} );
 	exit 1;
 }
 
@@ -309,7 +312,7 @@ for ( progclass() ) {
 	$max_index = progclass($_)->index_max if progclass($_)->index_max > $max_index;
 }
 my %type;
-my $min_download_size = 1000000;
+my $min_download_size = 1024000;
 
 # Static URLs
 my $channel_feed_url		= 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/400
@@ -1781,7 +1784,7 @@ sub parse {
 	my %get_opts;
 
 	for my $name (keys %{$opt_format_ref} ) {
-		my $format = @{ $opt_format_ref->{$name} }[0];
+		my $format = @{ $opt_format_ref->{$name} }[1];
 		$get_opts{ $format } = \$this->{$name};
 	}
 
@@ -1810,26 +1813,28 @@ EOF
 
 
 
-# Parse cmdline opts using supplied hash
-# Usage: $opt_cmdline->parse( \%opt_format );
+# Usage: $opt_cmdline->usage( \%opt_format, <helplong> );
 sub usage {
 	my $this = shift;
 	my $opt_format_ref = shift;
+	my $helplong = shift;
 	my %section_name;
 	my %name_syntax;
 	my %name_desc;
-	my $usage = <<'EOF';
-Usage ( Also see http://linuxcentre.net/iplayer ):
-Search Programmes:  get_iplayer [<search options>] [<regex|index> ...]
-Download files:     get_iplayer --get [<search options>] <regex|index> ...
-                    get_iplayer --pid <type>:<pid> [<options>]
-Stream Downloads:   get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -
-Update get_iplayer: get_iplayer --update
-EOF
+	my $usage;
+	$usage .= "Usage ( Also see http://linuxcentre.net/iplayer ):\n";
+	$usage .= " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]\n";
+	$usage .= " Download Programmes:           get_iplayer --get [<search options>] <regex|index> ...\n";
+	$usage .= "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
+	$usage .= " Stream Downloads:              get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -\n" if $helplong;
+	$usage .= " Update get_iplayer:            get_iplayer --update\n";
+	$usage .= " Advanced Options:              get_iplayer --long-help\n" if ! $helplong;
 
 	for my $name (keys %{$opt_format_ref} ) {
 		next if not $opt_format_ref->{$name};
-		my ( $format, $section, $syntax, $desc ) = @{ $opt_format_ref->{$name} };
+		my ( $advanced, $format, $section, $syntax, $desc ) = @{ $opt_format_ref->{$name} };
+		# Skip advanced options if not req'd
+		next if $advanced && ! $helplong;
 		push @{$section_name{$section}}, $name if $syntax;
 		$name_syntax{$name} = $syntax;
 		$name_desc{$name} = $desc;
@@ -3012,9 +3017,9 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		n95		=> ["n95", '', '', ""],
-		outputtv	=> ["outputtv=s", 'Output', '--outputtv <dir>', "Download output directory for tv"],
-		vlc		=> ["vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
+		n95		=> [ 0, "n95", '', '', ""],
+		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Download output directory for tv"],
+		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 	};
 }
 
@@ -3429,11 +3434,11 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		bandwidth 	=> ["bandwidth=n", 'Download', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
-		lame		=> ["lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
-		outputradio	=> ["outputradio=s", 'Output', '--outputradio <dir>', "Download output directory for radio"],
-		realaudio	=> ["realaudio", '', '', ""],
-		wav		=> ["wav", 'Download', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
+		bandwidth 	=> [ 1, "bandwidth=n", 'Download', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
+		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
+		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Download output directory for radio"],
+		realaudio	=> [ 0, "realaudio", '', '', ""],
+		wav		=> [ 1, "wav", 'Download', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
 	};
 }
 
@@ -3680,7 +3685,7 @@ sub channels { return {}; }
 # Class cmdline Options
 sub opt_format {
 	return {
-		outputpodcast	=> ["outputpodcast=s", 'Output', '--outputpodcast <dir>', "Download output directory for podcasts"],
+		outputpodcast	=> [ 1, "outputpodcast=s", 'Output', '--outputpodcast <dir>', "Download output directory for podcasts"],
 	};
 }
 
@@ -4945,9 +4950,9 @@ use URI;
 
 sub opt_format {
 	return {
-		ffmpeg		=> ["ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
-		rtmp		=> ["rtmp", '', '', ""],
-		rtmpdump	=> ["rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
+		rtmp		=> [ 0, "rtmp", '', '', ""],
+		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
 	};
 }
 
@@ -5591,12 +5596,12 @@ my $opt;
 # Class cmdline Options
 sub opt_format {
 	return {
-		pvr		=> ["pvr", 'PVR', '--pvr', "Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)"],
-		pvradd		=> ["pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
-		pvrdel		=> ["pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
-		pvrdisable	=> ["pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
-		pvrenable	=> ["pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
-		pvrlist		=> ["pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
+		pvr		=> [ 0, "pvr", 'PVR', '--pvr', "Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)"],
+		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
+		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
+		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
+		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
+		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
 	};
 }
 
