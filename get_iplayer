@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.20;
+my $version = 1.23;
 #
 # Help:
 #	./get_iplayer --help
@@ -174,6 +174,7 @@ my %opt_format = (
 	quiet		=> ["q|quiet|silent", 'Output', '-q, --quiet', "No logging output"],
 	raw		=> ["raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	save 		=> ["save", 'Config', '--save', "Save specified options as default"],
+	showoptions	=> ["showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> ["since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	stdout		=> ["stdout|x", 'Download', '-x, --stdout', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> ["streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
@@ -243,6 +244,22 @@ if ( not $opt_cmdline->parse( \%opt_format ) ) {
 	exit 1;
 }
 
+
+# deal with --save as $save and not as $opt_cmdline->{save}
+if ( $opt_cmdline->{save} == 1 ) {
+	$save = 1;
+	delete $opt_cmdline->{save};
+	delete $opt_cmdline->{help};
+	delete $opt_cmdline->{warranty};
+	delete $opt_cmdline->{conditions};
+}
+
+# Copy to $opt from opt_cmdline those options which are actually set 
+$opt->copy_set_options_from( $opt_cmdline );
+
+# Save opts to file if specified
+$opt->save( $opt_cmdline, $optfile ) if $save;
+
 # Show copyright notice
 logger Options->copyright_notice if not $opt_cmdline->{quiet};
 
@@ -261,27 +278,24 @@ if ( $opt_cmdline->{help} ) {
 	exit 1;
 }
 
+# List all options and where they are set from then exit
+if ( $opt_cmdline->{showoptions} ) {
+	# unset this option
+	delete $opt_cmdline->{showoptions};	
+	delete $opt->{showoptions};
+	# Show all options andf where set from
+	$opt_file->display('Options from Files');
+	$opt_cmdline->display('Options from Command Line');
+	$opt->display('Options Used');
+	exit 1;
+}
+
 # Display GPL stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
 	logger request_url_retry( create_ua('get_iplayer'), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
-
-# deal with --save as $save and not as $opt_cmdline->{save}
-if ( $opt_cmdline->{save} == 1 ) {
-	$save = 1;
-	delete $opt_cmdline->{save};
-}
-
-# Copy to $opt from opt_cmdline those options which are actually set 
-$opt->copy_set_options_from( $opt_cmdline );
-
-# Save opts to file if specified
-$opt->save( $opt_cmdline, $optfile ) if $save;
-
-
-
 
 ########## Global vars ###########
 
@@ -393,7 +407,7 @@ sub process_matches {
 	my $pids_history_ref = shift;
 	my @search_args = @_;
 	# Show options
-	$opt->display_current() if $opt->{verbose};
+	$opt->display('Current options') if $opt->{verbose};
 	# $prog{pid}->object hash
 	my %prog;
 	# obtain prog object given index. e.g. $index_prog{$index_no}->{element};
@@ -1907,26 +1921,14 @@ sub load {
 
 
 
-# Usage: $opt_file->display_default(); 
-# Display options from files
-sub display_default {
+# Usage: $opt_file->display( [<exclude regex>], [<title>] );
+# Display options
+sub display {
 	my $this = shift;
-	main::logger "Default options:\n";
-	for ( grep !/(help|debug|get|^pvr)/, sort keys %{$this} ) {
-		main::logger "\t$_ = $this->{$_}\n" if defined $this->{$_};
-	}
-	main::logger "\n";
-	return 0;
-}
-
-
-
-# Usage: $opt->display_current();
-# Display options currently set
-sub display_current {
-	my $this = shift;
-	main::logger "Current options:\n";
-	for ( sort keys %{$opt} ) {
+	my $title = shift || 'Options';
+	my $excluderegex = shift || 'ROGUEVALUE';
+	main::logger "$title:\n";
+	for ( grep !/(help|debug|get|^pvr)/i, sort keys %{$this} ) {
 		main::logger "\t$_ = $this->{$_}\n" if defined $this->{$_} && $this->{$_};
 	}
 	main::logger "\n";
@@ -2254,6 +2256,9 @@ sub generate_filenames {
 	if ( $opt->{symlink} ) {
 		# Substitute the fields for the pid
 		$prog->{symlink} = substitute( $prog, $opt->{symlink} );
+		main::logger("INFO: Symlink file name will be '$prog->{symlink}'\n") if $opt->{verbose};
+		# remove old symlink
+		unlink $prog->{symlink} if -l $prog->{symlink};
 	}
 
 	if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
@@ -4741,7 +4746,7 @@ sub get {
 
 	# Not sure if this is already done in download method???
 	# Create symlink if required
-	$prog->create_symlink( $opt->{symlink}, $prog->{filepart} ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
 
 	# Start marker
 	my $start_time = time();
@@ -4779,7 +4784,7 @@ sub get {
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 
 	# Re-symlink file
-	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	$prog->{mode} = 'iphone';
 	return 0;
@@ -4968,7 +4973,7 @@ sub get {
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Create symlink if required
-	$prog->create_symlink( $opt->{symlink}, $file_tmp ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	main::logger "\n\nINFO: Command: $cmd\n";
@@ -5019,7 +5024,7 @@ sub get {
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 	
 	# Re-symlink file
-	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 	$prog->{mode} = $mode;
@@ -5195,7 +5200,7 @@ sub get {
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 
 	# Create symlink if required
-	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	$prog->{mode} = 'realaudio';
 	return 0;
@@ -5300,7 +5305,7 @@ sub get {
 	for ( my $count = 0; $count <= $#url_list; $count++ ) {
 
 		# Create temp download filename
-		$file_tmp = $file_part_prefix.($count+1).".asf";
+		$file_tmp = sprintf( "%s%02d.asf", $file_part_prefix, $count+1);
 		$file_tmp_list[$count] = $file_tmp;
 		#my $null;
 		#$null = '-really-quiet' if ! $opt->{quiet};
@@ -5344,6 +5349,7 @@ sub get {
 	# Autoreap zombies
 	$SIG{CHLD}='IGNORE';
 	my $done = 0;
+	my $done_symlink;
 	while (keys %threadpid) {
 		my @sizes;
 		my $total_size = 0;
@@ -5361,6 +5367,16 @@ sub get {
 				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
 				push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
 				$total_size_new += $size;
+				# Now create a symlink if this is the first part and size > min_download_size
+				if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $min_download_size ) {
+					# Symlink to file if only one part or to dir if multi-part
+					if ( $#url_list ) {
+						$prog->create_symlink( $prog->{symlink}, $prog->{dir} );
+					} else {
+						$prog->create_symlink( $prog->{symlink}, $file_tmp_list[$threadpid{$procid}] );
+					}
+					$done_symlink = 1;
+				}
 			# Thread has completed/failed
 			} else {
 				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
@@ -5394,13 +5410,13 @@ sub get {
 	}
 
 	$prog->{mode} = 'itv';
-	# Retain raw format if required
-	if ( $opt->{raw} ) {
-		# Create symlink to first part file
-		$prog->create_symlink( $opt->{symlink}, $file_tmp_list[0] ) if $opt->{symlink};
-		return 0;
-	}
-
+#	# Retain raw format if required
+#	if ( $opt->{raw} ) {
+#		# Create symlink to first part file
+#		$prog->create_symlink( $prog->{symlink}, $file_tmp_list[0] ) if $opt->{symlink};
+#		return 0;
+#	}
+#
 #	# Convert video asf to mp4 if required - need to find a suitable converter...
 #	} else {
 #		# Create part of cmd that specifies each partial file
@@ -5420,7 +5436,7 @@ sub get {
 #	# Moving file into place as complete (if not stdout)
 #	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 #	# Create symlink if required
-#	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+#	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	return 0;
 }
 
@@ -5478,7 +5494,7 @@ sub get {
 	# Moving file into place as complete (if not stdout)
 	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
 
-	$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	$prog->{mode} = $mode;
 	return 0;
@@ -5544,7 +5560,7 @@ sub get {
 			$prog->{filename} );
 		move $prog->{filepart}, $prog->{filename};
 		# re-symlink file
-		$prog->create_symlink( $opt->{symlink}, $prog->{filename} ) if $opt->{symlink};
+		$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	}
 
 	$prog->{mode} = 'podcast';
@@ -5644,7 +5660,7 @@ sub run {
 	$pvr->load_list();
 
 	# Display default options from options files only
-	$opt_file->display_default();
+	$opt_file->display('Default Options', '(help|debug|get|^pvr)');
 
 	# For each PVR search
 	for my $name ( sort {lc $a cmp lc $b} keys %{$pvr} ) {
