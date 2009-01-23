@@ -1,8 +1,21 @@
 #!/usr/bin/perl
 #
-# get_iplayer
+# get_iplayer - Lists and downloads BBC iPlayer TV and Radio programmes, BBC Podcasts, and ITV player Programmes
 #
-# Lists and downloads BBC iPlayer TV and Radio programmes, BBC Podcasts, and ITV player Programmes
+#    Copyright (C) 2009 Phil Lewis
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 # Author: Phil Lewis
 # Email: iplayer (at sign) linuxcentre.net
@@ -131,6 +144,7 @@ my %opt_format = (
 	category 	=> ["category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> ["channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
 	command		=> ["c|command=s", 'Output', '-c, --command <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
+	conditions	=> ["conditions", '', '', 'Shows GPL conditions'],
 	debug		=> ["debug", 'Config', '--debug', "Debug output"],
 	exclude		=> ["exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
 	excludecategory	=> ["exclude-category=s", 'Search', '--exclude-category <regex>', "Narrow search to exclude matched catogories"],
@@ -157,7 +171,7 @@ my %opt_format = (
 	partialproxy	=> ["partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> ["pid=s", 'Download', '--pid <pid>|<type>:<pid>', "Download an arbitrary pid that does not necessarily appear in the index"],
 	proxy		=> ["proxy|p=s", 'Download', '-p, --proxy <url>', "Web proxy URL spec"],
-	quiet		=> ["q|quiet", 'Output', '-q, --quiet', "No logging output"],
+	quiet		=> ["q|quiet|silent", 'Output', '-q, --quiet', "No logging output"],
 	raw		=> ["raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	save 		=> ["save", 'Config', '--save', "Save specified options as default"],
 	since		=> ["since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
@@ -176,6 +190,7 @@ my %opt_format = (
 	versions	=> ["versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> ["verbose|v", 'Config', '-v, --verbose', "Verbose"],
 	vmode		=> ["vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): TV: iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+	warranty	=> ["warranty", '', '', 'Displays warranty section of GPL'],
 	whitespace	=> ["whitespace|ws|w", 'Output', '-w, --whitespace', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> ["xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> ["xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
@@ -228,9 +243,28 @@ if ( not $opt_cmdline->parse( \%opt_format ) ) {
 	exit 1;
 }
 
+# Show copyright notice
+logger Options->copyright_notice if not $opt_cmdline->{quiet};
+
+# User Agents
+my %user_agent = (
+  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
+  	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
+  	update		=> "get_iplayer updater (v${version} - $^O)",
+  	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
+  	get_iplayer	=> "get_iplayer/$version $^O",
+);
+
 # Display Usage
 if ( $opt_cmdline->{help} ) {
 	logger Options->usage( \%opt_format );
+	exit 1;
+}
+
+# Display GPL stuff
+if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
+	# Get license from GNU
+	logger request_url_retry( create_ua('get_iplayer'), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
 
@@ -277,15 +311,6 @@ my $metadata_mobile_prefix	= 'http://www.bbc.co.uk/iplayer/widget/episodedetail/
 my $podcast_index_feed_url	= 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
 my $version_url			= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
 my $update_url			= 'http://linuxcentre.net/get_iplayer/get_iplayer'; # disabled since this is a modified version
-
-# User Agents
-my %user_agent = (
-  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
-  	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
-  	update		=> "get_iplayer updater (v${version} - $^O)",
-  	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
-  	get_iplayer	=> "get_iplayer/$version $^O",
-);
 
 # Setup signal handlers
 $SIG{INT} = $SIG{PIPE} =\&cleanup;
@@ -690,7 +715,7 @@ sub get_regex_matches {
 }
 
 
-## BAD ##
+
 # Usage: sort_index( \%prog, \%index_prog, $prog_type )
 # Populates the index field of the prog hash as well as creating the %index_prog hash
 # Should be run after any number of get_links methods
@@ -730,7 +755,7 @@ sub sort_index {
 }
 
 
-###########
+
 # Returns classname for prog type or if not specified, an array of all prog types
 sub progclass {
 	my $prog_type = shift;
@@ -1011,122 +1036,6 @@ sub display_metadata {
 
 
 # Generic
-# Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
-sub relocate_moov_chunk_offsets {
-	my $moovdata = $_[0];
-	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
-	# get moov atom length
-	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
-	# Use index() to search for a string within a string
-	my $i = -1;
-	while (($i = index($moovdata, 'stco', $i)) > -1) {
-
-		# determine length of atom (4 bytes preceding stco)
-		my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
-		logger "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt->{verbose};
-
-		# loop through all chunk offsets in this atom and add offset (== moov atom length)
-		for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
-			my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
-			$chunk_offset += $moov_length;
-			# write back bytes into $moovdata
-			write_msb_value_at_offset( $moovdata, $j, $chunk_offset );
-		}
-
-		# skip over this whole atom now it is processed
-		$i += $stco_len;
-	}
-	# Write $moovdata back to calling string
-	$_[0] = $moovdata;
-	return $moov_length;
-}
-
-
-
-# Generic
-# Replace the moov->udta atom with a new user-supplied one and update the moov atom size
-# Usage: replace_moov_udta_atom ( $udta_new, $moovdata )
-sub replace_moov_udta_atom {
-	my $udta_new = $_[0];
-	my $moovdata = $_[1];
-
-	# get moov atom length
-	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
-
-	# Find the original udta atom start 
-	# Use index() to search for a string within a string ($i will point at the beginning of the atom)
-	my $i = index($moovdata, 'udta', -1) - 4;
-
-	# determine length of atom (4 bytes preceding the name)
-	my $udta_len = bytestring_to_int( substr($moovdata, $i, 4) );
-	logger "INFO: Found udta atom at moov atom offset: $i length $udta_len\n" if $opt->{verbose};
-
-	# Save the data before the udta atom
-	my $moovdata_before_udta = substr($moovdata, 0, $i);
-
-	# Save the remainder portion of data after the udta atom for later
-	my $moovdata_after_udta = substr($moovdata, $i, $moovdata - $i + $udta_len);
-
-	# Old udta atom should we need it
-	### my $udta_old = substr($moovdata, $i, $udta_len);
-
-	# Create new moov atom
-	$moovdata = $moovdata_before_udta.$udta_new.$moovdata_after_udta;
-	
-	# Recalculate the moov size and insert into moovdata
-	write_msb_value_at_offset( $moovdata, 0, length($moovdata) );
-	
-	# Write $moovdata back to calling string
-	$_[1] = $moovdata;
-
-	return 0;
-}
-
-
-
-# Generic
-# Write the msb 4 byte $value starting at $offset into the passed string
-# Usage: write_msb_value($string, $offset, $value)
-sub write_msb_value_at_offset {
-	my $offset = $_[1];
-	my $value = $_[2];
-	substr($_[0], $offset+0, 1) = chr( ($value >> 24) & 0xFF );
-	substr($_[0], $offset+1, 1) = chr( ($value >> 16) & 0xFF );
-	substr($_[0], $offset+2, 1) = chr( ($value >>  8) & 0xFF );
-	substr($_[0], $offset+3, 1) = chr( ($value >>  0) & 0xFF );
-	return 0;
-}
-
-
-
-# Generic
-# Returns a string containing an QT atom
-# Usage: create_qt_atom(<atome name>, <atom data>, ['string'])
-sub create_qt_atom {
-	my ($name, $data, $prog_type) = (@_);
-	if (length($name) != 4) {
-		logger "ERROR: Inavlid QT atom name length '$name'\n";
-		exit 1;
-	}
-	# prepend string length if this is a string type
-	if ( $prog_type eq 'string' ) {
-		my $value = length($data);
-		$data = '1111'.$data;
-		# overwrite '1111' with total atom length in 2-byte MSB + 0x0 0x0
-		substr($data, 0, 1) = chr( ($value >> 8) & 0xFF );
-		substr($data, 1, 1) = chr( ($value >> 0) & 0xFF );
-		substr($data, 2, 1) = chr(0);
-		substr($data, 3, 1) = chr(0);
-	}
-	my $atom = '0000'.$name.$data;
-	# overwrite '0000' with total atom length in MSB
-	write_msb_value_at_offset( $atom, 0, length($name.$data) + 4 );
-	return $atom;
-}
-
-
-
-# Generic
 # Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
 #  ensure filehandle $fh is open in append mode
 # or, $content = download_block(undef, $url_2, $ua, $start, $end, $file_len);
@@ -1310,22 +1219,6 @@ sub get_hex {
         }
 	logger "DEBUG: HEX string value = $ret\n" if $opt->{verbose};
         return $ret;
-}
-
-
-
-# Generic
-# Converts a string of chars to it's MSB decimal value
-sub bytestring_to_int {
-	# Reverse to LSB order
-        my $buf = reverse shift;
-        my $dec = 0;
-        for (my $i=0; $i<length($buf); $i++) {
-		# Multiply byte value by 256^$i then accumulate
-                $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
-        }
-        #logger "DEBUG: Decimal value = $dec\n" if $opt->{verbose};
-        return $dec;
 }
 
 
@@ -1608,18 +1501,6 @@ sub create_html {
 }
 
 
-# Generic
-# Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
-sub get_available_time_string {
-	my $datestring = shift;
-	# extract $year $mon $mday $hour $min $sec
-	$datestring =~ m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)Z};
-	my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
-	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
-	return "$time[7] days $time[2] hours ago";
-}
-
 
 # Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
@@ -1900,6 +1781,21 @@ sub parse {
 
 
 
+sub copyright_notice {
+	shift;
+	my $text = sprintf "get_iplayer v%.2f, ", $version;
+	$text .= <<'EOF';
+Copyright (C) 2009 Phil Lewis
+  This program comes with ABSOLUTELY NO WARRANTY; for details use --warranty.
+  This is free software, and you are welcome to redistribute it under certain
+  conditions; use --conditions for details.
+
+EOF
+	return $text;
+}
+
+
+
 # Parse cmdline opts using supplied hash
 # Usage: $opt_cmdline->parse( \%opt_format );
 sub usage {
@@ -1908,8 +1804,8 @@ sub usage {
 	my %section_name;
 	my %name_syntax;
 	my %name_desc;
-	my $usage = sprintf "get_iplayer v%.2f, Usage ( Also see http://linuxcentre.net/iplayer ):\n", $version;
-	$usage .= <<'EOF';
+	my $usage = <<'EOF';
+Usage ( Also see http://linuxcentre.net/iplayer ):
 Search Programmes:  get_iplayer [<search options>] [<regex|index> ...]
 Download files:     get_iplayer --get [<search options>] <regex|index> ...
                     get_iplayer --pid <type>:<pid> [<options>]
@@ -2024,6 +1920,7 @@ sub display_default {
 }
 
 
+
 # Usage: $opt->display_current();
 # Display options currently set
 sub display_current {
@@ -2115,6 +2012,7 @@ sub add_opt_object {
 	my $self = shift;
 	$Programme::optref = shift;
 }
+
 
 # $opt->{<option>} access method
 sub opt {
@@ -2474,6 +2372,19 @@ sub create_symlink {
 	# Create symlink
 	symlink $target, $symlink;
 	main::logger "INFO: Created symlink from '$symlink' -> '$target'\n" if $opt->{verbose};
+}
+
+
+
+# Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
+sub get_available_time_string {
+	my $datestring = shift;
+	# extract $year $mon $mday $hour $min $sec
+	$datestring =~ m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)Z};
+	my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
+	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
+	return "$time[7] days $time[2] hours ago";
 }
 
 
@@ -3230,7 +3141,7 @@ sub get_links {
 
 			# This is not the availability!
 			# <updated>2008-06-22T05:01:49Z</updated>
-			#$available = main::get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+			#$available = Programme::get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
@@ -4704,7 +4615,7 @@ sub get {
 		# Detemine moov start
 		# Get mdat_length_chars from downloaded block
 		my $mdat_length_chars = substr($buffer, $mdat_start, 4);
-		my $mdat_length = main::main::bytestring_to_int($mdat_length_chars);
+		my $mdat_length = bytestring_to_int($mdat_length_chars);
 		main::logger "DEBUG: mdat_length = ".get_hex($mdat_length_chars)." = $mdat_length\n" if $opt->{debug};
 		main::logger "DEBUG: mdat_length (decimal) = $mdat_length\n" if $opt->{debug};
 		# The MOOV box starts one byte after MDAT box ends
@@ -4751,7 +4662,7 @@ sub get {
 	if ($rearrange) {
 		# if cookie fails then trigger a retry after deleting cookiejar
 		# Determine orginal moov atom length so we can work out if the partially downloaded file has the moov atom in it already
-		$moov_length = main::main::bytestring_to_int( main::download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
+		$moov_length = bytestring_to_int( main::download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		main::logger "INFO: original moov atom length = $moov_length                          \n" if $opt->{verbose};
 		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
 		if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
@@ -4770,23 +4681,23 @@ sub get {
 			$moovdata = main::download_block( undef, $url_2, $ua, $moov_start, (${download_len}-1) );
 
 			# Create new udta atom with child atoms for metadata
-			my $udta_new = main::create_qt_atom('udta',
-				main::create_qt_atom( chr(0xa9).'nam', $prog->{name}.' - '.$prog->{episode}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'alb', $prog->{name}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'trk', $prog->{episode}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'aut', $prog->{channel}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'ART', $prog->{channel}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'des', $prog->{desc}, 'string' ).
-				main::create_qt_atom( chr(0xa9).'cmt', 'Downloaded with get_iplayer', 'string' ).
-				main::create_qt_atom( chr(0xa9).'req', 'QuickTime 6.0 or greater', 'string' ).
-				main::create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' )
+			my $udta_new = create_qt_atom('udta',
+				create_qt_atom( chr(0xa9).'nam', $prog->{name}.' - '.$prog->{episode}, 'string' ).
+				create_qt_atom( chr(0xa9).'alb', $prog->{name}, 'string' ).
+				create_qt_atom( chr(0xa9).'trk', $prog->{episode}, 'string' ).
+				create_qt_atom( chr(0xa9).'aut', $prog->{channel}, 'string' ).
+				create_qt_atom( chr(0xa9).'ART', $prog->{channel}, 'string' ).
+				create_qt_atom( chr(0xa9).'des', $prog->{desc}, 'string' ).
+				create_qt_atom( chr(0xa9).'cmt', 'Downloaded with get_iplayer', 'string' ).
+				create_qt_atom( chr(0xa9).'req', 'QuickTime 6.0 or greater', 'string' ).
+				create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' )
 			);
 			# Insert new udta atom over the old one and get the new $moov_length (and update moov atom size field)
-			main::replace_moov_udta_atom ( $udta_new, $moovdata );
+			replace_moov_udta_atom ( $udta_new, $moovdata );
 
 			# Process the moov data so that we can relocate it (change the chunk offsets that are absolute)
 			# Also update moov+_length to be accurate after metadata is added etc
-			$moov_length = main::relocate_moov_chunk_offsets( $moovdata );
+			$moov_length = relocate_moov_chunk_offsets( $moovdata );
 			main::logger "INFO: New moov atom length = $moov_length                          \n" if $opt->{verbose};
 			# write moov atom to file next (yes - were rearranging the file - header+moov+mdat - not header+mdat+moov)
 			main::logger "INFO: Appending ftype+wide+moov atoms to $prog->{filepart}\n" if $opt->{verbose};
@@ -4816,7 +4727,7 @@ sub get {
 				}
 				close MOOVDATA;
 				# Get moov atom size from file
-				$moov_length = main::bytestring_to_int( substr($data, 0, 4) );
+				$moov_length = bytestring_to_int( substr($data, 0, 4) );
 				main::logger "INFO: moov atom length (from partially downloaded file) = $moov_length                          \n" if $opt->{verbose};
 		}
 	}
@@ -4872,6 +4783,133 @@ sub get {
 
 	$prog->{mode} = 'iphone';
 	return 0;
+}
+
+
+
+# Usage: moov_length = relocate_moov_chunk_offsets(<binary string>)
+sub relocate_moov_chunk_offsets {
+	my $moovdata = $_[0];
+	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
+	# get moov atom length
+	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
+	# Use index() to search for a string within a string
+	my $i = -1;
+	while (($i = index($moovdata, 'stco', $i)) > -1) {
+
+		# determine length of atom (4 bytes preceding stco)
+		my $stco_len = bytestring_to_int( substr($moovdata, $i-4, 4) );
+		main::logger "INFO: Found stco atom at moov atom offset: $i length $stco_len\n" if $opt->{verbose};
+
+		# loop through all chunk offsets in this atom and add offset (== moov atom length)
+		for (my $j = $i+12; $j < $stco_len+$i-4; $j+=4) {
+			my $chunk_offset = bytestring_to_int( substr($moovdata, $j, 4) );
+			$chunk_offset += $moov_length;
+			# write back bytes into $moovdata
+			write_msb_value_at_offset( $moovdata, $j, $chunk_offset );
+		}
+
+		# skip over this whole atom now it is processed
+		$i += $stco_len;
+	}
+	# Write $moovdata back to calling string
+	$_[0] = $moovdata;
+	return $moov_length;
+}
+
+
+
+# Replace the moov->udta atom with a new user-supplied one and update the moov atom size
+# Usage: replace_moov_udta_atom ( $udta_new, $moovdata )
+sub replace_moov_udta_atom {
+	my $udta_new = $_[0];
+	my $moovdata = $_[1];
+
+	# get moov atom length
+	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
+
+	# Find the original udta atom start 
+	# Use index() to search for a string within a string ($i will point at the beginning of the atom)
+	my $i = index($moovdata, 'udta', -1) - 4;
+
+	# determine length of atom (4 bytes preceding the name)
+	my $udta_len = bytestring_to_int( substr($moovdata, $i, 4) );
+	main::logger "INFO: Found udta atom at moov atom offset: $i length $udta_len\n" if $opt->{verbose};
+
+	# Save the data before the udta atom
+	my $moovdata_before_udta = substr($moovdata, 0, $i);
+
+	# Save the remainder portion of data after the udta atom for later
+	my $moovdata_after_udta = substr($moovdata, $i, $moovdata - $i + $udta_len);
+
+	# Old udta atom should we need it
+	### my $udta_old = substr($moovdata, $i, $udta_len);
+
+	# Create new moov atom
+	$moovdata = $moovdata_before_udta.$udta_new.$moovdata_after_udta;
+	
+	# Recalculate the moov size and insert into moovdata
+	write_msb_value_at_offset( $moovdata, 0, length($moovdata) );
+	
+	# Write $moovdata back to calling string
+	$_[1] = $moovdata;
+
+	return 0;
+}
+
+
+
+# Converts a string of chars to it's MSB decimal value
+sub bytestring_to_int {
+	# Reverse to LSB order
+        my $buf = reverse shift;
+        my $dec = 0;
+        for (my $i=0; $i<length($buf); $i++) {
+		# Multiply byte value by 256^$i then accumulate
+                $dec += (ord substr($buf, $i, 1)) * 256 ** $i;
+        }
+        #main::logger "DEBUG: Decimal value = $dec\n" if $opt->{verbose};
+        return $dec;
+}
+
+
+
+# Write the msb 4 byte $value starting at $offset into the passed string
+# Usage: write_msb_value($string, $offset, $value)
+sub write_msb_value_at_offset {
+	my $offset = $_[1];
+	my $value = $_[2];
+	substr($_[0], $offset+0, 1) = chr( ($value >> 24) & 0xFF );
+	substr($_[0], $offset+1, 1) = chr( ($value >> 16) & 0xFF );
+	substr($_[0], $offset+2, 1) = chr( ($value >>  8) & 0xFF );
+	substr($_[0], $offset+3, 1) = chr( ($value >>  0) & 0xFF );
+	return 0;
+}
+
+
+
+# Returns a string containing an QT atom
+# Usage: create_qt_atom(<atome name>, <atom data>, ['string'])
+sub create_qt_atom {
+	my ($name, $data, $prog_type) = (@_);
+	if (length($name) != 4) {
+		main::logger "ERROR: Inavlid QT atom name length '$name'\n";
+		exit 1;
+	}
+	# prepend string length if this is a string type
+	if ( $prog_type eq 'string' ) {
+		my $value = length($data);
+		$data = '1111'.$data;
+		# overwrite '1111' with total atom length in 2-byte MSB + 0x0 0x0
+		substr($data, 0, 1) = chr( ($value >> 8) & 0xFF );
+		substr($data, 1, 1) = chr( ($value >> 0) & 0xFF );
+		substr($data, 2, 1) = chr(0);
+		substr($data, 3, 1) = chr(0);
+	}
+	my $atom = '0000'.$name.$data;
+	# overwrite '0000' with total atom length in MSB
+	write_msb_value_at_offset( $atom, 0, length($name.$data) + 4 );
+	return $atom;
 }
 
 
