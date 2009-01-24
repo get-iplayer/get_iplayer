@@ -2231,28 +2231,31 @@ sub generate_filenames {
 	$prog->{longname} = $prog->{name} if ! $prog->{longname};
 
 	# substitute fields and sanitize $prog->{fileprefix}
-	$prog->{fileprefix} = substitute( $prog, $prog->{fileprefix} );
+	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
 
 	# Spaces
 	$prog->{fileprefix} =~ s/\s+/_/g if ! $opt->{whitespace};
 
 	# Don't create subdir if we are only testing downloads
 	# Create a subdir for programme sorting option
-	if ( $opt->{subdir} && ! $opt->{test} ) {
-		my $subdir = substitute( '<longname>' );
-		$prog->{fileprefix} = "${subdir}/$prog->{fileprefix}";
-		# Create dir if it does not exist
-		mkpath("$prog->{dir}/${subdir}") if ! -d "$prog->{dir}/${subdir}";
+	if ( $opt->{subdir} ) {
+		my $subdir = $prog->substitute( '<longname>' );
+		$prog->{dir} .= "/${subdir}";
+		$prog->{dir} .= s|\/\/|\/|g;
+		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
-
-	main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
 
 	# Create a subdir if there are multiple parts
-	if ($multipart) {
+	if ( $multipart ) {
 		$prog->{dir} .= "/$prog->{fileprefix}";
+		$prog->{dir} .= s|\/\/|\/|g;
 		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
-		mkpath $prog->{dir} if ! -d $prog->{dir};
 	}
+
+	# Create dir if it does not exist
+	mkpath("$prog->{dir}") if (! -d "$prog->{dir}") && (! $opt->{test});
+
+	main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
 
 	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}";
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
@@ -2260,10 +2263,10 @@ sub generate_filenames {
 	# Create symlink filename if required
 	if ( $opt->{symlink} ) {
 		# Substitute the fields for the pid
-		$prog->{symlink} = substitute( $prog, $opt->{symlink} );
+		$prog->{symlink} = $prog->substitute( $opt->{symlink} );
 		main::logger("INFO: Symlink file name will be '$prog->{symlink}'\n") if $opt->{verbose};
 		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink};
+		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
 	}
 
 	if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
@@ -2284,7 +2287,7 @@ sub run_user_command {
 	my $command = shift;
 
 	# Substitute the fields for the pid (don't sanitize)
-	$command = substitute( $prog, $command, 1 );
+	$command = $prog->substitute( $command, 1 );
 
 	# Escape chars in command for shell use
 	StringUtils::esc_chars(\$command);
