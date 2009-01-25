@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.23;
+my $version = 1.24;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -57,6 +57,7 @@ my $version = 1.23;
 # * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
 # Bugs to fix:
 # * fork returns non-pid value for itv under ActivePerl - will need to implement serial download instead
+# * Realaudio mode does not create symlink until finished downloading
 # 
 
 use Env qw[@PATH];
@@ -3935,7 +3936,7 @@ sub download {
 	return 1 if $opt->{test};
 
 	my $stream = Streamer::podcast->new;
-	return $stream->get( $ua, $prog );
+	return $stream->get( $ua, $prog->{pid}, $prog );
 }
 
 
@@ -4927,7 +4928,7 @@ sub create_qt_atom {
 
 
 
-################### Streamer::rtsp class #################
+################### Streamer::rtmp class #################
 package Streamer::rtmp;
 
 # Inherit from Streamer class
@@ -5550,9 +5551,9 @@ sub get {
 		main::logger "INFO: Resuming download from $start\n";
 	}
 
-	my $fh = open_file_append($prog->{filepart});
+	my $fh = main::open_file_append($prog->{filepart});
 
-	if ( download_block($prog->{filepart}, $url_2, $ua, $start, undef, undef, $fh) != 0 ) {
+	if ( main::download_block($prog->{filepart}, $url_2, $ua, $start, undef, undef, $fh) != 0 ) {
 		main::logger "ERROR: Download failed\n";
 		return 'next';
 	} else {
