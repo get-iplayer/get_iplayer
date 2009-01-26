@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.24;
+my $version = 1.25;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -47,6 +47,7 @@ my $version = 1.24;
 # ** all global vars into a class???
 # ** all global URLs into a hash/class???
 # ** Cut down 'use' clauses in each class 
+# ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
@@ -543,10 +544,28 @@ sub process_matches {
 		}
 		exit 0;
 	}
-	### perl bug here too ???
-	# Get stream links from web site or from cache (also populates all hashes) specified in --type option
-	get_links( \%prog, \%index_prog, $_ ) for keys %type;
 
+	# We don't actually need to get the links first for the specifiied type(s) if we have only index number specified (and not --list)
+	my %got_cache;
+	my $need_get_links = 0;
+	if ( (! $opt->{list} ) ) {
+		for ( @search_args ) {
+			if ( (! /^[\d]+$/) || $_ > $max_index || $_ < 1 ) {
+				logger "DEBUG: arg '$_' is not a programme index number - load specified caches\n" if $opt->{debug};
+				$need_get_links = 1;
+				last;
+			}
+		}
+	}
+
+	# Pre-populate caches if --list option used or there was a non-index specified
+	if ( $need_get_links || $opt->{list} ) {
+			### perl bug here too ???
+			# Get stream links from web site or from cache (also populates all hashes) specified in --type option
+			get_links( \%prog, \%index_prog, $_ ) for keys %type;
+			$got_cache{$_} = 1 for keys %type;
+	}
+	
 	# List elements (i.e. 'channel' 'categories') if required and exit
 	if ( $opt->{list} ) {
 		list_unique_element_counts( \%prog, $opt->{list} );
@@ -569,8 +588,7 @@ sub process_matches {
 				push @index_search_args, $_;
 			}
 
-		### Probably bad - BBC specific
-		# If PID then find matching programmes with this BBC iPlayer PID
+		# If PID then find matching programmes with 'pid:<pid>'
 		} elsif ( m{^\s*pid:(.+?)\s*$}i ) {
 			if ( defined $prog{$1} ) {
 				logger "INFO: Search term '$1' is a pid\n" if $opt->{verbose};
@@ -587,23 +605,25 @@ sub process_matches {
 	}
 	
 	# Go get the cached data for other programme types if the index numbers require it
-	my %require;
 	for my $index ( @index_search_args ) {
 		# see if this index number falls into a valid range for a prog type
 		for my $prog_type ( progclass() ) {
-			if ( $index >= progclass($prog_type)->index_min && $index <= progclass($prog_type)->index_max
-			  && ( ! $require{$prog_type} ) && ( ! $type{$prog_type} ) ) {
+			if ( $index >= progclass($prog_type)->index_min && $index <= progclass($prog_type)->index_max && ( ! $got_cache{$prog_type} ) ) {
 				logger "DEBUG: Looking for index $index in $prog_type type\n" if $opt->{debug};
 				# Get extra required programme caches
 				logger "INFO: Additionally getting cached programme data for $prog_type\n" if $opt->{verbose};
-				$require{$prog_type} = 1;
-				# Get $prog_type stream links
 				# Add new prog types to the type list
 				$type{$prog_type} = 1;
+				# Get $prog_type stream links
 				get_links( \%prog, \%index_prog, $prog_type );
-				# Now check again if the index number exists in the cache
-				push @match_list, $index_prog{$index} if defined $index_prog{$index}->{pid};
+				$got_cache{$prog_type} =1;
 			}
+		}
+		# Now check again if the index number exists in the cache before adding this prog to the match list
+		if ( defined $index_prog{$index}->{pid} ) {
+			push @match_list, $index_prog{$index} if defined $index_prog{$index}->{pid};
+		} else {
+			logger "WARNING: Unmatched programme index '$index' specified - ignoring\n";
 		}
 	}
 
