@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.25;
+my $version = 1.26;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -59,7 +59,7 @@ my $version = 1.25;
 # Bugs to fix:
 # * fork returns non-pid value for itv under ActivePerl - will need to implement serial download instead
 # * Realaudio mode does not create symlink until finished downloading
-# 
+# * iphone overseas will not failback to realaudio for radio type
 
 use Env qw[@PATH];
 use Fcntl;
@@ -1408,6 +1408,7 @@ sub create_xml {
 						<url>${pid}.mov</url>
 						<Subtitle></Subtitle>
 						<Synopsis>${desc}</Synopsis>
+						<StreamImage>$this->{thumbnail}</StreamImage>
 					</Stream>\n" if $opt->{mythtv};
 				}
 			}			
@@ -1441,7 +1442,7 @@ sub create_xml {
 				if ( $channels{$channel} =~ /\|$name\|/ ) {
 					my @count = grep /^$name$/, keys %program_index;
 					print XML "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
-					print XML "\t\t<Stream>\n" if $opt->{mythtv};
+					#print XML "\t\t<Stream>\n" if $opt->{mythtv};
 					for my $this (@_) {
 						# loop through and find matches for each progname for this channel
 						my $pid = $this->{pid};
@@ -1453,11 +1454,13 @@ sub create_xml {
 								<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
 								<info><description>${desc}</description></info>
 							</movie>\n" if $opt->{fxd};
-							print XML "\t\t<Name>".encode_entities( $name )."</Name>\n\t\t<Url>${pid}.mov</Url>\n\t\t<Subtitle>${episode}</Subtitle>\n\t\t<Synopsis>${desc}</Synopsis>\n" if $opt->{mythtv};
+							print XML "\t\t<Stream>\n" if $opt->{mythtv};
+							print XML "\t\t<Name>".encode_entities( $name )."</Name>\n\t\t<Url>${pid}.mov</Url>\n\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n\t\t<Subtitle>${episode}</Subtitle>\n\t\t<Synopsis>${desc}</Synopsis>\n" if $opt->{mythtv};
+							print XML "\t</Stream>\n" if $opt->{mythtv};
 						}
 					}
 					print XML "\t</container>\n" if $opt->{fxd};
-					print XML "\t</Stream>\n" if $opt->{mythtv};
+					#print XML "\t</Stream>\n" if $opt->{mythtv};
 				}
 			}
 			print XML "\t</container>\n" if $opt->{fxd};
@@ -1499,6 +1502,7 @@ sub create_xml {
 					print XML "<Stream title=\"${title}\">
 						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
 						<info><description>${desc}</description></info>
+						<StreamImage>$this->{thumbnail}</StreamImage>
 					</Stream>\n" if $opt->{mythtv};
 				}
 			}
@@ -2063,48 +2067,78 @@ sub get_metadata {
 # Retry the download of a programme
 # Usage: download_retry_loop ( $progref, $retries )
 sub download_retry_loop {
-	my $this = shift;
+	my $prog = shift;
 	my $retries = shift;
 
 	# Retry loop
 	my $count = 0;
 	my $retcode;
 
-	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $this->{pid} );
+	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} );
 
 	# Skip and warn if there is no pid
-	if ( ! $this->{pid} ) {
+	if ( ! $prog->{pid} ) {
 		main::logger "ERROR: No PID for index $_ (try using --type option ?)\n";
 		return 1;
 	}
 
-	# Retry loop
-	for ($count = 1; $count <= $retries; $count++) {
-		$retcode = $this->download_programme;
-		last if $retcode eq 'skip';
-		if ( $retcode eq 'retry' && $count < $retries ) {
-			main::logger "WARNING: Retrying download for '$this->{name} - $this->{episode} ($this->{pid})'\n";
-		} else {
-			$retcode = 1 if $retcode eq 'retry';
-			last;
-		}
-	}
+	# Setup user-agent
+	my $ua = main::create_ua('desktop');
+	# Get all possible (or user overridden) modes for this prog download
+	my $modelist = $prog->modelist;
 
-	# Add to history, tag file, and run post download command if download was successful
-	if ( $retcode eq '0' ) {
-		main::add_to_download_history( $this );
-		$this->tag_file;
-		$this->run_user_command( $opt->{command} ) if $opt->{command};
-		$this->report() if $opt->{pvr};
-		return 0;
-	# Next match if 'skip' was returned
-	} elsif ( $retcode eq 'skip' ) {
-		return 1;
-	} elsif (! $opt->{test}) {
-		main::logger "ERROR: Failed to download '$this->{name} - $this->{episode} ($this->{pid})'\n";
-		return 1;
+	# download depending on the prog type
+	main::logger "INFO: $modelist modes will be tried\n";
+
+	# Expand the modes into a loop
+	for my $mode ( split /,/, $modelist ) {
+		chomp( $mode );
+		main::logger "INFO: Trying $mode mode to download $prog->{type}: $prog->{name} - $prog->{episode}\n";
+
+		# Retry loop
+		for ($count = 1; $count <= $retries; $count++) {
+
+			$retcode = $prog->download( $ua, $mode );
+			main::logger "DEBUG: Download using $mode mode return code: '$retcode'\n" if $opt->{verbose};
+
+			# Exit
+			if ( $retcode eq 'abort' ) {
+				main::logger "ERROR: aborting get_iplayer\n";
+				exit 1;
+
+			# Try Next prog
+			} elsif ( $retcode eq 'skip' ) {
+				main::logger "INFO: skipping this programme\n";
+				return 1;
+
+			# Try Next mode
+			} elsif ( $retcode eq 'next' ) { 
+				# break out of this retry loop
+				main::logger "INFO: skipping $mode mode\n";
+				last;
+			
+			# Success
+			} elsif ( $retcode eq '0' ) {
+				# Add to history, tag file, and run post download command
+				main::add_to_download_history( $prog );
+				$prog->tag_file;
+				$prog->run_user_command( $opt->{command} ) if $opt->{command};
+				$prog->report() if $opt->{pvr};
+				return 0;
+
+			# Retry this mode
+			} elsif ( $retcode eq 'retry' && $count < $retries ) {
+				main::logger "WARNING: Retrying download for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+			}
+		}
+		
+	
+	} # Next mode
+
+	if (! $opt->{test}) {
+		main::logger "ERROR: Failed to download '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 	}
-	return 2;
+	return 1;
 }
 
 
@@ -2114,55 +2148,6 @@ sub report {
 	my $prog = shift;
 	print STDOUT "New $prog->{type} programme: '$prog->{name} - $prog->{episode}', '$prog->{desc}'\n";
 	return 0;
-}
-
-
-
-# Usage: download_programme (<pid>)
-sub download_programme {
-	my $prog = shift;
-	my %streamdata;
-	my %version_pids;
-	my $return;
-	my $modelist;
-	
-	# Setup user-agent
-	my $ua = main::create_ua('desktop');
-
-	# download depending on the prog type
-	main::logger "INFO: Attempting to Download $prog->{type}: $prog->{name} - $prog->{episode}\n";
-
-	# Get all possible (or user overridden) modes for this prog download
-	$modelist = $prog->modelist;
-	main::logger "INFO: $modelist modes will be tried\n";
-
-	# Expand the modes into a loop
-	for my $mode ( split /,/, $modelist ) {
-		chomp( $mode );
-		main::logger "INFO: Attempting to download using $mode mode\n";
-		$return = $prog->download( $ua, $mode, \%version_pids );
-		main::logger "DEBUG: Download using $mode mode return code: '$return'\n" if $opt->{debug};
-
-		# Give up trying alternative download methods
-		return 2 if $return eq 'abort';
-
-		## Not going to allow retries here until rtmpdump/flashaudio exits correctly - so just just skip to next mode for now
-		#$return = 'next' if $return eq 'retry';
-		# Return to retry loop if successful or retry requested 
-		return 'retry' if $return eq 'retry';
-
-		# Return to retry loop and do nothing 
-		return 'skip' if $return eq 'skip';
-
-		# Return 0 if successful 
-		return 0 if ! $return;
-
-		# Return failed if there is no 'next'
-		return 1 if $return ne 'next';
-	}
-
-	# If we get here then we have failed
-	return 1;
 }
 
 
@@ -3064,7 +3049,12 @@ sub modelist {
 	
 	# Deal with BBC TV fallback modes
 	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi
-	$opt->{vmode} = 'flashhigh,flashnormal' if $opt->{vmode} eq 'rtmp' || $opt->{vmode} eq 'flash';
+	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
+	my @modes = split /,/, $opt->{vmode};
+	for (@modes) {
+		$_ = 'flashhigh,flashnormal' if $_ eq 'rtmp' || $_ eq 'flash';
+	}
+	$opt->{vmode} = join ',', @modes;
 	# Defaults
 	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
 		if ( ! main::exists_in_path($rtmpdump) ) {
@@ -3322,7 +3312,7 @@ sub download {
 	}
 	
 	# Skip from here if we are only testing downloads
-	return 'abort' if $opt->{test};
+	return 'skip' if $opt->{test};
 
 	# Get subtitles if they exist and are required 
 	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
@@ -3550,7 +3540,7 @@ sub download_realaudio {
 	# Check if we need 'tee'
 	if ( (! main::exists_in_path($tee)) && $opt->{stdout} && (! $opt->{nowrite}) ) {
 		main::logger "\nERROR: $tee does not exist in path, skipping\n";
-		return 'abort';
+		return 'next';
 	}
 	if (! main::exists_in_path($mplayer)) {
 		main::logger "\nWARNING: Required $mplayer does not exist\n";
@@ -3581,7 +3571,7 @@ sub download_realaudio {
 	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid>" );
 
 	# Skip from here if we are only testing downloads
-	return 'abort' if $opt->{test};
+	return 'skip' if $opt->{test};
 
 	# Do the audio download
 	my $stream = Streamer::rtsp->new;
@@ -3599,7 +3589,6 @@ sub download_iphone {
 
 	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mp3';
-
 	my $url_2 = %{ $prog->get_stream_data( $version_pids{ $prog->{version} }, 'iphone')}->{streamurl};
 
 	# Report error if no versions are available
@@ -3619,7 +3608,7 @@ sub download_iphone {
 	}
 
 	# Skip from here if we are only testing downloads
-	return 'abort' if $opt->{test};
+	return 'skip' if $opt->{test};
 
 	my $return;
 	# Disable proxy here if required
@@ -3668,7 +3657,7 @@ sub download_flashaudio {
 	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
 
 	# Skip from here if we are only testing downloads
-	return 'abort' if $opt->{test};
+	return 'skip' if $opt->{test};
 
 	# Do the RTMP flashaudio download
 	my $stream = Streamer::rtmp->new;
@@ -4462,7 +4451,7 @@ sub download {
 	return 'abort' if $prog->generate_filenames( "<name> <episode> <pid>", $#url_list );
 
 	# Skip from here if we are only testing downloads
-	return 1 if $opt->{test};
+	return 'skip' if $opt->{test};
 
 	my $stream = Streamer::mms->new;
 	return $stream->get( $ua, (join '|', @url_list), $prog );
@@ -4627,7 +4616,6 @@ sub get {
 	# e.g. Content-Range: bytes 0-1/181338136 (return if no content length returned)
 	my $download_len = $res->header("Content-Range");
 	if ( ! $download_len ) {
-		#main::logger "ERROR: No Content-Range was obtained\n" if $opt->{verbose};
 		main::logger "WARNING: iphone version not available\n";
 		return 'retry'
 	}
