@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.26;
+my $version = 1.27;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -59,7 +59,6 @@ my $version = 1.26;
 # Bugs to fix:
 # * fork returns non-pid value for itv under ActivePerl - will need to implement serial download instead
 # * Realaudio mode does not create symlink until finished downloading
-# * iphone overseas will not failback to realaudio for radio type
 
 use Env qw[@PATH];
 use Fcntl;
@@ -431,6 +430,8 @@ sub process_matches {
 	$opt->{type}		= lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} 		= join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
+	# Clear (BAD!!!!) global %type hash
+	%type = ();
 	$type{$_} = 1 for split /,/, $opt->{type};
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
