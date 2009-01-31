@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.27;
+my $version = 1.28;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -124,6 +124,8 @@ my $opt_file = Options->new();
 # Set Programme/Pvr/Streamer class global var refs to the Options instance
 Programme->add_opt_object($opt);
 Pvr->add_opt_object($opt);
+Pvr->add_opt_file_object($opt_file);
+Pvr->add_opt_cmdline_object($opt_cmdline);
 Streamer->add_opt_object($opt);
 
 # Print to STDERR/STDOUT if not quiet unless verbose or debug
@@ -145,57 +147,57 @@ my %opt_format = (
 	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaudio,realaudio (default: iphone,flashaudio,realaudio)"],
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
-	command		=> [ 1, "c|command=s", 'Output', '-c, --command <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
+	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
 	conditions	=> [ 0, "conditions", '', '', 'Shows GPL conditions'],
 	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
 	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
 	excludecategory	=> [ 1, "xcat|exclude-category=s", 'Search', '--exclude-category <regex>', "Narrow search to exclude matched catogories"],
 	excludechannel	=> [ 1, "xchan|exclude-channel=s", 'Search', '--exclude-channel <regex>', "Narrow search to exclude matched channel(s)"],
-	expiry		=> [ 1, "expiry|e=n", 'Config', '-e, --expiry <secs>', "Cache expiry in seconds (default 4hrs)"],
+	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
-	flush		=> [ 0, "flush|refresh|f", 'Config', '-f, --flush, --refresh', "Refresh cache"],
+	flush		=> [ 0, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
 	forcedownload	=> [ 1, "force-download", 'Download', '--force-download', "Ignore download history (unsets --hide option also)"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
-	get		=> [ 0, "get|g", 'Download', '-g, --get', "Download matching programmes"],
-	help		=> [ 0, "help|h", 'Config', '-h, --help', "This help text"],
+	get		=> [ 0, "get|g", 'Download', '--get, -g', "Download matching programmes"],
+	help		=> [ 0, "help|h", 'Config', '--help, -h', "This help text"],
 	helplong	=> [ 0, "help-long|advanced|long-help|helplong", 'Config', '--helplong', "Advanced options help text"],
 	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
-	info		=> [ 0, "i|info", 'Display', '-i, --info', "Show full programme metadata (only if number of matches < 50)"],
+	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata (only if number of matches < 50)"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
-	long		=> [ 0, "long|l", 'Search', '-l, --long', "Additionally search & display long programme descriptions / episode names"],
+	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	mp3audio	=> [ 0, "mp3audio", '', '', ""],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
-	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '-n, --nowrite', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
-	output		=> [ 0, "output|o=s", 'Output', '-o, --output <dir>', "Default Download output directory for all downloads"],
+	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
+	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
 	partialproxy	=> [ 1, "partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>', "Download an arbitrary pid that does not necessarily appear in the index"],
-	proxy		=> [ 0, "proxy|p=s", 'Download', '-p, --proxy <url>', "Web proxy URL spec"],
-	quiet		=> [ 1, "q|quiet|silent", 'Output', '-q, --quiet', "No logging output"],
+	proxy		=> [ 0, "proxy|p=s", 'Download', '--proxy, -p <url>', "Web proxy URL spec"],
+	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	save 		=> [ 0, "save", 'Config', '--save', "Save specified options as default"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
-	stdout		=> [ 1, "stdout|x", 'Download', '-x, --stdout', "Additionally stream to STDOUT (so you can pipe output to a player)"],
+	stdout		=> [ 1, "stdout|x", 'Download', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
-	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '-s, --subdir', "Downloaded files into Programme name subdirectory"],
+	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Downloaded files into Programme name subdirectory"],
 	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
 	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In TV mode, download subtitles into srt/SubRip format if available"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
-	test		=> [ 1, "test|t", 'Download', '-t, --test', "Test only - no download (will show programme type)"],
+	test		=> [ 1, "test|t", 'Download', '--test, -t', "Test only - no download (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio, tv, podcast, all, itv (tv is default)"],
-	update		=> [ 0, "update|u", 'Config', '-u, --update', "Update get_iplayer if a newer one exists"],
+	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
-	verbose		=> [ 1, "verbose|v", 'Config', '-v, --verbose', "Verbose"],
+	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
 	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): TV: iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
-	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '-w, --whitespace', "Keep whitespace (and escape chars) in filenames"],
+	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
@@ -231,15 +233,15 @@ if ( ! grep /\-\-save/, @ARGV ) {
 }
 
 # Parse cmdline opts from each Programme class/subclass
+for ( qw( Streamer Programme Pvr ) ) {
+	Options->get_class_options( $_, \%opt_format );
+}
 for ( progclass() ) {
 	Options->get_class_options( progclass($_), \%opt_format );
 }
 for ( qw( mms rtmp rtsp iphone mms 3gp podcast ) ) {
 	Options->get_class_options( "Streamer::$_", \%opt_format );
 }
-Options->get_class_options( "Streamer", \%opt_format );
-Options->get_class_options( "Programme", \%opt_format );
-Options->get_class_options( "Pvr", \%opt_format );
 
 # Parse the cmdline using the opt_format hash
 if ( not $opt_cmdline->parse( \%opt_format ) ) {
@@ -282,18 +284,6 @@ if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
 	exit 1;
 }
 
-# List all options and where they are set from then exit
-if ( $opt_cmdline->{showoptions} ) {
-	# unset this option
-	delete $opt_cmdline->{showoptions};	
-	delete $opt->{showoptions};
-	# Show all options andf where set from
-	$opt_file->display('Options from Files');
-	$opt_cmdline->display('Options from Command Line');
-	$opt->display('Options Used');
-	exit 1;
-}
-
 # Display GPL stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
@@ -312,7 +302,6 @@ for ( progclass() ) {
 	# Set maximum index number
 	$max_index = progclass($_)->index_max if progclass($_)->index_max > $max_index;
 }
-my %type;
 my $min_download_size = 1024000;
 
 # Static URLs
@@ -342,7 +331,6 @@ my $info_limit		= 40;
 my $iphone_block_size	= 0x2000000; # 32MB
 
 # Option dependant var definitions
-my %download_dir;
 my $cache_secs;
 my $mplayer;
 my $ffmpeg;
@@ -356,7 +344,6 @@ my $vlc_opts;
 my $id3v2;
 my $tee;
 my $bandwidth;
-my @version_search_list;
 my @search_args = @ARGV;
 
 
@@ -403,8 +390,6 @@ exit 0;
 
 
 
-### BAD ###
-# Writes: %download_dir, %type
 # Use the specified options to process the matches in specified array
 # Usage: process_matches( \%pids_history, @search_args )
 sub process_matches {
@@ -416,22 +401,14 @@ sub process_matches {
 	my %prog;
 	# obtain prog object given index. e.g. $index_prog{$index_no}->{element};
 	my %index_prog;
+	# hash of prog types specified
+	my %type;
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
-
-	# Option dependant vars
-	%download_dir	= (
-		'tv'		=> $opt->{outputtv} || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.',
-		'itv'		=> $opt->{outputtv} || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.',
-		'radio'		=> $opt->{outputradio} || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.',
-		'podcast'	=> $opt->{outputpodcast} || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.',
-	);
 
 	# Ensure lowercase types
 	$opt->{type}		= lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} 		= join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
-	# Clear (BAD!!!!) global %type hash
-	%type = ();
 	$type{$_} = 1 for split /,/, $opt->{type};
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
@@ -451,14 +428,20 @@ sub process_matches {
 	$tee			= 'tee';
 	$rtmpdump		= $opt->{rtmpdump} || 'rtmpdump';
 	$bandwidth		= $opt->{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
-	# Order with which to search for programme versions (can be overridden by --versionlist option)
-	@version_search_list 	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
-	@version_search_list 	= split /,/, $opt->{versionlist} if $opt->{versionlist};
 	# Set quiet, test and get options if we're asked for streaminfo
 	if ( $opt->{streaminfo} ) {
 		$opt->{test} 	= 1;
 		$opt->{get} 	= 1;
 		$opt->{quiet} 	= 1;
+	}
+
+	# List all options and where they are set from then exit
+	if ( $opt_cmdline->{showoptions} ) {
+		# Show all options andf where set from
+		$opt_file->display('Options from Files');
+		$opt_cmdline->display('Options from Command Line');
+		$opt->display('Options Used');
+		logger "Search Args: ".join(' ', @search_args)."\n\n";
 	}
 
 	# Sanity check some conflicting options
@@ -479,6 +462,8 @@ sub process_matches {
 	$opt->{vmode} = 'n95_wifi' if $opt->{n95};
 	$opt->{amode} = 'realaudio' if $opt->{realaudio};
 	$opt->{amode} = 'iphone' if $opt->{mp3audio};
+	# Make tv output dir apply for itv
+	#$opt->{outputitv} = $opt->{outputtv} if $opt->{outputtv} && ! $opt->{outputitv};
 
 	# Web proxy
 	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
@@ -487,14 +472,6 @@ sub process_matches {
 	# Update this script if required
 	if ($opt->{update}) {
 		update_script();
-	}
-
-	# Check for valid dload dirs or create them
-	for ( keys %download_dir ) {
-		if ( ! -d $download_dir{$_} ) {
-			logger "INFO: Created directory $download_dir{$_}\n";
-			mkpath($download_dir{$_});
-		}
 	}
 
 	# Get prog by arbitrary '<type>:<pid>' or just '<pid>' (using the specified types)(then exit)
@@ -516,12 +493,8 @@ sub process_matches {
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
 		exit 1 if check_download_history( $pid );
-		if ( $opt->{streaminfo} ) {
-			logger "ERROR: streaminfo mode not supported in pid mode\n";
-			exit 1;
-		}
 
-		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if doen in a $_ 'for' loop!!)
+		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
 		for my $t ( @try_types ) {
 			get_links( \%prog, \%index_prog, $t );
 		}
@@ -569,7 +542,7 @@ sub process_matches {
 	
 	# List elements (i.e. 'channel' 'categories') if required and exit
 	if ( $opt->{list} ) {
-		list_unique_element_counts( \%prog, $opt->{list} );
+		list_unique_element_counts( \%prog, \%type, $opt->{list} );
 		exit 0;
 	}
 
@@ -648,7 +621,7 @@ sub process_matches {
 	}
 		
 	# Display list for download
-	list_progs( @match_list );
+	list_progs( \%type, @match_list );
 
 	# Write HTML and XML files if required (with search options applied)
 	create_html( @match_list ) if $opt->{html};
@@ -667,9 +640,11 @@ sub process_matches {
 
 
 
-# Usage: list_progs( @prog_refs )
+# Usage: list_progs( \%type, @prog_refs )
 # Lists progs given an array of index numbers
 sub list_progs {
+	my $typeref = shift;
+	my $number_of_types = keys %{$typeref};
 	my $ua = create_ua('desktop');
 	my %names;
 
@@ -685,9 +660,9 @@ sub list_progs {
 	logger "Matches:\n" if $#_ >= 0;
 	for my $this (@_) {
 		if (! defined $names{ $this->{name} }) {
-			$this->list_entry( '' );
+			$this->list_entry( '', 0, $number_of_types );
 		} else {
-			$this->list_entry( '', 1 );
+			$this->list_entry( '', 1, $number_of_types );
 		}
 		$names{ $this->{name} } = 1;
 		if ( $opt->{info} ) {
@@ -1669,13 +1644,14 @@ sub check_download_history {
 
 
 
-# list_unique_element_counts( \%prog );
+# list_unique_element_counts( \%prog, \%type, $element_name );
 # Show channels for currently specified types
 sub list_unique_element_counts {
 	my $progref = shift;
+	my $typeref = shift;
 	my $element_name = shift;
 	my %elements;
-	logger "INFO: ".(join ',', keys %type)." $element_name List:\n" if $opt->{verbose};
+	logger "INFO: ".(join ',', keys %{ $typeref })." $element_name List:\n" if $opt->{verbose};
 	for my $pid ( keys %{ $progref } ) {
 		my @element;
 		# Need to separate the categories
@@ -2232,6 +2208,8 @@ sub substitute {
 sub generate_filenames {
 	my ($prog, $format, $multipart) = (@_);
 	
+	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
+
 	$prog->{fileprefix} = $opt->{fileprefix} || $format;
 
 	# If we dont have longname defined just set it to name
@@ -2315,11 +2293,11 @@ sub run_user_command {
 # %type
 # Display a line containing programme info (using long, terse, and type options)
 sub list_entry {
-	my ( $prog, $prefix, $tree ) = ( @_ );
+	my ( $prog, $prefix, $tree, $number_of_types ) = ( @_ );
 
 	my $prog_type = '';
 	# Show the type field if >1 type has been specified
-	$prog_type = "$prog->{type}, " if keys %type > 1;
+	$prog_type = "$prog->{type}, " if $number_of_types > 1;
 	my $name;
 	# If tree view
 	if ( $opt->{tree} ) {
@@ -2484,9 +2462,22 @@ sub get_version_pids {
 	#    <mediator identifier="b00dp4xn" name="pips"/>
 	#  </item>
 
+	# If a prog is totally unavailable you get 
+	# ...
+	# <updated>2009-01-15T23:13:33Z</updated>
+	# <noItems reason="noMedia" />
+	#
+	#                <relatedLink>
+	                
 	my $xml = $res->content;	
 	# flatten
 	$xml =~ s/\n/ /g;
+
+	# Detect noItems or no programmes
+	if ( $xml =~ m{<noItems\s+reason="noMedia"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+		main::logger "\rWARNING: No programmes are available for this pid\n\n";
+		return %version_pids;
+	}
 
 	# Get title
 	# <title>Amazon with Bruce Parry: Episode 1</title>
@@ -3246,6 +3237,11 @@ sub download {
 	# Look up version pids
 	%version_pids = $prog->get_version_pids( $ua );
 
+	# if %version_pids is empty then skip this programme download attempt
+	if ( (keys %version_pids) == 0 ) {
+		return 'skip';
+	}
+
 	# Check if we have vlc - if not use iPhone mode
 	if ( $opt->{vmode} eq 'n95' && (! main::exists_in_path($vlc)) ) {
 		main::logger "\nWARNING: Required $vlc does not exist\n";
@@ -3262,7 +3258,6 @@ sub download {
 		$opt->{raw} = 1;
 	}
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mov';
 	# Lookup table to determine which ext to use for different download methods
 	my %stream_ext = (
@@ -3277,6 +3272,9 @@ sub download {
 	$prog->{ext} = 'flv' if $mode =~ /^(flash|rtmp)/ && $opt->{raw};
 
 	# Do this for each version tried in this order (if they appeared in the content)
+	# Order with which to search for programme versions (can be overridden by --versionlist option)
+	my @version_search_list	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+	@version_search_list 	= split /,/, $opt->{versionlist} if $opt->{versionlist};
 	for my $version ( @version_search_list ) {
 
 		# Change $verpid to 'default' type if it exists, then Used 'signed' otherwise
@@ -3506,6 +3504,11 @@ sub download {
 	# Look up version pids
 	%version_pids = $prog->get_version_pids( $ua );
 
+	# if %version_pids is empty then skip this programme download attempt
+	if ( (keys %version_pids) == 0 ) {
+		return 'skip';
+	}
+
 	# This will always be the pid version for radio
 	$prog->{version} = 'default';
 	# Display media stream data if required
@@ -3553,7 +3556,6 @@ sub download_realaudio {
 		$opt->{wav} = 1;
 	}
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mp3';
 	$prog->{ext} = 'ra'  if $opt->{raw};
 	$prog->{ext} = 'wav' if $opt->{wav};
@@ -3588,7 +3590,6 @@ sub download_iphone {
 	my %streamdata;
 	my $url_2;
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mp3';
 	my $url_2 = %{ $prog->get_stream_data( $version_pids{ $prog->{version} }, 'iphone')}->{streamurl};
 
@@ -3642,7 +3643,6 @@ sub download_flashaudio {
 		return 'next';
 	}
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mp3';
 	$prog->{ext} = 'flv' if $opt->{raw};
 
@@ -3931,8 +3931,6 @@ sub download {
 	# stream data not available
 	return 'skip' if $opt->{streaminfo};
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
-
 	# Determine the correct filename and extension for this download
 	my $filename_orig = $prog->{pid};
 	$prog->{ext} = $prog->{pid};
@@ -3994,6 +3992,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
+		outputitv	=> [ 1, "outputitv=s", 'Output', '--outputitv <dir>', "Download output directory for itv"],
 	};
 }
 
@@ -4431,7 +4430,6 @@ sub download {
 		return 21;
 	}
 
-	$prog->{dir} = $download_dir{ $prog->{type} };
 	$prog->{ext} = 'mp4';
 	$prog->{ext} = 'asf' if $opt->{raw};
 	
@@ -4612,13 +4610,18 @@ sub get {
 		'Accept'	=> '*/*',
 		'Range'		=> 'bytes=0-1',
 	);
+	# detect bad url => not available
+	if ( $url_2 !~ /^http:\/\// ) {
+		main::logger "WARNING: iphone version not available\n";
+		return 'next';
+	}
 	my $req = HTTP::Request->new ('GET', $url_2, $h);
 	my $res = $ua->request($req);
 	# e.g. Content-Range: bytes 0-1/181338136 (return if no content length returned)
 	my $download_len = $res->header("Content-Range");
 	if ( ! $download_len ) {
 		main::logger "WARNING: iphone version not available\n";
-		return 'retry'
+		return 'retry';
 	}
 	$download_len =~ s|^bytes 0-1/(\d+).*$|$1|;
 	main::logger "INFO: Download File Length $download_len\n" if $opt->{verbose};
@@ -5604,7 +5607,11 @@ use Time::Local;
 my %vars = {};
 # Global options
 my $optref;
+my $opt_fileref;
+my $opt_cmdlineref;
 my $opt;
+my $opt_file;
+my $opt_cmdline;
 
 # Class cmdline Options
 sub opt_format {
@@ -5630,14 +5637,26 @@ sub new {
 	}
 	## Ensure the subclass $opt var is pointing to the Superclass global optref
 	$opt = $Pvr::optref;
+	$opt_file = $Pvr::opt_fileref;
+	$opt_cmdline = $Pvr::opt_cmdlineref;
 	bless $self, $type;
 }
 
 
-# Use to bind a new options ref to the class global $optref var
+# Use to bind a new options ref to the class global $opt_ref var
 sub add_opt_object {
 	my $self = shift;
 	$Pvr::optref = shift;
+}
+# Use to bind a new options ref to the class global $opt_fileref var
+sub add_opt_file_object {
+	my $self = shift;
+	$Pvr::opt_fileref = shift;
+}
+# Use to bind a new options ref to the class global $opt_cmdlineref var
+sub add_opt_cmdline_object {
+	my $self = shift;
+	$Pvr::opt_cmdlineref = shift;
 }
 
 
@@ -5845,7 +5864,7 @@ sub save {
 }
 
 
-
+# Uses class globals: %opt, %opt_file, %opt_cmdline
 # Returns @search_args
 # Clear all exisiting global args and opts then load the options specified in the default options and specified PVR search
 sub load_options {
@@ -5877,6 +5896,7 @@ sub load_options {
 }
 
 
+
 # Disable a PVR search by adding 'disable 1' option
 sub disable {
 	my $pvr = shift;
@@ -5893,6 +5913,7 @@ sub disable {
 }
 
 
+
 # Re-enable a PVR search by removing 'disable 1' option
 sub enable {
 	my $pvr = shift;
@@ -5907,6 +5928,7 @@ sub enable {
 	$pvr->save( $name, @options );	
 	return 0;
 }
+
 
 
 ############## End OO ##############
