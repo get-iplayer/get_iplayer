@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.28;
+my $version = 1.29;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -36,7 +36,6 @@ my $version = 1.28;
 # 	http://linuxcentre.net/getiplayer/documentation
 #
 # Todo:
-# * Use non-shell tee?
 # * Fix non-uk detection - iphone auth?
 # * Index/Download live radio streams w/schedule feeds to assist timing
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
@@ -48,6 +47,8 @@ my $version = 1.28;
 # ** all global URLs into a hash/class???
 # ** Cut down 'use' clauses in each class 
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
+# * Get --info to show whether subtitles are available
+# * rtmpdump now reports correct exitcode - fix code to recognise this
 
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
@@ -149,6 +150,7 @@ my %opt_format = (
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
 	conditions	=> [ 0, "conditions", '', '', 'Shows GPL conditions'],
+	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
 	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
 	excludecategory	=> [ 1, "xcat|exclude-category=s", 'Search', '--exclude-category <regex>', "Narrow search to exclude matched catogories"],
@@ -208,6 +210,7 @@ my $save;
 my $profile_dir;
 # This is where system-wide default options are specified
 my $optfile_system;
+
 # Options on unix-like systems
 if ( defined $ENV{HOME} ) {
 	$profile_dir = $ENV{HOME}.'/.get_iplayer';
@@ -226,22 +229,20 @@ my $optfile = "${profile_dir}/options";
 if ( ! grep /\-\-save/, @ARGV ) {
 	$opt->{debug} = 1 if grep /\-\-debug/, @ARGV;
 	# Load options from files into $opt_file
+	# system options
 	$opt_file->load( $opt, $optfile_system );
+	# User options
 	$opt_file->load( $opt, $optfile );
+	# Use .get_iplayer/options if it exists in current working dir
+	$opt_file->load( $opt, './.get_iplayer/options' ) if -f './.get_iplayer/options';
 	# Copy these loaded options into $opt
 	$opt->copy_set_options_from( $opt_file );
 }
 
 # Parse cmdline opts from each Programme class/subclass
-for ( qw( Streamer Programme Pvr ) ) {
-	Options->get_class_options( $_, \%opt_format );
-}
-for ( progclass() ) {
-	Options->get_class_options( progclass($_), \%opt_format );
-}
-for ( qw( mms rtmp rtsp iphone mms 3gp podcast ) ) {
-	Options->get_class_options( "Streamer::$_", \%opt_format );
-}
+Options->get_class_options( $_, \%opt_format ) for qw( Streamer Programme Pvr );
+Options->get_class_options( progclass($_), \%opt_format ) for progclass();
+Options->get_class_options( "Streamer::$_", \%opt_format ) for qw( mms rtmp rtsp iphone mms 3gp podcast );
 
 # Parse the cmdline using the opt_format hash
 if ( not $opt_cmdline->parse( \%opt_format ) ) {
@@ -354,13 +355,16 @@ my @search_args = @ARGV;
 push @search_args, '.*' if ! $search_args[0];
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
-my $lockfile = $profile_dir.'/pvr_lock';
+my $lockfile;
+$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr};
+
 # Create new PVR instance
 # $pvr->{searchname}->{<option>} = <value>;
 my $pvr = Pvr->new();
 # Set some class-wide values
 $pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
 
+# PVR functions
 if ( $opt->{pvradd} ) {
 	$pvr->add( $opt->{pvradd}, @search_args );
 
@@ -376,23 +380,34 @@ if ( $opt->{pvradd} ) {
 } elsif ( $opt->{pvrlist} ) {
 	$pvr->display_list();
 
+} elsif ( $opt->{pvrqueue} ) {
+	$pvr->queue( @search_args );
+
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
 	$pvr->run( $opt_file );
 
+# Download prog specified by --pid option
+} elsif ( $opt->{pid} ) {
+	my %pids_history = main::load_download_history() if $opt->{hide};
+	find_matches( \%pids_history );
+
 # Else just process command line args
 } else {
 	my %pids_history = main::load_download_history() if $opt->{hide};
-	process_matches( \%pids_history, @search_args );
+	download_matches( find_matches( \%pids_history, @search_args ) );
+
 }
 exit 0;
 
 
 
 # Use the specified options to process the matches in specified array
-# Usage: process_matches( \%pids_history, @search_args )
-sub process_matches {
+# Usage: find_matches( \%pids_history, @search_args )
+# Returns: array of objects to be downloaded
+#      or: number of failed/remaining programmes to download using the match (excluding previously downloaded progs) if --pid is specified
+sub find_matches {
 	my $pids_history_ref = shift;
 	my @search_args = @_;
 	# Show options
@@ -479,8 +494,8 @@ sub process_matches {
 		my @try_types;
 		my $pid;
 
-		# If $opt->{pid} is in the form of '<type>:<pid>'
-		if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} ) {
+		# If $opt->{pid} is in the form of '<type>:<pid>' and <type> is a valid type
+		if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && progclass(lc($1)) ) {
 			my $prog_type;
 			( $prog_type, $pid )= ( lc($1), $2 );
 			# Only try to download using this prog type
@@ -492,7 +507,7 @@ sub process_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		exit 1 if check_download_history( $pid );
+		return 0 if check_download_history( $pid );
 
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
 		for my $t ( @try_types ) {
@@ -500,6 +515,7 @@ sub process_matches {
 		}
 		
 		# Try to get pid using each speficied prog type
+		my $retcode;
 		for my $prog_type ( @try_types ) {
 			logger "INFO Trying to download pid using type $prog_type\n";
 			# Force prog type and create new prog instance if it doesn't exist
@@ -507,16 +523,19 @@ sub process_matches {
 			if ( not $prog{$pid}->{pid} ) {
 				logger "INFO: pid not found in $prog_type cache\n";
 				$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
-				last if ! $this->download_retry_loop( 3 );
+				$retcode = $this->download_retry_loop( 3 );
+				last if ! $retcode;
 			} else {
 				logger "INFO: pid found in cache\n";
 				$this = $prog{$pid};
-				last if ! $this->download_retry_loop( 3 );
+				$retcode = $this->download_retry_loop( 3 );
+				last if ! $retcode;
 				# If it is in the cache then we'll not need to try the other types regardless of success
 				last;
 			}
 		}
-		exit 0;
+		# return zero on success
+		return $retcode;
 	}
 
 	# We don't actually need to get the links first for the specifiied type(s) if we have only index number specified (and not --list)
@@ -628,14 +647,23 @@ sub process_matches {
 	create_xml( $opt->{fxd}, @match_list ) if $opt->{fxd};
 	create_xml( $opt->{mythtv}, @match_list ) if $opt->{mythtv};
 
+	return @match_list;
+}
+
+
+
+sub download_matches {
+	my @match_list = @_;
+
 	# Do the downloads based on list of index numbers if required
+	my $failcount;
 	if ( $opt->{get} || $opt->{stdout} ) {
 		for my $this (@match_list) {
-			$this->download_retry_loop( 3 );
+			$failcount =+ $this->download_retry_loop( 3 );
 		}
 	}
 
-	return 0;
+	return $failcount;
 }
 
 
@@ -692,7 +720,11 @@ sub get_regex_matches {
 	my $category_exclude_regex = $opt->{excludecategory} || '^ROGUE$';
 	my $since = $opt->{since} || 99999;
 	my $now = time();
-		
+	
+	# Determine search for fields
+	my @searchfields;
+	@searchfields = split /\s*,\s*/, lc( $opt->{fields} ) if $opt->{fields};
+
 	# Loop through each prog object
 	for my $this ( values %{$progref} ) {
 		# Only include programmes matching channels and category regexes
@@ -704,18 +736,18 @@ sub get_regex_matches {
 		  && $this->{categories} !~ /$category_exclude_regex/i
 		  && $this->{timeadded} >= $now - ($since * 3600)
 		) {
-
-			# Search prognames/pids while excluding channel_regex and category_regex
-			$download_hash{ $this->{index} } = $this if 
-				$this->{name} =~ /$download_regex/i;
-			# Also search long descriptions and episode data if -l is specified
-			$download_hash{ $this->{index} } = $this if (
-				$opt->{long} 
-				&& 
-				( $this->{desc} =~ /$download_regex/i
-				  || $this->{episode} =~ /$download_regex/i
-				)
-			);
+			# Custom search fields
+			if ( @searchfields ) {
+				for my $field ( @searchfields ) {
+					$download_hash{ $this->{index} } = $this if $this->{$field} =~ /$download_regex/i;
+				}
+			# Normal name / long search
+			} else {
+				# Search prognames/pids while excluding channel_regex and category_regex
+				$download_hash{ $this->{index} } = $this if $this->{name} =~ /$download_regex/i;
+				# Also search long descriptions and episode data if -l is specified
+				$download_hash{ $this->{index} } = $this if $opt->{long} && ( $this->{desc} =~ /$download_regex/i || $this->{episode} =~ /$download_regex/i );
+			}
 		}
 	}
 
@@ -3307,7 +3339,7 @@ sub download {
 	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
-		return 'abort';
+		return 'skip';
 	}
 	
 	# Skip from here if we are only testing downloads
@@ -3571,7 +3603,7 @@ sub download_realaudio {
 	}
 
 	# Determine the correct filenames for this download
-	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid>" );
+	return 'skip' if $prog->generate_filenames( "<longname> - <episode> <pid>" );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -3602,11 +3634,10 @@ sub download_iphone {
 	}
 
 	# Determine the correct filenames for this download
-	# Determine the correct filenames for this download
 	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
-		return 'abort';
+		return 'skip';
 	}
 
 	# Skip from here if we are only testing downloads
@@ -3655,7 +3686,7 @@ sub download_flashaudio {
 	}
 
 	# Determine the correct filenames for this download
-	return 'abort' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
+	return 'skip' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -3938,7 +3969,7 @@ sub download {
 	$prog->{ext} =~ s|^.*\.(\w+)$|$1|g;
 
 	# Determine the correct filenames for this download
-	return 1 if $prog->generate_filenames( "<longname> - <episode> $filename_orig" );
+	return 'skip' if $prog->generate_filenames( "<longname> - <episode> $filename_orig" );
 
 	# Skip from here if we are only testing downloads
 	return 1 if $opt->{test};
@@ -4447,7 +4478,7 @@ sub download {
 	}
 
 	# Determine the correct filenames for this download
-	return 'abort' if $prog->generate_filenames( "<name> <episode> <pid>", $#url_list );
+	return 'skip' if $prog->generate_filenames( "<name> <episode> <pid>", $#url_list );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -5616,12 +5647,14 @@ my $opt_cmdline;
 # Class cmdline Options
 sub opt_format {
 	return {
-		pvr		=> [ 0, "pvr", 'PVR', '--pvr', "Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)"],
+		pvr		=> [ 0, "pvr|pvrrun|pvr-run", 'PVR', '--pvr', "Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
 		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
 		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
+		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off downloading using the --pvr option"],
+		comment		=> [ 0, "comment=s", '', '', "Adds a comment to a PVR search"],
 	};
 }
 
@@ -5715,8 +5748,50 @@ sub run {
 		$opt->{flush} = '';
 		# Do the downloads (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
-		main::process_matches( \%pids_history, @search_args );
+		# If this is a one-off queue pid entry then delete the PVR entry upon successful download(s)
+		if ( $pvr->{$name}->{pid} ) {
+			my $failcount = main::find_matches( \%pids_history );
+			$pvr->del( $name ) if not $failcount;
+		# Just download matching progs
+		} else {
+			main::download_matches( main::find_matches( \%pids_history, @search_args ) );
+		}
 	}
+}
+
+
+
+# If queuing, only add pids because the index number might change by the time the pvr runs
+# If --pid and --type <type> is specified then add this prog also
+sub queue {
+	my $pvr = shift;
+	my @search_args = @_;
+
+	# Switch on --hide option
+	$opt->{hide} = 1;
+	my %pids_history = main::load_download_history();
+
+	# PID and TYPE specified
+	if ( $opt_cmdline->{pid} ) {
+		if ( $opt_cmdline->{type} && $opt_cmdline->{type} !~ ',' ) {
+			$pvr->add( "ONCE: ($opt_cmdline->{pid})" ) if ! main::check_download_history( $opt_cmdline->{pid} );
+		} else {
+			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
+			return 1;
+		}
+
+	# Search specified
+	} else {
+		my @matches = main::find_matches( \%pids_history, @search_args );
+		# Add a PVR entry for each matching prog PID
+		for my $this ( @matches ) {
+			$opt_cmdline->{pid} = $this->{pid};
+			$opt_cmdline->{type} = $this->{type};
+			$pvr->add( $this->substitute('ONCE: <name> - <episode> (<pid>)') );
+		}
+
+	}
+	return 0;
 }
 
 
@@ -5733,7 +5808,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for (grep /^(amode|vmode|long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|exclude|listformat|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for (grep /^(pid|comment|amode|vmode|long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|exclude|listformat|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
@@ -5764,6 +5839,7 @@ sub del {
 	# Delete pvr search file
 	if ( -f $vars{pvr_dir}.$name ) {
 		unlink $vars{pvr_dir}.$name;
+		main::logger "INFO: Deleted PVR search '$name'\n";
 	} else {
 		main::logger "ERROR: PVR search '$name' does not exist\n";
 		return 1;
@@ -5928,6 +6004,8 @@ sub enable {
 	$pvr->save( $name, @options );	
 	return 0;
 }
+
+
 
 
 
