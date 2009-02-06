@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.30;
+my $version = 1.31;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -201,7 +201,7 @@ my %opt_format = (
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
-	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): TV: iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi (default: iphone,flashhigh,flashnormal) Hulu: flash3,flash2,flash1"],
+	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
@@ -2688,7 +2688,7 @@ sub get_metadata {
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashwii|n95_wifi|n95_3g|mobile|flashaudio|realaudio|wma|subtitles
+# $media = all|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|realaudio|wma|subtitles
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -2778,8 +2778,8 @@ sub get_stream_data {
 		# application (e.g.):               ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcpc6cYbhdIakdWduc6bJdPbydbazdmdp-bjxPBF-cCp-GptFAoDqJBnHvzC&aifp=v001&slist=secure/b000g884xstreaming101052333
 		# tcURL: rtmp: //88.221.26.173:1935/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcpc6cYbhdIakdWduc6bJdPbydbazdmdp-bjxPBF-cCp-GptFAoDqJBnHvzC&aifp=v001&slist=secure/b000g884xstreaming101052333
 		# swfUrl: http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897
-		if ( $media =~ /^(flashwii|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			$prog_type = 'flashwii';
+		if ( $media =~ /^(flashlow|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashlow';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
@@ -3089,7 +3089,7 @@ sub modelist {
 	my $modelist;
 	
 	# Deal with BBC TV fallback modes
-	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashwii,n95_wifi
+	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
 	my @modes = split /,/, $opt->{vmode};
 	for (@modes) {
@@ -3322,7 +3322,7 @@ sub download {
 		iphone		=> 'mov',
 		flashhigh 	=> 'mp4',
 		flashnormal	=> 'avi',
-		flashwii	=> 'avi',
+		flashlow	=> 'avi',
 		n95_wifi	=> '3gp',
 		n95_3g		=> '3gp',
 	);
@@ -4616,16 +4616,17 @@ sub modelist {
 	my $modelist;
 	
 	# Deal with Hulu fallback modes
-	# Valid modes are flash3,flash2,flash1
-	# 'rtmp' or 'flash' => 'flash3,flash2,flash1'
+	# Valid modes are flashhigh,flashnormal,flashlow
+	# flashhigh doesn't seem to be supported yet by rtmpdump due to requiring RTMPE (encrypted streaming)
+	# 'rtmp' or 'flash' => 'flashnormal,flashlow'
 	my @modes = split /,/, $opt->{vmode};
 	for (@modes) {
-		$_ = 'flash3,flash2,flash1' if $_ eq 'rtmp' || $_ eq 'flash';
+		$_ = 'flashnormal,flashlow' if $_ eq 'rtmp' || $_ eq 'flash';
 	}
 	$opt->{vmode} = join ',', @modes;
 	# Defaults
 	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
-		$modelist = 'flash3,flash2,flash1';
+		$modelist = 'flashnormal,flashlow';
 	} else {
 		$modelist = $opt->{vmode};
 	}
@@ -5003,7 +5004,7 @@ sub get_metadata_url {
 
 
 # Gets media streams data for this version pid
-# $media = flash1|flash2|flash3)|all
+# $media = flashhigh|flashnormal|flashlow|all
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -5065,35 +5066,47 @@ sub get_stream_data {
 	my $xml1 = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme stream data for $prog->{name} from site\n");
 	# flatten xml1
 	$xml1 =~ s/[\n\r]//g;
-	my $quality = 0;
+
+	# Each prog has up to 3 different qualities/bitrates available. They start with '<video src='
+	# This loop names them respectively
 	for my $xml ( split /<video/, $xml1 ) {
 		$xml = "<video".$xml;
 		my $prog_type;
-		
-		# rtmp medium bitrate
-		# rtmpmedium
-		#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;\
-		#	slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;\
+
+		#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&\
+		#	slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ<break>\
 		#	content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
 		#      system-bitrate="516701" width="384" height="288"
 		#      profile="4x3 24fps Medium" />
+		#
+		#     <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_\
+		#	 97__Dd7ie-YcyEq2-8Jf18VTKg.flv?auth=daEbxdldwabdJbBdmb1dzcvd4cebIbRaxcg-bjJb0J-4q-ZqGEtCo1Fyt&aifp=sll02152008&slist=\
+		#	 hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_97__Dd7ie-YcyEq2-8Jf18VTKg.flv;.international=false" 
+		#	system-bitrate="998123" width="640" height="480" 
+		#	profile="4x3 30fps H264 Medium"/>
 		#
 		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=NS20070910&slist=${playpath}"
 		# flashver: "WIN 10,0,1.2,36"
 		# swfurl: "http://www.hulu.com/player.swf"
 		# tcurl: "rtmp://${serverip}:1935/${app}"
 		# pageurl: "http://www.hulu.com/watch/2711/family-guy-padre-de-familia"
-		#
 		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=sll02152008&slist=${playpath};.international=false"
 		#
-		## my $rtmpurl = {video}[$quality]->{src};
 		decode_entities($xml);
-		if ( $xml =~ m{<video\s+src="(rtmp.+?)<break>.+?profile="(.+?)"}i ) {
-			$quality++;
-			$prog_type = 'flash'.$quality;
-			$data{$prog_type}{type} = "Flash RTMP $2 stream";
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
-			$data{$prog_type}{streamurl} = $1;
+		# Get RTMPURL, bitrate, width, height, profilename
+		if ( $xml =~ m{<video\s+src="(rtmp.+?)".+?system-bitrate="(\d+?)"\s*width="(\d+?)"\s*height="(\d+?)"\s*profile="(.+?)"}i ) {
+			# initially set the key to be the 'bitrate|profile' so we can sort/rename keys afterwards
+			my ($rtmpurl, $bitrate, $width, $height, $profile) = ($1, $2, $3, $4, $5);
+			$prog_type = "$bitrate|$profile";
+			main::logger "DEBUG: stream XML: $xml\nDEBUG: RTMPurl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
+			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{verbose};
+			$data{$prog_type}{streamurl} = $rtmpurl;
+			$data{$prog_type}{type} = "Flash RTMP $profile stream";
+			$data{$prog_type}{bitrate} = $bitrate;
+			$data{$prog_type}{width} = $width;
+			$data{$prog_type}{height} = $height;
+			# if <break> is in streamurl then strip from there
+			$data{$prog_type}{streamurl} =~ s|<break>.*$||g;
 			my ( $servername, $parameters, $playpath );
 			( $servername, $parameters ) = ( $1, $2 ) if $data{$prog_type}{streamurl} =~ m{rtmp://(.+?)/.*ondemand.*(auth.+)$};
 			# get playpath if necessary
@@ -5110,6 +5123,19 @@ sub get_stream_data {
 			$data{$prog_type}{swfurl} = "http://www.hulu.com/player.swf";
 			$data{$prog_type}{flashver} = "WIN 10,0,1.2,36";
 		}
+	}
+
+	# Sort and rename %data keys to flash(high|normal|low) based on bitrate
+	my @modename = qw( flashhigh flashnormal flashlow flashverylow );
+	my $count = 1;
+	for my $old ( reverse sort {$a <=> $b} keys %data ) {
+		# Get the next modename
+		my $vmode = shift @modename;
+		# Create new key
+		main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{debug};
+		$data{$vmode} = $data{$old};
+		# Remove old key
+		delete $data{$old};
 	}
 
 	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
@@ -5637,8 +5663,9 @@ sub get {
 	main::logger "\n\nINFO: Command: $cmd\n";
 	my $return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
-	# Hack to get around rtmpdump prentending to fail on successful flash downloads
-	if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+	#if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+	# Hack to get around rtmpdump prentending to fail on successful flash downloads or pretending to succeed where it failed
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to download file $file_tmp via RTMP\n";
 		unlink $file_tmp;
