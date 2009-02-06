@@ -180,7 +180,7 @@ my %opt_format = (
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
 	partialproxy	=> [ 1, "partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
-	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>', "Download an arbitrary pid that does not necessarily appear in the index"],
+	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>|<pidurl>', "Download an arbitrary pid that does not necessarily appear in the index"],
 	proxy		=> [ 0, "proxy|p=s", 'Download', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
@@ -510,10 +510,14 @@ sub find_matches {
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
 		return 0 if check_download_history( $pid );
-
+		
+		# Maybe we don't want to populate caches - this slows down --pid downloads ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
-		for my $t ( @try_types ) {
-			get_links( \%prog, \%index_prog, $t );
+		# only get links if > 1 type is specified
+		if ( $#try_types >= 1 ) {
+			for my $t ( @try_types ) {
+				get_links( \%prog, \%index_prog, $t );
+			}
 		}
 		
 		# Try to get pid using each speficied prog type
@@ -525,6 +529,12 @@ sub find_matches {
 			if ( not $prog{$pid}->{pid} ) {
 				logger "INFO: pid not found in $prog_type cache\n";
 				$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
+				# if only one type is specified then we can clean up the pid which might actually be a url
+				if ( $#try_types == 0 ) {
+					logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
+					$this->clean_pid;
+					logger " New: '$this->{pid}'\n" if $opt->{verbose};
+				}
 				$retcode = $this->download_retry_loop( 3 );
 				last if ! $retcode;
 			} else {
@@ -2069,6 +2079,11 @@ sub opt {
 }
 
 
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+}
+
+
 # Return metadata of the prog
 sub get_metadata {
 	return {};
@@ -3097,6 +3112,15 @@ sub modelist {
 
 
 
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+	# extract b??????? format
+	$prog->{pid} = $1 if $prog->{pid} =~ m{(b\w{7})};
+}
+
+
+
 # Usage: Programme::tv->get_links( \%prog, 'tv' );
 # Uses: %{ channels() }, \%prog
 sub get_links {
@@ -3518,6 +3542,15 @@ sub modelist {
 		$modelist = $opt->{amode};
 	}
 	return $modelist;
+}
+
+
+
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+	# extract [bbw]??????? format - remove surrounding url
+	$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
 }
 
 
@@ -4041,6 +4074,15 @@ sub optional_list_entry_format {
 # Returns the modes to try for this prog type
 sub modelist {
 	return 'mms';
+}
+
+
+
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+	# extract numerical format - remove surrounding url
+	$prog->{pid} = $1 if $prog->{pid} =~ m{(\d{2,8})};
 }
 
 
@@ -4592,6 +4634,18 @@ sub modelist {
 
 
 
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+
+	# strip out any prefix leaving just numbers
+	$prog->{pid} =~ s/[^\d]//g;
+	# rewrite pid to be in correct form
+	$prog->{pid} = 'hulu-'.$prog->{pid};
+}
+
+
+
 # get full episode metadata given pid and ua.
 sub get_metadata {
 	my $prog = shift;
@@ -4648,9 +4702,11 @@ sub get_metadata {
 	$categories = $1 if $xml =~ m{tp:siteChannels="(.+?)"};
 	$categories =~ s/\|/,/g;
 
-	$longdesc = $1 if $xml =~ m{abstract="(.+?)"};
+	$name = $1 if $xml =~ m{tp:Series_Title="(.+?)"};
 
-	$episode = $1 if $xml =~ m{title="(.+?)"};
+	$channel = $1 if $xml =~ m{tp:Channel="(.+?)"};
+
+	( $episode, $longdesc ) = ( $1, $2 ) if $xml =~ m{title="([^"]+?)"\s+abstract="(.+?)"};
 
 	$duration = $1 if $xml =~ m{dur="(.+?)\d\d\dms"};
 
@@ -4915,6 +4971,15 @@ sub get_metadata_url {
 	my $ua = shift;
 
 	return $prog->{metadata_url} if $prog->{metadata_url};
+
+	# Don't rely on {web} being set (espcially if were called using --pid) - use {pid}
+	$prog->{web} = $prog->{pid};
+	# strip out any prefix leaving just numbers
+	$prog->{web} =~ s/[^\d]//g;
+	# rewrite pid to be in correct form
+	$prog->{pid} = 'hulu-'.$prog->{web};
+	# Add in the web page prefix
+	$prog->{web} = 'http://www.hulu.com/watch/'.$prog->{web};
 
 	# download/stream method.....
 	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
