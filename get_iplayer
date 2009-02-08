@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.32;
+my $version = 1.33;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -960,82 +960,6 @@ sub get_links {
 		$index_progref->{$_} = $progref->{ $index_prog_old{$_} } for keys %index_prog_old;
 	}
 	
-	return 0;
-}
-
-
-
-
-# Generic
-# Download Subtitles, convert to srt(SubRip) format and apply time offset
-sub download_stream_subtitles {
-	my ( $ua, $file, $verpid ) = @_;
-	my $suburl;
-	my $subs;
-	logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt->{verbose};
-	$suburl = %{ Programme::bbciplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
-	# Return if we have no url
-	if (! $suburl) {
-		logger "\nINFO: Subtitles not available\n";
-		return 2;
-	}
-
-	logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
-
-	# Open subs file
-	unlink($file);
-	my $fh = open_file_append($file);
-
-	# Download subs
-	$subs = request_url_retry($ua, $suburl, 2);
-	if (! $subs ) {
-		logger "\nERROR: Subtitle Download failed\n";
-		return 1;
-	} else {
-		logger "\nINFO: Downloaded Subtitles\n";
-	}
-
-	# Convert the format to srt
-	# SRT:
-	#1
-	#00:01:22,490 --> 00:01:26,494
-	#Next round!
-	#
-	#2
-	#00:01:33,710 --> 00:01:37,714
-	#Now that we've moved to paradise, there's nothing to eat.
-	#
-	
-	# TT:
-	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
-	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
-	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
-	my $count = 1;
-	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
-	for ( @lines ) {
-		my ( $begin, $end, $sub );
-		# Remove span elements
-		s|<\/?span.*?>||g;
-		# Remove <br /> elements
-		s|<br.*?>||g;
-		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
-		if ($begin && $end && $sub ) {
-			$begin =~ s/\./,/g;
-			$end =~ s/\./,/g;
-			if ($opt->{suboffset}) {
-				$begin = subtitle_offset( $begin, $opt->{suboffset} );
-				$end = subtitle_offset( $end, $opt->{suboffset} );
-			}
-			decode_entities($sub);
-			# Write to file
-			print $fh "$count\n";
-			print $fh "$begin --> $end\n";
-			print $fh "$sub\n\n";
-			$count++;
-		}
-	}	
-	close $fh;
-
 	return 0;
 }
 
@@ -2091,6 +2015,15 @@ sub clean_pid {
 sub get_metadata {
 	return {};
 }
+
+
+
+# Download Subtitles, convert to srt(SubRip) format and apply time offset
+sub download_subtitles {
+	# return failed...
+	return 1;
+}
+
 
 
 # Retry the download of a programme
@@ -3382,7 +3315,7 @@ sub download {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
 		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-		main::download_stream_subtitles( $ua, $subfile, $version_pids{ $prog->{version} } );
+		$prog->download_subtitles( $ua, $subfile, $version_pids{ $prog->{version} } );
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
 	}
 
@@ -3411,6 +3344,82 @@ sub download {
 	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
 
 	return $return;
+}
+
+
+# BBC iPlayer TV
+# Download Subtitles, convert to srt(SubRip) format and apply time offset
+# Todo: get the subtitle streamurl before this...
+sub download_subtitles {
+	my $prog = shift;
+	my ( $ua, $file, $verpid ) = @_;
+	my $suburl;
+	my $subs;
+	main::logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt->{verbose};
+	$suburl = %{ Programme::bbciplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
+	# Return if we have no url
+	if (! $suburl) {
+		main::logger "\nINFO: Subtitles not available\n";
+		return 2;
+	}
+
+	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
+
+	# Open subs file
+	unlink($file);
+	my $fh = main::open_file_append($file);
+
+	# Download subs
+	$subs = main::request_url_retry($ua, $suburl, 2);
+	if (! $subs ) {
+		main::logger "\nERROR: Subtitle Download failed\n";
+		return 1;
+	} else {
+		main::logger "\nINFO: Downloaded Subtitles\n";
+	}
+
+	# Convert the format to srt
+	# SRT:
+	#1
+	#00:01:22,490 --> 00:01:26,494
+	#Next round!
+	#
+	#2
+	#00:01:33,710 --> 00:01:37,714
+	#Now that we've moved to paradise, there's nothing to eat.
+	#
+	
+	# TT:
+	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
+	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
+	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
+	my $count = 1;
+	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
+	for ( @lines ) {
+		my ( $begin, $end, $sub );
+		# Remove span elements
+		s|<\/?span.*?>||g;
+		# Remove <br /> elements
+		s|<br.*?>||g;
+		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
+		if ($begin && $end && $sub ) {
+			$begin =~ s/\./,/g;
+			$end =~ s/\./,/g;
+			if ($opt->{suboffset}) {
+				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
+				$end = main::subtitle_offset( $end, $opt->{suboffset} );
+			}
+			decode_entities($sub);
+			# Write to file
+			print $fh "$count\n";
+			print $fh "$begin --> $end\n";
+			print $fh "$sub\n\n";
+			$count++;
+		}
+	}	
+	close $fh;
+
+	return 0;
 }
 
 
@@ -5256,7 +5265,10 @@ sub download {
 		$prog->{$_} = $metadata{$_} if ! $prog->{$_};
 	}
 
-	%streamdata = %{ $prog->get_stream_data( undef, $mode) };
+	# Get all streams data because we might need the subtitles url also later
+	my %all_stream_data = $prog->get_stream_data( undef, 'all');
+	%streamdata = %{ $all_stream_data{$mode} } if $all_stream_data{$mode};
+	#%streamdata = %{ $prog->get_stream_data( undef, $mode) };
 
 	if ( ! $streamdata{streamurl} ) {
 		main::logger "WARNING: No programme stream URLs were found for $mode, skipping\n";
@@ -5273,27 +5285,143 @@ sub download {
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
 
-	## Get subtitles if they exist and are required 
-	## best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
-	#my $subfile_done;
-	#my $subfile;
-	#if ( $opt->{subtitles} ) {
-	#	$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
-	#	$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-	#	$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-	#	main::download_stream_subtitles( $ua, $subfile, $version_pids{ $prog->{version} } );
-	#	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
-	#}
+	# Get subtitles if they exist and are required 
+	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
+	my $subfile_done;
+	my $subfile;
+	if ( $opt->{subtitles} ) {
+		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
+		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
+		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
+		$prog->download_subtitles( $ua, $subfile, $all_stream_data{subtitles}{streamurl} );
+		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+	}
 
 	my $return;
 	# Do rtmp download
 	my $stream = Streamer::rtmp->new;
 	$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
 	
-	## Rename the subtitle file accordingly
-	#move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
+	# Rename the subtitle file accordingly
+	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
 
 	return $return;
+}
+
+
+
+# get Hulu subtitles stream then convert to srt
+sub download_subtitles {
+	my $prog = shift;
+	my ( $ua, $file, $suburl ) = @_;
+	my $subs;
+
+	# Return if we have no url
+	if (! $suburl) {
+		main::logger "\nINFO: Subtitles not available\n";
+		return 2;
+	}
+
+	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
+
+	# Open subs file
+	unlink($file);
+	my $fh = main::open_file_append($file);
+
+	# Download subs
+	$subs = main::request_url_retry($ua, $suburl, 2);
+	if (! $subs ) {
+		main::logger "\nERROR: Subtitle Download failed\n";
+		return 1;
+	} else {
+		main::logger "\nINFO: Downloaded Subtitles\n";
+	}
+
+	# Convert smil the format to srt
+	# SRT:
+	#1
+	#00:01:22,490 --> 00:01:26,494
+	#Next round!
+	#
+	#2
+	#00:01:33,710 --> 00:01:37,714
+	#Now that we've moved to paradise, there's nothing to eat.
+	#
+	# SMIL:
+	# timestamps are in milliseconds
+	#   <Sync Start="18664">
+	#      <P Class="ENCC">I got a call from an old friend,
+	#      <br />heard Scylla was</P>
+	#    </Sync>
+	#    <Sync Start="20864">
+	#      <P Class="ENCC">in play and he wants to know</P>
+	#    </Sync>
+	#    <Sync Start="21864">
+	#      <P Class="ENCC">if he can get in on it.
+	#      <br />I've set up a safe house</P>
+	#    </Sync>
+	#    <Sync Start="23598">
+	#      <P Class="ENCC">where you can hear him out.</P>
+	#    </Sync>
+	#    <Sync Start="25031">
+	#      <P Class="ENCC">Do you have a pen?
+	#      <br />Just a minute.</P>
+	#    </Sync>
+	#    <Sync Start="26431">
+	#      <P Class="ENCC">1917 Piermont.</P>
+	#    </Sync>
+	
+	# TT:
+	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
+	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
+	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
+
+	my $count = 1;
+	# flatten
+	$subs =~ s/[\r\n]//g;
+	# $subdata{<count>}{start|end|text} = 'value';
+	my %subdata; 
+	my @lines = split /<Sync\s/, $subs;
+	for ( @lines ) {
+		my ( $begin, $sub );
+		# Remove span elements
+		s|<\/?span.*?>| |g;
+		# Remove <br /> elements
+		s|<br.*?>| |g;
+		# Start="2284698"><P Class="ENCC">I won't have to drink it<br />in this crappy warehouse.</P></Sync>
+		( $begin, $sub ) = ( $1, $2 ) if m{.*Start="(.+?)".+<P.+?>(.+?)<\/p>.*?<\/Sync>}i;
+		decode_entities($sub);
+		if ($begin && $sub ) { ### !~ /^.amp.nbsp.$/ ) {
+			# Convert milliseconds into HH:MM:ss,mmm format
+			my $seconds = int( $begin / 1000.0 );
+			my $ms = $begin - ( $seconds * 1000.0 );
+			$begin = sprintf("%02d:%02d:%02d,%03d", (gmtime($seconds))[2,1,0], $ms );
+			decode_entities($sub);
+			# Remove any simple html elements
+			$sub =~ s|<\/?(\w)+>| |g;
+			# strip multispaces
+			$sub =~ s/\s+/ /g;
+			# Write to file
+			$subdata{$count}{start} = $begin;
+			$subdata{$count}{text} = $sub;
+			# set the end of the previous sub line
+			$subdata{$count-1}{end} = $begin;
+			$count++;
+		}
+	}	
+	$subdata{$count-1}{end} = $subdata{$count-1}{start};
+
+	# write each sub to file
+	for my $count ( sort {$a <=> $b} keys %subdata ) {
+		if ( $subdata{$count}{start} && $subdata{$count}{text} && $subdata{$count}{end} ) {
+			#main::logger "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
+			print $fh "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
+		}
+	}
+
+	close $fh;
+
+	return 0;
 }
 
 
@@ -5330,6 +5458,7 @@ sub get_metadata_url {
 	my $hpid = $1 if $html=~ m{<pid>(.+?)<\/pid>};
 	main::logger "INFO: HPID=$hpid\n" if $opt->{verbose};
 
+	$prog->{subtitle_url} = "http://www.hulu.com/transcripts/$hpid.smi";
 	$prog->{metadata_url} = "http://releasegeo.hulu.com/content.select?pid=$hpid&mbr=true&format=smil";
 	return $prog->{metadata_url};
 }
@@ -5468,6 +5597,12 @@ sub get_stream_data {
 		$data{$vmode} = $data{$old};
 		# Remove old key
 		delete $data{$old};
+	}
+
+	# This doesn't actually check if subtitles are available - just creates the URL for the smil file
+	if ( $prog->{subtitle_url} ) {
+		$data{subtitles}{type} = 'Subtitles stream';
+		$data{subtitles}{streamurl} = $prog->{subtitle_url};
 	}
 
 	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
