@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.34;
+my $version = 1.36;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -149,7 +149,7 @@ sub logger(@) {
 # Define general 'option names' => ( <advanced>, <option cmdline format>, <option help section>, <option help> )
 # If you want the option to be hidden then don't specify <option cmdline format>, use ''
 my %opt_format = (
-	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaudio,realaudio (default: iphone,flashaudio,realaudio)"],
+	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaac,flashaudio,realaudio (default: iphone,flashaac,flashaudio,realaudio)"],
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
@@ -1601,7 +1601,7 @@ sub check_download_history {
 	if ( $matchedpid ) {
 		chomp $name;
 		chomp $episode;
-		logger "INFO: $name - $episode ($pid) Already in download history ($historyfile)\n";
+		logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
 		close HIST;
 		return 1;
 
@@ -2114,11 +2114,11 @@ sub report {
 
 
 
-# Add id3 tag to MP3 files if required
+# Add id3 tag to MP3/AAC files if required
 sub tag_file {
 	my $prog = shift;
 
-	if ( $prog->{ext} eq 'mp3' ) {
+	if ( $prog->{ext} =~ /^(aac|mp3|mp4a)$/i ) {
 		# Return if file does not exist
 		return if ! -f $prog->{filename};
 		# Create ID3 tagging options for external tagger program (escape " for shell)
@@ -2624,7 +2624,7 @@ sub get_metadata {
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|realaudio|wma|subtitles
+# $media = all|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -2817,6 +2817,36 @@ sub get_stream_data {
 			$data{$prog_type}{type} = 'Mobile WMV DRM stream';
 		}
 		
+		# Audio rtmp aac
+		# <media kind="audio"
+		#        expires="2009-02-20T07:02:00+00:00"
+		#        type="audio/mp4"
+		#        encoding="aac"  >
+		#        <connection
+		#                priority="10"
+		#                kind="akamai"
+		#                server="cp48185.edgefcs.net"
+		#                identifier="mp4:radio3/RBN2_radio_3_-_friday_0100_b00hgdss_2009_02_13_07_50_29"
+		#                authString="dbEbUbHc5aBbNbodoadaXbYd1anboa1bOcd-bjLHLn-cCp-d0i_-HooFHnDoOCrHrwF"
+		#        />
+		# </media>
+		#app: ondemand?_fcs_vhost=cp48181.edgefcs.net&auth=daEasducLbidOancObacmc0amd6d7ana8c6-bjx.9v-cCp-JqlFHoEq.FBqGnxC&aifp=v001&slist=secure/radio1/RBN2_radio_1_-_wednesday_1000_b00g3xcj_2008_12_31_13_21_49
+		#swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7276
+		#tcUrl: rtmp://92.122.210.173:1935/ondemand?_fcs_vhost=cp48181.edgefcs.net&auth=daEasducLbidOancObacmc0amd6d7ana8c6-bjx.9v-cCp-JqlFHoEqFBqGnxC&aifp=v001&slist=secure/radio1/RBN2_radio_1_-_wednesday_1.000_b00g3xcj_2008_12_31_13_21_49
+		#pageUrl: http://www.bbc.co.uk/iplayer/episode/b00g3xp7/Annie_Mac_31_12_2008/
+		if ( $media =~ /^(flashaac|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mp4".+?encoding="aac".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashaac';
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
+			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			# Remove offending mp3: at the start of the identifier (don't remove in stream url)
+			$data{$prog_type}{identifier} =~ s/^mp4://;
+			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{type} = 'RTMP AAC stream';
+			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+		}
+
 		# Audio rtmp mp3
 		#<media kind="audio"
 		#        type="audio/mpeg"
@@ -3548,7 +3578,7 @@ sub modelist {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$modelist = 'iphone,real';
 		} else {
-			$modelist = 'iphone,flash,real';
+			$modelist = 'iphone,flashaac,flashaudio,real';
 		}
 	} else {
 		$modelist = $opt->{amode};
@@ -3601,9 +3631,9 @@ sub download {
 	if ( $mode =~ /^(real|ra)/ ) {
 		return $prog->download_realaudio( $ua, \%version_pids );
 
-	# FlashAudio
-	} elsif ( $mode =~ /^(flash|rtmp)/ ) {
-		return $prog->download_flashaudio( $ua, \%version_pids );
+	# FlashAudio/FlashAAC
+	} elsif ( $mode =~ /^flash/ ) {
+		return $prog->download_rtmp( $ua, $mode, \%version_pids );
 
 	# iPhone
 	} elsif ( $mode =~ /^(iphone|mp3)/ ) {
@@ -3703,9 +3733,10 @@ sub download_iphone {
 
 
 
-sub download_flashaudio {
+sub download_rtmp {
 	my $prog = shift;
 	my $ua = shift; 
+	my $mode = shift;
 	my %version_pids = %{@_[0]};
 	my %streamdata;
 	my $url_2;
@@ -3721,14 +3752,15 @@ sub download_flashaudio {
 		return 'next';
 	}
 
-	$prog->{ext} = 'mp3';
+	$prog->{ext} = 'mp3' if $mode eq 'flashaudio';
+	$prog->{ext} = 'aac' if $mode eq 'flashaac';
 	$prog->{ext} = 'flv' if $opt->{raw};
 
-	main::logger "INFO: Trying to get media stream metadata for flashaudio RTMP mode\n" if $opt->{verbose};
-	%streamdata = %{ $prog->get_stream_data( $version_pids{ $prog->{version} }, 'flashaudio') };
+	main::logger "INFO: Trying to get media stream metadata for $mode RTMP mode\n" if $opt->{verbose};
+	%streamdata = %{ $prog->get_stream_data( $version_pids{ $prog->{version} }, $mode) };
 	$url_2 = $streamdata{streamurl};
 	if ( ! $url_2 ) {
-		main::logger "\nWARNING: No flashaudio version available\n";
+		main::logger "\nWARNING: No $mode version available\n";
 		return 'next';
 	}
 
@@ -3738,9 +3770,9 @@ sub download_flashaudio {
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
 
-	# Do the RTMP flashaudio download
+	# Do the RTMP download
 	my $stream = Streamer::rtmp->new;
-	return $stream->get( $ua, $streamdata{streamurl}, $prog, 'flashaudio', $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+	return $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
 }
 
 
@@ -5324,9 +5356,6 @@ sub download_subtitles {
 
 	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
 
-	# Open subs file
-	unlink($file);
-	my $fh = main::open_file_append($file);
 
 	# Download subs
 	$subs = main::request_url_retry($ua, $suburl, 2);
@@ -5410,6 +5439,10 @@ sub download_subtitles {
 		}
 	}	
 	$subdata{$count-1}{end} = $subdata{$count-1}{start};
+
+	# Open subs file
+	unlink($file);
+	my $fh = main::open_file_append($file);
 
 	# write each sub to file
 	for my $count ( sort {$a <=> $b} keys %subdata ) {
@@ -5587,20 +5620,40 @@ sub get_stream_data {
 	}
 
 	# Sort and rename %data keys to flash(high|normal|low) based on bitrate
-	my @modename = qw( flashhigh flashnormal flashlow flashverylow );
-	my $count = 1;
+	#my @modename = qw( flashhigh flashnormal flashlow flashverylow );
+	#my $count = 1;
+	#for my $old ( reverse sort {$a <=> $b} keys %data ) {
+	#	# Get the next modename
+	#	my $vmode = shift @modename;
+	#	# Create new key
+	#	main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{debug};
+	#	$data{$vmode} = $data{$old};
+	#	# Remove old key
+	#	delete $data{$old};
+	#}
+	# Now do this on bitrate range mapping - works better if there is no 1Mbps version
 	for my $old ( reverse sort {$a <=> $b} keys %data ) {
+		my $vmode;
 		# Get the next modename
-		my $vmode = shift @modename;
-		# Create new key
-		main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{debug};
+		if ( $data{$old}{bitrate} > 800000 ) {
+			$vmode = 'flashhigh';
+		} elsif ( $data{$old}{bitrate} > 600000 ) {
+			$vmode = 'flashnormal';
+		} elsif ( $data{$old}{bitrate} > 400000 ) {
+			$vmode = 'flashlow';
+		} elsif ( $data{$old}{bitrate} > 200000 ) {
+			$vmode = 'flashverylow';
+		} else {
+			main::logger "INFO: unmatched mode '$old'\n";
+			next;
+		}
+		main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{verbose};
 		$data{$vmode} = $data{$old};
-		# Remove old key
 		delete $data{$old};
 	}
 
-	# This doesn't actually check if subtitles are available - just creates the URL for the smil file
-	if ( $prog->{subtitle_url} ) {
+	# Check if subtitles are available (broken with --pid) then creates the URL for the smil file
+	if ( $prog->{subtitle_url} ) { # && $prog->{guidance} =~ /captions|subtitles/i ) {
 		$data{subtitles}{type} = 'Subtitles stream';
 		$data{subtitles}{streamurl} = $prog->{subtitle_url};
 	}
@@ -6144,7 +6197,7 @@ sub get {
 		move($file_tmp, $prog->{filename}) if ! $opt->{stdout};
 		return 0;
 
-	# Convert flv to mp3
+	# Convert flv to mp3/aac
 	} elsif ( $mode eq 'flashaudio' ) {
 		# We could do id3 tagging here with ffmpeg but id3v2 does this later anyway
 		# This fails
@@ -6153,6 +6206,10 @@ sub get {
 		# $cmd = "$ffmpeg -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$prog->{filepart}\" 1>&2";
 		# At last this removes the flv container and dumps the mp3 stream! - mplayer dumps core but apparently succeeds
 		$cmd = "$mplayer $mplayer_opts -dumpaudio \"$file_tmp\" -dumpfile \"$prog->{filepart}\" 1>&2";
+	# Convert flv to aac/mp4a
+	} elsif ( $mode eq 'flashaac' ) {
+		# This works as long as we specify aac andnot mp4a
+		$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
 	# Convert video flv to mp4/avi if required
 	} else {
 		$cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
