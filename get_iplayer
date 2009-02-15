@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.36;
+my $version = 1.37;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -49,14 +49,12 @@ my $version = 1.36;
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 # * Get --info to show whether subtitles are available
 # * rtmpdump now reports correct exitcode - fix code to recognise this
-# * Get more than just the recent series' episodes off hulu
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
 # * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
-# * resuming a flashaudio download fails
 # * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
 # * Hulu indexing takes way too long
 #
@@ -120,6 +118,7 @@ my %prog_types = (
 
 
 # Final options instance
+
 my $opt = Options->new();
 # Command line options instance
 my $opt_cmdline = Options->new();
@@ -132,6 +131,9 @@ Pvr->add_opt_object($opt);
 Pvr->add_opt_file_object($opt_file);
 Pvr->add_opt_cmdline_object($opt_cmdline);
 Streamer->add_opt_object($opt);
+# Kludge: Create dummy Streamer and Programme instances (without a single instance, none of the bound options work)
+Programme->new();
+Streamer->new();
 
 # Print to STDERR/STDOUT if not quiet unless verbose or debug
 sub logger(@) {
@@ -166,7 +168,7 @@ my %opt_format = (
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	get		=> [ 0, "get|g", 'Download', '--get, -g', "Download matching programmes"],
 	help		=> [ 0, "help|h", 'Config', '--help, -h', "This help text"],
-	helplong	=> [ 0, "help-long|advanced|long-help|helplong", 'Config', '--helplong', "Advanced options help text"],
+	helplong	=> [ 0, "help-long|advanced|long-help|longhelp|lh|hl|helplong", 'Config', '--helplong', "Advanced options help text"],
 	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
@@ -191,7 +193,8 @@ my %opt_format = (
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Downloaded files into Programme name subdirectory"],
 	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In TV mode, download subtitles into srt/SubRip format if available"],
+	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In tv/hulu modes, download subtitles into srt/SubRip format if available"],
+	subsonly	=> [ 1, "subtitlessonly|subsonly", 'Download', '--subtitles-only', "Only download the subtitles, not the programme"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
 	test		=> [ 1, "test|t", 'Download', '--test, -t', "Test only - no download (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
@@ -482,6 +485,9 @@ sub find_matches {
 	$opt->{amode} = 'realaudio' if $opt->{realaudio};
 	$opt->{amode} = 'iphone' if $opt->{mp3audio};
 
+	# Set --subtitles if --subsonly is used
+	$opt->{subtitles} = 1 if $opt->{subsonly};
+
 	# Web proxy
 	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
 	logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
@@ -509,7 +515,7 @@ sub find_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if check_download_history( $pid );
+		return 0 if check_download_history( $pid ) && ! $opt->{subsonly};
 		
 		# Maybe we don't want to populate caches - this slows down --pid downloads ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -883,7 +889,7 @@ sub get_links {
 		while (<CACHE>) {
 			chomp();
 			# Get cache format if specified
-			if ( /^[\#](.+?\|){3,}/ ) {
+			if ( /^\#(.+?\|){3,}/ ) {
 				@cache_format_old = split /[\#\|]/;
 				shift @cache_format_old;
 				logger "INFO: Cache format from existing $prog_type cache file: ".(join ',', @cache_format_old)."\n" if $opt->{debug};
@@ -2036,7 +2042,7 @@ sub download_retry_loop {
 	my $count = 0;
 	my $retcode;
 
-	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} );
+	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} ) && ! $opt->{subsonly};
 
 	# Skip and warn if there is no pid
 	if ( ! $prog->{pid} ) {
@@ -2081,11 +2087,13 @@ sub download_retry_loop {
 			
 			# Success
 			} elsif ( $retcode eq '0' ) {
-				# Add to history, tag file, and run post download command
-				main::add_to_download_history( $prog );
-				$prog->tag_file;
-				$prog->run_user_command( $opt->{command} ) if $opt->{command};
-				$prog->report() if $opt->{pvr};
+				if ( ! $opt->{subsonly} ) {
+					# Add to history, tag file, and run post download command
+					main::add_to_download_history( $prog );
+					$prog->tag_file;
+					$prog->run_user_command( $opt->{command} ) if $opt->{command};
+					$prog->report() if $opt->{pvr};
+				}
 				return 0;
 
 			# Retry this mode
@@ -2118,7 +2126,7 @@ sub report {
 sub tag_file {
 	my $prog = shift;
 
-	if ( $prog->{ext} =~ /^(aac|mp3|mp4a)$/i ) {
+	if ( $prog->{ext} =~ /^(aac|mp3|m4a)$/i ) {
 		# Return if file does not exist
 		return if ! -f $prog->{filename};
 		# Create ID3 tagging options for external tagger program (escape " for shell)
@@ -2126,15 +2134,15 @@ sub tag_file {
 		$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
 		# Only tag if the required tool exists
 		if ( main::exists_in_path($id3v2) ) {
-			main::logger "INFO: id3 tagging MP3 file\n";
+			main::logger "INFO: id3 tagging $prog->{ext} file\n";
 			my $cmd = "$id3v2 --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." \"$prog->{filename}\" 1>&2";
 			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 			if ( system($cmd) ) {
-				main::logger "WARNING: Failed to tag MP3 file\n";
+				main::logger "WARNING: Failed to tag $prog->{ext} file\n";
 				return 2;
 			}
 		} else {
-			main::logger "WARNING: Cannot tag MP3 file\n" if $opt->{verbose};
+			main::logger "WARNING: Cannot tag $prog->{ext} file\n" if $opt->{verbose};
 		}
 	}
 }
@@ -2502,7 +2510,7 @@ sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
 	my $metadata;
-	my $entry3;
+	my $entry;
 	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
 
 	# This URL works for all prog types:
@@ -2517,11 +2525,11 @@ sub get_metadata {
 	# This URL works for tv/radio prog types:
 	# $prog_feed_url = http://feeds.bbc.co.uk/iplayer/episode/$pid
 
-	$entry3 = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
-	decode_entities($entry3);
-	main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry3\n\n" if $opt->{debug};
+	$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
+	decode_entities($entry);
+	main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
 	# Flatten
-	$entry3 =~ s|\n| |g;
+	$entry =~ s|\n| |g;
 
 	# Entry3 format
 	#<?xml version="1.0" encoding="utf-8"?>                                      
@@ -2581,17 +2589,17 @@ sub get_metadata {
 	#  </entry>
 	#</feed>
 		
-	$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
-	$available = $1 if $entry3 =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
-	$duration = $1 if $entry3 =~ m{duration=\"(\d+?)\"};
-	$prog_type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
-	$longdesc = $1 if $entry3 =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
-	$guidance = $1 if $entry3 =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
-	$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-	$thumbnail = $1 if $entry3 =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
+	$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
+	$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
+	$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
+	$longdesc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
+	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+	$thumbnail = $1 if $entry =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
 	
 	my @cats;
-	for (split /<media:category scheme=\".+?\"/, $entry3) {
+	for (split /<media:category scheme=\".+?\"/, $entry) {
 		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
 	}
 	$categories = join ',', @cats;
@@ -2600,24 +2608,23 @@ sub get_metadata {
 	$prog->get_version_pids( $ua );
 
 	# Fill in from cache if not got from metadata
-	my %metadata;
-	$metadata{pid}		= $prog->{pid};
-	$metadata{index}	= $prog->{index};
-	$metadata{name}		= $name || $prog->{name};
-	$metadata{episode}	= $episode || $prog->{episode};
-	$metadata{type}		= $prog_type || $prog->{type};
-	$metadata{duration}	= $duration || $prog->{duration};
-	$metadata{channel}	= $channel || $prog->{channel};
-	$metadata{available}	= $available || $prog->{available};
-	$metadata{expiry}	= $expiry || $prog->{expiry};
-	$metadata{versions}	= $versions || $prog->{versions};
-	$metadata{guidance}	= $guidance || $prog->{guidance};
-	$metadata{categories}	= $categories || $prog->{categories};
-	$metadata{desc}		= $longdesc || $prog->{desc};
-	$metadata{player}	= $player;
-	$metadata{thumbnail}	= $thumbnail || $prog->{thumbnail};
-
-	return %metadata;
+	return (
+		pid		=> $prog->{pid},
+		index		=> $prog->{index},
+		name		=> $name || $prog->{name},
+		episode		=> $episode || $prog->{episode},
+		type		=> $prog_type || $prog->{type},
+		duration	=> $duration || $prog->{duration},
+		channel		=> $channel || $prog->{channel},
+		available	=> $available || $prog->{available},
+		expiry		=> $expiry || $prog->{expiry},
+		versions	=> $versions || $prog->{versions},
+		guidance	=> $guidance || $prog->{guidance},
+		categories	=> $categories || $prog->{categories},
+		desc		=> $longdesc || $prog->{desc},
+		player		=> $player,
+		thumbnail	=> $thumbnail || $prog->{thumbnail},
+	);
 }
 
 
@@ -2839,7 +2846,7 @@ sub get_stream_data {
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
-			# Remove offending mp3: at the start of the identifier (don't remove in stream url)
+			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
 			$data{$prog_type}{identifier} =~ s/^mp4://;
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'RTMP AAC stream';
@@ -3008,24 +3015,24 @@ sub index_min { return 1 }
 sub index_max { return 9999 }
 sub channels {
 	return {
-		'bbc_one'			=> 'tv|BBC One',
-		'bbc_two'			=> 'tv|BBC Two',
-		'bbc_three'			=> 'tv|BBC Three',
-		'bbc_four'			=> 'tv|BBC Four',
-		'cbbc'				=> 'tv|CBBC',
-		'cbeebies'			=> 'tv|CBeebies',
-		'bbc_news24'			=> 'tv|BBC News 24',
-		'bbc_parliament'		=> 'tv|BBC Parliament',
-		'bbc_one_northern_ireland'	=> 'tv|BBC One Northern Ireland',
-		'bbc_one_scotland'		=> 'tv|BBC One Scotland',
-		'bbc_one_wales'			=> 'tv|BBC One Wales',
-		'bbc_webonly'			=> 'tv|BBC Web Only',
-		'bbc_hd'			=> 'tv|BBC HD',
-		'bbc_alba'			=> 'tv|BBC Alba',
-		'categories/news/tv'		=> 'tv|BBC News',
-		'categories/sport/tv'		=> 'tv|BBC Sport',
-	#	'categories/tv'			=> 'tv|All',
-		'categories/signed'		=> 'tv|Signed',
+		'bbc_one'			=> 'BBC One',
+		'bbc_two'			=> 'BBC Two',
+		'bbc_three'			=> 'BBC Three',
+		'bbc_four'			=> 'BBC Four',
+		'cbbc'				=> 'CBBC',
+		'cbeebies'			=> 'CBeebies',
+		'bbc_news24'			=> 'BBC News 24',
+		'bbc_parliament'		=> 'BBC Parliament',
+		'bbc_one_northern_ireland'	=> 'BBC One Northern Ireland',
+		'bbc_one_scotland'		=> 'BBC One Scotland',
+		'bbc_one_wales'			=> 'BBC One Wales',
+		'bbc_webonly'			=> 'BBC Web Only',
+		'bbc_hd'			=> 'BBC HD',
+		'bbc_alba'			=> 'BBC Alba',
+		'categories/news/tv'		=> 'BBC News',
+		'categories/sport/tv'		=> 'BBC Sport',
+	#	'categories/tv'			=> 'All',
+		'categories/signed'		=> 'Signed',
 	};
 }
 
@@ -3164,7 +3171,7 @@ sub get_links {
 		# Discard first element == header
 		shift @entries;
 
-		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $prog_type, $versions );
+		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $versions );
 		foreach my $entry (@entries) {
 
 			my $entry_flat = $entry;
@@ -3193,8 +3200,8 @@ sub get_links {
 				push @category, $1 if $line =~ m{<category\s+term="(.+?)"};
 			}
 
-			# Extract channel and type
-			($prog_type, $channel) = (split /\|/, $channels{$_})[0,1];
+			# Extract channel
+			$channel = $channels{$_};
 
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
@@ -3223,7 +3230,7 @@ sub get_links {
 			} else {
 				$versions = 'default';
 			}
-			
+
 			# build data structure
 			$progref->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
@@ -3349,25 +3356,27 @@ sub download {
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
 	}
 
-	my $return;
-	# Do rtmp download
-	if ( $mode =~ /^(rtmp|flash)/ ) {
-		my $stream = Streamer::rtmp->new;
-		$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+	my $return = 0;
+	if ( ! $opt->{subsonly} ) {
+		# Do rtmp download
+		if ( $mode =~ /^(rtmp|flash)/ ) {
+			my $stream = Streamer::rtmp->new;
+			$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
 
-	# Do the N95 h.264 download
-	} elsif ( $mode =~ /^n95/ ) {
-		my $stream = Streamer::3gp->new;
-		$return = $stream->get( $ua, $url_2, $prog, $mode );
+		# Do the N95 h.264 download
+		} elsif ( $mode =~ /^n95/ ) {
+			my $stream = Streamer::3gp->new;
+			$return = $stream->get( $ua, $url_2, $prog, $mode );
 
-	# Do the iPhone h.264 download
-	} else {
-		my $stream = Streamer::iphone->new();
-		# Disable proxy here if required
-		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-		$return = $stream->get( $ua, $url_2, $prog, 1 );
-		# Re-enable proxy here if required
-		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+		# Do the iPhone h.264 download
+		} else {
+			my $stream = Streamer::iphone->new();
+			# Disable proxy here if required
+			$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
+			$return = $stream->get( $ua, $url_2, $prog, 1 );
+			# Re-enable proxy here if required
+			$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+		}
 	}
 	
 	# Rename the subtitle file accordingly
@@ -3405,7 +3414,7 @@ sub download_subtitles {
 		main::logger "\nERROR: Subtitle Download failed\n";
 		return 1;
 	} else {
-		main::logger "\nINFO: Downloaded Subtitles\n";
+		main::logger "\nINFO: Downloaded Subtitles to $prog->{dir}/$prog->{fileprefix}.srt\n";
 	}
 
 	# Convert the format to srt
@@ -3482,64 +3491,64 @@ sub index_min { return 10001 }
 sub index_max { return 19999 };
 sub channels {
 	return {
-		'bbc_1xtra'				=> 'radio|BBC 1Xtra',
-		'bbc_radio_one'				=> 'radio|BBC Radio 1',
-		'bbc_radio_two'				=> 'radio|BBC Radio 2',
-		'bbc_radio_three'			=> 'radio|BBC Radio 3',
-		'bbc_radio_four'			=> 'radio|BBC Radio 4',
-		'bbc_radio_five_live'			=> 'radio|BBC Radio 5 live',
-		'bbc_radio_five_live_sports_extra'	=> 'radio|BBC 5 live Sports Extra',
-		'bbc_6music'				=> 'radio|BBC 6 Music',
-		'bbc_7'					=> 'radio|BBC 7',
-		'bbc_asian_network'			=> 'radio|BBC Asian Network',
-		'bbc_radio_foyle'			=> 'radio|BBC Radio Foyle',
-		'bbc_radio_scotland'			=> 'radio|BBC Radio Scotland',
-		'bbc_radio_nan_gaidheal'		=> 'radio|BBC Radio Nan Gaidheal',
-		'bbc_radio_ulster'			=> 'radio|BBC Radio Ulster',
-		'bbc_radio_wales'			=> 'radio|BBC Radio Wales',
-		'bbc_radio_cymru'			=> 'radio|BBC Radio Cymru',
-		'bbc_world_service'			=> 'radio|BBC World Service',
-#		'categories/radio'			=> 'radio|All',
-		'bbc_radio_cumbria'			=> 'radio|BBC Cumbria',
-		'bbc_radio_newcastle'			=> 'radio|BBC Newcastle',
-		'bbc_tees'				=> 'radio|BBC Tees',
-		'bbc_radio_lancashire'			=> 'radio|BBC Lancashire',
-		'bbc_radio_merseyside'			=> 'radio|BBC Merseyside',
-		'bbc_radio_manchester'			=> 'radio|BBC Manchester',
-		'bbc_radio_leeds'			=> 'radio|BBC Leeds',
-		'bbc_radio_sheffield'			=> 'radio|BBC Sheffield',
-		'bbc_radio_york'			=> 'radio|BBC York',
-		'bbc_radio_humberside'			=> 'radio|BBC Humberside',
-		'bbc_radio_lincolnshire'		=> 'radio|BBC Lincolnshire',
-		'bbc_radio_nottingham'			=> 'radio|BBC Nottingham',
-		'bbc_radio_leicester'			=> 'radio|BBC Leicester',
-		'bbc_radio_derby'			=> 'radio|BBC Derby',
-		'bbc_radio_stoke'			=> 'radio|BBC Stoke',
-		'bbc_radio_shropshire'			=> 'radio|BBC Shropshire',
-		'bbc_wm'				=> 'radio|BBC WM',
-		'bbc_radio_coventry_warwickshire'	=> 'radio|BBC Coventry &amp; Warwickshire',
-		'bbc_radio_hereford_worcester'		=> 'radio|BBC Hereford &amp; Worcester',
-		'bbc_radio_northampton'			=> 'radio|BBC Northampton',
-		'bbc_three_counties_radio'		=> 'radio|BBC Three Counties',
-		'bbc_radio_cambridge'			=> 'radio|BBC Cambridgeshire',
-		'bbc_radio_norfolk'			=> 'radio|BBC Norfolk',
-		'bbc_radio_suffolk'			=> 'radio|BBC Suffolk',
-		'bbc_radio_essex'			=> 'radio|BBC Essex',
-		'bbc_london'				=> 'radio|BBC London',
-		'bbc_radio_kent'			=> 'radio|BBC Kent',
-		'bbc_southern_counties_radio'		=> 'radio|BBC Southern Counties',
-		'bbc_radio_oxford'			=> 'radio|BBC Oxford',
-		'bbc_radio_berkshire'			=> 'radio|BBC Berkshire',
-		'bbc_radio_solent'			=> 'radio|BBC Solent',
-		'bbc_radio_gloucestershire'		=> 'radio|BBC Gloucestershire',
-		'bbc_radio_swindon'			=> 'radio|BBC Swindon',
-		'bbc_radio_wiltshire'			=> 'radio|BBC Wiltshire',
-		'bbc_radio_bristol'			=> 'radio|BBC Bristol',
-		'bbc_radio_somerset_sound'		=> 'radio|BBC Somerset',
-		'bbc_radio_devon'			=> 'radio|BBC Devon',
-		'bbc_radio_cornwall'			=> 'radio|BBC Cornwall',
-		'bbc_radio_guernsey'			=> 'radio|BBC Guernsey',
-		'bbc_radio_jersey'			=> 'radio|BBC Jersey',
+		'bbc_1xtra'				=> 'BBC 1Xtra',
+		'bbc_radio_one'				=> 'BBC Radio 1',
+		'bbc_radio_two'				=> 'BBC Radio 2',
+		'bbc_radio_three'			=> 'BBC Radio 3',
+		'bbc_radio_four'			=> 'BBC Radio 4',
+		'bbc_radio_five_live'			=> 'BBC Radio 5 live',
+		'bbc_radio_five_live_sports_extra'	=> 'BBC 5 live Sports Extra',
+		'bbc_6music'				=> 'BBC 6 Music',
+		'bbc_7'					=> 'BBC 7',
+		'bbc_asian_network'			=> 'BBC Asian Network',
+		'bbc_radio_foyle'			=> 'BBC Radio Foyle',
+		'bbc_radio_scotland'			=> 'BBC Radio Scotland',
+		'bbc_radio_nan_gaidheal'		=> 'BBC Radio Nan Gaidheal',
+		'bbc_radio_ulster'			=> 'BBC Radio Ulster',
+		'bbc_radio_wales'			=> 'BBC Radio Wales',
+		'bbc_radio_cymru'			=> 'BBC Radio Cymru',
+		'bbc_world_service'			=> 'BBC World Service',
+#		'categories/radio'			=> 'All',
+		'bbc_radio_cumbria'			=> 'BBC Cumbria',
+		'bbc_radio_newcastle'			=> 'BBC Newcastle',
+		'bbc_tees'				=> 'BBC Tees',
+		'bbc_radio_lancashire'			=> 'BBC Lancashire',
+		'bbc_radio_merseyside'			=> 'BBC Merseyside',
+		'bbc_radio_manchester'			=> 'BBC Manchester',
+		'bbc_radio_leeds'			=> 'BBC Leeds',
+		'bbc_radio_sheffield'			=> 'BBC Sheffield',
+		'bbc_radio_york'			=> 'BBC York',
+		'bbc_radio_humberside'			=> 'BBC Humberside',
+		'bbc_radio_lincolnshire'		=> 'BBC Lincolnshire',
+		'bbc_radio_nottingham'			=> 'BBC Nottingham',
+		'bbc_radio_leicester'			=> 'BBC Leicester',
+		'bbc_radio_derby'			=> 'BBC Derby',
+		'bbc_radio_stoke'			=> 'BBC Stoke',
+		'bbc_radio_shropshire'			=> 'BBC Shropshire',
+		'bbc_wm'				=> 'BBC WM',
+		'bbc_radio_coventry_warwickshire'	=> 'BBC Coventry &amp; Warwickshire',
+		'bbc_radio_hereford_worcester'		=> 'BBC Hereford &amp; Worcester',
+		'bbc_radio_northampton'			=> 'BBC Northampton',
+		'bbc_three_counties_radio'		=> 'BBC Three Counties',
+		'bbc_radio_cambridge'			=> 'BBC Cambridgeshire',
+		'bbc_radio_norfolk'			=> 'BBC Norfolk',
+		'bbc_radio_suffolk'			=> 'BBC Suffolk',
+		'bbc_radio_essex'			=> 'BBC Essex',
+		'bbc_london'				=> 'BBC London',
+		'bbc_radio_kent'			=> 'BBC Kent',
+		'bbc_southern_counties_radio'		=> 'BBC Southern Counties',
+		'bbc_radio_oxford'			=> 'BBC Oxford',
+		'bbc_radio_berkshire'			=> 'BBC Berkshire',
+		'bbc_radio_solent'			=> 'BBC Solent',
+		'bbc_radio_gloucestershire'		=> 'BBC Gloucestershire',
+		'bbc_radio_swindon'			=> 'BBC Swindon',
+		'bbc_radio_wiltshire'			=> 'BBC Wiltshire',
+		'bbc_radio_bristol'			=> 'BBC Bristol',
+		'bbc_radio_somerset_sound'		=> 'BBC Somerset',
+		'bbc_radio_devon'			=> 'BBC Devon',
+		'bbc_radio_cornwall'			=> 'BBC Cornwall',
+		'bbc_radio_guernsey'			=> 'BBC Guernsey',
+		'bbc_radio_jersey'			=> 'BBC Jersey',
 	};
 }
 
@@ -3626,6 +3635,9 @@ sub download {
 		$opt->{quiet} = 1;
 		return 'skip';
 	}
+
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
 
 	# RealAudio
 	if ( $mode =~ /^(real|ra)/ ) {
@@ -4023,7 +4035,7 @@ sub get_links {
 				'thumbnail'	=> $thumbnail,
 				'channel'	=> $channel,
 				'categories'	=> join(',', @category),
-				'type'		=> 'podcast',
+				'type'		=> $prog_type,
 				'web'		=> $web,
 			);
 		}
@@ -4040,6 +4052,9 @@ sub download {
 
 	# stream data not available
 	return 'skip' if $opt->{streaminfo};
+
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
 
 	# Determine the correct filename and extension for this download
 	my $filename_orig = $prog->{pid};
@@ -4087,14 +4102,14 @@ sub index_min { return 100001 }
 sub index_max { return 199999 }
 sub channels {
 	return {
-		'crime'					=> 'itv|TV Classics Crime Drama',
-		'perioddrama'				=> 'itv|TV Classics Period Drama',
-		'familydrama'				=> 'itv|TV Classics Family Drama',
-		'documentary'				=> 'itv|TV Classics Documentaries',
-		'comedy'				=> 'itv|TV Classics Comedy',
-		'kids'					=> 'itv|TV Classics Children\'s TV',
-		'soaps'					=> 'itv|TV Classics Soaps',
-		'/'					=> 'itv|TV Classics',
+		'crime'					=> 'TV Classics Crime Drama',
+		'perioddrama'				=> 'TV Classics Period Drama',
+		'familydrama'				=> 'TV Classics Family Drama',
+		'documentary'				=> 'TV Classics Documentaries',
+		'comedy'				=> 'TV Classics Comedy',
+		'kids'					=> 'TV Classics Children\'s TV',
+		'soaps'					=> 'TV Classics Soaps',
+		'/'					=> 'TV Classics',
 	};
 }
 
@@ -4136,92 +4151,91 @@ sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
 	my $metadata;
-	my $entry3;
+	my $entry;
 	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
 
 	# ITV Catch-Up metadata
-		my $prog_metadata_url_itv = 'http://www.itv.com/_app/Dynamic/CatchUpData.ashx?ViewType=5&Filter='; # +<pid>
-		$entry3 = main::request_url_retry($ua, "${prog_metadata_url_itv}$prog->{pid}", 3, '', '');
-		decode_entities($entry3);
-		main::logger "DEBUG: ${prog_metadata_url_itv}$prog->{pid}:\n$entry3\n\n" if $opt->{debug};
-		# Flatten
-		$entry3 =~ s|[\r\n]||g;
+	my $prog_metadata_url_itv = 'http://www.itv.com/_app/Dynamic/CatchUpData.ashx?ViewType=5&Filter='; # +<pid>
+	$entry = main::request_url_retry($ua, "${prog_metadata_url_itv}$prog->{pid}", 3, '', '');
+	decode_entities($entry);
+	main::logger "DEBUG: ${prog_metadata_url_itv}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+	# Flatten
+	$entry =~ s|[\r\n]||g;
 
-		#div class="itvCatchUpPlayerPanel" xmlns:ms="urn:schemas-microsoft-com:xslt">
-		#  <div class="cu-sponsor"><a href="http://sam.itv.com/accipiter/adclick/CID=000040d70000000000000000/acc_random=1/SITE=CLICKTRACK/AREAITVCATCHUP.VIDEO=CLICKTRACK..FREEVIEW.SPONSORBUTTON.OCT08/AAMSZ=120X60/pageid=1" title="ITV Player in assocation with Freeview"><img src="/_app/img/catchup/catchup_video_freeview2.jpg" alt="ITV Player is sponsored by Freeview"></a></div>
-		#  <h2>Doctor Zhivago</h2>
-		#  <p>Part 1 of 3. Dramatisation of the epic novel by Boris Pasternak. Growing up in Moscow with his uncle, aunt and cousin Tonya, Yury is captivated by a stunning young girl called ...</p>
-		#  <p class="timings"><span class="date">Mon 29 Dec 2008</span><br /><br /><span>
-		#
-		#        Duration: 1hr 30 min |
-		#                                Expires in
-		#                                <strong>22</strong>
-		#                                                days
-		#                                        </span></p>
-		#  <p><a href="http://www.itv.com/CatchUp/Programmes/default.html?ViewType=1&amp;Filter=2352">3 Episodes Available
-		#        </a><br></br></p>
-		#  <p class="channelLogo"><img src="/_app/img/logos/itv3-black.gif" alt="ITV 4"></p>
-		#  <div id="cu-2-0-VideoID">33105</div>
-		#  <div id="cu-2-0-DentonId">17</div>
-		#  <div id="cu-2-0-ItemMediaUrl">http://www.itv.com//img/480x272/Doctor-Zhivago-c47828f8-a1af-4cd2-b5a2-40c18eb7e63c.jpg</div>
-		#</div><script language="javascript" type="text/javascript" xmlns:ms="urn:schemas-microsoft-com:xslt">
-		#                        SetCatchUpModuleID(0);
-		#                </script>
-		#
+	#div class="itvCatchUpPlayerPanel" xmlns:ms="urn:schemas-microsoft-com:xslt">
+	#  <div class="cu-sponsor"><a href="http://sam.itv.com/accipiter/adclick/CID=000040d70000000000000000/acc_random=1/SITE=CLICKTRACK/AREAITVCATCHUP.VIDEO=CLICKTRACK..FREEVIEW.SPONSORBUTTON.OCT08/AAMSZ=120X60/pageid=1" title="ITV Player in assocation with Freeview"><img src="/_app/img/catchup/catchup_video_freeview2.jpg" alt="ITV Player is sponsored by Freeview"></a></div>
+	#  <h2>Doctor Zhivago</h2>
+	#  <p>Part 1 of 3. Dramatisation of the epic novel by Boris Pasternak. Growing up in Moscow with his uncle, aunt and cousin Tonya, Yury is captivated by a stunning young girl called ...</p>
+	#  <p class="timings"><span class="date">Mon 29 Dec 2008</span><br /><br /><span>
+	#
+	#        Duration: 1hr 30 min |
+	#                                Expires in
+	#                                <strong>22</strong>
+	#                                                days
+	#                                        </span></p>
+	#  <p><a href="http://www.itv.com/CatchUp/Programmes/default.html?ViewType=1&amp;Filter=2352">3 Episodes Available
+	#        </a><br></br></p>
+	#  <p class="channelLogo"><img src="/_app/img/logos/itv3-black.gif" alt="ITV 4"></p>
+	#  <div id="cu-2-0-VideoID">33105</div>
+	#  <div id="cu-2-0-DentonId">17</div>
+	#  <div id="cu-2-0-ItemMediaUrl">http://www.itv.com//img/480x272/Doctor-Zhivago-c47828f8-a1af-4cd2-b5a2-40c18eb7e63c.jpg</div>
+	#</div><script language="javascript" type="text/javascript" xmlns:ms="urn:schemas-microsoft-com:xslt">
+	#                        SetCatchUpModuleID(0);
+	#                </script>
+	#
 
-		#<div class="itvCatchUpPlayerPanel" xmlns:ms="urn:schemas-microsoft-com:xslt">
-		#  <div class="cu-sponsor"><a href="http://sam.itv.com/accipiter/adclick/CID=000040d70000000000000000/acc_random=1/SITE=CLICKTRACK/AREAITVCATCHUP.VIDEO=CLICKTRACK..FREEVIEW.SPONSORBUTTON.OCT08/AAMSZ=120X60/pageid=1" title="ITV Player in assocation with Freeview"><img src="/_app/img/catchup/catchup_video_freeview2.jpg" alt="ITV Player is sponsored by Freeview"></a></div>
-		#  <h2>Affinity</h2>
-		#  <p>Victorian period drama with a murderous, pyschological twist.</p>
-		#  <p class="timings"><span class="date">Sun 28 Dec 2008</span><br /><br /><span>
-		#
-		#        Duration: 2hr 00 min |
-		#                                Expires in
-		#                                <strong>21</strong>
-		#                                                days
-		#                                        </span></p>
-		#  <p class="channelLogo"><img src="/_app/img/logos/itv1-black.gif" alt="ITV 2"></p>
-		#  <div class="guidance">
-		#    <div><strong>ITV Video Guidance</strong><p>This programme contains strong language and scenes of a sexual nature                                                                                                                           </p>
-		#    </div>
-		#  </div>
-		#  <div id="cu-2-0-VideoID">33076</div>
-		#  <div id="cu-2-0-DentonId">11</div>
-		#  <div id="cu-2-0-ItemMediaUrl">http://www.itv.com//img/480x272/Affinity-9624033b-6e05-4784-85f7-114be0559b24.jpg</div>
-		#</div><script language="javascript" type="text/javascript" xmlns:ms="urn:schemas-microsoft-com:xslt">
-		#                        SetCatchUpModuleID(0);
-		#                </script>
-		#
+	#<div class="itvCatchUpPlayerPanel" xmlns:ms="urn:schemas-microsoft-com:xslt">
+	#  <div class="cu-sponsor"><a href="http://sam.itv.com/accipiter/adclick/CID=000040d70000000000000000/acc_random=1/SITE=CLICKTRACK/AREAITVCATCHUP.VIDEO=CLICKTRACK..FREEVIEW.SPONSORBUTTON.OCT08/AAMSZ=120X60/pageid=1" title="ITV Player in assocation with Freeview"><img src="/_app/img/catchup/catchup_video_freeview2.jpg" alt="ITV Player is sponsored by Freeview"></a></div>
+	#  <h2>Affinity</h2>
+	#  <p>Victorian period drama with a murderous, pyschological twist.</p>
+	#  <p class="timings"><span class="date">Sun 28 Dec 2008</span><br /><br /><span>
+	#
+	#        Duration: 2hr 00 min |
+	#                                Expires in
+	#                                <strong>21</strong>
+	#                                                days
+	#                                        </span></p>
+	#  <p class="channelLogo"><img src="/_app/img/logos/itv1-black.gif" alt="ITV 2"></p>
+	#  <div class="guidance">
+	#    <div><strong>ITV Video Guidance</strong><p>This programme contains strong language and scenes of a sexual nature                                                                                                                           </p>
+	#    </div>
+	#  </div>
+	#  <div id="cu-2-0-VideoID">33076</div>
+	#  <div id="cu-2-0-DentonId">11</div>
+	#  <div id="cu-2-0-ItemMediaUrl">http://www.itv.com//img/480x272/Affinity-9624033b-6e05-4784-85f7-114be0559b24.jpg</div>
+	#</div><script language="javascript" type="text/javascript" xmlns:ms="urn:schemas-microsoft-com:xslt">
+	#                        SetCatchUpModuleID(0);
+	#                </script>
+	#
 
-		#$expiry = $1 if $entry3 =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
-		$available = $1 if $entry3 =~ m{<p\s+class="timings">\s*<span\s+class="date">(.+?)<\/span>};
-		$duration = $1 if $entry3 =~ m{Duration:\s*(.+?)\s+\|};
-		#$prog_type = $1 if $entry3 =~ m{medium=\"(\w+?)\"};
-		$longdesc = $1 if $entry3 =~ m{<p>(.+?)<\/p>}i;
-		$guidance = $1 if $entry3 =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
-		#$player = $1 if $entry3 =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-		$thumbnail = $1 if $entry3 =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
-		$name = $1 if $entry3 =~ m{<h2>(.+?)</h2>};
+	#$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	$available = $1 if $entry =~ m{<p\s+class="timings">\s*<span\s+class="date">(.+?)<\/span>};
+	$duration = $1 if $entry =~ m{Duration:\s*(.+?)\s+\|};
+	#$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
+	$longdesc = $1 if $entry =~ m{<p>(.+?)<\/p>}i;
+	$guidance = $1 if $entry =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
+	#$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+	$thumbnail = $1 if $entry =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
+	$name = $1 if $entry =~ m{<h2>(.+?)</h2>};
 
 	# Fill in from cache if not got from metadata
-	my %metadata;
-	$metadata{pid}		= $prog->{pid};
-	$metadata{index}	= $prog->{index};
-	$metadata{name}		= $name || $prog->{name};
-	$metadata{episode}	= $episode || $prog->{episode};
-	$metadata{type}		= $prog_type || $prog->{type};
-	$metadata{duration}	= $duration || $prog->{duration};
-	$metadata{channel}	= $channel || $prog->{channel};
-	$metadata{available}	= $available || $prog->{available};
-	$metadata{expiry}	= $expiry || $prog->{expiry};
-	$metadata{versions}	= $versions || $prog->{versions};
-	$metadata{guidance}	= $guidance || $prog->{guidance};
-	$metadata{categories}	= $categories || $prog->{categories};
-	$metadata{desc}		= $longdesc || $prog->{desc};
-	$metadata{player}	= $player;
-	$metadata{thumbnail}	= $thumbnail || $prog->{thumbnail};
-
-	return %metadata;
+	return (
+		pid		=> $prog->{pid},
+		index		=> $prog->{index},
+		name		=> $name || $prog->{name},
+		episode		=> $episode || $prog->{episode},
+		type		=> $prog_type || $prog->{type},
+		duration	=> $duration || $prog->{duration},
+		channel		=> $channel || $prog->{channel},
+		available	=> $available || $prog->{available},
+		expiry		=> $expiry || $prog->{expiry},
+		versions	=> $versions || $prog->{versions},
+		guidance	=> $guidance || $prog->{guidance},
+		categories	=> $categories || $prog->{categories},
+		desc		=> $longdesc || $prog->{desc},
+		player		=> $player,
+		thumbnail	=> $thumbnail || $prog->{thumbnail},
+	);
 }
 
 
@@ -4312,10 +4326,10 @@ sub get_links {
 					'name'		=> $name,
 					'versions'	=> 'default',
 					'episode'	=> $episode,
-					'channel'	=> (split /\|/, $channels{$channel})[1],
+					'channel'	=> $channels{$channel},
 					'guidance'	=> $guidance,
-					'categories'	=> (split /\|/, $channels{$channel})[1],
-					'type'		=> 'itv',
+					'categories'	=> $channels{$channel},
+					'type'		=> $prog_type,
 					'web'		=> $url,
 				);
 			}
@@ -4543,6 +4557,9 @@ sub download {
 		return 'skip';
 	}
 
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
+
 	# Check for mplayer (required)
 	if (! main::exists_in_path($mplayer)) {
 		main::logger "ERROR: Required $mplayer does not exist, skipping\n";
@@ -4636,102 +4653,23 @@ sub channels {
 	return {
 		# From http://www.hulu.com/channels (# <no of pages>, each page has 20 episodes)
 		# Takes about 25 mins to get 9000 progs
-		'Action and Adventure'		=> 'hulu|Action and Adventure', # 89
-		'Animation and Cartoons'	=> 'hulu|Animation and Cartoons', # 52
-		'Comedy'			=> 'hulu|Comedy', # 144 pages
-		'Drama'				=> 'hulu|Drama', # 125
-		'Family'			=> 'hulu|Family', # 23
-		'Food and Leisure'		=> 'hulu|Food and Leisure', # 39
-		'Home and Garden'		=> 'hulu|Home and Garden', # 8
-		'Horror and Suspense'		=> 'hulu|Horror and Suspense', #63
-		'Music'				=> 'hulu|Music', # 2
-		'News and Information'		=> 'hulu|News and Information', # 19
-		'Other'				=> 'hulu|Other', # 0
-		'Reality and Game Shows'	=> 'hulu|Reality and Game Shows', # 33
-		'Science Fiction'		=> 'hulu|Science Fiction', # 56
-		'Sports'			=> 'hulu|Sports', # 27
-		'Talk and Interview'		=> 'hulu|Talk and Interview', # 10
-		'Videogames'			=> 'hulu|Videogames', # 0
-		'Web'				=> 'hulu|Web', # 48
-		#"15+gigs"				=> "hulu|15 Gigs",
-		#"60frames"				=> "hulu|60Frames",
-		#"abc+studios"				=> "hulu|ABC Studios",
-		#"alli"					=> "hulu|Alli",
-		#"attentionspan.tv"			=> "hulu|AttentionSpan.TV",
-		#"australian+food+tv"			=> "hulu|Australian Food TV",
-		#"bravo"					=> "hulu|Bravo",
-		#"c+spot"				=> "hulu|C Spot",
-		#"chiller"				=> "hulu|Chiller",
-		#"clubwpt"				=> "hulu|ClubWPT",
-		#"cnbc"					=> "hulu|CNBC",
-		#"comedy+central"			=> "hulu|Comedy Central",
-		#"crackle"				=> "hulu|Crackle",
-		#"crime+&amp;+investigation+network"	=> "hulu|Crime &amp; Investigation Network",
-		#"davis+panzer"				=> "hulu|Davis Panzer",
-		#"diy+network"				=> "hulu|DIY Network",
-		#"e!+entertainment"			=> "hulu|E! Entertainment",
-		#"entertainment+rights"			=> "hulu|Entertainment Rights",
-		#"entertainment+studios"			=> "hulu|Entertainment Studios",
-		#"eqal"					=> "hulu|Eqal",
-		#"fearnet"				=> "hulu|FEARnet",
-		#"fine+living"				=> "hulu|Fine Living",
-		#"fox+business"				=> "hulu|Fox Business",
-		#"fox+movie+channel"			=> "hulu|Fox Movie Channel",
-		#"fox+news"				=> "hulu|Fox News",
-		#"fox+reality"				=> "hulu|Fox Reality",
-		#"fox+sports"				=> "hulu|Fox Sports",
-		#"fox+television+classics"		=> "hulu|Fox Television Classics",
-		#"fox+television+studios"		=> "hulu|Fox Television Studios",
-		#"fox"					=> "hulu|FOX",
-		#"fuel+tv"				=> "hulu|FUEL TV",
-		#"funimation"				=> "hulu|FUNimation",
-		#"fx"					=> "hulu|FX",
-		#"generate"				=> "hulu|Generate",
-		#"gong"					=> "hulu|Gong",
-		#"hgtv"					=> "hulu|HGTV",
-		#"historic+films"			=> "hulu|Historic Films",
-		#"hype"					=> "hulu|Hype",
-		#"image+entertainment"			=> "hulu|Image Entertainment",
-		#"independent+comedy+network"		=> "hulu|Independent Comedy Network",
-		#"itsallinyourhands.tv"			=> "hulu|itsallinyourhands.tv",
-		#"jackass+world"				=> "hulu|Jackass World",
-		#"japanese+humor+owarai"			=> "hulu|Japanese Humor Owarai",
-		#"lionsgate"				=> "hulu|Lionsgate",
-		#"local+food+sustainable+network"	=> "hulu|Local Food Sustainable Network",
-		#"mgm"					=> "hulu|MGM",
-		#"military+history"			=> "hulu|Military History",
-		#"the+minisode+network"			=> "hulu|The Minisode Network",
-		#"mojo"					=> "hulu|Mojo",
-		#"mrc+studios"				=> "hulu|MRC Studios",
-		#"mynetworktv"				=> "hulu|MyNetworkTV",
-		#"nbc+sports"				=> "hulu|NBC Sports",
-		#"nbc+universal+television+distribution"	=> "hulu|NBC Universal Television Distribution",
-		#"nbc"					=> "hulu|NBC",
-		#"nhl"					=> "hulu|NHL",
-		#"oxygen"				=> "hulu|Oxygen",
-		#"pbs"					=> "hulu|PBS",
-		#"program+partners"			=> "hulu|Program Partners",
-		#"sci+fi"				=> "hulu|SCI FI",
-		#"shout!+factory"			=> "hulu|Shout! Factory",
-		#"sleuth"				=> "hulu|Sleuth",
-		#"sony"					=> "hulu|Sony",
-		#"speed+racer+enterprises"		=> "hulu|Speed Racer Enterprises",
-		#"speed"					=> "hulu|SPEED",
-		#"stage+9"				=> "hulu|Stage 9",
-		#"strike.tv"				=> "hulu|Strike.TV",
-		#"sundance+channel"			=> "hulu|Sundance Channel",
-		#"telenext+media"			=> "hulu|Telenext Media",
-		#"tvg+interactive+horseracing"		=> "hulu|TVG Interactive Horseracing",
-		#"tvguide"				=> "hulu|TVGuide",
-		#"ums"					=> "hulu|UMS",
-		#"usa"					=> "hulu|USA",
-		#"viz+media"				=> "hulu|VIZ Media",
-		#"vogue.tv"				=> "hulu|Vogue.TV",
-		#"vuguru"				=> "hulu|Vuguru",
-		#"warner+bros."				=> "hulu|Warner Bros.",
-		#"the+wine+library"			=> "hulu|The Wine Library",
-		#"wwe"					=> "hulu|WWE",
-		#"the+zalman+king+company"		=> "hulu|The Zalman King Company",
+		'Action and Adventure'		=> 'Action and Adventure', # 89
+		'Animation and Cartoons'	=> 'Animation and Cartoons', # 52
+		'Comedy'			=> 'Comedy', # 144 pages
+		'Drama'				=> 'Drama', # 125
+		'Family'			=> 'Family', # 23
+		'Food and Leisure'		=> 'Food and Leisure', # 39
+		'Home and Garden'		=> 'Home and Garden', # 8
+		'Horror and Suspense'		=> 'Horror and Suspense', #63
+		'Music'				=> 'Music', # 2
+		'News and Information'		=> 'News and Information', # 19
+		'Other'				=> 'Other', # 0
+		'Reality and Game Shows'	=> 'Reality and Game Shows', # 33
+		'Science Fiction'		=> 'Science Fiction', # 56
+		'Sports'			=> 'Sports', # 27
+		'Talk and Interview'		=> 'Talk and Interview', # 10
+		'Videogames'			=> 'Videogames', # 0
+		'Web'				=> 'Web', # 48
 	};
 }
 
@@ -4739,7 +4677,10 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		outputhulu	=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
+		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
+		hulupages		=> [ 1, "hulupages|hulu-pages=s", 'Config', '--hulu-pages <pages>', "How many pages to index from Hulu for each channel (20 programmes per page). Default: 10"],
+		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity"],
+		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
 	};
 }
 
@@ -4854,24 +4795,23 @@ sub get_metadata {
 	$duration = $1 if $xml =~ m{dur="(.+?)\d\d\dms"};
 
 	# Fill in from cache if not got from metadata
-	my %metadata;
-	$metadata{pid}		= $prog->{pid};
-	$metadata{index}	= $prog->{index};
-	$metadata{name}		= $name || $prog->{name};
-	$metadata{episode}	= $episode || $prog->{episode};
-	$metadata{type}		= $prog_type || $prog->{type};
-	$metadata{duration}	= $duration || $prog->{duration};
-	$metadata{channel}	= $channel || $prog->{channel};
-	$metadata{available}	= $available || $prog->{available};
-	$metadata{expiry}	= $expiry || $prog->{expiry};
-	$metadata{versions}	= $versions || $prog->{versions};
-	$metadata{guidance}	= $guidance || $prog->{guidance};
-	$metadata{categories}	= $categories || $prog->{categories};
-	$metadata{desc}		= $longdesc || $prog->{desc};
-	$metadata{player}	= $player;
-	$metadata{thumbnail}	= $thumbnail || $prog->{thumbnail};
-
-	return %metadata;
+	return (
+		pid		=> $prog->{pid},
+		index		=> $prog->{index},
+		name		=> $name || $prog->{name},
+		episode		=> $episode || $prog->{episode},
+		type		=> $prog_type || $prog->{type},
+		duration	=> $duration || $prog->{duration},
+		channel		=> $channel || $prog->{channel},
+		available	=> $available || $prog->{available},
+		expiry		=> $expiry || $prog->{expiry},
+		versions	=> $versions || $prog->{versions},
+		guidance	=> $guidance || $prog->{guidance},
+		categories	=> $categories || $prog->{categories},
+		desc		=> $longdesc || $prog->{desc},
+		player		=> $player,
+		thumbnail	=> $thumbnail || $prog->{thumbnail},
+	);
 }
 
 
@@ -4887,15 +4827,19 @@ sub get_links {
 	
 	# Maximum number of pages per channel we scrape to get episodes (20 episdoes per page)
 	# 10 results in 2000+ episodes ou of approx 9000
-	my $hulu_max_pages_per_channel = 10;
+	my $hulu_max_pages_per_channel = $opt->{hulupages} || 10;
 
-	# What to sort the pages by: pub_date?, popularity, release, rating
-	my $hulu_channel_page_sort = 'popularity';
+	# What to sort the pages by: popularity, release, rating
+	my $hulu_channel_page_sort = $opt->{hulusort} || 'popularity';
 
 	# What hulu prog types to get: episodes, feature_film, tv, clips, film_trailers, film_clips, movies
 	# The two useful ones are episodes (9000+ full length TV episodes) and feature_film (200+ full-length movies)
-	my @htypes = qw(feature_film episodes);
-	
+	my @htypes;
+	if ( $opt->{hulutypes} ) {
+		@htypes = split /,/, $opt->{hulutypes};
+	} else {
+		@htypes = qw(feature_film episodes);
+	}
 
 	main::logger "INFO: Getting hulu Index Feeds\n";
 	# Setup User agent
@@ -5064,7 +5008,7 @@ sub get_links {
 						'categories'	=> $channel,
 						'desc'		=> $description,
 						'duration'	=> $duration,
-						'type'		=> 'hulu',
+						'type'		=> $prog_type,
 						'web'		=> $web,
 						'thumbnail'	=> $thumbnail,
 					);
@@ -5084,179 +5028,6 @@ sub get_links {
 	return 0;
 }
 
-
-# This version only gets most recent series and results in about 5000 programmes
-# Does not get films
-# Usage: Programme::hulu->get_links( \%prog, 'hulu' );
-# Uses: %{ channels() }, \%prog
-sub get_links_old {
-	shift; # ignore obj ref
-	my $progref = shift;
-	my $prog_type = shift;
-	my %channels = %{ channels() };
-
-	my $xml;
-	my $res;
-	my %series_pid;
-	my %episode_pid;
-	main::logger "INFO: Getting hulu Index Feeds\n";
-	# Setup User agent
-	my $ua = main::create_ua('desktop');
-
-	# Extract channels names from http://www.hulu.com/browse/network/episodes
-
-	# Search URLs:
-	#http://www.hulu.com/videos/search?sort_by=relevance&company=history&query=* (query must be at end)
-	# Search for all full TV episodes on Fox => 1829 results: 
-	# channels: 15+gigs fox sci-fi 
-	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=episode
-	# Limit by show name, insert: ?showname=doogie+howser%2C+m.d.&
-
-	# Search for all full feature films on <channel>
-	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=feature_film
-
-	# For full-movie pages http://www.hulu.com/browse/alphabetical/feature_film
-	# just search for 
-	# add_to_playlist?video_id=(\d+?)'
-
-	# Use category-based channels like 'Comedy' using type: episodes|feature_film
-	# http://www.hulu.com/channels/<channel>?kind=videos&page=2&sort=popularity&type=episodes
-
-	# Method
-	# http://www.hulu.com/browse/alphabetical/episode (gets url for each prog series) =>
-	#  =>
-	
-	# Download index feed
-	my $hulu_index_shows_url = 'http://www.hulu.com/browse/alphabetical/episode';
-
-	# E.g.
-	# <li class="full-episode-icon" onclick="window.location='http://www.hulu.com/the-facts-of-life';">
-	# <a href="http://www.hulu.com/the-facts-of-life" class="show-thumb info_hover">The Facts Of Life</a></li>
-	my $html = main::request_url_retry($ua, $hulu_index_shows_url, 3, '.', "WARNING: Failed to get hulu episode index from site\n");
-
-	# flatten
-	$html =~ s/[\n\r]//g;
-
-	for my $s_line ( (split /<li\s+class="full-episode-icon"/, $html) ) {
-	
-		# Get page, search for relevent lines which contain series links and loop through each matching line
-		my ($url, $name);
-		# Extract series url + series description
-		($url, $name) = ($1, $2) if $s_line =~ m{<a\s+href="\s*(http.+?)\s*"\s+class="show-thumb info_hover">(.+?)<\/a>};
-		chomp($url);
-		chomp($name);
-		next if ! ($url && $name);
-		main::logger "DEBUG: Series: '$name' URL: '$url'\n" if $opt->{verbose};
-
-		# look for:
-		# http://www.hulu.com/feed/show/<showid>/episodes
-		# Another feed?
-		# GET "http://r.hulu.com/videos?show_id=<showid>&sort=episode_number&order=asc&video_type=episode&items_per_page=20&page=3&unexpired_only=1"
-		# Extract the feed url
-		my $feed_url = "http://www.hulu.com/feed/show/$1/episodes" if main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get ${name} index from site\n") =~ m{http://www.hulu.com/feed/show/(\d+?)/episodes};
-		# Get the feed xml data
-		my $xml = main::request_url_retry($ua, $feed_url, 3, '.', "WARNING: Failed to get XML feed for ${name} index from site\n");
-		# flatten xml
-		$xml =~ s/[\n\r]//g;
-
-		# e.g.
-		#   <channel>
-		#    <atom:link type="application/rss+xml" rel="self"
-		#    href="http://www.hulu.com/feed/show/24/episodes" />
-		#    <title>Hulu - Episodes for Doogie Howser, M.D.</title>
-		#    <link>http://www.hulu.com/feed</link>
-		#    <description>Hulu - Episodes for Doogie Howser, M.D.</description>
-		#    <pubDate>Thu, 05 Feb 2009 21:24:28 -0000</pubDate>
-		#
-		#    <item>
-		#      <title>Doogie Howser, M.D.: What Makes Doogie Run (s4 | e22)</title>
-		#      <guid isPermaLink="true">
-		#      http://www.hulu.com/watch/30185/doogie-howser-md-what-makes-doogie-run#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fshow%2F24%2Fepisodes</guid>
-		#      <link>
-		#      http://www.hulu.com/watch/30185/doogie-howser-md-what-makes-doogie-run#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fshow%2F24%2Fepisodes</link>
-		#	<description>
-		#        <![CDATA[<a href="http://www.hulu.com/watch/30185/doogie-howser-md-what-makes-doogie-\
-		#		run#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fshow%2F24%2Fepisodes"><img
-		#		 src="http://thumbnails.hulu.com/9/842/31469_145x80_generated__TzOk71X7tE6DEvgMzoB1Fg.jpg" 
-		#		align="right" hspace="10" vspace="10" width="145" height="80" border="0" />
-		#		</a><p>Vinnie convinces Doogie to enroll in an acting class.  Enlightened by the experience, 
-		#		Doogie decides he has been on the fast tract too long, and decides to resign from Eastman and travel abroad.</p>
-		#		<p>Added: July 28, 2008<br/>Air date: March 24, 1993<br/>Duration: 23:00<br/>Rating: 4.6 / 5.0<br/></p>]]>
-		#	</description>		
-		#      <pubDate>Tue, 01 Jul 2008 00:00:00 -0000</pubDate>
-		#      <media:thumbnail width="145"
-		#      url="http://thumbnails.hulu.com/9/842/31469_145x80_generated__TzOk71X7tE6DEvgMzoB1Fg.jpg"
-		#      height="80" />
-		#      <media:credit>Twentieth Century Fox Television</media:credit>
-		#      <media:player url="http://www.hulu.com/embed/xovA2hGgoYQjuAfB0lAWYg"
-		#      width="512" height="296" />
-		#    </item>
-
-		for my $entry ( split /<item>/, $xml ) {
-			decode_entities($entry);
-
-			my ($guidance, $pid, $episode, $web, $thumbnail, $channel, $duration, $description );
-
-			main::logger "DEBUG: Match Line: $entry\n" if $opt->{debug};
-
-			# Extract episode data
-			$episode = $1 if $entry =~ m{<title>.+?:\s+(.+?)<\/title>}i;
-			# Remove any '|'s
-			$episode =~ s/\|/_/g;
-
-			# Extract pid
-			$pid = $1 if $entry =~ m{<link>\s*http://www.hulu.com/watch/(\d+)/};
-
-			# Construct web url
-			$web = 'http://www.hulu.com/watch/'.$pid;
-
-			# Prepend 'hulu-' to pid to keep as a GUID
-			$pid = 'hulu-'.$pid;
-
-			# Description
-			$description = $1 if $entry =~ m{<description>.+?<p>\s*(.+?)\s*<\/p>}i;
-
-			# Duration
-			$duration = $1 if $entry =~ m{>Duration:\s*([\d:]+?)\s*<}i;
-
-
-			# Extract thumbnail
-			$thumbnail = $1 if $entry =~ m{<media:thumbnail.+?url="(http.+?)"}i;
-
-			# Extract channel
-			$channel = $1 if $entry =~ m{<media:credit>\s*(.+?)\s*<}i;
-
-			# skip if no data
-			next if ! ($pid && $episode);
-			main::logger "DEBUG: PID: '$pid' Episode: '$episode'\n" if $opt->{debug};
-
-			# Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-				next;
-			}
-
-			# build data structure
-			$progref->{$pid} = Programme::itv->new(
-				'pid'		=> $pid,
-				'name'		=> $name,
-				'versions'	=> 'default',
-				'episode'	=> $episode,
-				'channel'	=> $channel,
-				'guidance'	=> $guidance,
-				'categories'	=> '',
-				'desc'		=> $description,
-				'duration'	=> $duration,
-				'type'		=> 'hulu',
-				'web'		=> $web,
-				'thumbnail'	=> $thumbnail,
-			);
-		}
-	}
-
-	main::logger "\n";
-	return 0;
-}
 
 
 # Usage: download (<prog>, <ua>)
@@ -5329,11 +5100,13 @@ sub download {
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
 	}
 
-	my $return;
-	# Do rtmp download
-	my $stream = Streamer::rtmp->new;
-	$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
-	
+	my $return = 0;
+	if ( ! $opt->{subsonly} ) {
+		# Do rtmp download
+		my $stream = Streamer::rtmp->new;
+		$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+	}
+
 	# Rename the subtitle file accordingly
 	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
 
@@ -6441,7 +6214,7 @@ use Time::Local;
 use URI;
 
 
-# get hulu prog info
+# get ITV prog info
 sub get_url {
 	my ( undef, $ua, $pid ) = ( @_ );
 
