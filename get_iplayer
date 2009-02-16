@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.37;
+my $version = 1.38;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2183,6 +2183,7 @@ sub substitute {
 	
 # Determine the correct filenames for a download
 # Sets the various filenames and creates appropriate directories
+# Gets more programme metadata if the prog name does not exist
 #
 # Uses:
 #	$opt->{fileprefix}
@@ -2199,8 +2200,17 @@ sub substitute {
 # Returns 0 on success, 1 on failure (i.e. if the <filename> already exists)
 #
 sub generate_filenames {
-	my ($prog, $format, $multipart) = (@_);
-	
+	my ($prog, $ua, $format, $multipart) = (@_);
+
+	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
+	if ( ! $prog->{name} ) {
+		my %metadata = $prog->get_metadata($ua);
+		for ( keys %metadata ) {
+			main::logger "DEBUG: Metadata: $_=$metadata{$_} was=$prog->{$_}\n" if $opt->{debug};
+			$prog->{$_} = $metadata{$_} if ! $prog->{$_};
+		}
+	}
+
 	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
 
 	$prog->{fileprefix} = $opt->{fileprefix} || $format;
@@ -2209,7 +2219,9 @@ sub generate_filenames {
 	$prog->{longname} = $prog->{name} if ! $prog->{longname};
 
 	# substitute fields and sanitize $prog->{fileprefix}
+	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
+	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	# Spaces
 	$prog->{fileprefix} =~ s/\s+/_/g if ! $opt->{whitespace};
@@ -2525,6 +2537,8 @@ sub get_metadata {
 	# This URL works for tv/radio prog types:
 	# $prog_feed_url = http://feeds.bbc.co.uk/iplayer/episode/$pid
 
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
+
 	$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
 	decode_entities($entry);
 	main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
@@ -2597,7 +2611,9 @@ sub get_metadata {
 	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
 	$thumbnail = $1 if $entry =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
-	
+	($name, $episode) = ($1, $2) if $entry =~ m{<title\s+type="text">(.+?):\s+(.+?)<};
+	$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
+
 	my @cats;
 	for (split /<media:category scheme=\".+?\"/, $entry) {
 		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
@@ -2676,6 +2692,63 @@ sub get_stream_data {
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 		}
 			
+		# Learning Zone 400 clips, (e.g. pid = 1309) 
+		# All Clips Index: http://www.bbc.co.uk/apps/ifl/learningzone/clips/queryengine?config=results_within&pagesize=1000
+		# GET "http://www.bbc.co.uk/apps/ifl/learningzone/clips/showrecord?Id=1309" | grep emp.setPlaylist
+                #        emp.setPlaylist("http://www.bbc.co.uk/learningzone/clips/clips/s_engl/bb/s_engl_ec_01591_4x3_bb.xml");
+		# GET http://www.bbc.co.uk/learningzone/clips/clips/s_engl/bb/s_engl_ec_01591_4x3_bb.xml
+		# <?xml version="1.0" encoding="UTF-8"?>
+		# <playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
+		#  <id>tag:bbc.co.uk,2008:learning_zone_broadband:s_engl_ec_01591_4x3_bb:playlist</id>
+		#  <updated>2008-11-07T12:00:00+01:00</updated>
+		#  <title>No Love Lost</title>
+		#  <summary>D H Lawrence appears on a spoof of the Lily Savage TV show Love Lines but with the real Lily. He has had a date with &#39;Michele Roberts&#39;. Lily is scathing, Lawrence is boorish and Michele is rather innocent. Michele&#39;s &#39;Middle class hero&#39; is read over a scene of Lawrence taking his motorbike to pieces, ignoring her. Lawrence&#39;s &#39;Desire&#39; is spoken by the character to camera.</summary>
+		#  <link rel="alternate" href="http://www.bbc.co.uk/learningzone/clips/1309.html"/>
+		#  <link rel="holding" href="http://www.bbc.co.uk/learningzone/clips/images/previews/s_engl/s_engl_ec_01591_4x3.jpg" width="512" height="288" type="application/octet-stream"/>
+		#  <rights>
+		#    <right name="embed">false</right>
+		#  </rights>
+		#  <item kind="programme" duration="249" publisher="learning_zone_broadband" identifier="s_engl_ec_01591_4x3_bb">
+		#  <id>tag:bbc.co.uk,2008:learning_zone_broadband:s_engl_ec_01591_4x3_bb</id>
+		#    <media kind="video" width="384" height="288" type="video/x-flv" >
+		#      <connection kind="akamai" identifier="secure/s_engl/s_engl_ec_01591_4x3_bb" server="cp54782.edgefcs.net" tokenIssuer="akamaiUk"/>
+		#    </media>
+		#  </item>
+		# </playlist>
+		#
+		# Get metadata and auth : GET /mediaselector/4/gtis/?server=cp54782.edgefcs.net&identifier=secure/s_engl/s_engl_ec_01591_4x3_bb&kind=akamai&application=ondemand&cb=90723
+		# <?xml version="1.0" encoding="utf-8"?>
+		# <stream version="0.1" >
+		#   <server>cp54782.edgefcs.net</server>
+		#   <identifier>secure/s_engl/s_engl_ec_01591_4x3_bb</identifier>
+		#   <token>dbEaNbFctbtdBbCaFaFaEbeauaLdZagc4c0-bjMxDK-cCp-d0i_-KomFJoFqMCvEowD</token>
+		#   <kind>akamai</kind>
+		#   <application>ondemand</application>
+		# </stream>
+		#
+		# Wireshark:
+		# app...ondemand?_fcs_vhost=cp54782.edgefcs.net&auth=dbEaNbFctbtdBbCaFaFaEbeauaLdZagc4c0-bjMxDK-cCp-d0i_-Kom.FJoFqMCvEowD&aifp=v001&slist=secure/s_engl/s_engl_ec_01591_4x3_bb..
+		# flashVer..LNX 10,0,15,3..
+		# swfUrl..2http://www.bbc.co.uk/emp/9.player.swf?revision=7938..
+		# tcUrl...rtmp://86.53.218.30:1935/ondemand?_fcs_vhost=cp54782.edgefcs.net&auth=dbEaNbFctbtdBbCaFaFaEbea.uaLdZagc4c0-bjMxDK-cCp-d0i_-KomFJoFqMCvEowD&aifp=v001&slist=secure/s_engl/s_engl_ec_01591_4x3_bb..
+		#if ( $media =~ /^(flashlearningzone|all)$/ ) {
+		#	my ($page, $url, $xml);
+		#	$prog_type = 'flashlearningzone';
+		#	$data{$prog_type}{type} = 'Flash RTMP Learning Zone normal quality stream';
+		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+		#	$page = GET "http://www.bbc.co.uk/apps/ifl/learningzone/clips/showrecord?Id=$pid";
+		#	$url = $1 if $page =~ m{emp.setPlaylist("(http://www.bbc.co.uk/learningzone.+?)")};
+		#	$xml = GET $url;
+		#	( $data{$prog_type}{identifier}, $data{$prog_type}{server} ) = ( $1, $2 ) if $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?kind="akamai"\s+identifier="(.+?)"\s+?server="(.+?)"} );
+		#	$xml = GET "http://www.bbc.co.uk/mediaselector/4/gtis/?server=$data{$prog_type}{server}&identifier=$data{$prog_type}{identifier}&kind=akamai&application=ondemand&cb=";
+		#	$data{$prog_type}{authstring} = $1 if $xml =~ m{<token>(.+?)<\/token>};
+		#	$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+		#	$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+		#	$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+		#	$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+		#}
+
+
 		# h.264 normal quality stream
 		#	<media kind="video"
 		#        width="640"
@@ -3335,7 +3408,7 @@ sub download {
 	}
 
 	# Determine the correct filenames for this download
-	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
+	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
@@ -3692,7 +3765,7 @@ sub download_realaudio {
 	}
 
 	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( "<longname> - <episode> <pid>" );
+	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> <pid>" );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -3723,7 +3796,7 @@ sub download_iphone {
 	}
 
 	# Determine the correct filenames for this download
-	if ( $prog->generate_filenames( "<longname> - <episode> <pid> <version>" ) ) {
+	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
@@ -3777,7 +3850,7 @@ sub download_rtmp {
 	}
 
 	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( "<longname> - <episode> <pid> <version>" );
+	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -4063,7 +4136,7 @@ sub download {
 	$prog->{ext} =~ s|^.*\.(\w+)$|$1|g;
 
 	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( "<longname> - <episode> $filename_orig" );
+	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
 
 	# Skip from here if we are only testing downloads
 	return 1 if $opt->{test};
@@ -4153,6 +4226,8 @@ sub get_metadata {
 	my $metadata;
 	my $entry;
 	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
 
 	# ITV Catch-Up metadata
 	my $prog_metadata_url_itv = 'http://www.itv.com/_app/Dynamic/CatchUpData.ashx?ViewType=5&Filter='; # +<pid>
@@ -4576,14 +4651,8 @@ sub download {
 		return 'skip';
 	}
 	
-	# Get and set more meta data - Set the %prog values from metadata if they aren't already set
-	my %metadata = $prog->get_metadata($ua);
-	for ( qw/ name episode available duration thumbnail desc guidance / ) {
-		$prog->{$_} = $metadata{$_} if ! $prog->{$_};
-	}
-
 	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( "<name> <episode> <pid>", $#url_list );
+	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>", $#url_list );
 
 	# Skip from here if we are only testing downloads
 	return 'skip' if $opt->{test};
@@ -4736,6 +4805,8 @@ sub get_metadata {
 	my $ua = shift;
 	my $metadata;
 	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
 
 	my $url = $prog->get_metadata_url( $ua );
 
@@ -5062,12 +5133,6 @@ sub download {
 		$prog->{ext} = 'avi';
 	}
 
-	# Get and set more meta data - Set the %prog values from metadata if they aren't already set
-	my %metadata = $prog->get_metadata($ua);
-	for ( qw/ name episode available duration thumbnail desc guidance / ) {
-		$prog->{$_} = $metadata{$_} if ! $prog->{$_};
-	}
-
 	# Get all streams data because we might need the subtitles url also later
 	my %all_stream_data = $prog->get_stream_data( undef, 'all');
 	%streamdata = %{ $all_stream_data{$mode} } if $all_stream_data{$mode};
@@ -5079,7 +5144,7 @@ sub download {
 	}
 
 	# Determine the correct filenames for this download
-	if ( $prog->generate_filenames( "<name> - <episode> <pid> $mode" ) ) {
+	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> $mode" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
@@ -5598,7 +5663,7 @@ sub get {
 		# Get mdat_length_chars from downloaded block
 		my $mdat_length_chars = substr($buffer, $mdat_start, 4);
 		my $mdat_length = bytestring_to_int($mdat_length_chars);
-		main::logger "DEBUG: mdat_length = ".get_hex($mdat_length_chars)." = $mdat_length\n" if $opt->{debug};
+		main::logger "DEBUG: mdat_length = ".main::get_hex($mdat_length_chars)." = $mdat_length\n" if $opt->{debug};
 		main::logger "DEBUG: mdat_length (decimal) = $mdat_length\n" if $opt->{debug};
 		# The MOOV box starts one byte after MDAT box ends
 		$moov_start = $mdat_start + $mdat_length;
@@ -6738,7 +6803,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for (grep /^(pid|comment|amode|vmode|long|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|exclude|listformat|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for (grep /^(pid|comment|amode|vmode|long|fileprefix|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|exclude|listformat|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
