@@ -2545,7 +2545,7 @@ sub get_metadata {
 	# Flatten
 	$entry =~ s|\n| |g;
 
-	# Entry3 format
+	# Entry format
 	#<?xml version="1.0" encoding="utf-8"?>                                      
 	#<?xml-stylesheet href="http://www.bbc.co.uk/iplayer/style/rss.css" type="text/css"?>
 	#<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-GB">
@@ -2611,7 +2611,8 @@ sub get_metadata {
 	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
 	$thumbnail = $1 if $entry =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
-	($name, $episode) = ($1, $2) if $entry =~ m{<title\s+type="text">(.+?):\s+(.+?)<};
+	$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
+	$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
 	$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
 	my @cats;
