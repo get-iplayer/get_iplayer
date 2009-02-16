@@ -713,7 +713,7 @@ sub list_progs {
 		$names{ $this->{name} } = 1;
 		if ( $opt->{info} ) {
 			my %metadata = $this->get_metadata( $ua );
-			display_metadata( \%metadata, qw/ pid index type duration channel available expiry versions guidance categories desc player / );
+			display_metadata( \%metadata, sort keys %metadata );
 		}
 	}
 	logger "\n";
@@ -2629,7 +2629,7 @@ sub get_metadata {
 		pid		=> $prog->{pid},
 		index		=> $prog->{index},
 		name		=> $name || $prog->{name},
-		episode		=> $episode || $prog->{episode},
+		episode		=> $episode || $prog->{episode} || $prog->{name},
 		type		=> $prog_type || $prog->{type},
 		duration	=> $duration || $prog->{duration},
 		channel		=> $channel || $prog->{channel},
