@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.38;
+my $version = 1.39;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1327,13 +1327,13 @@ sub create_xml {
 		logger "ERROR: Couldn't open xml file $xmlfile for writing\n";
 		return 1;
 	}
-	print XML '<?xml version="1.0" ?>';
-	print XML '<freevo>' if $opt->{fxd};
-	print XML "\n<MediaStreams>\n" if $opt->{mythtv};
+	print XML "<?xml version=\"1.0\" ?>\n";
+	print XML "<freevo>\n" if $opt->{fxd};
+	print XML "<MediaStreams>\n" if $opt->{mythtv};
 
 	if ( $opt->{xmlnames} ) {
 		# containers sorted by prog names
-		print XML "\t<container title=\"iplayer by Programme Name\">\n" if $opt->{fxd};
+		print XML "\t<container title=\"Programmes by Name\">\n" if $opt->{fxd};
 		my %program_index;
 		my %program_count;
 		# create hash of programme_name -> index
@@ -1342,30 +1342,38 @@ sub create_xml {
 			$program_count{ $this->{name} }++;
 		}
 		for my $name ( sort keys %program_index ) {
-			my @count = grep /^$name$/, keys %program_index;
-			print XML "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
+			print XML "\t\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
 			print XML "\t<Streams>\n" if $opt->{mythtv};
+			print XML "\t\t<Name>".encode_entities( $name )."</Name>\n" if $opt->{mythtv};
 			for my $this (@_) {
 				my $pid = $this->{pid};
 				# loop through and find matches for each progname
-				if ( $this->{name} =~ /^$name$/ ) {
+				if ( $this->{name} eq $name ) {
 					my $episode = encode_entities( $this->{episode} );
 					my $desc = encode_entities( $this->{desc} );
-					my $title = "${episode} ($this->{available})";
-					print XML "<movie title=\"${title}\">
-						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
-						<info><description>${desc}</description></info>
-					</movie>\n" if $opt->{fxd};
-					print XML "<Stream>
-						<Name>\"${title}\"</Name>
-						<url>${pid}.mov</url>
-						<Subtitle></Subtitle>
-						<Synopsis>${desc}</Synopsis>
-						<StreamImage>$this->{thumbnail}</StreamImage>
-					</Stream>\n" if $opt->{mythtv};
+					my $title = "${episode}";
+					$title .= " ($this->{available})" if $this->{available} !~ /^(unknown|)$/i;
+					if ( $opt->{fxd} ) {
+						print XML "\t\t\t<movie title=\"${title}\">\n";
+						print XML "\t\t\t\t<video>\n";
+						print XML "\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n";
+						print XML "\t\t\t\t</video>\n";
+						print XML "\t\t\t\t<info>\n";
+						print XML "\t\t\t\t\t<description>${desc}</description>\n";
+						print XML "\t\t\t\t</info>\n";
+						print XML "\t\t\t</movie>\n";
+					} elsif ( $opt->{mythtv} ) {
+						print XML "\t\t<Stream>\n";
+						print XML "\t\t\t<Name>${title}</Name>\n";
+						print XML "\t\t\t<url>${pid}.mov</url>\n";
+						print XML "\t\t\t<Subtitle></Subtitle>\n";
+						print XML "\t\t\t<Synopsis>${desc}</Synopsis>\n";
+						print XML "\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n";
+						print XML "\t\t</Stream>\n";
+					}
 				}
 			}			
-			print XML "\t</container>\n" if $opt->{fxd};
+			print XML "\t\t</container>\n" if $opt->{fxd};
 			print XML "\t</Streams>\n" if $opt->{mythtv};
 		}
 		print XML "\t</container>\n" if $opt->{fxd};
@@ -1374,7 +1382,7 @@ sub create_xml {
 
 	if ( $opt->{xmlchannels} ) {
 		# containers for prog names sorted by channel
-		print XML "\t<container title=\"iplayer by Channel\">\n" if $opt->{fxd};
+		print XML "\t<container title=\"Programmes by Channel\">\n" if $opt->{fxd};
 		my %program_index;
 		my %program_count;
 		my %channels;
@@ -1382,42 +1390,58 @@ sub create_xml {
 	        for my $this (@_) {
 	        	$program_index{ $this->{name} } = $_;
 			$program_count{ $this->{name} }++;
-			$channels{ $this->{channel} } .= '|'.$this->{name}.'|';
+			push @{ $channels{ $this->{channel} } }, $this->{name};
 		}
 		for my $channel ( sort keys %channels ) {
-			print XML "\t<container title=\"".encode_entities( $channel )."\">\n" if $opt->{fxd};
-			print XML "\t<Feed>
-				\t<Name>".encode_entities( $channel )."</Name>
-				\t<Provider>BBC</Provider>\n
-				\t<Streams>\n" if $opt->{mythtv};
+			print XML "\t\t<container title=\"".encode_entities( $channel )."\">\n" if $opt->{fxd};
+			print XML
+				"\t<Feed>\n".
+				"\t\t<Name>".encode_entities( $channel )."</Name>\n".
+				"\t\t<Provider>BBC</Provider>\n".
+				"\t\t<Streams>\n" if $opt->{mythtv};
 			for my $name ( sort keys %program_index ) {
 				# Do we have any of this prog $name on this $channel?
-				if ( $channels{$channel} =~ /\|$name\|/ ) {
-					my @count = grep /^$name$/, keys %program_index;
-					print XML "\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
+				my $match;
+				for ( @{ $channels{$channel} } ) {
+					$match = 1 if $_ eq $name;
+				}
+				if ( $match ) {
+					print XML "\t\t\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
 					#print XML "\t\t<Stream>\n" if $opt->{mythtv};
 					for my $this (@_) {
 						# loop through and find matches for each progname for this channel
 						my $pid = $this->{pid};
-						if ( $this->{channel} =~ /^$channel$/ && $this->{name} =~ /^$name$/ ) {
+						if ( $this->{channel} eq $channel && $this->{name} eq $name ) {
 							my $episode = encode_entities( $this->{episode} );
 							my $desc = encode_entities( $this->{desc} );
 							my $title = "${episode} ($this->{available})";
-							print XML "<movie title=\"${title}\">
-								<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
-								<info><description>${desc}</description></info>
-							</movie>\n" if $opt->{fxd};
-							print XML "\t\t<Stream>\n" if $opt->{mythtv};
-							print XML "\t\t<Name>".encode_entities( $name )."</Name>\n\t\t<Url>${pid}.mov</Url>\n\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n\t\t<Subtitle>${episode}</Subtitle>\n\t\t<Synopsis>${desc}</Synopsis>\n" if $opt->{mythtv};
-							print XML "\t</Stream>\n" if $opt->{mythtv};
+							if ( $opt->{fxd} ) {
+								print XML
+									"\t\t\t\t<movie title=\"${title}\">\n".
+									"\t\t\t\t\t<video>\n".
+									"\t\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n".
+									"\t\t\t\t\t</video>\n".
+									"\t\t\t\t\t<info>\n".
+									"\t\t\t\t\t\t<description>${desc}</description>\n".
+									"\t\t\t\t\t</info>\n".
+									"\t\t\t\t</movie>\n";
+							} elsif ( $opt->{mythtv} ) {
+								print XML 
+									"\t\t\t<Stream>\n".
+									"\t\t\t\t<Name>".encode_entities( $name )."</Name>\n".
+									"\t\t\t\t<Url>${pid}.mov</Url>\n".
+									"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
+									"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
+									"\t\t\t\t<Synopsis>${desc}</Synopsis>\n".
+									"\t\t\t</Stream>\n";
+							}
 						}
 					}
-					print XML "\t</container>\n" if $opt->{fxd};
-					#print XML "\t</Stream>\n" if $opt->{mythtv};
+					print XML "\t\t\t</container>\n" if $opt->{fxd};
 				}
 			}
-			print XML "\t</container>\n" if $opt->{fxd};
-			print XML "\t</Streams>\n\t</Feed>\n" if $opt->{mythtv};
+			print XML "\t\t</container>\n" if $opt->{fxd};
+			print XML "\t\t</Streams>\n\t</Feed>\n" if $opt->{mythtv};
 		}
 		print XML "\t</container>\n" if $opt->{fxd};
 	}
@@ -1437,9 +1461,9 @@ sub create_xml {
 			'W-Z' => '[wxyz]',
 			'0-9' => '[\d]',
 		);
-		print XML "\t<container title=\"iplayer A-Z\">\n";
+		print XML "\t<container title=\"Programmes A-Z\">\n";
 		for my $folder (sort keys %table) {
-			print XML "\t<container title=\"iplayer $folder\">\n";
+			print XML "\t\t<container title=\"$folder\">\n";
 			for my $this (@_) {
 				my $pid = $this->{pid};
 				my $name = encode_entities( $this->{name} );
@@ -1448,18 +1472,29 @@ sub create_xml {
 				my $title = "${name} - ${episode} ($this->{available})";
 				my $regex = $table{$folder};
 				if ( $name =~ /^$regex/i ) {
-					print XML "<movie title=\"${title}\">
-						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
-						<info><description>${desc}</description></info>
-					</movie>\n" if $opt->{fxd};
-					print XML "<Stream title=\"${title}\">
-						<video><url id=\"p1\">${pid}.mov<playlist/></url></video>
-						<info><description>${desc}</description></info>
-						<StreamImage>$this->{thumbnail}</StreamImage>
-					</Stream>\n" if $opt->{mythtv};
+					if ( $opt->{fxd} ) {
+						print XML
+							"\t\t\t<movie title=\"${title}\">\n".
+							"\t\t\t\t<video>\n".
+							"\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n".
+							"\t\t\t\t</video>\n".
+							"\t\t\t\t<info>\n".
+							"\t\t\t\t\t<description>${desc}</description>\n".
+							"\t\t\t\t</info>\n".
+							"\t\t\t</movie>\n";
+					} elsif ( $opt->{mythtv} ) {
+						print XML
+							"\t\t\t<Stream>\n".
+							"\t\t\t\t<Name>${title}</Name>\n".
+							"\t\t\t\t<Url>${pid}.mov</Url>\n".
+							"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
+							"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
+							"\t\t\t\t<Synopsis>${desc}</Synopsis>\n".
+							"\t\t\t</Stream>\n";
+					}
 				}
 			}
-			print XML "\t</container>\n";
+			print XML "\t\t</container>\n";
 		}
 		print XML "\t</container>\n";
 	}
@@ -5575,13 +5610,17 @@ use URI;
 
 # Generic
 # Get streaming iphone URL
+# More iphone stream data http://www.bbc.co.uk/json/stream/b0067vmx/iplayer_streaming_http_mp4?r=585330738351 HTTP/1.1
+# Capabilities based on IP address: http://www.bbc.co.uk/mobile/iplayer-mgw/damp/proxytodemi?ip=111.222.333.444
+# Category codes list: http://www.bbc.co.uk/mobile/iwiplayer/category_codes.php
 sub get_url {
 	shift;
 	my $ua = shift;
 	my $pid = shift;
 
-	# Create url with appended 6 digit random number
-	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?'.(sprintf "%06.0f", 1000000*rand(0)).'%20';
+	# Create url with appended 12 digit random number /mediaselector/3/auth/iplayer_streaming_http_mp4/b0067vmx?r=101477348958
+	# http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4
+	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?r='.(sprintf "%012.0f", 999999999999*rand(0) );
 	main::logger "INFO: media stream download URL = $url_1\n" if $opt->{verbose};
 		
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
