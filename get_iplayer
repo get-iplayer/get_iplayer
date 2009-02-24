@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.39;
+my $version = 1.40;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -198,6 +198,8 @@ my %opt_format = (
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
 	test		=> [ 1, "test|t", 'Download', '--test, -t', "Test only - no download (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
+	thumb		=> [ 1, "thumb", 'Download', '--thumb', "Download Thumbnail image if available"],
+	thumbext	=> [ 1, "thumbext=s", 'Download', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio,tv,podcast,itv,hulu,all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
@@ -2126,6 +2128,7 @@ sub download_retry_loop {
 					# Add to history, tag file, and run post download command
 					main::add_to_download_history( $prog );
 					$prog->tag_file;
+					$prog->download_thumbnail if $opt->{thumb};
 					$prog->run_user_command( $opt->{command} ) if $opt->{command};
 					$prog->report() if $opt->{pvr};
 				}
@@ -2425,6 +2428,43 @@ sub get_available_time_string {
 	return "$time[7] days $time[2] hours ago";
 }
 
+
+sub download_thumbnail {
+	my $prog = shift;
+	my $file;
+	my $ext;
+	my $image;
+		
+	if ( $prog->{thumbnail} =~ /^http/i ) {
+		main::logger "\nINFO: Getting thumbnail from $prog->{thumbnail}\n" if $opt->{verbose};
+		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
+		$ext = $opt->{thumbext} || $ext;
+		$file = "$prog->{dir}/$prog->{fileprefix}.${ext}";
+
+		# Download subs
+		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
+		if (! $image ) {
+			main::logger "\nERROR: Thumbnail Download failed\n";
+			return 1;
+		} else {
+			main::logger "\nINFO: Downloaded Thumbnail\n";
+		}
+
+	} else {
+		# Return if we have no url
+		main::logger "\nINFO: Thumbnail not available\n" if $opt->{verbose};
+		return 2;
+	}
+
+	# Write to file
+	unlink($file);
+	my $fh = main::open_file_append($file);
+	binmode $fh;
+	print $fh $image;
+	close $fh;
+
+	return 0;
+}
 
 
 ################### TV class #################
@@ -4786,6 +4826,7 @@ sub opt_format {
 		hulupages		=> [ 1, "hulupages|hulu-pages=s", 'Config', '--hulu-pages <pages>', "How many pages to index from Hulu for each channel (20 programmes per page). Default: 10"],
 		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity"],
 		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
+		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return the decrypted hulu pid given the encrypted one as the first argument"],
 	};
 }
 
@@ -5351,7 +5392,7 @@ sub get_metadata_url {
 	# download/stream method.....
 	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
 	# GET http://r.hulu.com/videos?content_id=$cid
-	# $pid = ^^^->{video}->{pid}
+	# $pid = decrypt( ^^^->{video}->{pid} )
 	# $xml = GET http://releasegeo.hulu.com/content.select?pid=$pid&mbr=true&format=smil
 
 	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
@@ -5364,6 +5405,15 @@ sub get_metadata_url {
 	main::logger "DEBUG: http://r.hulu.com/videos?content_id=$cid :\n\n$html\n\n" if $opt->{debug};
 	my $hpid = $1 if $html=~ m{<pid>(.+?)<\/pid>};
 	main::logger "INFO: HPID=$hpid\n" if $opt->{verbose};
+
+	# Workaround to get new hulu decrypted pid using a programme defined in --hulu-decrypt-pid
+	if ( $opt->{huludecpid} ) {
+		my $cmd = "$opt->{huludecpid} $hpid";
+		main::logger "INFO: Running command '$cmd'\n" if $opt->{verbose};
+		$hpid = `$cmd`;
+		main::logger "ERROR: '$cmd' returned a non-zero exit code $?\n" if $?;
+		chomp( $hpid );
+	}
 
 	$prog->{subtitle_url} = "http://www.hulu.com/transcripts/$hpid.smi";
 	$prog->{metadata_url} = "http://releasegeo.hulu.com/content.select?pid=$hpid&mbr=true&format=smil";
@@ -6843,7 +6893,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for (grep /^(pid|comment|amode|vmode|long|fileprefix|output.*|proxy|subdir|whitespace|versions|type|(exclude)?category|(exclude)?channel|exclude|listformat|command|realaudio|mp3audio|wav|raw|bandwidth|subtitles|suboffset|since|versionlist|verbose)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(vlc|test|subsonly|stdout|get|update|save|helplong|help|expiry|nowrite|tree|terse|streaminfo|listformat|list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
@@ -6856,7 +6906,6 @@ sub add {
 	}
 	# Save search to file
 	$pvr->save( $name, @options );
-	#$pvr->show( $name );
 	return 0;
 }
 
