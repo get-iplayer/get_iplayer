@@ -220,8 +220,13 @@ my $profile_dir;
 # This is where system-wide default options are specified
 my $optfile_system;
 
+# Options directories specified by env vars
+if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
+	$profile_dir = $ENV{GETIPLAYERUSERPREFS};
+	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
+
 # Options on unix-like systems
-if ( defined $ENV{HOME} ) {
+} elsif ( defined $ENV{HOME} ) {
 	$profile_dir = $ENV{HOME}.'/.get_iplayer';
 	$optfile_system = '/etc/get_iplayer/options';
 
@@ -278,6 +283,10 @@ $opt->save( $opt_cmdline, $optfile ) if $save;
 
 # Show copyright notice
 logger Options->copyright_notice;
+
+# Display prefs dirs if required
+main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
+main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
 
 # User Agents
 my %user_agent = (
