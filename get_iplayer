@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.40;
+my $version = 1.41;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -181,6 +181,7 @@ my %opt_format = (
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
+	overwrite	=> [ 1, "overwrite|over-write", 'Download', '--overwrite', "Overwrite downloaded files if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>|<pidurl>', "Download an arbitrary pid that does not necessarily appear in the index"],
 	proxy		=> [ 0, "proxy|p=s", 'Download', '--proxy, -p <url>', "Web proxy URL spec"],
@@ -2306,9 +2307,15 @@ sub generate_filenames {
 		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
 	}
 
+	# If the file already exists
 	if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
-		main::logger("WARNING: File $prog->{filename} already exists\n\n");
-		return 1;
+		if ( $opt->{overwrite} ) {
+			main::logger("INFO: Overwriting file $prog->{filename}\n\n");
+			unlink $prog->{filename};
+		} else {
+			main::logger("WARNING: File $prog->{filename} already exists\n\n");
+			return 1;
+		}
 	}
 
 	return 0;
@@ -3595,9 +3602,11 @@ sub download_subtitles {
 	for ( @lines ) {
 		my ( $begin, $end, $sub );
 		# Remove span elements
-		s|<\/?span.*?>||g;
+		s|<\/?span.*?>| |g;
 		# Remove <br /> elements
-		s|<br.*?>||g;
+		s|<br.*?>| |g;
+		# Remove >1 spaces
+		s|\s{2,}| |g;
 		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
 		if ($begin && $end && $sub ) {
 			$begin =~ s/\./,/g;
