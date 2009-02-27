@@ -148,8 +148,8 @@ sub logger(@) {
 	}
 }
 
-# Define general 'option names' => ( <advanced>, <option cmdline format>, <option help section>, <option help> )
-# If you want the option to be hidden then don't specify <option cmdline format>, use ''
+# Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
+# If you want the option to be hidden then don't specify <option help section>, use ''
 my %opt_format = (
 	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaac,flashaudio,realaudio (default: iphone,flashaac,flashaudio,realaudio)"],
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
@@ -173,6 +173,7 @@ my %opt_format = (
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
 	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata (only if number of matches < 50)"],
+	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
@@ -2273,6 +2274,9 @@ sub generate_filenames {
 
 	# Spaces
 	$prog->{fileprefix} =~ s/\s+/_/g if ! $opt->{whitespace};
+
+	# Change the date in the filename to ISO8601 format if required
+	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
 
 	# Don't create subdir if we are only testing downloads
 	# Create a subdir for programme sorting option
