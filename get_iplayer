@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.41;
+my $version = 1.42;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2993,7 +2993,7 @@ sub get_stream_data {
 			$data{$prog_type}{type} = 'Mobile WMV DRM stream';
 		}
 		
-		# Audio rtmp aac
+		# Audio rtmp aac (akamai)
 		# <media kind="audio"
 		#        expires="2009-02-20T07:02:00+00:00"
 		#        type="audio/mp4"
@@ -3018,9 +3018,40 @@ sub get_stream_data {
 			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
 			$data{$prog_type}{identifier} =~ s/^mp4://;
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
-			$data{$prog_type}{type} = 'RTMP AAC stream';
+			$data{$prog_type}{type} = 'RTMP AAC stream (akamai)';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+		}
+
+		# Audio rtmp aac (limelight)
+		#<media kind="audio"
+		#        expires="2009-03-06T10:02:00+00:00"
+		#        type="audio/mp4"
+		#        encoding="aac"  >
+		#        <connection
+		#                priority="9"
+		#                application="a1414/e3"
+		#                kind="limelight"
+		#                server="bbcmedia.fcod.llnwd.net"
+		#                identifier="mp4:radio1/secure_auth/RBN2_radio_1_-_friday_0630_b00hq198_2009_02_27_10_22_46"
+		#                authString="s=1236278552&amp;e=1236278632&amp;h=b0119dd8938baf1a74e5b2ae5f1be1e1"
+		#        />
+		#</media>
+		# flashVer: LNX 10,0,22,87
+		# app: a1414/e3
+		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7938
+		# tcUrl: rtmp://bbcmedia.fcod.llnwd.net:1935/a1414/e3
+		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00hq19g/The_Chris_Moyles_Show_27_02_2009/
+		# streamurl: mp4:radio1/secure_auth/RBN2_radio_1_-_friday_0630_b00hq198_2009_02_27_10_22_46?s=1236278999&e=1236279079&h=d.fd7879eb098c5595eefbf8f23b8ecc1
+		if ( $media =~ /^(flashaac|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mp4".+?encoding="aac".+?application="(.+?)".+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashaac';
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			decode_entities($data{$prog_type}{authstring});
+			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{type} = 'RTMP AAC stream (limelight)';
+			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7938";
 		}
 
 		# Audio rtmp mp3
@@ -6102,6 +6133,7 @@ sub opt_format {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmp		=> [ 0, "rtmp", '', '', ""],
 		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
+		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream downloaded OK"],
 	};
 }
 
@@ -6135,7 +6167,7 @@ sub get {
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 	#if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 	# Hack to get around rtmpdump prentending to fail on successful flash downloads or pretending to succeed where it failed
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to download file $file_tmp via RTMP\n";
 		unlink $file_tmp;
