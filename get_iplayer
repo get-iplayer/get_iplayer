@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.42;
+my $version = 1.43;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4879,7 +4879,7 @@ sub opt_format {
 		hulupages		=> [ 1, "hulupages|hulu-pages=s", 'Config', '--hulu-pages <pages>', "How many pages to index from Hulu for each channel (20 programmes per page). Default: 10"],
 		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity"],
 		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
-		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return the decrypted hulu pid given the encrypted one as the first argument"],
+		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
 	};
 }
 
@@ -5459,17 +5459,20 @@ sub get_metadata_url {
 	my $hpid = $1 if $html=~ m{<pid>(.+?)<\/pid>};
 	main::logger "INFO: HPID=$hpid\n" if $opt->{verbose};
 
-	# Workaround to get new hulu decrypted pid using a programme defined in --hulu-decrypt-pid
+	# Workaround to get new hulu decrypted pid and auth string using a programme defined in --hulu-decrypt-pid
+	my $auth;
 	if ( $opt->{huludecpid} ) {
 		my $cmd = "$opt->{huludecpid} $hpid";
 		main::logger "INFO: Running command '$cmd'\n" if $opt->{verbose};
-		$hpid = `$cmd`;
+		( $hpid, $auth ) = (split /\s/, `$cmd`)[0,1];
 		main::logger "ERROR: '$cmd' returned a non-zero exit code $?\n" if $?;
 		chomp( $hpid );
+		chomp( $auth );
+		main::logger "INFO: PID=$hpid AUTH=$auth\n" if $opt->{verbose};
 	}
 
 	$prog->{subtitle_url} = "http://www.hulu.com/transcripts/$hpid.smi";
-	$prog->{metadata_url} = "http://releasegeo.hulu.com/content.select?pid=$hpid&mbr=true&format=smil";
+	$prog->{metadata_url} = "http://releasegeo.hulu.com/select.ashx?pid=$hpid&auth=$auth";
 	return $prog->{metadata_url};
 }
 
