@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.43;
+my $version = 1.44;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -6164,10 +6164,18 @@ sub get {
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
+	my $return;
 	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	main::logger "\n\nINFO: Command: $cmd\n";
-	my $return = system($cmd) >> 8;
-	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
+	
+	# Try up to 6 times to resume if exitcode == 2 and file is big enough
+	my $tries = 6;
+	do {
+		$return = system($cmd) >> 8;
+		main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
+		$tries--;
+	} while ( $tries > 0 && $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size );
+
 	#if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 	# Hack to get around rtmpdump prentending to fail on successful flash downloads or pretending to succeed where it failed
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
