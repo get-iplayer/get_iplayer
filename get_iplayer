@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.44;
+my $version = 1.45;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2743,7 +2743,7 @@ sub get_metadata {
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
+# $media = all|flashhd|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -2762,32 +2762,131 @@ sub get_stream_data {
 		$xml = "<media".$xml;
 		my $prog_type;
 		
-		# h.264 high quality stream
-		#	<media kind="video"
-		#        width="640"
+		# h.264 HD stream (akamai) 
+		#<media kind="video"                                             
+		#        width="720"                                             
+		#        height="404"                                            
+		#        expires="2009-03-22T12:59:00+00:00"                     
+		#        bitrate="1500"                                          
+		#        type="video/mp4"                                        
+		#        encoding="h264"  >                                      
+		#        <connection                                             
+		#                priority="10"                                   
+		#                kind="akamai"                                   
+		#                server="cp41752.edgefcs.net"                    
+		#                identifier="mp4:secure/1500kbps/b000j9khdh264_high_109076298" 
+		#                authString="dbEbdc9ccdedbdKa0csdMdIcwaLc1dZbubw-bjWbG9-c0-d0i_-EpmFCqAqGEtEpyK" 
+		#        />                                                                                      
+		#	<connection                                                                                     
+		#                priority="15"                                                                   
+		#                application="a1414/e3"                                                          
+		#                kind="limelight"                                                                
+        	#	         server="bbcmedia.fcod.llnwd.net"                                                
+		#	         identifier="mp4:iplayerstream/secure_auth/1500kbps/b000j9khdh264_high_109076298" 
+		#                authString="s=1237325845&amp;e=1237325925&amp;h=754c1318511f78d6c65a3f8180aa84f9" 
+		#        />                                                                                        
+		#</media>                                                                                          
+		# application (e.g.):            ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc2cL-bjw5rj-cCp-JnlDCnzn.MEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
+		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
+		if ( $media =~ /^(flashhd|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashhd';
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
+			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
+			$data{$prog_type}{identifier} =~ s/^mp4://;
+			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream';
+			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:80/$data{$prog_type}{application}";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+		}
+
+
+
+		# New h.264 high quality stream (limelight)
+		#<media kind="video" 
+		#        width="640" 
 		#        height="360"
-		#        type="video/mp4"
-		#        encoding="h264"  >
-		#        <connection
-		#                priority="10"
-		#                application="bbciplayertok"
-		#                kind="level3"
-		#                server="bbciplayertokfs.fplive.net"
-		#                identifier="mp4:b000zxf4-H26490898078"
-		#                authString="d52f77fede048f1ffd6587fd47446dee"
-		#        />
-		# application: bbciplayertok
-		# tcURL: rtmp://bbciplayertokfs.fplive.net:80/bbciplayertok
+		#        expires="2009-03-22T12:59:00+00:00"
+		#        bitrate="796"                      
+		#        type="video/mp4"                   
+		#        encoding="h264"  >                 
+		#        <connection                        
+		#                priority="5"               
+		#                application="iplayertok"   
+		#                kind="level3"              
+		#                server="iplayertokfs.fplive.net" 
+		#                identifier="mp4:b000j9khdH264109076298" 
+		#                authString="token=c3RhcnRfdGltZT0yMDA5MDMxNzA5MDkxMiZlbmRfdGltZT0yMDA5MDMxODA5MDkxMiZkaWdlc3Q9MjUyYWUyM2FhNzVjZjQ2ZDdjZDdkMDQ0MDRjNjY4OGQ=" 
+		#        />                                                                                                                                                  
+		#        <connection                                                                                                                                                 
+		#                priority="10"                                                                                                                               
+		#                application="a1414/e3"                                                                                                                      
+		#                kind="limelight"                                                                                                                            
+		#                server="bbcmedia.fcod.llnwd.net"                                                                                                            
+		#                identifier="mp4:iplayerstream/secure_auth/b000j9khdH264109076298"                                                                           
+		#                authString="s=1237324112&amp;e=1237324192&amp;h=e20bd5a8842a8c11645f80f676135170"                                                           
+		#        />                                                                                                                                                  
+		#</media> 
+		# flashVer: LNX 10,0,22,87
+		# app: a1414/e3
+		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7938
+		# tcUrl: rtmp://bbcmedia.fcod.llnwd.net:1935/a1414/e3
+		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00hq19g/The_Chris_Moyles_Show_27_02_2009/
+		# streamurl: mp4:radio1/secure_auth/RBN2_radio_1_-_friday_0630_b00hq198_2009_02_27_10_22_46?s=1236278999&e=1236279079&h=d.fd7879eb098c5595eefbf8f23b8ecc1
+		#if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		#	$prog_type = 'flashhigh';
+		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+		#	( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+		#	decode_entities($data{$prog_type}{authstring});
+		#	$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+		#	$data{$prog_type}{type} = 'Flash RTMP H.264 high quality stream (limelight)';
+		#	$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+		#	$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7938";
+		#}
+
+		# New h.264 high quality stream (level3)
+		#<media kind="video" 
+		#        width="640" 
+		#        height="360"
+		#        expires="2009-03-22T12:59:00+00:00"
+		#        bitrate="796"                      
+		#        type="video/mp4"                   
+		#        encoding="h264"  >                 
+		#        <connection                        
+		#                priority="5"               
+		#                application="iplayertok"   
+		#                kind="level3"              
+		#                server="iplayertokfs.fplive.net" 
+		#                identifier="mp4:b000j9khdH264109076298" 
+		#                authString="token=c3RhcnRfdGltZT0yMDA5MDMxNzA5MDkxMiZlbmRfdGltZT0yMDA5MDMxODA5MDkxMiZkaWdlc3Q9MjUyYWUyM2FhNzVjZjQ2ZDdjZDdkMDQ0MDRjNjY4OGQ=" 
+		#        />                                                                                                                                                  
+		#        <connection                                                                                                                                                 
+		#                priority="10"                                                                                                                               
+		#                application="a1414/e3"                                                                                                                      
+		#                kind="limelight"                                                                                                                            
+		#                server="bbcmedia.fcod.llnwd.net"                                                                                                            
+		#                identifier="mp4:iplayerstream/secure_auth/b000j9khdH264109076298"                                                                           
+		#                authString="s=1237324112&amp;e=1237324192&amp;h=e20bd5a8842a8c11645f80f676135170"                                                           
+		#        />                                                                                                                                                  
+		#</media> 
+		# app: iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzA5MjUxNyZlbmRfdGltZT0yMDA5MDMxODA5MjUxNyZkaWdlc3Q9Y2M5ZDdlMjgzZTAxZjE3OTdhNGI3YzZjNDUzN2Y2ZjA=
+		# flashVer: LNX 10,0,22,87
+		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340
+		# tcUrl: rtmp://iplayertokfs.fplive.net:80/iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzA5MjUxNyZlbmRfdGltZT0yMDA5MDMxODA5MjUxNyZkaWdlc3Q9Y2M5ZDdlMjgzZTAxZjE3OTdhNGI3YzZjNDUzN2Y2ZjA=
+		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j9khg/The_Politics_Show_East_15_03_2009/
 		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashhigh';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
-			$data{$prog_type}{type} = 'Flash RTMP H.264 high quality stream';
+			$data{$prog_type}{type} = 'Flash RTMP H.264 high quality stream (level3)';
+			$data{$prog_type}{application} = $data{$prog_type}{application}.'?'.$data{$prog_type}{authstring};
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:80/$data{$prog_type}{application}";
-			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 		}
-			
+
+
 		# Learning Zone 400 clips, (e.g. pid = 1309) 
 		# All Clips Index: http://www.bbc.co.uk/apps/ifl/learningzone/clips/queryengine?config=results_within&pagesize=1000
 		# GET "http://www.bbc.co.uk/apps/ifl/learningzone/clips/showrecord?Id=1309" | grep emp.setPlaylist
@@ -3493,6 +3592,7 @@ sub download {
 	# Lookup table to determine which ext to use for different download methods
 	my %stream_ext = (
 		iphone		=> 'mov',
+		flashhd 	=> 'mp4',
 		flashhigh 	=> 'mp4',
 		flashnormal	=> 'avi',
 		flashlow	=> 'avi',
