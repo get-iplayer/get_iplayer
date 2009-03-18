@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.45;
+my $version = 1.46;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2762,7 +2762,7 @@ sub get_stream_data {
 		$xml = "<media".$xml;
 		my $prog_type;
 		
-		# h.264 HD stream (akamai) 
+		# h.264 HD stream (akamai) - currently hangs and timesout after 15MB
 		#<media kind="video"                                             
 		#        width="720"                                             
 		#        height="404"                                            
@@ -2788,22 +2788,106 @@ sub get_stream_data {
 		#</media>                                                                                          
 		# application (e.g.):            ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc2cL-bjw5rj-cCp-JnlDCnzn.MEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
 		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
-		if ( $media =~ /^(flashhd|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			$prog_type = 'flashhd';
+		if ( $media =~ /^(flashhd1|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashhd1';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
 			$data{$prog_type}{identifier} =~ s/^mp4://;
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
-			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream';
+			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream (akamai)';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:80/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 		}
 
 
+		# h.264 HD stream (limelight) - still not working
+		#<media kind="video"                                             
+		#        width="720"                                             
+		#        height="404"                                            
+		#        expires="2009-03-22T12:59:00+00:00"                     
+		#        bitrate="1500"                                          
+		#        type="video/mp4"                                        
+		#        encoding="h264"  >                                      
+		#        <connection                                             
+		#                priority="10"                                   
+		#                kind="akamai"                                   
+		#                server="cp41752.edgefcs.net"                    
+		#                identifier="mp4:secure/1500kbps/b000j9khdh264_high_109076298" 
+		#                authString="dbEbdc9ccdedbdKa0csdMdIcwaLc1dZbubw-bjWbG9-c0-d0i_-EpmFCqAqGEtEpyK" 
+		#        />                                                                                      
+		#	<connection                                                                                     
+		#                priority="15"                                                                   
+		#                application="a1414/e3"                                                          
+		#                kind="limelight"                                                                
+        	#	         server="bbcmedia.fcod.llnwd.net"                                                
+		#	         identifier="mp4:iplayerstream/secure_auth/1500kbps/b000j9khdh264_high_109076298" 
+		#                authString="s=1237325845&amp;e=1237325925&amp;h=754c1318511f78d6c65a3f8180aa84f9" 
+		#        />                                                                                        
+		#</media>                                                                                          
+		if ( $media =~ /^(flashhd2|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashhd2';
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			decode_entities($data{$prog_type}{authstring});
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
+			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream (limelight)';
+			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+			$data{$prog_type}{port} = 1935;
+		}
 
-		# New h.264 high quality stream (limelight)
+
+		# h.264 HD stream (level3) 
+		#<media kind="video" 
+		#        width="720" 
+		#        height="404"
+		#        expires="2009-03-23T21:44:00+00:00"
+		#        bitrate="1500"                     
+		#        type="video/mp4"                   
+		#        encoding="h264"  >                 
+		#        <connection                        
+		#                priority="10"              
+		#                kind="akamai"              
+		#                server="cp41752.edgefcs.net" 
+		#                identifier="mp4:secure/1500kbps/b000j48zbh264_high_109050585" 
+		#                authString="dbEcAaCd9bid2c.bncfdGccaUcCcnaqaWcm-bjWdfm-c0-d0i_-HntGBoEqJDpFqyH" 
+		#        />                                                                                      
+		#	<connection                                                                                     
+		#                priority="5"                                                                    
+		#                application="iplayertok"                                                        
+		#                kind="level3"                                                                   
+		#                server="iplayertokfs.fplive.net"                                                
+		#                identifier="mp4:1500kbps/b000j48zbh264_high_109050585"                          
+		#                authString="token=c3RhcnRfdGltZT0yMDA5MDMxNzExMjUwMCZlbmRfdGltZT0yMDA5MDMxODExMjUwMCZkaWdlc3Q9NzAwZDE0ZmIxNTFlNThlNjAxZDM0MzJjZjhmNzg5NGU=" 
+		#        />                                                                                                                                                  
+		#</media>		
+		# wireshark:
+		# app: iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzExMjI0MSZlbmRfdGltZT0yMDA5MDMxODExMjI0MSZkaWdlc3Q9M2YyMWE.wNjQ1OGVlZWI2ZjE3YTY1YzI4NTQ3ZjBkOWQ=
+		# flashVer: LNX 10,0,22,87
+		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340
+		# tcUrl: rtmp://iplayertokfs.fplive.net:1935/iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzExMjI0MSZlbmRfdGltZT0yMDA5MDMxODExMjI.0MSZkaWdlc3Q9M2YyMWEwNjQ1OGVlZWI2ZjE3YTY1YzI4NTQ3ZjBkOWQ=
+		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j48zs/Heroes_Series_3_Cold_Wars/
+		if ( $media =~ /^(flashhd|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="720".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashhd';
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream (level3)';
+			$data{$prog_type}{application} = $data{$prog_type}{application}.'?'.$data{$prog_type}{authstring};
+			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
+			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
+			#$data{$prog_type}{identifier} =~ s/^mp4://;
+			$data{$prog_type}{port} = 1935;
+		}
+
+
+		# New h.264 high quality stream (limelight) - needs work
 		#<media kind="video" 
 		#        width="640" 
 		#        height="360"
@@ -2875,15 +2959,17 @@ sub get_stream_data {
 		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340
 		# tcUrl: rtmp://iplayertokfs.fplive.net:80/iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzA5MjUxNyZlbmRfdGltZT0yMDA5MDMxODA5MjUxNyZkaWdlc3Q9Y2M5ZDdlMjgzZTAxZjE3OTdhNGI3YzZjNDUzN2Y2ZjA=
 		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j9khg/The_Politics_Show_East_15_03_2009/
-		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="640".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashhigh';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{type} = 'Flash RTMP H.264 high quality stream (level3)';
 			$data{$prog_type}{application} = $data{$prog_type}{application}.'?'.$data{$prog_type}{authstring};
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:80/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{port} = 1935;
 		}
 
 
@@ -2965,11 +3051,13 @@ sub get_stream_data {
 			$prog_type = 'flashnormal';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'Flash RTMP H.264 normal quality stream';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:80/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{port} = 1935;
 		}
 			
 		# Wii h.264 standard quality stream
@@ -2993,11 +3081,13 @@ sub get_stream_data {
 			$prog_type = 'flashlow';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'Flash RTMP H.264 Wii stream';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897";
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{port} = 1935;
 		}
 		
 		# iPhone h.264/mp3 stream
@@ -3114,12 +3204,14 @@ sub get_stream_data {
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
 			$data{$prog_type}{identifier} =~ s/^mp4://;
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'RTMP AAC stream (akamai)';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+			$data{$prog_type}{port} = 1935;
 		}
 
 		# Audio rtmp aac (limelight)
@@ -3147,10 +3239,12 @@ sub get_stream_data {
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			decode_entities($data{$prog_type}{authstring});
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'RTMP AAC stream (limelight)';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7938";
+			$data{$prog_type}{port} = 1935;
 		}
 
 		# Audio rtmp mp3
@@ -3174,12 +3268,14 @@ sub get_stream_data {
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
+			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			# Remove offending mp3: at the start of the identifier (don't remove in stream url)
 			$data{$prog_type}{identifier} =~ s/^mp3://;
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{type} = 'RTMP MP3 stream';
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
+			$data{$prog_type}{port} = 1935;
 		}
 		
 		# RealAudio stream
@@ -3593,6 +3689,7 @@ sub download {
 	my %stream_ext = (
 		iphone		=> 'mov',
 		flashhd 	=> 'mp4',
+		flashhd1 	=> 'mp4',
 		flashhigh 	=> 'mp4',
 		flashnormal	=> 'avi',
 		flashlow	=> 'avi',
@@ -3661,7 +3758,7 @@ sub download {
 		# Do rtmp download
 		if ( $mode =~ /^(rtmp|flash)/ ) {
 			my $stream = Streamer::rtmp->new;
-			$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+			$return = $stream->get( $ua, $prog, $mode, %streamdata );
 
 		# Do the N95 h.264 download
 		} elsif ( $mode =~ /^n95/ ) {
@@ -4086,7 +4183,7 @@ sub download_rtmp {
 
 	# Do the RTMP download
 	my $stream = Streamer::rtmp->new;
-	return $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+	return $stream->get( $ua, $prog, $mode, %streamdata );
 }
 
 
@@ -5399,7 +5496,7 @@ sub download {
 	if ( ! $opt->{subsonly} ) {
 		# Do rtmp download
 		my $stream = Streamer::rtmp->new;
-		$return = $stream->get( $ua, $streamdata{streamurl}, $prog, $mode, $streamdata{application}, $streamdata{tcurl}, $streamdata{authstring}, $streamdata{swfurl} );
+		$return = $stream->get( $ua, $prog, $mode, %streamdata );
 	}
 
 	# Rename the subtitle file accordingly
@@ -6244,7 +6341,17 @@ sub opt_format {
 # %prog (only for {ext} and {mode})
 # Actually do the RTMP stream downloading
 sub get {
-	my ( $stream, $ua, $url_2, $prog, $mode, $application, $tcurl, $authstring, $swfurl ) = @_;
+	my ( $stream, $ua, $prog, $mode, %streamdata ) = @_;
+
+	my $url_2 	= $streamdata{streamurl};
+	my $server	= $streamdata{server};
+	my $application = $streamdata{application};
+	my $tcurl 	= $streamdata{tcurl};
+	my $authstring 	= $streamdata{authstring};
+	my $swfurl 	= $streamdata{swfurl};
+	my $playpath 	= $streamdata{playpath};
+	my $port 	= $streamdata{port};
+
 	my $file_tmp;
 	my $cmd;
 	
@@ -6259,13 +6366,23 @@ sub get {
 		unlink( $file_tmp );
 	}
 		
+	# rtmpdump version detection
+	my $rtmpver;
+	chomp( $rtmpver = (grep /^RTMPDump/, `$rtmpdump`)[0] );
+	$rtmpver =~ s/^RTMPDump\s+v([\.\d]+).*$/$1/g;
+	main::logger "INFO: rtmpdump version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	my $return;
-	$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+	# Different invocation dependant on version
+	if ($rtmpver < 1.4 ) {
+		$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+	} else {
+		$cmd = "$rtmpdump --resume --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
 	# Try up to 6 times to resume if exitcode == 2 and file is big enough
