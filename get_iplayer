@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.46;
+my $version = 1.47;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -49,6 +49,7 @@ my $version = 1.46;
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 # * Get --info to show whether subtitles are available
 # * rtmpdump now reports correct exitcode - fix code to recognise this
+# * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
@@ -208,7 +209,7 @@ my %opt_format = (
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
-	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
@@ -554,12 +555,12 @@ sub find_matches {
 					$this->clean_pid;
 					logger " New: '$this->{pid}'\n" if $opt->{verbose};
 				}
-				$retcode = $this->download_retry_loop( 3 );
+				$retcode = $this->download_retry_loop();
 				last if ! $retcode;
 			} else {
 				logger "INFO: pid found in cache\n";
 				$this = $prog{$pid};
-				$retcode = $this->download_retry_loop( 3 );
+				$retcode = $this->download_retry_loop();
 				last if ! $retcode;
 				# If it is in the cache then we'll not need to try the other types regardless of success
 				last;
@@ -690,7 +691,7 @@ sub download_matches {
 	my $failcount;
 	if ( $opt->{get} || $opt->{stdout} ) {
 		for my $this (@match_list) {
-			$failcount =+ $this->download_retry_loop( 3 );
+			$failcount =+ $this->download_retry_loop();
 		}
 	}
 
@@ -2084,11 +2085,22 @@ sub download_subtitles {
 # Usage: download_retry_loop ( $progref, $retries )
 sub download_retry_loop {
 	my $prog = shift;
-	my $retries = shift;
 
 	# Retry loop
 	my $count = 0;
 	my $retcode;
+
+	# Use different number of retries for different modes
+	my %retry = (
+		flashwii	=> 10,
+		flashnormal	=> 10,
+		flashhigh	=> 10,
+		flashvhigh	=> 20,
+		flashvhigh1	=> 20,
+		flashvhigh2	=> 20,
+		flashaac	=> 10,
+		flashaudio	=> 10,
+	);
 
 	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} ) && ! $opt->{subsonly};
 
@@ -2111,8 +2123,11 @@ sub download_retry_loop {
 		chomp( $mode );
 		main::logger "INFO: Trying $mode mode to download $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
+		my $retries = $retry{$mode} || 3;
+
 		# Retry loop
 		for ($count = 1; $count <= $retries; $count++) {
+			main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
 
 			$retcode = $prog->download( $ua, $mode );
 			main::logger "DEBUG: Download using $mode mode return code: '$retcode'\n" if $opt->{verbose};
@@ -2743,7 +2758,7 @@ sub get_metadata {
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|flashhd|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
+# $media = all|flashvhigh|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -2762,7 +2777,7 @@ sub get_stream_data {
 		$xml = "<media".$xml;
 		my $prog_type;
 		
-		# h.264 HD stream (akamai) - currently hangs and timesout after 15MB
+		# h.264 HD stream (akamai)
 		#<media kind="video"                                             
 		#        width="720"                                             
 		#        height="404"                                            
@@ -2788,8 +2803,8 @@ sub get_stream_data {
 		#</media>                                                                                          
 		# application (e.g.):            ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc2cL-bjw5rj-cCp-JnlDCnzn.MEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
 		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
-		if ( $media =~ /^(flashhd1|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			$prog_type = 'flashhd1';
+		if ( $media =~ /^(flashvhigh1|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashvhigh1';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -2827,8 +2842,8 @@ sub get_stream_data {
 		#                authString="s=1237325845&amp;e=1237325925&amp;h=754c1318511f78d6c65a3f8180aa84f9" 
 		#        />                                                                                        
 		#</media>                                                                                          
-		if ( $media =~ /^(flashhd2|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			$prog_type = 'flashhd2';
+		if ( $media =~ /^(flashvhigh2|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashvhigh2';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
@@ -2872,8 +2887,8 @@ sub get_stream_data {
 		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340
 		# tcUrl: rtmp://iplayertokfs.fplive.net:1935/iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzExMjI0MSZlbmRfdGltZT0yMDA5MDMxODExMjI.0MSZkaWdlc3Q9M2YyMWEwNjQ1OGVlZWI2ZjE3YTY1YzI4NTQ3ZjBkOWQ=
 		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j48zs/Heroes_Series_3_Cold_Wars/
-		if ( $media =~ /^(flashhd|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="720".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
-			$prog_type = 'flashhd';
+		if ( $media =~ /^(flashvhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="720".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+			$prog_type = 'flashvhigh';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -2882,8 +2897,6 @@ sub get_stream_data {
 			$data{$prog_type}{tcurl} = "rtmp://$data{$prog_type}{server}:1935/$data{$prog_type}{application}";
 			$data{$prog_type}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
-			# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-			#$data{$prog_type}{identifier} =~ s/^mp4://;
 			$data{$prog_type}{port} = 1935;
 		}
 
@@ -3689,8 +3702,9 @@ sub download {
 	# Lookup table to determine which ext to use for different download methods
 	my %stream_ext = (
 		iphone		=> 'mov',
-		flashhd 	=> 'mp4',
-		flashhd1 	=> 'mp4',
+		flashvhigh 	=> 'mp4',
+		flashvhigh1 	=> 'mp4',
+		flashvhigh2 	=> 'mp4',
 		flashhigh 	=> 'mp4',
 		flashnormal	=> 'avi',
 		flashlow	=> 'avi',
@@ -6386,15 +6400,12 @@ sub get {
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
-	# Try up to 6 times to resume if exitcode == 2 and file is big enough
-	my $tries = 6;
-	do {
-		$return = system($cmd) >> 8;
-		main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
-		$tries--;
-	} while ( $tries > 0 && $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size );
+	$return = system($cmd) >> 8;
+	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
-	#if ( (! -f $file_tmp) || ($return && -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+	# if we fail during the rtmp download, try to resume (this gets new streamdata again so that it isn't stale)
+	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
+
 	# Hack to get around rtmpdump prentending to fail on successful flash downloads or pretending to succeed where it failed
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
