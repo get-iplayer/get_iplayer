@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.47;
+my $version = 1.48;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -6181,7 +6181,7 @@ sub get {
 		$prog->{filename} );
 
 	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
+	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
 
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
@@ -6416,7 +6416,7 @@ sub get {
 	
 	# Retain raw flv format if required
 	if ( $opt->{raw} ) {
-		move($file_tmp, $prog->{filename}) if ! $opt->{stdout};
+		move($file_tmp, $prog->{filename}) if $file_tmp ne $prog->{filename} && ! $opt->{stdout};
 		return 0;
 
 	# Convert flv to mp3/aac
@@ -6452,7 +6452,7 @@ sub get {
 		$prog->{filename} = $file_tmp;
 	}
 	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
+	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
 	
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
@@ -6544,7 +6544,7 @@ sub get {
 			return 'next';
 		}
 		# Move file to done state
-		move $prog->{filepart}, $prog->{filename} if ! $opt->{nowrite};
+		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
 
 	# No transcoding if --raw was specified
 	} elsif ( $opt->{raw} && ! $opt->{stdout} ) {
@@ -6557,7 +6557,7 @@ sub get {
 			return 'next';
 		}
 		# Move file to done state
-		move $prog->{filepart}, $prog->{filename} if ! $opt->{nowrite};
+		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
 
 	# Use transcoding via named pipes
 	} else {
@@ -6602,7 +6602,7 @@ sub get {
 			unlink $namedpipe;
 
 			# Move file to done state
-			move $prog->{filepart}, $prog->{filename} if ! $opt->{nowrite};
+			move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
 			main::logger "INFO: Transcoding thread has completed\n";
 			exit 0;
 		}
@@ -6923,7 +6923,7 @@ sub get {
 	}
 	main::logger "INFO: Downloaded $prog->{filename}\n";
 	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
+	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
 
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
@@ -6989,7 +6989,7 @@ sub get {
 			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
 			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0, 
 			$prog->{filename} );
-		move $prog->{filepart}, $prog->{filename};
+		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename};
 		# re-symlink file
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	}
