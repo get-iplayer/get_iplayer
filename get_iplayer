@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.48;
+my $version = 1.49;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -47,7 +47,6 @@ my $version = 1.48;
 # ** all global URLs into a hash/class???
 # ** Cut down 'use' clauses in each class 
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
-# * Get --info to show whether subtitles are available
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 #
@@ -82,6 +81,7 @@ use strict;
 #use warnings;
 use Time::Local;
 use URI;
+use POSIX qw(:termios_h);
 $|=1;
 
 
@@ -173,7 +173,7 @@ my %opt_format = (
 	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
-	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata (only if number of matches < 50)"],
+	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata and availability of modes and subtitles (max 50 matches)"],
 	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
@@ -707,7 +707,7 @@ sub list_progs {
 	my $number_of_types = keys %{$typeref};
 	my $ua = create_ua('desktop');
 	my %names;
-
+	
 	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt->{info} ) {
 		# Truncate array if were lisiting info and > $info_limit entries are requested - be nice to the beeb!
@@ -2068,7 +2068,13 @@ sub clean_pid {
 
 # Return metadata of the prog
 sub get_metadata {
-	return {};
+	my $prog = shift;
+	# Fill in from cache if not got from metadata
+	my %metadata;
+	for ( qw/ pid index name episode type duration channel available expiry versions guidance categories desc player thumbnail modes / ) {
+		$metadata{$_} = $prog->{$_} if defined $prog->{$_};
+	}
+	return %metadata;
 }
 
 
@@ -2731,8 +2737,20 @@ sub get_metadata {
 	}
 	$categories = join ',', @cats;
 
-	# populate version pid metadata 
-	$prog->get_version_pids( $ua );
+	# Get list of available modes for each version available
+	# populate version pid metadata
+	my %version_pids = $prog->get_version_pids( $ua );
+	$versions = join ',', sort keys %version_pids;
+	my $modes;
+	# Do this for each version tried in this order (if they appeared in the content)
+	for my $version ( sort keys %version_pids ) {
+		# Try to get stream data for this version (don't resolve any URLs)
+		my $quiet = $opt->{quiet};
+		$opt->{quiet} = 1;
+		my %all_stream_data = get_stream_data($prog, $version_pids{$version}, 'all', 1 );
+		$opt->{quiet} = $quiet;
+		$modes .= $version.": ".(join ',', sort keys %all_stream_data)."  ";
+	}
 
 	# Fill in from cache if not got from metadata
 	return (
@@ -2745,12 +2763,13 @@ sub get_metadata {
 		channel		=> $channel || $prog->{channel},
 		available	=> $available || $prog->{available},
 		expiry		=> $expiry || $prog->{expiry},
-		versions	=> $versions || $prog->{versions},
+		versions	=> $versions,
 		guidance	=> $guidance || $prog->{guidance},
 		categories	=> $categories || $prog->{categories},
 		desc		=> $longdesc || $prog->{desc},
 		player		=> $player,
 		thumbnail	=> $thumbnail || $prog->{thumbnail},
+		modes		=> $modes,
 	);
 }
 
@@ -2760,7 +2779,7 @@ sub get_metadata {
 # Gets media streams data for this version pid
 # $media = all|flashvhigh|flashhigh|flashnormal|iphone|flashlow|n95_wifi|n95_3g|mobile|flashaudio|flashaac|realaudio|wma|subtitles
 sub get_stream_data {
-	my ( $prog, $verpid, $media ) = @_;
+	my ( $prog, $verpid, $media, $noresolve ) = @_;
 	my %data;
 
 	# Setup user agent with redirection enabled
@@ -2805,7 +2824,7 @@ sub get_stream_data {
 		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
 		if ( $media =~ /^(flashvhigh1|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashvhigh1';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
@@ -2844,8 +2863,7 @@ sub get_stream_data {
 		#</media>                                                                                          
 		if ( $media =~ /^(flashvhigh2|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashvhigh2';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
-			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			decode_entities($data{$prog_type}{authstring});
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -2889,7 +2907,7 @@ sub get_stream_data {
 		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j48zs/Heroes_Series_3_Cold_Wars/
 		if ( $media =~ /^(flashvhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="720".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashvhigh';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{type} = 'Flash RTMP H.264 HD quality stream (level3)';
@@ -2934,7 +2952,7 @@ sub get_stream_data {
 		# streamurl: mp4:radio1/secure_auth/RBN2_radio_1_-_friday_0630_b00hq198_2009_02_27_10_22_46?s=1236278999&e=1236279079&h=d.fd7879eb098c5595eefbf8f23b8ecc1
 		#if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?application="([^\"]+?)"\s+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 		#	$prog_type = 'flashhigh';
-		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 		#	( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 		#	decode_entities($data{$prog_type}{authstring});
 		#	$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
@@ -2975,7 +2993,7 @@ sub get_stream_data {
 		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j9khg/The_Politics_Show_East_15_03_2009/
 		if ( $media =~ /^(flashhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="640".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashhigh';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{type} = 'Flash RTMP H.264 high quality stream (level3)';
@@ -3030,7 +3048,7 @@ sub get_stream_data {
 		#	my ($page, $url, $xml);
 		#	$prog_type = 'flashlearningzone';
 		#	$data{$prog_type}{type} = 'Flash RTMP Learning Zone normal quality stream';
-		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+		#	main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 		#	$page = GET "http://www.bbc.co.uk/apps/ifl/learningzone/clips/showrecord?Id=$pid";
 		#	$url = $1 if $page =~ m{emp.setPlaylist("(http://www.bbc.co.uk/learningzone.+?)")};
 		#	$xml = GET $url;
@@ -3063,7 +3081,7 @@ sub get_stream_data {
 		# tcURL: rtmp://88.221.26.165:80/ondemand?_fcs_vhost=cp41752.edgefcs.net&auth=daEcia8aQaRardxdwb_dCbvc0cPbLavc.2cL-bjw5rj-cCp-JnlDCnznMEqHpxF&aifp=v001&slist=secure/b000gy717streaming103693754
 		if ( $media =~ /^(flashnormal|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="vp6".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashnormal';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
@@ -3093,7 +3111,7 @@ sub get_stream_data {
 		# swfUrl: http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897
 		if ( $media =~ /^(flashlow|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/x-flv".+?encoding="spark".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashlow';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
 			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
@@ -3120,7 +3138,7 @@ sub get_stream_data {
 		#</media>
 		if ( $media =~ /^(iphone|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mp4".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'iphone';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{streamurl} ) = ( $1, $2, $3 );
 			$data{$prog_type}{type} = 'iPhone stream';
 		}
@@ -3139,11 +3157,11 @@ sub get_stream_data {
 		#</media>
 		if ( $media =~ /^(n95_wifi|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'n95_wifi';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{href} ) = ( $1, $2, $3 );
 			$data{$prog_type}{type} = 'Nokia N95 h.264 low quality WiFi stream';
 			$opt->{quiet} = 1 if $opt->{streaminfo};
-			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') );
+			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') ) if ! $noresolve;
 			$opt->{quiet} = 0 if $opt->{streaminfo};
 		}
 		
@@ -3162,11 +3180,11 @@ sub get_stream_data {
 		#</media>    
 		if ( $media =~ /^(n95_3g|all)$/ && $xml =~ m{<media\s+kind="".+?type="video/mpeg".+?encoding="h264".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'n95_3g';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{href} ) = ( $1, $2, $3 );
 			$data{$prog_type}{type} = 'Nokia N95 h.264 low quality 3G stream';
 			$opt->{quiet} = 1 if $opt->{streaminfo};
-			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') );
+			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') ) if ! $noresolve;
 			$opt->{quiet} = 0 if $opt->{streaminfo};
 		}
 		
@@ -3191,7 +3209,7 @@ sub get_stream_data {
 		#</media>
 		if ( $media =~ /^(mobile|all)$/ && $xml =~ m{<media\s+kind="video".+?type="video/wmv".+?kind="sis"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'mobile';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{streamurl} ) = ( $1, $2, $3 );
 			$data{$prog_type}{type} = 'Mobile WMV DRM stream';
 		}
@@ -3215,7 +3233,7 @@ sub get_stream_data {
 		#pageUrl: http://www.bbc.co.uk/iplayer/episode/b00g3xp7/Annie_Mac_31_12_2008/
 		if ( $media =~ /^(flashaac|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mp4".+?encoding="aac".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashaac';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -3250,7 +3268,7 @@ sub get_stream_data {
 		# streamurl: mp4:radio1/secure_auth/RBN2_radio_1_-_friday_0630_b00hq198_2009_02_27_10_22_46?s=1236278999&e=1236279079&h=d.fd7879eb098c5595eefbf8f23b8ecc1
 		if ( $media =~ /^(flashaac|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mp4".+?encoding="aac".+?application="(.+?)".+?kind="limelight"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashaac';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
 			decode_entities($data{$prog_type}{authstring});
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -3279,7 +3297,7 @@ sub get_stream_data {
 		#pageUrl: http://www.bbc.co.uk/iplayer/episode/b00g3xp7/Annie_Mac_31_12_2008/
 		if ( $media =~ /^(flashaudio|all)$/ && $xml =~ m{<media\s+kind="audio".+?type="audio/mpeg".+?encoding="mp3".+?kind="akamai"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashaudio';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3 );
 			$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&auth=$data{$prog_type}{authstring}&aifp=v001&slist=$data{$prog_type}{identifier}";
 			$data{$prog_type}{playpath} = $data{$prog_type}{identifier};
@@ -3319,11 +3337,11 @@ sub get_stream_data {
 		#</mediaSelection>
 		if ( $media =~ /^(realaudio|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/real".+?encoding="real".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'realaudio';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{href} ) = ( $3, $4, $5 );
 			$data{$prog_type}{type} = 'RealAudio RTSP stream';
 			$opt->{quiet} = 1 if $opt->{streaminfo};
-			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') );
+			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') ) if ! $noresolve;
 			$data{$prog_type}{streamurl} =~ s/[\s\n]//g;
 			$opt->{quiet} = 0 if $opt->{streaminfo};
 		}
@@ -3343,11 +3361,11 @@ sub get_stream_data {
 		#</media>
 		if ( $media =~ /^(wma|all)$/ && $xml =~ m{<media\s+kind="(audio|)".+?type="audio/wma".+?encoding="wma".+?kind="(sis|edgesuite)"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'wma';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{href} ) = ( $3, $4, $5 );
 			$data{$prog_type}{type} = 'WMA MMS stream';
 			$opt->{quiet} = 1 if $opt->{streaminfo};
-			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') );
+			chomp( $data{$prog_type}{streamurl} = main::request_url_retry($ua, $data{$prog_type}{href}, 2, '', '') ) if ! $noresolve;
 			$data{$prog_type}{streamurl} =~ s/[\s\n]//g;
 			# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
 			$data{$prog_type}{streamurl} =~ s/^.*href=\"(.+?)\".*$/$1/gi;
@@ -3367,21 +3385,22 @@ sub get_stream_data {
 		#</media>
 		if ( $media =~ /^(subtitles|all)$/ && $xml =~ m{<media\s+kind="captions".+?type="application/ttaf\+xml".+?kind="http"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?href="(http.+?)"} ) {
 			$prog_type = 'subtitles';
-			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{streamurl} ) = ( $1, $2, $3 );
 			$data{$prog_type}{type} = 'Subtitles stream';
 		}	
 	}
 	# Do iphone redirect check regardless of an xml entry for iphone - sometimes the iphone streams exist regardless
-	if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
-		my $prog_type = 'iphone';
-		$data{$prog_type}{type} = 'iPhone stream';
-		# Get iphone redirect
-		$data{$prog_type}{streamurl} = $streamurl;
-	} else {
-		main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
+	 if ( ! $noresolve ) {
+		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
+			my $prog_type = 'iphone';
+			$data{$prog_type}{type} = 'iPhone stream';
+			# Get iphone redirect
+			$data{$prog_type}{streamurl} = $streamurl;
+		} else {
+			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
+		}
 	}
-
 	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
 	if ( $media eq 'all' ) {
 		return %data;
@@ -5785,7 +5804,7 @@ sub get_stream_data {
 			my ($rtmpurl, $bitrate, $width, $height, $profile) = ($1, $2, $3, $4, $5);
 			$prog_type = "$bitrate|$profile";
 			main::logger "DEBUG: stream XML: $xml\nDEBUG: RTMPurl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
-			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{verbose};
+			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{debug};
 			$data{$prog_type}{streamurl} = $rtmpurl;
 			$data{$prog_type}{type} = "Flash RTMP $profile stream";
 			$data{$prog_type}{bitrate} = $bitrate;
@@ -6171,7 +6190,7 @@ sub get {
 	}
 
 	# end marker
-	my $end_time = time();
+	my $end_time = time() + 0.0001;
 
 	# Calculate average speed, duration and total bytes downloaded
 	main::logger sprintf("INFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
@@ -6812,7 +6831,7 @@ sub get {
 			} else {
 				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
 				# end marker
-				my $end_time = time();
+				my $end_time = time() + 0.0001;
 				# Calculate average speed, duration and total bytes downloaded
 				main::logger sprintf("INFO: Thread #%d Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
 					($threadpid{$procid}+1),
@@ -6980,7 +6999,7 @@ sub get {
 		return 'next';
 	} else {
 		# end marker
-		my $end_time = time();
+		my $end_time = time() + 0.0001;
 		# Final file size
 		my $size = stat($prog->{filepart})->size;
 		# Calculate average speed, duration and total bytes downloaded
