@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.49;
+my $version = 1.50;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -5801,30 +5801,37 @@ sub get_stream_data {
 		# Get RTMPURL, bitrate, width, height, profilename
 		if ( $xml =~ m{<video\s+src="(rtmp.+?)".+?system-bitrate="(\d+?)"\s*width="(\d+?)"\s*height="(\d+?)"\s*profile="(.+?)"}i ) {
 			# initially set the key to be the 'bitrate|profile' so we can sort/rename keys afterwards
-			my ($rtmpurl, $bitrate, $width, $height, $profile) = ($1, $2, $3, $4, $5);
+			my ( $streamurl, $bitrate, $width, $height, $profile ) = ($1, $2, $3, $4, $5);
+			# Skip prifiles mentioning H264 - they are rtmpe streams 
+			next if $profile =~ /H264/;
 			$prog_type = "$bitrate|$profile";
-			main::logger "DEBUG: stream XML: $xml\nDEBUG: RTMPurl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
+			main::logger "DEBUG: stream XML: $xml\nDEBUG: StreamUrl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
 			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{debug};
-			$data{$prog_type}{streamurl} = $rtmpurl;
+			$data{$prog_type}{streamurl} = $streamurl;
 			$data{$prog_type}{type} = "Flash RTMP $profile stream";
 			$data{$prog_type}{bitrate} = $bitrate;
 			$data{$prog_type}{width} = $width;
 			$data{$prog_type}{height} = $height;
+
 			# if <break> is in streamurl then strip from there
 			$data{$prog_type}{streamurl} =~ s|<break>.*$||g;
-			my ( $servername, $parameters, $playpath );
-			( $servername, $parameters ) = ( $1, $2 ) if $data{$prog_type}{streamurl} =~ m{rtmp://(.+?)/.*ondemand.*(auth.+)$};
+			my ( $parameters, $playpath );
+			( $data{$prog_type}{server}, $parameters ) = ( $1, $2 ) if $data{$prog_type}{streamurl} =~ m{rtmp://(.+?)/.*ondemand.*(auth.+)$};
+
 			# get playpath if necessary
 			$playpath = $1 if $data{$prog_type}{streamurl} =~ m{rtmp://.+?ondemand/(.+?)\?};
 			if( $playpath ) {
-				$data{$prog_type}{streamurl} = "rtmp://$servername:1935/ondemand?_fcs_vhost=$servername&slist=$playpath";	
+				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&slist=$playpath";
 			} else {
-				$data{$prog_type}{streamurl} = "rtmp://$servername:1935/ondemand?_fcs_vhost=$servername&$parameters";
+				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
 			}
 			# strip out .international from streamurl
 			$data{$prog_type}{streamurl} =~ s/\;\.international.*$//;
-			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$servername&$parameters";
-			$data{$prog_type}{tcurl}   = "rtmp://".inet_ntoa(inet_aton($servername)).":1935/ondemand?_fcs_vhost=$servername&$parameters";
+
+			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
+			$data{$prog_type}{tcurl}   = "rtmp://${data{$prog_type}{server}}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
+			( $data{$prog_type}{playpath}, $data{$prog_type}{auth} ) = ( $3, $1 ) if $parameters =~ m{auth=(.+?)&aifp=(.+?)&slist=(.+?);};
+			$data{$prog_type}{port} = 1935;
 			$data{$prog_type}{swfurl} = "http://www.hulu.com/player.swf";
 			$data{$prog_type}{flashver} = "WIN 10,0,1.2,36";
 		}
@@ -6384,7 +6391,7 @@ sub get {
 	my $authstring 	= $streamdata{authstring};
 	my $swfurl 	= $streamdata{swfurl};
 	my $playpath 	= $streamdata{playpath};
-	my $port 	= $streamdata{port};
+	my $port 	= $streamdata{port} || '1935';
 
 	my $file_tmp;
 	my $cmd;
@@ -6415,7 +6422,7 @@ sub get {
 	if ($rtmpver < 1.4 ) {
 		$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	} else {
-		$cmd = "$rtmpdump --resume --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$rtmpdump --resume --port $port --protocol \"rtmp\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
