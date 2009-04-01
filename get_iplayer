@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.50;
+my $version = 1.51;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2879,6 +2879,9 @@ sub get_stream_data {
 		#<media kind="video" 
 		#        width="720" 
 		#        height="404"
+		## Or
+		##        width="832" 
+		##        height="468"
 		#        expires="2009-03-23T21:44:00+00:00"
 		#        bitrate="1500"                     
 		#        type="video/mp4"                   
@@ -2905,7 +2908,7 @@ sub get_stream_data {
 		# swfUrl: http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340
 		# tcUrl: rtmp://iplayertokfs.fplive.net:1935/iplayertok?token=c3RhcnRfdGltZT0yMDA5MDMxNzExMjI0MSZlbmRfdGltZT0yMDA5MDMxODExMjI.0MSZkaWdlc3Q9M2YyMWEwNjQ1OGVlZWI2ZjE3YTY1YzI4NTQ3ZjBkOWQ=
 		# pageUrl: http://www.bbc.co.uk/iplayer/episode/b00j48zs/Heroes_Series_3_Cold_Wars/
-		if ( $media =~ /^(flashvhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="720".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
+		if ( $media =~ /^(flashvhigh|all)$/ && $xml =~ m{<media\s+kind="video"\s+?width="[789]\d\d".+?type="video/mp4".+?encoding="h264".+?application="(.+?)".+?kind="level3"\s+server="(.+?)"\s+?identifier="(.+?)"\s+?authString="(.+?)"} ) {
 			$prog_type = 'flashvhigh';
 			main::logger "DEBUG: Processing $prog_type stream\n" if $opt->{debug};
 			( $data{$prog_type}{application}, $data{$prog_type}{server}, $data{$prog_type}{identifier}, $data{$prog_type}{authstring} ) = ( $1, $2, $3, $4 );
