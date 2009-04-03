@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.53;
+my $version = 1.54;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4975,25 +4975,66 @@ sub index_min { return 200001 }
 sub index_max { return 299999 }
 sub channels {
 	return {
-		# From http://www.hulu.com/channels (# <no of pages>, each page has 20 episodes)
-		# Takes about 25 mins to get 9000 progs
-		'Action and Adventure'		=> 'Action and Adventure', # 89
-		'Animation and Cartoons'	=> 'Animation and Cartoons', # 52
-		'Comedy'			=> 'Comedy', # 144 pages
-		'Drama'				=> 'Drama', # 125
-		'Family'			=> 'Family', # 23
-		'Food and Leisure'		=> 'Food and Leisure', # 39
-		'Home and Garden'		=> 'Home and Garden', # 8
-		'Horror and Suspense'		=> 'Horror and Suspense', #63
-		'Music'				=> 'Music', # 2
-		'News and Information'		=> 'News and Information', # 19
-		'Other'				=> 'Other', # 0
-		'Reality and Game Shows'	=> 'Reality and Game Shows', # 33
-		'Science Fiction'		=> 'Science Fiction', # 56
-		'Sports'			=> 'Sports', # 27
-		'Talk and Interview'		=> 'Talk and Interview', # 10
-		'Videogames'			=> 'Videogames', # 0
-		'Web'				=> 'Web', # 48
+		'Action and Adventure'		=> 'Action and Adventure',
+		'Action and Adventure/Espionage'		=> 'Action and Adventure, Espionage',
+		'Action and Adventure/Martial Arts'		=> 'Action and Adventure, Martial Arts',
+		'Action and Adventure/Military and War'		=> 'Action and Adventure, Military and War',
+		'Action and Adventure/Westerns'		=> 'Action and Adventure, Westerns',
+		'Animation and Cartoons'		=> 'Animation and Cartoons',
+		'Animation and Cartoons/Anime'		=> 'Animation and Cartoons, Anime',
+		'Comedy'		=> 'Comedy',
+		'Comedy/Romance'		=> 'Comedy, Romance',
+		'Comedy/Satire'		=> 'Comedy, Satire',
+		'Comedy/Sitcoms'		=> 'Comedy, Sitcoms',
+		'Comedy/Sketch'		=> 'Comedy, Sketch',
+		'Comedy/Stand Up'		=> 'Comedy, Stand Up',
+		'Drama'		=> 'Drama',
+		'Drama/Crime and Courtroom'		=> 'Drama, Crime and Courtroom',
+		'Drama/Medical'		=> 'Drama, Medical',
+		'Drama/Soap Operas'		=> 'Drama, Soap Operas',
+		'Family'		=> 'Family',
+		'Food and Leisure'		=> 'Food and Leisure',
+		'Food and Leisure/Entertaining'		=> 'Food and Leisure, Entertaining',
+		'Food and Leisure/Fashion and Beauty'		=> 'Food and Leisure, Fashion and Beauty',
+		'Food and Leisure/Food and Beverage'		=> 'Food and Leisure, Food and Beverage',
+		'Food and Leisure/Health and Fitness'		=> 'Food and Leisure, Health and Fitness',
+		'Food and Leisure/Recipes'		=> 'Food and Leisure, Recipes',
+		'Food and Leisure/Travel'		=> 'Food and Leisure, Travel',
+		'Home and Garden'		=> 'Home and Garden',
+		'Home and Garden/Decorating'		=> 'Home and Garden, Decorating',
+		'Home and Garden/Do it Yourself'		=> 'Home and Garden, Do it Yourself',
+		'Home and Garden/Home Improvement'		=> 'Home and Garden, Home Improvement',
+		'Home and Garden/Real Estate'		=> 'Home and Garden, Real Estate',
+		'Horror and Suspense'		=> 'Horror and Suspense',
+		'Horror and Suspense/Mystery'		=> 'Horror and Suspense, Mystery',
+		'Horror and Suspense/Paranormal'		=> 'Horror and Suspense, Paranormal',
+		'Music'		=> 'Music',
+		'News and Information'		=> 'News and Information',
+		'News and Information/Celebrity and Gossip'		=> 'News and Information, Celebrity and Gossip',
+		'News and Information/Current News'		=> 'News and Information, Current News',
+		'News and Information/Documentary and Biography'		=> 'News and Information, Documentary and Biography',
+		'News and Information/Live Events and Specials'		=> 'News and Information, Live Events and Specials',
+		'News and Information/Politics'		=> 'News and Information, Politics',
+		'News and Information/Science and Technology'		=> 'News and Information, Science and Technology',
+		'Other'		=> 'Other',
+		'Reality and Game Shows'		=> 'Reality and Game Shows',
+		'Science Fiction'		=> 'Science Fiction',
+		'Sports'		=> 'Sports',
+		'Sports/College Football'		=> 'Sports, College Football',
+		'Sports/Extreme Sports'		=> 'Sports, Extreme Sports',
+		'Sports/Fighting and Martial Arts'		=> 'Sports, Fighting and Martial Arts',
+		'Sports/Gaming'		=> 'Sports, Gaming',
+		'Sports/NBA'		=> 'Sports, NBA',
+		'Sports/NHL'		=> 'Sports, NHL',
+		'Sports/WWE'		=> 'Sports, WWE',
+		'Talk and Interview'		=> 'Talk and Interview',
+		'Talk and Interview/Celebrity and Gossip'		=> 'Talk and Interview, Celebrity and Gossip',
+		'Talk and Interview/Late Night'		=> 'Talk and Interview, Late Night',
+		'Videogames'		=> 'Videogames',
+		'Videogames/Previews'		=> 'Videogames, Previews',
+		'Videogames/Reviews'		=> 'Videogames, Reviews',
+		'Web'		=> 'Web',
+		'Web/Web Originals'		=> 'Web, Web Originals',
 	};
 }
 
@@ -5002,8 +5043,7 @@ sub channels {
 sub opt_format {
 	return {
 		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
-		hulupages		=> [ 1, "hulupages|hulu-pages=s", 'Config', '--hulu-pages <pages>', "How many pages to index from Hulu for each channel (20 programmes per page). Default: 10"],
-		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity"],
+		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity,release,rating"],
 		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
 		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
 	};
@@ -5150,14 +5190,9 @@ sub get_links {
 	my $progref = shift;
 	my $prog_type = shift;
 	my %channels = %{ channels() };
-
 	
-	# Maximum number of pages per channel we scrape to get episodes (20 episdoes per page)
-	# 10 results in 2000+ episodes ou of approx 9000
-	my $hulu_max_pages_per_channel = $opt->{hulupages} || 10;
-
 	# What to sort the pages by: popularity, release, rating
-	my $hulu_channel_page_sort = $opt->{hulusort} || 'popularity';
+	my $hulu_channel_page_sort = $opt->{hulusort} || 'popularity,release,rating';
 
 	# What hulu prog types to get: episodes, feature_film, tv, clips, film_trailers, film_clips, movies
 	# The two useful ones are episodes (9000+ full length TV episodes) and feature_film (200+ full-length movies)
@@ -5184,69 +5219,12 @@ sub get_links {
 	# Search for all full feature films on <channel>
 	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=feature_film
 
+	# Sorted and categorised Feed
+	# http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}
+
 	# For full-movie pages http://www.hulu.com/browse/alphabetical/feature_film
 	# just search for 
 	# add_to_playlist?video_id=(\d+?)'
-
-	# Method used:
-	# Use category-based channels like 'Comedy' using types: 'episodes'|'feature_film'
-
-	# An expanded example is here:	  	
-	#                   <div class="home-thumb">
-	#                      <div class="home-play-container">
-	#                        <span class="play-button-hover"><a href=
-	#                        "http://www.hulu.com/watch/19199/gaytown-boiling-point?c=Comedy"
-	#                        class="info_hover" onclick=
-	#                        "SearchTracking.send(null, null, null, null, 'hulu_19199')">
-	#                        <img src=
-	#                        "http://thumbnails.hulu.com/7/925/19225_145x80_manicured__mLKcuWdu+E2pPh0pjfMQWw.jpg"
-	#                        class="thumbnail" border="0" alt=
-	#                        "Gaytown: Boiling Point (season 1, episode 8)"
-	#                        width="145" height="80" title="" style=
-	#                        "width: 145px; height: 80px;" /></a></span>
-	#                        <span class="add-me"><a href="#" onclick=
-	#                        "var self = this;; new Ajax.Request('/users/add_to_playlist?video_id=19199',
-	#                        {asynchronous:true, evalScripts:true, onSuccess:function(request){if (typeof(Behaviors)
-	#                         != 'undefined') {Behaviors.onQueueSuccess(self);}}}); return false;">
-	#                        <img alt="" border="0" class="hover-me" id=
-	#                        "icon-add.gif123395627913173" src=
-	#                        "http://static.hulu.com/images/icon-add.gif?1233824978"
-	#                        title="Queue this video" name=
-	#                        "icon-add.gif123395627913173" /></a></span>
-	#                      </div>
-	#
-	#                      <div class="show-title-container">
-	#                        <img alt="Closed Captions available" class=
-        #	                "closed-captions" height="12" src=
-        #	                "http://static.hulu.com/images/icon-cc.png?1233824978"
-        #       	         title="Closed Captions available" width=
-        #               	 "17" /><a href=
-	#                        "http://www.hulu.com/watch/19199/gaytown-boiling-point?c=Comedy"
-	#                        class="show-title-gray info_hover">Gaytown:
-	#                        <span class="episode-title">Boiling
-	#                        Point</span></a>
-	#                      </div><span class="video-info">Season 1 : Ep.
-	#                      8&nbsp;&nbsp;&nbsp;(04:57)</span>
-	#                      <span class="video-info">More: <a href=
-	#                      "http://www.hulu.com/gaytown?c=Comedy" class=
-	#                      "info_hover">Gaytown</a></span>
-	#                    </div>
-	## For films:
-	#                      <div class="show-title-container">
-	#                        <img alt="Closed Captions available" class=
-	#                        "closed-captions" height="12" src=
-	#                        "http://static.hulu.com/images/icon-cc.png?1233824978"
-	#                        title="Closed Captions available" width=
-	#                        "17" /> <a href=
-	#                        "http://www.hulu.com/watch/49352/21-grams?c=Drama"
-	#                        class="show-title-gray info_hover">21
-	#                        Grams</a>
-	#                      </div><span class="video-info">Feature
-	#                      Film&nbsp;&nbsp;&nbsp;(2:04:37)</span>
-	#                      <span class="video-info">More: <a href=
-	#                      "http://www.hulu.com/21-grams?c=Drama" class=
-	#                      "info_hover">21 Grams</a></span>
-	#                    </div>
 
 	for my $channel ( keys %channels ) {
 
@@ -5259,57 +5237,76 @@ sub get_links {
 
 			# loop through each pageno until no episodes found (or max 10 pages per channel)
 			my $page = 0;
-			my $episode_count = 1;
-			while ($episode_count != 0 && $page < $hulu_max_pages_per_channel) {
+			my $episode_count;
+			for my $page_sort ( split /,/, $hulu_channel_page_sort ) {
 				$page++;
 				$episode_count = 0;
 
 				# Build Hulu URL
-				my $hulu_prog_page_url = "http://www.hulu.com/channels/${channel}?kind=videos&page=${page}&sort=${hulu_channel_page_sort}&type=${htype}";
-
+				my $hulu_prog_page_url = "http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}";
 				# Get page
 				my $html = main::request_url_retry($ua, $hulu_prog_page_url, 3, '.', "WARNING: Failed to get episode page for channel ${channel}, page ${page}, type ${htype}\n");
 				# flatten html
 				$html =~ s/[\n\r]//g;
 
+				# Feed format:
+				#   <item>                                                                                                                                
+				#      <title>Burn Notice: Lesser Evil (s2 | e16)</title>
+				#      <guid isPermaLink="true">http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</guid>
+				#      <link>http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</link>
+				#      <description>
+				#        <![CDATA[
+				#		<a href="http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity">
+				#		<img src="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg"
+				#		 align="right" hspace="10" vspace="10" width="145" height="80" border="0" /></a>
+				#		<p>In the explosive season finale, Michael learns some surprising facts about Victor's past, and is forced to take on Carla in a final showdown.</p>
+				#		<p>Added: March 05, 2009<br/>Air date: March 05, 2009<br/>Duration: 43:23<br/>Rating: 4.8 / 5.0<br/></p>
+				#	 ]]>
+				#      </description>
+				#      <pubDate>Thu, 05 Mar 2009 20:35:25 -0000</pubDate>
+				#      <media:thumbnail url="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg" width="145" height="80"/>
+				#      <media:credit>USA</media:credit>
+				#    </item>
+
 				#loop through each episode section
-				for my $entry ( split /class="home-play-container"/, $html ) { 
+				for my $entry ( split /<item>/, $html ) { 
 
 					# Extract episode data
 					$entry =~ s/\&nbsp;/ /g;
 					decode_entities($entry);
 
-					my ($guidance, $name, $pid, $episode, $web, $thumbnail, $duration, $description );
+					my ($title, $guidance, $name, $pid, $episode, $web, $thumbnail, $duration, $description );
 
 					main::logger "DEBUG: Match Line: $entry\n" if $opt->{debug};
-					# Extract pid
-					$pid = $1 if $entry =~ m{href="http://www.hulu.com/watch/(\d+)/};
 
+					# Extract pid
+					$pid = $1 if $entry =~ m{<link>\s*http://www.hulu.com/watch/(\d+)/};
 					# Construct web url
 					$web = 'http://www.hulu.com/watch/'.$pid;
 
 					# Prepend 'hulu-' to pid to keep as a GUID
 					$pid = 'hulu-'.$pid;
 
-					# Name
-					$name = $1 if $entry =~ m{class="show-title-gray info_hover">\s*(.+?)\s*<}i;
-					$name =~ s/:$//g;
+					# Name : Episode
+					$title = $1 if $entry =~ m{<title>\s*(.+?)\s*</title>}i;
+					( $name, $episode ) = (split /:/, $title)[0,1];
+					$name =~ s/(^\s*|\s*$)//g;
+					$episode =~ s/(^\s*|\s*$)//g;
 
-					# Episode
-					$episode = $1 if $entry =~ m{class="episode-title">\s*(.+?)\s*<}i;
 					# Remove any '|'s
 					$episode =~ s/\|/_/g;
+
 					# Films don't have episode names
 					$episode = 'Film' if !$episode;
 
 					# Description
-					( $description , $duration )= ( $1, $2 ) if $entry =~ m{class="video-info">\s*(.+?)\s*\(([\d:]+?)\)}i;
+					( $description , $duration )= ( $1, $2 ) if $entry =~ m{CDATA\[.+?<p>\s*(.+?)\s*</p>.+?Duration:\s+([\d:]+)<.+?\]}i;
 
 					# Extract thumbnail
-					$thumbnail = $1 if $entry =~ m{<img\s+src="(http.+?)"\s+class="thumbnail"}i;
+					$thumbnail = $1 if $entry =~ m{<media:thumbnail\s+url="(http.+?)"}i;
 
 					# Guidance (subtitles)
-					$guidance = 'Subtitles Available' if $entry =~ m{"Closed Captions available"}i;
+					$guidance = $1 if $entry =~ m{>(Rating:\s*[\d\.]\s*/\s*[\d\.]+)<}i;
 
 					# skip if no data
 					next if ! ($pid && $episode && $name);
