@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.54;
+my $version = 1.55;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -52,11 +52,9 @@ my $version = 1.54;
 #
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
-# * vlc does not quit after downloading an rtsp N95 video stream (ctrl-c is required) - need a --play-and-quit option if such a thing exists
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
 # * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
-# * Hulu indexing takes way too long
 #
 # Bugs to fix:
 # * fork returns non-pid value for itv under ActivePerl - will need to implement serial download instead
@@ -181,6 +179,7 @@ my %opt_format = (
 	mp3audio	=> [ 0, "mp3audio", '', '', ""],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
+	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes downloaded over 30 days ago"],	
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
 	overwrite	=> [ 1, "overwrite|over-write", 'Download', '--overwrite', "Overwrite downloaded files if they already exist"],
@@ -418,7 +417,7 @@ if ( $opt->{pvradd} ) {
 } else {
 	my %pids_history = main::load_download_history() if $opt->{hide};
 	download_matches( find_matches( \%pids_history, @search_args ) );
-
+	purge_downloaded_files( 30 );
 }
 exit 0;
 
@@ -1607,7 +1606,7 @@ sub add_to_download_history {
 		logger "WARNING: Cannot write or append to $historyfile\n\n";
 		return 1;
 	}
-	print HIST "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}\n";
+	print HIST "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
 	close HIST;
 	return 0;
 }
@@ -1667,6 +1666,56 @@ sub check_download_history {
 	}
 }
 
+
+
+# Generic
+# Checks history for files that are over 30 days old and asks user if they should be deleted
+# "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
+sub purge_downloaded_files {
+	my @delete;
+	my @proglist;
+	my $days = shift;
+			
+	# Return if disabled or running in a typically non-interactive mode
+	return 0 if $opt->{nopurge} || $opt->{stdout} || $opt->{nowrite} || $opt->{quiet};
+	
+	if ( ! open(HIST, "< $historyfile") ) {
+		logger "WARNING: Cannot read $historyfile\n\n";
+		return 0;
+	}
+
+	while( <HIST> ) {
+		chomp($_);
+		my ($pid, $name, $episode, $type, $time, $mode, $filename) = (split /\|/)[0,1,2,3,4,5,6];
+		if ( $time < (time() - $days*86400) && $filename && -f $filename ) {
+			my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
+			my @t = gmtime( time() - $time );
+			push @proglist, "$name - $episode, Downloaded: $t[7] days $t[2] hours ago";
+			push @delete, $filename;
+		}
+	}
+	
+	if ( @delete ) {
+		main::logger "\nThese programmes should be deleted:\n";
+		main::logger "-----------------------------------\n";
+		main::logger join "\n", @proglist;
+		main::logger "\n-----------------------------------\n";
+		main::logger "Do you wish to delete them now (--nopurge will prevent this check) (yes/NO) ?\n";
+		my $answer = <STDIN>;
+		if ($answer =~ /^yes$/i ) {
+			for ( @delete ) {
+				main::logger "INFO: Deleting $_\n";
+				system("unlink $_");
+			}
+			main::logger "Programmes deleted\n";
+		} else {
+			main::logger "No Programmes deleted\n";
+		}
+	}
+	
+	return 0;
+}
 
 
 
@@ -1850,7 +1899,7 @@ sub usage {
 	my %name_syntax;
 	my %name_desc;
 	my $usage;
-	$usage .= "Usage ( Also see http://linuxcentre.net/iplayer ):\n";
+	$usage .= "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):\n";
 	$usage .= " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]\n";
 	$usage .= " Download Programmes:           get_iplayer --get [<search options>] <regex|index> ...\n";
 	$usage .= "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
@@ -6825,7 +6874,7 @@ sub get {
 	main::logger "INFO: Stage 3 URL = $url_2\n" if $opt->{verbose};
 	if ( ! $opt->{stdout} ) {
 		main::logger "INFO: Downloading Low Quality H.264 stream\n";
-		my $cmd = "$vlc $vlc_opts --sout file/ts:$prog->{filepart} $url_2 1>&2";
+		my $cmd = "$vlc $vlc_opts --sout file/ts:$prog->{filepart} $url_2 vlc://quit 1>&2";
 		if ( system($cmd) ) {
 			return 'next';
 		}
@@ -6833,7 +6882,7 @@ sub get {
 	# to STDOUT
 	} else {
 		main::logger "INFO: Streaming Low Quality H.264 stream to stdout\n";
-		my $cmd = "$vlc $vlc_opts --sout file/ts:- $url_2 1>&2";
+		my $cmd = "$vlc $vlc_opts --sout file/ts:- $url_2 vlc://quit 1>&2";
 		if ( system($cmd) ) {
 			return 'next';
 		}	
