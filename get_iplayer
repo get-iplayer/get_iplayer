@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.57;
+my $version = 1.58;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -196,6 +196,7 @@ my %opt_format = (
 	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
 	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In tv/hulu modes, download subtitles into srt/SubRip format if available"],
 	subsonly	=> [ 1, "subtitlessonly|subsonly", 'Download', '--subtitles-only', "Only download the subtitles, not the programme"],
+	subsraw		=> [ 1, "subsraw", 'Download', '--subsraw', "Additionally save the raw subtitles file"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
 	test		=> [ 1, "test|t", 'Download', '--test, -t', "Test only - no download (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
@@ -3356,6 +3357,7 @@ sub get_stream_data {
 			$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
 			# Get iphone redirect
 			$data{$mode}{streamurl} = $streamurl;
+			$data{$mode}{streamer} = 'iphone';
 		} else {
 			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
 		}
@@ -3804,6 +3806,7 @@ sub download_subtitles {
 	my ( $ua, $file, $verpid ) = @_;
 	my $suburl;
 	my $subs;
+	
 	main::logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt->{verbose};
 	$suburl = %{ Programme::bbciplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
 	# Return if we have no url
@@ -3824,7 +3827,14 @@ sub download_subtitles {
 		main::logger "\nERROR: Subtitle Download failed\n";
 		return 1;
 	} else {
-		main::logger "\nINFO: Downloaded Subtitles to $prog->{dir}/$prog->{fileprefix}.srt\n";
+		# Dump raw subs into a file if required
+		if ( $opt->{subsraw} ) {
+			main::logger "\nINFO: Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.ttxt\n";
+			my $fhraw = main::open_file_append("$prog->{dir}/$prog->{fileprefix}.ttxt");
+			print $fhraw $subs;
+			close $fhraw;
+		}
+		main::logger "\nINFO: Downloading Subtitles to $prog->{dir}/$prog->{fileprefix}.srt\n";
 	}
 
 	# Convert the format to srt
@@ -5394,7 +5404,14 @@ sub download_subtitles {
 		main::logger "\nERROR: Subtitle Download failed\n";
 		return 1;
 	} else {
-		main::logger "\nINFO: Downloaded Subtitles\n";
+		# Dump raw subs into a file if required
+		if ( $opt->{subsraw} ) {
+			main::logger "\nINFO: Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.smi\n";
+			my $fhraw = main::open_file_append("$prog->{dir}/$prog->{fileprefix}.smi");
+			print $fhraw $subs;
+			close $fhraw;
+		}
+		main::logger "\nINFO: Downloading Subtitles\n";
 	}
 
 	# Convert smil the format to srt
@@ -5825,6 +5842,9 @@ sub get_url {
 	# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 	if ( $url =~ /statuscode=404/ ) {
 		main::logger "\rERROR: Programme is not yet ready for download\n" if $opt->{verbose};
+		return '';
+	} elsif ( $url =~ /statuscode=403/ ) {
+		main::logger "\rERROR: Programme is not permitted for download\n" if $opt->{verbose};
 		return '';
 	}
 
