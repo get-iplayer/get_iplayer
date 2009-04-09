@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.58;
+my $version = 1.59;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2118,7 +2118,7 @@ sub get_metadata {
 	my $prog = shift;
 	# Fill in from cache if not got from metadata
 	my %metadata;
-	for ( qw/ pid index name episode type duration channel available expiry versions guidance categories desc player thumbnail modes / ) {
+	for ( qw/ pid index name episode type duration channel available expiry versions guidance categories desc player thumbnail modes web / ) {
 		$metadata{$_} = $prog->{$_} if defined $prog->{$_};
 	}
 	return %metadata;
@@ -2735,6 +2735,7 @@ sub get_metadata {
 	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Entertainment">9100099</media:category>
 	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Music">9100006</media:category>
 	#        <media:category scheme="urn:bbc:metadata:cs:iPlayerUXCategoriesCS" label="Pop &amp; Chart">9200069</media:category>
+	#        <media:rating scheme="urn:simple">adult</media:rating>
 	#        <media:credit role="Production Department" scheme="urn:ebu">BBC Radio 1</media:credit>
 	#        <media:credit role="Publishing Company" scheme="urn:ebu">BBC Radio 1</media:credit>
 	#        <media:thumbnail url="http://www.bbc.co.uk/iplayer/images/episode/b00djtfh_86_48.jpg" width="86" height="48" />
@@ -2807,6 +2808,7 @@ sub get_metadata {
 		player		=> $player,
 		thumbnail	=> $thumbnail || $prog->{thumbnail},
 		modes		=> $modes,
+		web		=> $prog->{web},
 	);
 }
 
@@ -3539,6 +3541,7 @@ sub get_links {
 		#	     &lt;/p&gt;
 		#	   </content>
 		#	   <category term="Factual" />
+		#          <category term="Guidance" />
 		#	   <category term="TV" />
 		#	   <link rel="via" href="http://www.bbc.co.uk/iplayer/episode/b0088jgs?src=a_syn30" type="text/html" title="Bargain Hunt: Series 18: Oswestry" />
 		#       </entry>
@@ -3571,8 +3574,8 @@ sub get_links {
 		# Discard first element == header
 		shift @entries;
 
-		my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $versions );
 		foreach my $entry (@entries) {
+			my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $versions, $guidance );
 
 			my $entry_flat = $entry;
 			$entry_flat =~ s/\n/ /g;
@@ -3621,6 +3624,9 @@ sub get_links {
 				next;
 			}
 
+			# Set guidance based on category
+			$guidance = 'Yes' if grep /guidance/i, @category;
+
 			# Check for signed-only version from Channel
 			if ($channel eq 'Signed') {
 				$versions = 'signed';
@@ -3638,7 +3644,7 @@ sub get_links {
 				'versions'	=> $versions,
 				'episode'	=> $episode,
 				'desc'		=> $desc,
-				'guidance'	=> ' ',
+				'guidance'	=> $guidance,
 				'available'	=> 'Unknown',
 				'duration'	=> 'Unknown',
 				'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
@@ -4503,6 +4509,7 @@ sub get_metadata {
 		desc		=> $longdesc || $prog->{desc},
 		player		=> $player,
 		thumbnail	=> $thumbnail || $prog->{thumbnail},
+		web		=> $prog->{web},
 	);
 }
 
@@ -5126,6 +5133,7 @@ sub get_metadata {
 		desc		=> $longdesc || $prog->{desc},
 		player		=> $player,
 		thumbnail	=> $thumbnail || $prog->{thumbnail},
+		web		=> $prog->{web},
 	);
 }
 
@@ -7135,9 +7143,9 @@ sub display_list {
 	for my $name ( sort {lc $a cmp lc $b} keys %{$pvr} ) {
 		# Report whether disabled
 		if ( $pvr->{$name}->{disable} ) {
-			main::logger "(Disabled) PVR Search '$name':\n";
+			main::logger "pvrsearch = $name (disabled)\n";
 		} else {
-			main::logger "PVR Search '$name':\n";
+			main::logger "pvrsearch = $name\n";
 		}
 		for ( sort keys %{ $pvr->{$name} } ) {
 			main::logger "\t$_ = $pvr->{$name}->{$_}\n";
