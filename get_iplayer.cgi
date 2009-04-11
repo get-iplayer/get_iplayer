@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.08';
+my $VERSION = '0.09';
 
 # Features:
 # * Search for progs
@@ -26,6 +26,8 @@ my $VERSION = '0.08';
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
 # * Add loads of options
+# * &nbsp; isn't considered good practice
+# * in general, take presentation data out of the html and into css, take scripting out of the html and into the js
 
 use strict;
 use CGI ':all';
@@ -111,7 +113,6 @@ my %nextpages = (
 
 # Page Routing
 $nextpage = $cgi->param( 'NEXTPAGE' ) || 'Show_Programmes';
-#print "<h3>Page: $nextpage</h3>";
 form_header();
 print $cgi->Dump if $DEBUG;
 # Authorized
@@ -173,8 +174,8 @@ sub show_pvr_list {
 	my @html;
 	my @displaycols = ( 'pvrsearch', ( grep !/pvrsearch/, ( sort keys %fields ) ) );
 	# Build header row
-	push @html, "<tr>";
-	push @html, th( { -class => 'contactdata' }, checkbox( -title => 'Select/Unselect All PVR Searches', -onClick => "check_toggle(document.form, 'PVRSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+	push @html, "<tr class=\"search\" >";
+	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All PVR Searches', -onClick=>"check_toggle(document.form, 'PVRSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -187,7 +188,7 @@ sub show_pvr_list {
                 }
                 $class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
 
-		push @html, th( { -class => 'contactdata' },
+		push @html, th( { -class => 'search' },
 			label( {
 				-title		=> $title,
 				-class		=> $class,
@@ -203,35 +204,37 @@ sub show_pvr_list {
 	for my $name ( @pvrsearches ) {
 		my @row;
 		push @row, td( {-class=>'search'},
-                  checkbox(
-                    -name	=> 'PVRSELECT',
-                    -label	=> '',
-                    -value 	=> "$name",
-                    -checked	=> 0,
-                    -override	=> 1,
-                  )
+			checkbox(
+				-class		=> 'search',
+				-name		=> 'PVRSELECT',
+				-label		=> '',
+				-value	 	=> "$name",
+				-checked	=> 0,
+				-override	=> 1,
+			)
 		);
 		for ( @displaycols ) {
 			push @row, td( {-class=>'search'}, $pvrsearch->{$name}->{$_} );
 		}
-		push @html, Tr( @row );
+		push @html, Tr( {-class=>'search'}, @row );
 	}
 
 	
 	# Search form
 	print start_form(
 		-name   => "form",
-		-method => "GET",
+		-method => "POST",
 	);
 
 	print button(
+		-class		=> 'search',
 		-name		=> 'Delete Selected PVR Entries',
 		-value		=> 'Delete Selected PVR Entries',
 		-title		=> 'Delete Selected PVR Entries',
 		-onClick 	=> "form.NEXTPAGE.value='pvr_del'; submit()",
 	);
 
-	print table( {-valign=>'left', -cellspacing=>'1', -cellpadding=>'1', -width=>'100%'}, @html );
+	print table( {-class=>'search'} , @html );
 	# Make sure we go to the correct nextpage for processing
 	print hidden(
 		-name		=> "NEXTPAGE",
@@ -379,6 +382,7 @@ sub show_progs {
 	my $searchfields = join(",", param( 'SEARCHFIELDS' )) || 'name';
 	my $typelist = join(",", param( 'PROGTYPES' )) || 'tv';
 	my $pagesize = param( 'PAGESIZE' ) || 17;
+	my $pageno = param( 'PAGE' ) || 1;
 	my @html;
 	my %type;
 
@@ -401,101 +405,56 @@ sub show_progs {
         my $sort_field = param( 'SORT' ) || 'name';
         my $reverse = param( 'REVERSE' ) || '0';
 
-
-        # Determine paged progs
-        my $page = param( 'PAGE' ) || 1;
-	my $first = $pagesize * ($page - 1);
-	my $last = $first + $pagesize;
-	$last = keys %prog if $last > keys %prog;
 	# Sort
 	@pids = get_sorted( \%prog, $sort_field, $reverse );
-	# How many pages
-	my $pages = int( $#pids / $pagesize ) + 1;
-	# Page trail
-	my @pagetrail;
-	my $trailsize = 10;
-	push @pagetrail, label( {
-		-title		=> "Previous Page",
-		-class		=> 'pageno',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page-1; submit()",},
-		"<<&nbsp;&nbsp;",
-	) if $page > 1;
-	push @pagetrail, label( {
-		-title		=> "Page 1",
-		-class		=> 'pageno',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=1; submit()",},
-		"1&nbsp;&nbsp;",
-	) if $page > 1;
-	push @pagetrail, "...&nbsp;&nbsp;" if $page > $trailsize+2;
- 	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
-		push @pagetrail, label( {
-			-title		=> "Page $pn",
-			-class		=> 'pageno',
-			-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value='$pn'; submit()",},
-			"$pn&nbsp;&nbsp;",
-		) if $pn > 1 && $pn != $page && $pn < $pages;
-		push @pagetrail, label( {
-			-title          => "Current Page",
-			-class          => 'pageno-current', },
-		"$page&nbsp;&nbsp;",
-		) if $pn == $page;
-	}
-	push @pagetrail, "...&nbsp;&nbsp;" if $page < $pages-$trailsize-1;
-	push @pagetrail, label( {
-		-title		=> "Page ".$pages,
-		-class		=> 'pageno',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$pages; submit()",},
-		"$pages&nbsp;&nbsp;",
-	) if $page < $pages;
-	push @pagetrail, label( {
-		-title		=> "Next Page",
-		-class		=> 'pageno',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page+1; submit()",},
-		">>&nbsp;&nbsp;",
-	) if $page < $pages;
+
+	my ($first, $last, @pagetrail) = pagetrail( $pageno, $pagesize, $#pids+1, 7 );
 
 
 	# Default displaycols
 	push @html, "<tr>";
-	push @html, th( { -class => 'contactdata' }, checkbox( -title => 'Select/Unselect All Programmes', -onClick => "check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
-	        # Sort by column click and change display class (colour) according to sort status
-	        my ($title, $class, $onclick);
-	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
-                } else {
-                  ($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; submit()");
-                }
-                $class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
+		# Sort by column click and change display class (colour) according to sort status
+		my ($title, $class, $onclick);
+		if ( $sort_field eq $heading && not $reverse ) {
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
+		} else {
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; submit()");
+		}
+		$class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
 
-		push @html, th( { -class => 'contactdata' },
-                  table(
-                    Tr([ 
-                      th({ -class => 'contactdata' },
-			label( {
-			   -title	=> $title,
-			   -class       => $class,
-			   -onClick	=> $onclick,
-			   },
-			   $fieldname{$heading},
-                        )
-                      ).
-                      th({ -class => 'contactdata' },
-                        checkbox(
-                          -name		=> 'COLS',
-                          -label	=> '',
-                          -value 	=> $heading,
-                          -checked	=> 1,
-                          -override	=> 1,
-                          -onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()"
-                        )
-                      )
-                    ])
-                  )
-                );
-        }
+		push @html, 
+			th( { -class => 'search' },
+				table( { -class => 'searchhead' },
+					Tr( { -class => 'search' }, [ 
+						th( { -class => 'search' },
+							label( {
+								-title		=> $title,
+								-class		=> $class,
+								-onClick	=> $onclick,
+								},
+								$fieldname{$heading},
+							)
+						).
+						th({ -class => 'search' },
+							checkbox(
+								-class		=> 'search',
+								-name		=> 'COLS',
+								-label		=> '',
+								-value 		=> $heading,
+								-checked	=> 1,
+								-override	=> 1,
+								-onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()"
+							)
+						)
+					]
+				)
+			)
+		);
+	}
 	push @html, "</tr>";
 
 	# Build each prog row
@@ -503,57 +462,62 @@ sub show_progs {
 		my $pid = $pids[$i]; 
 		my @row;
 		push @row, td( {-class=>'search'},
-                  checkbox(
-                    -name	=> 'PROGSELECT',
-                    -label	=> '',
-                    -value 	=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}",
-                    -checked	=> 0,
-                    -override	=> 1,
-                  )
+			checkbox(
+				-class		=> 'search',
+				-name		=> 'PROGSELECT',
+				-label		=> '',
+				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}",
+				-checked	=> 0,
+				-override	=> 1,
+			)
 		);
 		for ( @displaycols ) {
 			if ( ! /thumbnail/ ) {
 				push @row, td( {-class=>'search'}, $prog{$pid}->{$_} );
 			} else {
-				push @row, td( {-class=>'search'}, "<a href=\"$prog{$pid}->{web}\"><img border=0 height=\"40\" src=\"$prog{$pid}->{$_}\"></a>" );
+				push @row, td( {-class=>'search'}, a( { -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			}
 		}
-		push @html, Tr( @row );
+		push @html, Tr( {-class=>'search'}, @row );
 	}
 
 	my @typeselect;
-	push @typeselect, td({ -style => 'white-space:nowrap', -valign => 'middle' }, 'Programme Types:');
+	push @typeselect, td({ -class=>'types' }, 'Programme Types:');
 	for my $prog_type (keys %prog_types) {
-	  push @typeselect,
-	    td( { -style => 'white-space:nowrap' }, [
-	      "&nbsp;&nbsp;&nbsp;&nbsp;$prog_types{$prog_type}",
-              checkbox(
-                -name		=> 'PROGTYPES',
-                -label		=> '',
-                -value 		=> $prog_type,
-                -checked	=> $type{$prog_type},
-                -override	=> 1,
-              )
-            ]);
+		push @typeselect,
+			td( { -class => 'types' }, [
+				"&nbsp;&nbsp;&nbsp;&nbsp;$prog_types{$prog_type}",
+				checkbox(
+					-class		=> 'types',
+					-name		=> 'PROGTYPES',
+					-label		=> '',
+					-value 		=> $prog_type,
+					-checked	=> $type{$prog_type},
+					-override	=> 1,
+				)
+			]
+		);
 	}
 
 	# Search form
 	print start_form(
 		-name   => "form",
-		-method => "GET",
+		-method => "POST",
 	);
 
-	print table( { -rules => 'none' },
-	  Tr( 
-	    td([
+	print table( { -class=>'header' },
+	  Tr( { -class=>'header' }, 
+	    td( { -class=>'header' }, [
 	      "Name Search",
 	      textfield(
+	        -class		=> 'header',
 		-name		=> 'SEARCH',
 		-size		=> 20,
               ),
 
               "in",
               popup_menu(
+	        -class		=> 'header',
 	        -name		=> 'SEARCHFIELDS',
                 -values		=> [(@headings,'name,episode','name,episode,desc')],
 		-labels		=> \%fieldname,
@@ -561,12 +525,14 @@ sub show_progs {
               ),
 
               submit({
-                -tabindex=>'1',
-                -value=>"Search"
+	        -class		=> 'header',
+                -tabindex	=> '1',
+                -value		=> "Search"
               }),
 	
               "Programmes per Page",
               popup_menu(
+	        -class		=> 'header',
 	        -name		=> 'PAGESIZE',
                 -values		=> ['17','50','100','200','500'],
                 -default	=> $pagesize,
@@ -575,6 +541,7 @@ sub show_progs {
 
               "Sort",            
               popup_menu(
+	        -class		=> 'header',
 		-name		=> 'SORT',
 		-values		=> [@headings],
 		-labels		=> \%fieldname,
@@ -584,54 +551,56 @@ sub show_progs {
             ]),
           ),
         );
-	print table( { -rules => 'none', -valign=>'left', -cellspacing=>'0', -cellpadding=>'0', -width=>'35%'}, Tr( @typeselect ) ).br();
-	print button(
-		-name		=> 'Add Selected to Download Queue',
-		-value		=> 'Add Selected to Download Queue',
-		-title		=> 'Add Selected to Download Queue',
-		-onClick 	=> "form.NEXTPAGE.value='pvr_queue'; submit()",
+	print table( { -class=>'types' }, Tr( { -class=>'types' }, @typeselect ) );
+	print table( { -class=>'actions' },
+		Tr( { -class=>'actions' },
+			td( { -class=>'actions' }, [
+				button(
+					-class		=> 'actions',
+					-name		=> 'Queue Selected for Download',
+					-value		=> 'Queue Selected for Download',
+					-title		=> 'Queue Selected for Download',
+					-onClick 	=> "form.NEXTPAGE.value='pvr_queue'; submit()",
+				),
+				button(
+					-class		=> 'actions',
+					-name		=> 'Add Current Search to PVR',
+					-value		=> 'Add Current Search to PVR',
+					-title		=> 'Add Current Search to PVR',
+					-onClick 	=> "form.NEXTPAGE.value='pvr_add'; submit()",
+				),
+				"Results ".($first+1)." - $last of ".($#pids+1),
+			]),
+		),
 	);
-	print button(
-		-name		=> 'Add Current Search to PVR',
-		-value		=> 'Add Current Search to PVR',
-		-title		=> 'Add Current Search to PVR',
-		-onClick 	=> "form.NEXTPAGE.value='pvr_add'; submit()",
-	);
-	#print button(
-	#	-name		=> 'Show Download Queue',
-	#	-value		=> 'Show Download Queue',
-	#	-title		=> 'Show Download Queue',
-	#	-onClick 	=> "form.NEXTPAGE.value='pvr_list'; submit()",
-	#);
-	print "&nbsp;&nbsp;&nbsp;Results ".($first+1)." - $last of ".($#pids+1);
-	print br();
-	print "<center>".div(@pagetrail)."</center>";
-	print table( {-valign=>'left', -cellspacing=>'1', -cellpadding=>'1', -width=>'100%'}, @html );
-	print "<center>".div(@pagetrail)."</center>";
+	print div( { -id=>'centered', -class=>'pagetrail' }, @pagetrail);
+	print table( {-class=>'search' }, @html );
+	print div( { -id=>'centered', -class=>'pagetrail' }, @pagetrail);
 
 	my @columnselect;
 	for my $heading (@headings) {
-          next if grep(/$heading/i, @displaycols);
-	  push @columnselect, (
-	    Tr(
-	    td( { -width => '8%' }, [
-              checkbox(
-                -name		=> 'COLS',
-                -label		=> $fieldname{$heading},
-                -value 		=> $heading,
-                -checked	=> 0,
-                -override	=> 1,
-                -onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()",
-              )
-            ])
-            )
-	  );
+		next if grep(/$heading/i, @displaycols);
+		push @columnselect, (
+			Tr( { -class=>'colselect' }, 
+				td( { -class=>'colselect' }, [
+					checkbox(
+						-class		=> 'colselect',
+						-name		=> 'COLS',
+						-label		=> $fieldname{$heading},
+						-value 		=> $heading,
+						-checked	=> 0,
+						-override	=> 1,
+						-onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()",
+					)
+				])
+			)
+		);
 	}
-	unshift @columnselect, Tr( td( { -class => 'colselect' }, "Enable these columns:" ) ) if @columnselect;
+	unshift @columnselect, Tr( { -class=>'colselect' }, th( { -class=>'colselect' }, "Enable these columns:" ) ) if @columnselect;
 
 	# Display drop down menu with multiple select for columns shown
 	print (
-          table( { -width=>'100%', -rules => 'none', -cellpadding => 0, -cellspacing => 0 }, @columnselect ).
+          table( { -class => 'colselect' }, @columnselect ).
           # Make sure we go to the correct nextpage for processing
           hidden(
             -name	=> "NEXTPAGE",
@@ -653,8 +622,62 @@ sub show_progs {
           end_form()
         );
 
-
 	return 0;
+}
+
+
+
+# Build page trail
+sub pagetrail {
+	my ( $page, $pagesize, $count, $trailsize ) = ( @_ );
+
+	my $first = $pagesize * ($page - 1);
+	my $last = $first + $pagesize;
+	$last = $count if $last > $count;
+	# How many pages
+	my $pages = int( $count / $pagesize ) + 1;
+	# Page trail
+	my @pagetrail;
+	push @pagetrail, label( {
+		-title		=> "Previous Page",
+		-class		=> 'pagetrail',
+		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page-1; submit()",},
+		"<<&nbsp;&nbsp;",
+	) if $page > 1;
+	push @pagetrail, label( {
+		-title		=> "Page 1",
+		-class		=> 'pagetrail',
+		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=1; submit()",},
+		"1&nbsp;&nbsp;",
+	) if $page > 1;
+	push @pagetrail, "...&nbsp;&nbsp;" if $page > $trailsize+2;
+ 	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
+		push @pagetrail, label( {
+			-title		=> "Page $pn",
+			-class		=> 'pagetrail',
+			-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value='$pn'; submit()",},
+			"$pn&nbsp;&nbsp;",
+		) if $pn > 1 && $pn != $page && $pn < $pages;
+		push @pagetrail, label( {
+			-title          => "Current Page",
+			-class          => 'pagetrail-current', },
+		"$page&nbsp;&nbsp;",
+		) if $pn == $page;
+	}
+	push @pagetrail, "...&nbsp;&nbsp;" if $page < $pages-$trailsize-1;
+	push @pagetrail, label( {
+		-title		=> "Page ".$pages,
+		-class		=> 'pagetrail',
+		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$pages; submit()",},
+		"$pages&nbsp;&nbsp;",
+	) if $page < $pages;
+	push @pagetrail, label( {
+		-title		=> "Next Page",
+		-class		=> 'pagetrail',
+		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page+1; submit()",},
+		">>&nbsp;&nbsp;",
+	) if $page < $pages;
+	return ($first, $last, @pagetrail);
 }
 
 
@@ -729,8 +752,6 @@ sub begin_html {
 	print "</HEAD>\n";
 	insert_javascript();
 	print "<body>\n";
-	# this hack makes the browser display tables whilst rxing them...
-#	print "<hr size=1></BODY><BODY>";
 
 	print $cgi->dump if $DEBUG;
 }
@@ -754,40 +775,38 @@ sub form_header {
 		);
 
 
-	print table({-valign=>'middle', -cellspacing=>'1', -cellpadding=>'0', -width=>'100%'},
-	Tr(
-		td({-class=>'title'},"get_iplayer Manager"),
-		td({-align=>'right' -width=>'131'}, a({-href=>"http://linuxcentre.net/get_iplayer/"}, img({-src=>"$icons_base_url/logo_white_131x28.gif", -border=>'0', -align=>'right'}) ) ),
+	print table( {-class=>'title'},
+	Tr( {-class=>'title'},
+		td( { -class=>'title' }, "get_iplayer Manager"),
+		td( { -class=>'title', -align=>'right' -width=>'131' }, a( {-href=>"http://linuxcentre.net/get_iplayer/"}, img( { -src=>"$icons_base_url/logo_white_131x28.gif", -align=>'right' }) ) ),
 	) ).
 
 	hr({-size=>1}).
 
-	table({-valign=>'middle', -cellspacing=>'1' },
+	table({ -class=>'icons' },
 
-	Tr({-valign=>'middle'}, td( [
+	Tr( { -class=>'icons' }, td( { -class=>'icons' }, [
 		img({
 			-alt => 'Back',
 			-title => 'Back',
 			-src => "$icons_base_url/back.png",
 			-onClick  => "history.back()",
 		}),
-		"&nbsp&nbsp",
 		# go to search page
-		img({
+		#image_button(-name=>'button_name', -src=>image URL, -align=>alignment, -alt=>text, -value=>text)
+		image_button({
 			-alt => 'Search',
 			-title => 'Programme Search',
 			-src => "$icons_base_url/index.png",
-			-onClick  => "parent.location='?'",
+			-onClick  => "formheader.NEXTPAGE.value='Show_Programmes'; submit()",
 		}),
-		"&nbsp&nbsp",
 		# go back to parent page - set no params
-		img({
+		image_button({
 			-alt => 'PVR Searches',
 			-title => 'PVR Searches',
 			-src => "$icons_base_url/pie2.png",
-			-onClick  => "parent.location='?NEXTPAGE=pvr_list'",
+			-onClick  => "formheader.NEXTPAGE.value='pvr_list'; submit()",
 		}),
-		"&nbsp&nbsp",
 		# Open the help page in a different window
 		img({
 			-alt => 'Help',
@@ -795,12 +814,16 @@ sub form_header {
 			-src => "$icons_base_url/unknown.png",
 			-onClick  => "parent.location='http://linuxcentre.net/getiplayer/documentation'",
 		}),
-		"&nbsp&nbsp",
 		$menu,
 	] )	) ).
 	hidden(
 		-name => "ADVANCED",
 		-value => $advanced,
+		-override => 1,
+	).
+	hidden(
+		-name => "NEXTPAGE",
+		-value => '',
 		-override => 1,
 	).
 
@@ -817,7 +840,7 @@ sub form_header {
 #
 #############################################
 sub form_footer {
-	print p( b({-class=>"search_note"},
+	print p( b({-class=>"footer"},
 		"Note: Changes cannot be undone".
 		br()."&copy;2009 Phil Lewis - Licensed under GPLv3"
 	));
@@ -845,8 +868,8 @@ sub insert_javascript {
 
 	print <<EOF;
 
-	<script LANGUAGE=\"JavaScript\"><!--
-
+	<script type="text/javascript">
+	
 	// 
 	// Popup a Yes/No dialogue with param as question.
 	//
@@ -935,7 +958,7 @@ sub insert_javascript {
 		return true;
 	}
 
-	--></SCRIPT>
+	</SCRIPT>
 EOF
 }
 
@@ -951,53 +974,49 @@ sub insert_stylesheet {
 
 	<STYLE type="text/css">
 	
-	BODY			{ background: white; font-family: verdana, sans-serif;}
-	H1, H2, H3		{ font-family: verdana, sans-serif; }
-	TD, INPUT, SELECT	{ Color: black; font-size: 9pt; }
-	TH			{ Color: black; align: left; font-size: 9pt; background: #EEEEEE; }
-	TABLE			{ rules: all; frame: border; cellspacing: 1; }
-	A 			{ font-size: 9pt; text-decoration: none; }
-	LABEL			{ font-size: 9pt; text-decoration: none; }
+	BODY			{ color: #000; background: white; font-size: 90%; font-family: verdana, sans-serif;}
+	IMG			{ border: 0; }
+
+	TABLE.title		{ font-size: 120%; border-spacing: 1px; padding: 0; }
+	TR.title		{ font-weight: bold; }
+
+	TABLE.icons		{ border-spacing: 10px 0; padding: 0px; }
+
+	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
+	INPUT.header		{ font-size: 80%; } 
+	SELECT.header		{ font-size: 80%; } 
+
+	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; width: 35%; }
+	TR.types		{ white-space: nowrap; }
+	INPUT.types		{ font-size: 70%; }
 	
-	TD.titleinfo		{ font-size: 9pt; color: black; text-decoration: none; align: left; valign: middle; nowrap: yes; }
-	TD.title		{ font-size: 16pt; color: black; font-weight: bold; }
-	B.title			{ font-size: 14pt; color: black; }
+	TABLE.actions		{ font-size: 80%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	TD.actions		{ font-weight: bold; }
+	INPUT.actions		{ font-size: 80%; }
 	
-	A.search		{ font-size: 9pt; text-decoration: none; Color: black; }
-	B.search		{ font-size: 11pt; color: black; font-weight: normal; }
-	B.search_note		{ font-size: 10pt; color: #777777; font-weight: normal; }
-	B.passwordlabel		{ font-size: 10pt; font-family: courier; }
-	TD.search		{ font-size: 9pt; background: #EEEEEE; }
-	INPUT.search		{ font-size: 9pt; background: #EEEEEE; }
+	DIV.pagetrail		{ font-size: 80%; font-weight: bold; text-align: center; }
+	#centered		{ width: 700px; height:20px; margin:0px auto 0; position: relative; }
+	LABEL.pagetrail		{ Color: #009; }
+	LABEL.pagetrail-current	{ Color: #900; }
 
-	TD.colselect		{ Color: black; align: left; font-size: 9pt; font-weight: bold; }
-	TH.search		{ Color: white; align: centre; background: #AAAAAA; font-size: 10pt;}
-	TH.creategrey		{ Color: grey; align: left; font-size: 9pt; }
-	H3.error		{ Color: red; }
-	UL.error		{ Color: red; }
+	TABLE.colselect		{ font-size: 70%; padding: 0; border-spacing: 0px; }
+	TR.colselect		{ text-align: left; }
+	TH.colselect		{ font-weight: bold; }
+	INPUT.colselect		{ font-size: 70%; }
+	LABEL.colselect		{ font-size: 70%; }
+	
+	TABLE.search		{ font-size: 70%; border-spacing: 2px; padding: 0; width: 100%; }
+	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
+	TR.search		{ background: #EEE; }
+	TR.search:hover		{ background: #CCC; }
+	TH.search		{ Color: white; text-align: center; background: #999; text-align: center; }
+	TD.search		{ text-align: left; }
+	INPUT.search		{ font-size: 70%; background: #EEE; }
+	LABEL.sorted            { Color: #cfc; }
+	LABEL.unsorted          { Color: #fff; }
+	LABEL.sorted_reverse    { Color: #fcc; }
 
-	TH.test			{ Color: black; align: centre; font-size: 10pt; background: #EEEEEE; }
-	TD.testfailed		{ font-size: 10pt; text-decoration: none; Color: black; background: #FFFFFF;}
-	TD.testsuccess		{ font-size: 10pt; text-decoration: none; Color: black; background: #EEFFEE;}
-
-	LABEL.pageno		{ font-size: 9pt; text-decoration: none; font-weight: bold; Color: #009; }
-	LABEL.pageno-current	{ font-size: 9pt; text-decoration: none; font-weight: bold; Color: #900; }
-        LABEL.sorted            { font-size: 8pt; text-decoration: none; Color: #ccffcc; }
-        LABEL.unsorted          { font-size: 8pt; text-decoration: none; Color: white; }
-        LABEL.sorted_reverse    { font-size: 8pt; text-decoration: none; Color: #ffcccc; }
-        A.note		        { font-size: 10pt; color: #777777; font-weight: normal; text-decoration: none; }
-        B.note          	{ font-size: 10pt; color: #777777; font-weight: normal; }
-        TD.contactdata          { font-size: 8pt; background: #EEEEEE; }
-        TD.userdata             { font-size: 8pt; background: #EEEEEE; }
-        TD.userdata_white    	{ font-size: 8pt; background: white; }
-        TD.contactdata_white    { font-size: 8pt; background: white; }
-        TR.contactdata          { font-size: 8pt; background: #EEEEEE; }
-        TR.contactdata:hover    { font-size: 8pt; background: #CCCCCC; }
-        TH.contactdata          { Color: white; align: centre; background: #999999; font-size: 8pt;}
-
-	H3.wizard		{ font-weight: bold; font-size: 14pt; text-decoration: none; Color: black; }
-	A.wizard		{ font-size: 11pt; text-decoration: none; Color: black; }
-
+	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
 	</STYLE>
 EOF
 
