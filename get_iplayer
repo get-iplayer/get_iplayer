@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.60;
+my $version = 1.61;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -208,7 +208,7 @@ my %opt_format = (
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
-	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
@@ -2983,6 +2983,37 @@ sub get_stream_data {
 				
 
 
+		# flashhd modes
+		} elsif (	$mattribs->{kind} eq 'video' &&
+				$mattribs->{type} eq 'video/mp4' &&
+				$mattribs->{encoding} eq 'h264' &&
+				$mattribs->{bitrate} =~ /3200/
+		) {
+			# Connections within mode
+			for my $cattribs ( @{ $mattribs->{connections} } ) {
+
+				# Match to submode
+				if ( $cattribs->{kind} eq 'akamai' ) {
+					$mode = 'flashhd1';
+					$data{$mode}{ext} = 'mp4';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{authString};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} 1280x720 $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{playpath} = $data{$mode}{identifier};
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
+					$data{$mode}{identifier} =~ s/^mp4://;
+					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				}
+			}
+
+
+
 		# flashhigh modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/mp4' &&
@@ -3472,6 +3503,7 @@ sub modelist {
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
 	# flashhigh => flashhigh1,flashhigh2
 	# flashvhigh => flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4
+	# flashhd => flashhd1
 	my @modes = split /,/, $opt->{vmode};
 	for (@modes) {
 		$_ = 'flashhigh,flashnormal' if $_ eq 'rtmp' || $_ eq 'flash';
@@ -3485,6 +3517,11 @@ sub modelist {
 	my @modes = split /,/, $opt->{vmode};
 	for (@modes) {
 		$_ = 'flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4' if $_ eq 'flashvhigh';
+	}
+	$opt->{vmode} = join ',', @modes;
+	my @modes = split /,/, $opt->{vmode};
+	for (@modes) {
+		$_ = 'flashhd1' if $_ eq 'flashhd';
 	}
 	$opt->{vmode} = join ',', @modes;
 
