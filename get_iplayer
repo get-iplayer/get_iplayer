@@ -18,13 +18,13 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 # Author: Phil Lewis
-# Email: iplayer (at sign) linuxcentre.net
+# Email: iplayer2 (at sign) linuxcentre.net
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
 #
 package main;
-my $version = 1.59;
+my $version = 1.60;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -296,7 +296,7 @@ my %user_agent = (
   	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
   	update		=> "get_iplayer updater (v${version} - $^O)",
   	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
-  	get_iplayer	=> "get_iplayer/$version $^O",
+  	get_iplayer	=> "get_iplayer/$version $^O/$^V",
 );
 
 # Display Usage
@@ -792,7 +792,7 @@ sub get_regex_matches {
 
 
 # Usage: sort_index( \%prog, \%index_prog, $prog_type )
-# Populates the index field of the prog hash as well as creating the %index_prog hash
+# Populates the index fif the prog hash as well as creating the %index_prog hash
 # Should be run after any number of get_links methods
 sub sort_index {
 	my $progref = shift;
@@ -1376,6 +1376,8 @@ sub create_xml {
 					} elsif ( $opt->{mythtv} ) {
 						print XML "\t\t<Stream>\n";
 						print XML "\t\t\t<Name>${title}</Name>\n";
+						print XML "\t\t\t<type>$this->{type}</type>\n";
+						print XML "\t\t\t<index>$this->{index}</index>\n";
 						print XML "\t\t\t<url>${pid}.mov</url>\n";
 						print XML "\t\t\t<Subtitle></Subtitle>\n";
 						print XML "\t\t\t<Synopsis>${desc}</Synopsis>\n";
@@ -1440,6 +1442,8 @@ sub create_xml {
 								print XML 
 									"\t\t\t<Stream>\n".
 									"\t\t\t\t<Name>".encode_entities( $name )."</Name>\n".
+									"\t\t\t\t<index>$this->{index}</index>\n".
+									"\t\t\t\t<type>$this->{type}</type>\n".
 									"\t\t\t\t<Url>${pid}.mov</Url>\n".
 									"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
 									"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
@@ -1497,6 +1501,8 @@ sub create_xml {
 						print XML
 							"\t\t\t<Stream>\n".
 							"\t\t\t\t<Name>${title}</Name>\n".
+							"\t\t\t\t<index>$this->{index}</index>\n".
+							"\t\t\t\t<type>$this->{type}</type>\n".
 							"\t\t\t\t<Url>${pid}.mov</Url>\n".
 							"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
 							"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
@@ -3954,8 +3960,8 @@ sub channels {
 		'bbc_radio_stoke'			=> 'BBC Stoke',
 		'bbc_radio_shropshire'			=> 'BBC Shropshire',
 		'bbc_wm'				=> 'BBC WM',
-		'bbc_radio_coventry_warwickshire'	=> 'BBC Coventry &amp; Warwickshire',
-		'bbc_radio_hereford_worcester'		=> 'BBC Hereford &amp; Worcester',
+		'bbc_radio_coventry_warwickshire'	=> 'BBC Coventry & Warwickshire',
+		'bbc_radio_hereford_worcester'		=> 'BBC Hereford & Worcester',
 		'bbc_radio_northampton'			=> 'BBC Northampton',
 		'bbc_three_counties_radio'		=> 'BBC Three Counties',
 		'bbc_radio_cambridge'			=> 'BBC Cambridgeshire',
@@ -4040,7 +4046,7 @@ sub modelist {
 # Cleans up a pid and removes url parts that might be specified
 sub clean_pid {
 	my $prog = shift;
-	# extract [bbw]??????? format - remove surrounding url
+	# extract [bpw]??????? format - remove surrounding url
 	$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
 }
 
@@ -4390,6 +4396,7 @@ sub channels {
 sub opt_format {
 	return {
 		outputitv	=> [ 1, "outputitv=s", 'Output', '--outputitv <dir>', "Download output directory for itv"],
+		itvnothread	=> [ 1, "itvnothread", 'Download', '--itvnothread', "Disable parallel threaded downloads for itv"],
 	};
 }
 
@@ -4556,6 +4563,8 @@ sub get_links {
 			chomp($url);
 			chomp($name);
 			next if ! ($url && $name);
+			# decode
+			decode_entities($name);
 			main::logger "DEBUG: Channel: '$channel' Series: '$name' URL: '$url'\n" if $opt->{verbose};
 
 			# Get list of episodes for this series
@@ -4577,6 +4586,9 @@ sub get_links {
 				next if ! ($pid && $episode);
 				# Remove 'Play'
 				$guidance =~ s/^Play$//ig;
+				# decode
+				decode_entities($episode);
+				decode_entities($guidance);
 				# Strip non-printables
 				$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
 				#$guidance =~ s|[^\w\s\-\!"£\$\\/%\^&\*\(\)\+=,\.\?':;@~\[\]]+||gi;
@@ -4638,6 +4650,8 @@ sub get_links {
 		my @entries;
 
 		main::logger "\n\nDEBUG: XML: $feedxml\n"  if $opt->{debug}; 
+
+		decode_entities($feedxml);
 
 		# <EpisodeCount>1</EpisodeCount>
 		$episodecount = $1 if $feedxml =~ m{<EpisodeCount>\s*(\d+)\s*<\/EpisodeCount>};
@@ -6659,15 +6673,47 @@ sub get {
 		$cmd = "$mplayer $mplayer_opts -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
-		my $childpid = fork();
-		if (! $childpid) {
+		# fork download threads
+		if ( not $opt->{itvnothread} ) {
+			my $childpid = fork();
+			if (! $childpid) {
+				# Child starts here
+				main::logger "INFO: Downloading file $file_tmp\n";
+				# Remove old file
+				unlink $file_tmp;
+				# Retry loop
+				my $retry = $retries;
+				while ($retry) {
+					my $cmdoutput = `$cmd`;
+					my $exitcode = $?;
+					main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
+					if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
+						# Failed, retry
+						main::logger "WARNING: Failed, retrying to download $file_tmp, exit code: $exitcode\n";
+						$retry--;
+					} else {
+						# Successfully downloaded
+						main::logger "INFO: Download thread has completed for file $file_tmp\n";
+						exit 0;
+					}
+				}
+				main::logger "ERROR: Download thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
+				move $file_tmp, "${file_tmp}.failed";
+				exit 1;
+			}
+			# Create a hash of process_id => 'count'
+			$threadpid{$childpid} = $count;
+
+		# else download each part in turn
+		} else {
 			# Child starts here
 			main::logger "INFO: Downloading file $file_tmp\n";
 			# Remove old file
 			unlink $file_tmp;
 			# Retry loop
 			my $retry = $retries;
-			while ($retry) {
+			my $done = 0;
+			while ( $retry && not $done ) {
 				my $cmdoutput = `$cmd`;
 				my $exitcode = $?;
 				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
@@ -6677,73 +6723,77 @@ sub get {
 					$retry--;
 				} else {
 					# Successfully downloaded
-					main::logger "INFO: Download thread has completed for file $file_tmp\n";
-					exit 0;
+					main::logger "INFO: Download has completed for file $file_tmp\n";
+					$done = 1;
 				}
+			} 
+			# if the download part failed after a few retries...
+			if (not $done) {
+				main::logger "ERROR: Download failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
+				move $file_tmp, "${file_tmp}.failed";
+				return 1;
 			}
-			main::logger "ERROR: Download thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
-			move $file_tmp, "${file_tmp}.failed";
-			exit 1;
-		}
-		# Create a hash of process_id => 'count'
-		$threadpid{$childpid} = $count;
+		} 
 	}
-	# Wait for all threads to complete
-	$| = 1;
-	# Autoreap zombies
-	$SIG{CHLD}='IGNORE';
-	my $done = 0;
-	my $done_symlink;
-	while (keys %threadpid) {
-		my @sizes;
-		my $total_size = 0;
-		my $total_size_new = 0;
-		my $format = "Threads: ";
-		sleep 1;
-		#main::logger "DEBUG: ProcessIDs: ".(join ',', keys %threadpid)."\n";
-		for my $procid (sort keys %threadpid) {
-			my $size = 0;
-			# Is this child still alive?
-			if ( kill 0 => $procid ) {
-				main::logger "DEBUG Thread $threadpid{$procid} still alive ($file_tmp_list[$threadpid{$procid}])\n" if $opt->{debug};
-				# Build the status string
-				$format .= "%d) %.3fMB   ";
-				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
-				push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
-				$total_size_new += $size;
-				# Now create a symlink if this is the first part and size > min_download_size
-				if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $min_download_size ) {
-					# Symlink to file if only one part or to dir if multi-part
-					if ( $#url_list ) {
-						$prog->create_symlink( $prog->{symlink}, $prog->{dir} );
-					} else {
-						$prog->create_symlink( $prog->{symlink}, $file_tmp_list[$threadpid{$procid}] );
-					}
-					$done_symlink = 1;
-				}
-			# Thread has completed/failed
-			} else {
-				$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
-				# end marker
-				my $end_time = time() + 0.0001;
-				# Calculate average speed, duration and total bytes downloaded
-				main::logger sprintf("INFO: Thread #%d Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
-					($threadpid{$procid}+1),
-					$size / (1024.0 * 1024.0),
-					sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
-					$size / ($end_time - $start_time) / 1024.0 * 8.0,
-					$file_tmp_list[$threadpid{$procid}] );
-				# Remove from thread test list
-				delete $threadpid{$procid};
-			}
-		}
-		$format .= " downloaded (%.0fkbps)        \r";
-		main::logger sprintf $format, @sizes, ($total_size_new - $total_size) / (time() - $start_time) / 1024.0 * 8.0;
-	}
-	main::logger "INFO: All download threads completed\n";	
-	# Unset autoreap
-	delete $SIG{CHLD};
 
+	# If doing a threaded download, monitor the progress and thread completion
+	if ( not $opt->{itvnothread} ) {
+		# Wait for all threads to complete
+		$| = 1;
+		# Autoreap zombies
+		$SIG{CHLD}='IGNORE';
+		my $done = 0;
+		my $done_symlink;
+		while (keys %threadpid) {
+			my @sizes;
+			my $total_size = 0;
+			my $total_size_new = 0;
+			my $format = "Threads: ";
+			sleep 1;
+			#main::logger "DEBUG: ProcessIDs: ".(join ',', keys %threadpid)."\n";
+			for my $procid (sort keys %threadpid) {
+				my $size = 0;
+				# Is this child still alive?
+				if ( kill 0 => $procid ) {
+					main::logger "DEBUG Thread $threadpid{$procid} still alive ($file_tmp_list[$threadpid{$procid}])\n" if $opt->{debug};
+					# Build the status string
+					$format .= "%d) %.3fMB   ";
+					$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
+					push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
+					$total_size_new += $size;
+					# Now create a symlink if this is the first part and size > min_download_size
+					if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $min_download_size ) {
+						# Symlink to file if only one part or to dir if multi-part
+						if ( $#url_list ) {
+							$prog->create_symlink( $prog->{symlink}, $prog->{dir} );
+						} else {
+							$prog->create_symlink( $prog->{symlink}, $file_tmp_list[$threadpid{$procid}] );
+						}
+						$done_symlink = 1;
+					}
+				# Thread has completed/failed
+				} else {
+					$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
+					# end marker
+					my $end_time = time() + 0.0001;
+					# Calculate average speed, duration and total bytes downloaded
+					main::logger sprintf("INFO: Thread #%d Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+						($threadpid{$procid}+1),
+						$size / (1024.0 * 1024.0),
+						sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
+						$size / ($end_time - $start_time) / 1024.0 * 8.0,
+						$file_tmp_list[$threadpid{$procid}] );
+					# Remove from thread test list
+					delete $threadpid{$procid};
+				}
+			}
+			$format .= " downloaded (%.0fkbps)        \r";
+			main::logger sprintf $format, @sizes, ($total_size_new - $total_size) / (time() - $start_time) / 1024.0 * 8.0;
+		}
+		main::logger "INFO: All download threads completed\n";	
+		# Unset autoreap
+		delete $SIG{CHLD};
+	}
 	# If not all files > min_size then assume download failed
 	for (@file_tmp_list) {
 		# If file doesnt exist or too small then skip

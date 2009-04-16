@@ -26,7 +26,6 @@ my $VERSION = '0.09';
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
 # * Add loads of options
-# * &nbsp; isn't considered good practice
 # * in general, take presentation data out of the html and into css, take scripting out of the html and into the js
 
 use strict;
@@ -100,7 +99,7 @@ my $nextpage;
 
 # Page routing based on NEXTPAGE CGI parameter
 my %nextpages = (
-	'Show_Programmes'		=> \&show_progs,	# Main Programme Listings
+	'search_progs'			=> \&search_progs,	# Main Programme Listings
 	'pvr_queue'			=> \&pvr_queue,		# Queue Download of Selected Progs
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
@@ -112,11 +111,12 @@ my %nextpages = (
 
 
 # Page Routing
-$nextpage = $cgi->param( 'NEXTPAGE' ) || 'Show_Programmes';
+$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
 form_header();
-print $cgi->Dump if $DEBUG;
-# Authorized
-# Page Routing
+if ( $DEBUG ) {
+	print Dump();
+	
+}
 if ($nextpages{$nextpage}) {
 	# call the correct subroutine
 	$nextpages{$nextpage}->();
@@ -376,7 +376,7 @@ sub pvr_add {
 
 
 
-sub show_progs {
+sub search_progs {
 	my $search = shift || param( 'SEARCH' ) || '.*';
 	my $cols = join(",", param( 'COLS' )) || undef;
 	my $searchfields = join(",", param( 'SEARCHFIELDS' )) || 'name';
@@ -420,9 +420,9 @@ sub show_progs {
 		# Sort by column click and change display class (colour) according to sort status
 		my ($title, $class, $onclick);
 		if ( $sort_field eq $heading && not $reverse ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='Show_Programmes'; form.SORT.value='$heading'; submit()");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; submit()");
 		}
 		$class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
 
@@ -447,7 +447,7 @@ sub show_progs {
 								-value 		=> $heading,
 								-checked	=> 1,
 								-override	=> 1,
-								-onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()"
+								-onChange	=> "form.NEXTPAGE.value='search_progs'; submit()"
 							)
 						)
 					]
@@ -486,7 +486,8 @@ sub show_progs {
 	for my $prog_type (keys %prog_types) {
 		push @typeselect,
 			td( { -class => 'types' }, [
-				"&nbsp;&nbsp;&nbsp;&nbsp;$prog_types{$prog_type}",
+				'',
+				"$prog_types{$prog_type}",
 				checkbox(
 					-class		=> 'types',
 					-name		=> 'PROGTYPES',
@@ -524,10 +525,13 @@ sub show_progs {
                 -default	=> 'name',
               ),
 
-              submit({
+              button({
 	        -class		=> 'header',
                 -tabindex	=> '1',
-                -value		=> "Search"
+                -name		=> "Search",
+                -value		=> "Search",
+                -title		=> "Search",
+		-onClick 	=> "form.NEXTPAGE.value='search_progs'; submit()",
               }),
 	
               "Programmes per Page",
@@ -536,7 +540,7 @@ sub show_progs {
 	        -name		=> 'PAGESIZE',
                 -values		=> ['17','50','100','200','500'],
                 -default	=> $pagesize,
-                -onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()",
+                -onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
               ),
 
               "Sort",            
@@ -545,7 +549,7 @@ sub show_progs {
 		-name		=> 'SORT',
 		-values		=> [@headings],
 		-labels		=> \%fieldname,
-		-onChange 	=> "form.NEXTPAGE.value='Show_Programmes'; submit()",
+		-onChange 	=> "form.NEXTPAGE.value='search_progs'; submit()",
               ),
 
             ]),
@@ -573,9 +577,9 @@ sub show_progs {
 			]),
 		),
 	);
-	print div( { -id=>'centered', -class=>'pagetrail' }, @pagetrail);
+	print @pagetrail;
 	print table( {-class=>'search' }, @html );
-	print div( { -id=>'centered', -class=>'pagetrail' }, @pagetrail);
+	print @pagetrail;
 
 	my @columnselect;
 	for my $heading (@headings) {
@@ -590,7 +594,7 @@ sub show_progs {
 						-value 		=> $heading,
 						-checked	=> 0,
 						-override	=> 1,
-						-onChange	=> "form.NEXTPAGE.value='Show_Programmes'; submit()",
+						-onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
 					)
 				])
 			)
@@ -604,7 +608,7 @@ sub show_progs {
           # Make sure we go to the correct nextpage for processing
           hidden(
             -name	=> "NEXTPAGE",
-            -value	=> "Show_Programmes",
+            -value	=> "search_progs",
             -override	=> 1,
           ).
           # Reverse sort value
@@ -638,46 +642,47 @@ sub pagetrail {
 	my $pages = int( $count / $pagesize ) + 1;
 	# Page trail
 	my @pagetrail;
-	push @pagetrail, label( {
+	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Previous Page",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page-1; submit()",},
-		"<<&nbsp;&nbsp;",
-	) if $page > 1;
-	push @pagetrail, label( {
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$page-1; submit()",},
+		"<<",
+	)) if $page > 1;
+	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Page 1",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=1; submit()",},
-		"1&nbsp;&nbsp;",
-	) if $page > 1;
-	push @pagetrail, "...&nbsp;&nbsp;" if $page > $trailsize+2;
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=1; submit()",},
+		"1",
+	)) if $page > 1;
+	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page > $trailsize+2;
  	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
-		push @pagetrail, label( {
+		push @pagetrail, td( { -class=>'pagetrail' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail',
-			-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value='$pn'; submit()",},
-			"$pn&nbsp;&nbsp;",
-		) if $pn > 1 && $pn != $page && $pn < $pages;
-		push @pagetrail, label( {
+			-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value='$pn'; submit()",},
+			"$pn",
+		)) if $pn > 1 && $pn != $page && $pn < $pages;
+		push @pagetrail, td( { -class=>'pagetrail' }, label( {
 			-title          => "Current Page",
 			-class          => 'pagetrail-current', },
-		"$page&nbsp;&nbsp;",
-		) if $pn == $page;
+		"$page",
+		)) if $pn == $page;
 	}
-	push @pagetrail, "...&nbsp;&nbsp;" if $page < $pages-$trailsize-1;
-	push @pagetrail, label( {
+	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page < $pages-$trailsize-1;
+	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Page ".$pages,
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$pages; submit()",},
-		"$pages&nbsp;&nbsp;",
-	) if $page < $pages;
-	push @pagetrail, label( {
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$pages; submit()",},
+		"$pages",
+	)) if $page < $pages;
+	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Next Page",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='Show_Programmes'; form.PAGE.value=$page+1; submit()",},
-		">>&nbsp;&nbsp;",
-	) if $page < $pages;
-	return ($first, $last, @pagetrail);
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$page+1; submit()",},
+		">>",
+	)) if $page < $pages;
+	my @html = table( { -id=>'centered', -class=>'pagetrail' }, Tr( { -class=>'pagetrail' }, @pagetrail ));
+	return ($first, $last, @html);
 }
 
 
@@ -752,8 +757,6 @@ sub begin_html {
 	print "</HEAD>\n";
 	insert_javascript();
 	print "<body>\n";
-
-	print $cgi->dump if $DEBUG;
 }
 
 
@@ -798,7 +801,7 @@ sub form_header {
 			-alt => 'Search',
 			-title => 'Programme Search',
 			-src => "$icons_base_url/index.png",
-			-onClick  => "formheader.NEXTPAGE.value='Show_Programmes'; submit()",
+			-onClick  => "formheader.NEXTPAGE.value='search_progs'; submit()",
 		}),
 		# go back to parent page - set no params
 		image_button({
@@ -823,7 +826,7 @@ sub form_header {
 	).
 	hidden(
 		-name => "NEXTPAGE",
-		-value => '',
+		-value => 'search_progs',
 		-override => 1,
 	).
 
@@ -870,60 +873,6 @@ sub insert_javascript {
 
 	<script type="text/javascript">
 	
-	// 
-	// Popup a Yes/No dialogue with param as question.
-	//
-	function submit_check(text) {
-		if ( document.formheader.NEXTPAGE.value == "Delete") {
-			var output = confirm(text);
-			if (output == true) {
-				document.formheader.submit();
-			}
-		} else {
-			document.formheader.submit();
-		}
-	}
-
-	//
-	// Popup a message if the form contains invalid data.
-	//
-	function create_form_validate(f) {
-		verify(f);
-		submit();
-	}
-
-	//
-	// A utility function that returns true if a string contains only 
-	// whitespace characters
-	//
-	function isblank(s) {
-		for(var i = 0; i < s.length; i++) {
-			var c = s.charAt(i);
-			if ((c != ' ') && (c != '\\n') && (c != '	')) return false;
-		}
-		return true;
-	}
-
-
-	//
-	// Limit inputs to certain characters
-	//
-	var userid = "abcdefghijklmnopqrstuvwxyz-1234567890";
-	var email = "-0123456789abcdefghijklmnopqrstuvwxyz@._";
-	var numb = "0123456789";
-	var fullname = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890 ',-";
-	var path = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890/_-.+~";
-	function res(t,v){
-		var w = "";
-		for (i=0; i < t.value.length; i++) {
-		x = t.value.charAt(i);
-		if (v.indexOf(x,0) != -1)
-			w += x;
-		}
-		t.value = w;
-	}
-
-
 	//
 	// Check/Uncheck all checkboxes named <name>
 	//
@@ -981,21 +930,23 @@ sub insert_stylesheet {
 	TR.title		{ font-weight: bold; }
 
 	TABLE.icons		{ border-spacing: 10px 0; padding: 0px; }
-
+	TD.icons:hover		{ background: #CCC; }
+	
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
 	INPUT.header		{ font-size: 80%; } 
 	SELECT.header		{ font-size: 80%; } 
 
-	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; width: 35%; }
+	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; }
 	TR.types		{ white-space: nowrap; }
-	INPUT.types		{ font-size: 70%; }
+	TD.types		{ width: 20px }
 	
 	TABLE.actions		{ font-size: 80%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TD.actions		{ font-weight: bold; }
 	INPUT.actions		{ font-size: 80%; }
 	
-	DIV.pagetrail		{ font-size: 80%; font-weight: bold; text-align: center; }
-	#centered		{ width: 700px; height:20px; margin:0px auto 0; position: relative; }
+	TABLE.pagetrail		{ font-size: 80%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
+	TD.pagetrail:hover	{ background: #CCC; }
+	#centered		{ height:20px; margin:0px auto 0; position: relative; }
 	LABEL.pagetrail		{ Color: #009; }
 	LABEL.pagetrail-current	{ Color: #900; }
 
