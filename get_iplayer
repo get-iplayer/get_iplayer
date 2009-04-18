@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.61;
+my $version = 1.62;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -49,15 +49,13 @@ my $version = 1.61;
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
+# * Create template parsers for each BBC iPlayer CDN as the parsing does appear to be similar
 
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
 # * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
-
-# Bugs to fix:
-# * fork returns non-pid value for itv under ActivePerl - will need to implement serial download instead
 
 use Env qw[@PATH];
 use Fcntl;
@@ -723,8 +721,9 @@ sub list_progs {
 		}
 		$names{ $this->{name} } = 1;
 		if ( $opt->{info} ) {
-			my %metadata = $this->get_metadata( $ua );
-			display_metadata( \%metadata, sort keys %metadata );
+			$this->get_metadata( $ua );
+			# display all attribs except 'streams'
+			$this->display_metadata( grep !/^streams$/, sort keys %{ $this } );
 		}
 	}
 	logger "\n";
@@ -1003,35 +1002,23 @@ sub subtitle_offset {
 
 # Generic
 sub display_stream_info {
-	my ($prog, $verpid, $media) = (@_);
-	logger "INFO: Getting media stream metadata for $prog->{name} - $prog->{episode}, $verpid\n" if $prog->{pid};
-	my %data = $prog->get_stream_data( $verpid, $media);
-	# Print out stream data
-	for my $prog_type (sort keys %data) {
+	my ($prog, $verpid, $version) = (@_);
+	# default version is 'default'
+	$version = 'default' if not defined $verpid;
+	# Get stream data if not defined
+	my %data;
+	if ( not defined $prog->{streams}->{$version} ) {
+		logger "INFO: Getting media stream metadata for $prog->{name} - $prog->{episode}, $verpid ($version)\n" if $prog->{pid};
+		%data = $prog->get_stream_data( $verpid );
+		$prog->{streams}->{$version} = \%data;
+	}
+	for my $prog_type ( sort keys %{ $prog->{streams}->{$version} } ) {
 		logger "stream:     $prog_type\n";
-		for my $entry ( sort keys %{ $data{$prog_type} } ) {
-			logger sprintf("%-11s %s\n", $entry.':', $data{$prog_type}{$entry} );
+		for my $entry ( sort keys %{ $prog->{streams}->{$version}->{$prog_type} } ) {
+			logger sprintf("%-11s %s\n", $entry.':', $prog->{streams}->{$version}->{$prog_type}->{$entry} );
 		}
 		logger "\n";
 	}
-	return 0;
-}
-
-
-
-# Generic
-# Displays specified metadata from supplied hash
-# Usage: display_metadata( <hashref>, <array of elements to display> )
-sub display_metadata {
-	my %data = %{$_[0]};
-	shift;
-	my @keys = @_;
-	@keys = keys %data if $#_ < 0;
-	logger "\n";
-	for (@keys) {
-		logger sprintf "%-15s %s\n", ucfirst($_).':', $data{$_} if $data{$_};
-	}
-	logger "\n";
 	return 0;
 }
 
@@ -2122,12 +2109,32 @@ sub clean_pid {
 # Return metadata of the prog
 sub get_metadata {
 	my $prog = shift;
-	# Fill in from cache if not got from metadata
-	my %metadata;
-	for ( qw/ pid index name episode type duration channel available expiry versions guidance categories desc player thumbnail modes web / ) {
-		$metadata{$_} = $prog->{$_} if defined $prog->{$_};
+	$prog->{modes} = 'default: '.$prog->modelist();
+}
+
+
+# Displays specified metadata from supplied object
+# Usage: $prog->display_metadata( <array of elements to display> )
+sub display_metadata {
+	my %data = %{$_[0]};
+	shift;
+	my @keys = @_;
+	@keys = keys %data if $#_ < 0;
+	main::logger "\n";
+	for (@keys) {
+		main::logger sprintf "%-15s %s\n", ucfirst($_).':', $data{$_} if $data{$_};
 	}
-	return %metadata;
+	main::logger "\n";
+	return 0;
+}
+
+
+
+# Return hash of version => verpid given a pid
+sub get_version_pids {
+	my %version_pids;
+	$version_pids{'default'} = 1;
+	return %version_pids;
 }
 
 
@@ -2144,8 +2151,6 @@ sub download_subtitles {
 # Usage: download_retry_loop ( $prog )
 sub download_retry_loop {
 	my $prog = shift;
-	my $count = 0;
-	my $retcode;
 
 	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} ) && ! $opt->{subsonly};
 
@@ -2157,68 +2162,143 @@ sub download_retry_loop {
 
 	# Setup user-agent
 	my $ua = main::create_ua('desktop');
+
+	# Order with which to search for programme versions (can be overridden by --versionlist option)
+	# maybe we need this array per prog type??
+	my @version_search_list	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+	@version_search_list = split /,/, $opt->{versionlist} if $opt->{versionlist};
+
+	# check here for no matching verpids for specified version search list???
+
+	# Look up version pids for this prog
+	my %version_pids = $prog->get_version_pids( $ua );
+
+	# if %version_pids is empty then skip this programme download attempt
+	if ( (keys %version_pids) == 0 ) {
+		main::logger "INFO: No versions exist for this programme\n";
+		return 1;
+	}
+
 	# Get all possible (or user overridden) modes for this prog download
 	my $modelist = $prog->modelist;
 
-	# download depending on the prog type
-	main::logger "INFO: $modelist modes will be tried\n";
+	######## version loop #######
+	# Do this for each version tried in this order (if they appeared in the content)
+	for my $version ( @version_search_list ) {
+		my $retcode = 1;
+		main::logger "DEBUG: Trying version '$version'\n" if $opt->{debug};
+		if ( $version_pids{$version} ) {
+			main::logger "INFO: Checking existence of $version version\n";
+			$prog->{version} = $version;
+			main::logger "INFO: Version = $prog->{version}\n" if $opt->{verbose};
 
-	# Expand the modes into a loop
-	for my $mode ( split /,/, $modelist ) {
-		chomp( $mode );
-		main::logger "INFO: Trying $mode mode to download $prog->{type}: $prog->{name} - $prog->{episode}\n";
+			# Try to get stream data for this version if not already populated
+			if ( not defined $prog->{streams}->{$version} ) {
+				my %streamdata = $prog->get_stream_data( $version_pids{$version} );
+				$prog->{streams}->{$version} = \%streamdata;
+			}
 
-		my $retries = 3;
+			# Display media stream data if required
+			if ( $opt->{streaminfo} ) {
+				main::display_stream_info( $prog, $version_pids{$version}, $version );
+				$opt->{quiet} = 0;
+				next;
+			}
 
-		# Use different number of retries for flash modes
-		$retries = 20 if $mode =~ /^flash/;
+			########## mode loop ########
+			# download depending on the prog type
 
-		# Retry loop
-		for ($count = 1; $count <= $retries; $count++) {
-			main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
+			# only use modes that exist
+			my @modes;
+			for ( split /,/, $modelist ) {
+				push @modes, $_ if defined $prog->{streams}->{$version}->{$_};
+			}
+			# Check for no applicable modes - report which ones are available if none are specified
+			if ($#modes < 0) {
+				my $allmodes = join ',', sort keys %{ $prog->{streams}->{$version} };
+				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version' (try modes: $allmodes)\n";
+				next;
+			}
+			main::logger "INFO: ".join(',', @modes)." modes will be tried for version $version\n";
 
-			$retcode = $prog->download( $ua, $mode );
-			main::logger "DEBUG: Download using $mode mode return code: '$retcode'\n" if $opt->{verbose};
+			# Expand the modes into a loop
+			for my $mode ( @modes ) {
+				chomp( $mode );
+				main::logger "INFO: Trying $mode mode to download $prog->{type}: $prog->{name} - $prog->{episode}\n";
+				$prog->{mode} = $mode;
 
-			# Exit
-			if ( $retcode eq 'abort' ) {
-				main::logger "ERROR: aborting get_iplayer\n";
-				exit 1;
+				# try the download for this mode
+				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $version_pids{$version} );
+				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
-			# Try Next prog
-			} elsif ( $retcode eq 'skip' ) {
-				main::logger "INFO: skipping this programme\n";
-				return 1;
-
-			# Try Next mode
-			} elsif ( $retcode eq 'next' ) { 
-				# break out of this retry loop
-				main::logger "INFO: skipping $mode mode\n";
-				last;
-			
-			# Success
-			} elsif ( $retcode eq '0' ) {
-				if ( ! $opt->{subsonly} ) {
-					# Add to history, tag file, and run post download command
-					main::add_to_download_history( $prog );
-					$prog->tag_file;
-					$prog->download_thumbnail if $opt->{thumb};
-					$prog->run_user_command( $opt->{command} ) if $opt->{command};
-					$prog->report() if $opt->{pvr};
-				}
-				return 0;
-
-			# Retry this mode
-			} elsif ( $retcode eq 'retry' && $count < $retries ) {
-				main::logger "WARNING: Retrying download for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+				# Only need to try one mode for subs
+				last if $opt->{subsonly};
 			}
 		}
-		
-	
-	} # Next mode
+		# Break out of loop if we have a successful download for this version and mode
+		return 0 if not $retcode;
+	}
 
 	if (! $opt->{test}) {
 		main::logger "ERROR: Failed to download '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+	}
+	return 1;
+}
+
+
+
+# returns 1 on fail, 0 on success
+sub mode_ver_download_retry_loop {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my $retries = 3;
+	my $count = 0;
+	my $retcode;
+
+	# Use different number of retries for flash modes
+	$retries = 20 if $mode =~ /^flash/;
+
+	# Retry loop
+	for ($count = 1; $count <= $retries; $count++) {
+		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
+
+		$retcode = $prog->download( $ua, $mode, $version, $version_pid );
+		main::logger "DEBUG: Download using $mode mode return code: '$retcode'\n" if $opt->{verbose};
+
+		# Exit
+		if ( $retcode eq 'abort' ) {
+			main::logger "ERROR: aborting get_iplayer\n";
+			exit 1;
+
+		# Try Next prog
+		} elsif ( $retcode eq 'skip' ) {
+			main::logger "INFO: skipping this programme\n";
+			return 1;
+
+		# Try Next mode
+		} elsif ( $retcode eq 'next' ) { 
+			# break out of this retry loop
+			main::logger "INFO: skipping $mode mode\n";
+			last;
+
+		# Success
+		} elsif ( $retcode eq '0' ) {
+			if ( ! $opt->{subsonly} ) {
+				# Add to history, tag file, and run post download command
+				main::add_to_download_history( $prog );
+				$prog->tag_file;
+				$prog->download_thumbnail if $opt->{thumb};
+				$prog->run_user_command( $opt->{command} ) if $opt->{command};
+				$prog->report() if $opt->{pvr};
+			}
+			return 0;
+
+		# Retry this mode
+		} elsif ( $retcode eq 'retry' && $count < $retries ) {
+			main::logger "WARNING: Retrying download for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+			# Try to get stream data for this version/mode - retries require new auth data
+			my %streamdata = $prog->get_stream_data( $version_pid );
+			$prog->{streams}->{$version} = \%streamdata;
+		}
 	}
 	return 1;
 }
@@ -2315,13 +2395,7 @@ sub generate_filenames {
 	my ($prog, $ua, $format, $multipart) = (@_);
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
-	if ( ! $prog->{name} ) {
-		my %metadata = $prog->get_metadata($ua);
-		for ( keys %metadata ) {
-			main::logger "DEBUG: Metadata: $_=$metadata{$_} was=$prog->{$_}\n" if $opt->{debug};
-			$prog->{$_} = $metadata{$_} if ! $prog->{$_};
-		}
-	}
+	$prog->get_metadata($ua) if ! $prog->{name};
 
 	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
 
@@ -2343,7 +2417,6 @@ sub generate_filenames {
 
 	# Don't create subdir if we are only testing downloads
 	# Create a subdir for programme sorting option
-	# main::display_metadata( \%{ $prog }, sort keys %{ $prog } );
 	if ( $opt->{subdir} ) {
 		my $subdir = $prog->substitute( '<longname>' );
 		$prog->{dir} .= "/${subdir}";
@@ -2513,6 +2586,7 @@ sub get_available_time_string {
 }
 
 
+
 sub download_thumbnail {
 	my $prog = shift;
 	my $file;
@@ -2549,6 +2623,7 @@ sub download_thumbnail {
 
 	return 0;
 }
+
 
 
 ################### TV class #################
@@ -2788,34 +2863,63 @@ sub get_metadata {
 	my $modes;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %version_pids ) {
-		# Try to get stream data for this version (don't resolve any URLs)
-		my $quiet = $opt->{quiet};
-		$opt->{quiet} = 1;
-		my %all_stream_data = get_stream_data($prog, $version_pids{$version}, 'all', 1 );
-		$opt->{quiet} = $quiet;
-		$modes .= $version.": ".(join ',', sort keys %all_stream_data)."  ";
+		# Try to get stream data for this version if it isn't already populated
+		if ( not defined $prog->{streams}->{$version} ) {
+			my %all_stream_data = get_stream_data($prog, $version_pids{$version} );
+			# Add streamdata to object
+			$prog->{streams}->{$version} = \%all_stream_data;
+		}
+		$modes .= $version.": ".(join ',', sort keys %{ $prog->{streams}->{$version} } )."  ";
 	}
 
 	# Fill in from cache if not got from metadata
-	return (
-		pid		=> $prog->{pid},
-		index		=> $prog->{index},
-		name		=> $name || $prog->{name},
-		episode		=> $episode || $prog->{episode} || $prog->{name},
-		type		=> $prog_type || $prog->{type},
-		duration	=> $duration || $prog->{duration},
-		channel		=> $channel || $prog->{channel},
-		available	=> $available || $prog->{available},
-		expiry		=> $expiry || $prog->{expiry},
-		versions	=> $versions,
-		guidance	=> $guidance || $prog->{guidance},
-		categories	=> $categories || $prog->{categories},
-		desc		=> $longdesc || $prog->{desc},
-		player		=> $player,
-		thumbnail	=> $thumbnail || $prog->{thumbnail},
-		modes		=> $modes,
-		web		=> $prog->{web},
-	);
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
+	$prog->{type}		= $prog_type || $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions;
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	$prog->{modes}		= $modes;
+	return 0;
+}
+
+
+
+#new_stream_report($mattribs, $cattribs)
+sub new_stream_report {
+	my $mattribs = shift;
+	my $cattribs = shift;
+	
+	main::logger "New BBC iPlayer Stream Found:\n";
+	main::logger "MEDIA-ELEMENT:\n";
+		
+	# list media attribs
+	main::logger "MEDIA-ATTRIBS:\n";
+	for (keys %{ $mattribs }) {
+		main::logger "\t$_ => $mattribs->{$_}\n";
+	}
+	
+	my @conn;
+	if ( defined $cattribs ) {
+		@conn = ( $cattribs );
+	} else {
+		@conn = @{ $mattribs->{connections} };
+	}
+	for my $cattribs ( @conn ) {
+		main::logger "\tCONNECTION-ELEMENT:\n";
+			
+		# Print attribs
+		for (keys %{ $cattribs }) {
+			main::logger "\t\t$_ => $cattribs->{$_}\n";
+		}	
+	}
+	return 0;
 }
 
 
@@ -2882,9 +2986,9 @@ sub parse_attributes {
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|<modename>
+# $media = undef|<modename>
 sub get_stream_data {
-	my ( $prog, $verpid, $media, $noresolve ) = @_;
+	my ( $prog, $verpid, $media ) = @_;
 	my %data;
 
 	# Setup user agent with redirection enabled
@@ -2901,11 +3005,46 @@ sub get_stream_data {
 	my $mode;
 	for my $mattribs ( @medias ) {
 		
+		# flashhd modes
+		if (		$mattribs->{kind} eq 'video' &&
+				$mattribs->{type} eq 'video/mp4' &&
+				$mattribs->{encoding} eq 'h264' &&
+				$mattribs->{bitrate} =~ /3200/
+		) {
+			# Connections within mode
+			for my $cattribs ( @{ $mattribs->{connections} } ) {
+
+				# Match to submode
+				if ( $cattribs->{kind} eq 'akamai' ) {
+					$mode = 'flashhd1';
+					$data{$mode}{ext} = 'mp4';
+					$data{$mode}{streamer} = 'rtmp';
+					$mattribs->{width} = 1280 if ! $mattribs->{width};
+					$mattribs->{height} = 720 if ! $mattribs->{height};
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{authString};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{playpath} = $data{$mode}{identifier};
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
+					$data{$mode}{identifier} =~ s/^mp4://;
+					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
+				}
+			}
+
+
+
 		# flashvhigh modes
-		if (	$mattribs->{kind} eq 'video' &&
-			$mattribs->{type} eq 'video/mp4' &&
-			$mattribs->{encoding} eq 'h264' &&
-			$mattribs->{width} =~ /[789]\d\d/
+		} elsif (	$mattribs->{kind} eq 'video' &&
+				$mattribs->{type} eq 'video/mp4' &&
+				$mattribs->{encoding} eq 'h264' &&
+				$mattribs->{width} =~ /[789]\d\d/
 		) {
 			# Connections within mode
 			for my $cattribs ( @{ $mattribs->{connections} } ) {
@@ -2977,38 +3116,8 @@ sub get_stream_data {
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				}
-
-			}
-				
-
-
-		# flashhd modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264' &&
-				$mattribs->{bitrate} =~ /3200/
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashhd1';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} 1280x720 $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp4://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3056,6 +3165,25 @@ sub get_stream_data {
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+				} elsif ( $cattribs->{kind} eq 'akamai' ) {
+					$mode = 'flashhigh3';
+					$data{$mode}{ext} = 'mp4';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{authString};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{playpath} = $data{$mode}{identifier};
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
+					$data{$mode}{identifier} =~ s/^mp4://;
+					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}			
 
@@ -3085,6 +3213,8 @@ sub get_stream_data {
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3101,7 +3231,7 @@ sub get_stream_data {
 
 				# Match to submode
 				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashlow';
+					$mode = 'flashlow1';
 					$data{$mode}{ext} = 'avi';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{server} = $cattribs->{server};
@@ -3114,6 +3244,26 @@ sub get_stream_data {
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/iplayer/7player.swf?revision=3897";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+				} elsif ( $cattribs->{kind} eq 'limelight' ) {
+					$mode = 'flashlow2';
+					$data{$mode}{ext} = 'avi';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{authString};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					decode_entities($data{$mode}{authstring});
+					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
+					$data{$mode}{playpath} =~ s/^mp4://g;
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7978_8340";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3138,6 +3288,8 @@ sub get_stream_data {
 					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "iPhone $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}		
 			}
 
@@ -3160,12 +3312,11 @@ sub get_stream_data {
 					$mattribs->{height} = 176 if ! $mattribs->{height};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{href} = $cattribs->{href};
+					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "Nokia N95 WiFi $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$opt->{quiet} = 1 if $opt->{streaminfo};
-					chomp( $data{$mode}{streamurl} = main::request_url_retry($ua, $data{$mode}{href}, 2, '', '') ) if ! $noresolve;
-					$opt->{quiet} = 0 if $opt->{streaminfo};
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3188,12 +3339,11 @@ sub get_stream_data {
 					$mattribs->{height} = 96 if ! $mattribs->{height};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{href} = $cattribs->{href};
+					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "Nokia N95 3G $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$opt->{quiet} = 1 if $opt->{streaminfo};
-					chomp( $data{$mode}{streamurl} = main::request_url_retry($ua, $data{$mode}{href}, 2, '', '') ) if ! $noresolve;
-					$opt->{quiet} = 0 if $opt->{streaminfo};
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 			
@@ -3231,6 +3381,17 @@ sub get_stream_data {
 					$data{$mode}{streamurl} =~ s/_mobile//g;
 					$data{$mode}{type} = "WMV DRM $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+				# Dummy entry to catch DRM license
+				} elsif ( $cattribs->{kind} eq 'licence' ) {
+					# priority => 10
+					# identifier => D28E8245-9158-4314-B310-5F5B24AC5F06
+					# kind => licence
+					# href => http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx/D28E8245-9158-4314-B310-5F5B24AC5F06
+					# server => http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx
+
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3277,6 +3438,8 @@ sub get_stream_data {
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7938";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3307,6 +3470,8 @@ sub get_stream_data {
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=7276";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3326,13 +3491,11 @@ sub get_stream_data {
 					$data{$mode}{streamer} = 'rtsp';
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{href} = $cattribs->{href};
+					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$opt->{quiet} = 1 if $opt->{streaminfo};
-					chomp( $data{$mode}{streamurl} = main::request_url_retry($ua, $data{$mode}{href}, 2, '', '') ) if ! $noresolve;
-					$data{$mode}{streamurl} =~ s/[\s\n]//g;
-					$opt->{quiet} = 0 if $opt->{streaminfo};
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				} 
 			}
 
@@ -3349,19 +3512,15 @@ sub get_stream_data {
 				if ( $cattribs->{kind} =~ /(sis|edgesuite)/ ) {
 					$mode = 'wma';
 					$data{$mode}{ext} = 'wma';
-					$data{$mode}{streamer} = 'http';
+					$data{$mode}{streamer} = 'mms';
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{href} = $cattribs->{href};
+					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "WMA MMS Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-					$opt->{quiet} = 1 if $opt->{streaminfo};
-					chomp( $data{$mode}{streamurl} = main::request_url_retry($ua, $data{$mode}{href}, 2, '', '') ) if ! $noresolve;
-					$data{$mode}{streamurl} =~ s/[\s\n]//g;
-					# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
-					$data{$mode}{streamurl} =~ s/^.*href=\"(.+?)\".*$/$1/gi;
-					$opt->{quiet} = 0 if $opt->{streaminfo};
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
 
@@ -3384,26 +3543,30 @@ sub get_stream_data {
 					$data{$mode}{streamurl} = $cattribs->{href};
 					$data{$mode}{type} = "Subtitles stream ($cattribs->{kind})";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
 				}
 			}
+
+		# Catch unknown
+		} else {
+			new_stream_report($mattribs, undef) if $opt->{verbose};
 		}	
 	}
 
 	# Do iphone redirect check regardless of an xml entry for iphone - sometimes the iphone streams exist regardless
-	if ( ! $noresolve ) {
-		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
-			my $mode = 'iphone';
-			$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
-			# Get iphone redirect
-			$data{$mode}{streamurl} = $streamurl;
-			$data{$mode}{streamer} = 'iphone';
-		} else {
-			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
-		}
+	if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
+		my $mode = 'iphone';
+		$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
+		# Get iphone redirect
+		$data{$mode}{streamurl} = $streamurl;
+		$data{$mode}{streamer} = 'iphone';
+	} else {
+		main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
 	}
 
-	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
-	if ( $media eq 'all' ) {
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
 		return %data;
 	} else {
 		# Make sure this hash exists before we pass it back...
@@ -3501,7 +3664,8 @@ sub modelist {
 	# Deal with BBC TV fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
-	# flashhigh => flashhigh1,flashhigh2
+	# flashlow => flashlow1,flashlow2
+	# flashhigh => flashhigh1,flashhigh2,flashhigh3
 	# flashvhigh => flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4
 	# flashhd => flashhd1
 	my @modes = split /,/, $opt->{vmode};
@@ -3511,7 +3675,12 @@ sub modelist {
 	$opt->{vmode} = join ',', @modes;
 	my @modes = split /,/, $opt->{vmode};
 	for (@modes) {
-		$_ = 'flashhigh1,flashhigh2' if $_ eq 'flashhigh';
+		$_ = 'flashhigh1,flashhigh2,flashhigh3' if $_ eq 'flashhigh';
+	}
+	$opt->{vmode} = join ',', @modes;
+	my @modes = split /,/, $opt->{vmode};
+	for (@modes) {
+		$_ = 'flashlow1,flashlow2' if $_ eq 'flashlow';
 	}
 	$opt->{vmode} = join ',', @modes;
 	my @modes = split /,/, $opt->{vmode};
@@ -3704,25 +3873,12 @@ sub get_links {
 
 
 
-# Usage: download (<prog>, <ua>, <mode>)
+# Usage: download (<prog>, <ua>, <mode>, <version>, <version_pid>)
 sub download {
-	my $prog = shift;
-	my $ua = shift; 
-	my $mode = shift;
-	my %version_pids;
-	my %streamdata;
-	my $url;
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
 	# if subsonly required then skip for non-tv
 	return 'skip' if $opt->{subsonly} && $prog->{type} ne 'tv';
-
-	# Look up version pids
-	%version_pids = $prog->get_version_pids( $ua );
-
-	# if %version_pids is empty then skip this programme download attempt
-	if ( (keys %version_pids) == 0 ) {
-		return 'skip';
-	}
 
 	# Check if we need 'tee'
 	if ( $mode =~ /^real/ && (! main::exists_in_path($tee)) && $opt->{stdout} && (! $opt->{nowrite}) ) {
@@ -3754,27 +3910,8 @@ sub download {
 		$opt->{raw} = 1;
 	}
 
-	# Do this for each version tried in this order (if they appeared in the content)
-	# Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @version_search_list	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
-	@version_search_list 	= split /,/, $opt->{versionlist} if $opt->{versionlist};
-	for my $version ( @version_search_list ) {
-
-		# Change $verpid to 'default' type if it exists, then Used 'signed' otherwise
-		if ( $version_pids{$version} ) {
-			main::logger "INFO: Checking existence of $version version\n";
-			$prog->{version} = $version;
-			main::logger "INFO: Version = $prog->{version}\n" if $opt->{verbose};
-			# Try to get stream data
-			%streamdata = %{ $prog->get_stream_data( $version_pids{ $prog->{version} }, $mode) };
-			$url = $streamdata{streamurl};
-		}
-		# Break out of loop if we have an actual URL
-		last if $url;
-	}
-
 	# Get extension from streamdata if defined and raw not specified
-	$prog->{ext} = $streamdata{ext};
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 
 	# Nasty hacky filename ext overrides based on non-default fallback modes
 	# Override iphone ext from metadata which is wrong for radio
@@ -3784,19 +3921,6 @@ sub download {
 	$prog->{ext} = 'wav' if $opt->{wav} &&  $mode =~ /^real/;
 	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^(flash|rtmp)/;
-
-	# Display media stream data if required
-	if ( $opt->{streaminfo} ) {
-		main::display_stream_info( $prog, $version_pids{ $prog->{version} }, 'all' );
-		$opt->{quiet} = 1;
-		return 'skip';
-	}
-
-	# Report error if no versions are available
-	if ( ! $url ) {
-		main::logger "\nWARNING: No $mode versions available\n";
-		return 'next';
-	}
 
 	# Determine the correct filenames for this download
 	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
@@ -3816,7 +3940,7 @@ sub download {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
 		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-		$prog->download_subtitles( $ua, $subfile, $version_pids{ $prog->{version} } );
+		$prog->download_subtitles( $ua, $subfile );
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
 	}
 
@@ -3829,11 +3953,11 @@ sub download {
 		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
 
 		# Instantiate new streamer based on streamdata
-		my $class = "Streamer::$streamdata{streamer}";
+		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 		my $stream = $class->new;
 
 		# Do download
-		$return = $stream->get( $ua, $url, $prog, %streamdata );
+		$return = $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 
 		# Re-enable proxy here if required
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
@@ -3852,12 +3976,11 @@ sub download {
 # Todo: get the subtitle streamurl before this...
 sub download_subtitles {
 	my $prog = shift;
-	my ( $ua, $file, $verpid ) = @_;
+	my ( $ua, $file ) = @_;
 	my $suburl;
 	my $subs;
 	
-	main::logger "INFO: Getting Subtitle metadata for $verpid\n" if $opt->{verbose};
-	$suburl = %{ Programme::bbciplayer->get_stream_data( $verpid, 'subtitles') }->{streamurl};
+	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles}->{streamurl};
 	# Return if we have no url
 	if (! $suburl) {
 		main::logger "\nINFO: Subtitles not available\n";
@@ -4060,7 +4183,7 @@ sub modelist {
 	}
 
 	# Deal with BBC Radio fallback modes and expansions
-	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
+	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
 	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
 	# flashaac => flashaac1,flashaac2
 	my @modes = split /,/, $opt->{amode};
@@ -4361,29 +4484,51 @@ sub get_links {
 
 
 
-sub download {
-	my ( $prog, $ua ) = ( @_ );
-	my %streamdata;
+# Gets media streams data for this version pid
+# $media = http|undef
+sub get_stream_data {
+	my ( $prog, $verpid, $media ) = @_;
+	my %data;
 
-	# stream data not available
-	return 'skip' if $opt->{streaminfo};
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+
+	$data{podcast}{ext} = $prog->{pid};
+	$data{podcast}{ext} =~ s|^.*\.(\w+)$|$1|g;
+	$data{podcast}{streamer} = 'http';
+	$data{podcast}{streamurl} = $prog->{pid};
+	$data{podcast}{type} = 'Podcast stream';
+
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return %data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data{$media}{exists} = 0 if not defined $data{$media};
+		return $data{$media};
+	}
+}
+
+
+
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
 	# if subsonly required then skip
 	return 'skip' if $opt->{subsonly};
 
 	# Determine the correct filename and extension for this download
 	my $filename_orig = $prog->{pid};
-	$prog->{ext} = $prog->{pid};
 	$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
-	$prog->{ext} =~ s|^.*\.(\w+)$|$1|g;
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 
 	# Determine the correct filenames for this download
 	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
 
 	# Skip from here if we are only testing downloads
 	return 1 if $opt->{test};
-
-	my $stream = Streamer::http->new;
+	# Instantiate new streamer based on streamdata
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+	my $stream = $class->new;
 	return $stream->get( $ua, $prog->{pid}, $prog );
 }
 
@@ -4537,24 +4682,22 @@ sub get_metadata {
 	$name = $1 if $entry =~ m{<h2>(.+?)</h2>};
 
 	# Fill in from cache if not got from metadata
-	return (
-		pid		=> $prog->{pid},
-		index		=> $prog->{index},
-		name		=> $name || $prog->{name},
-		episode		=> $episode || $prog->{episode},
-		type		=> $prog_type || $prog->{type},
-		duration	=> $duration || $prog->{duration},
-		channel		=> $channel || $prog->{channel},
-		available	=> $available || $prog->{available},
-		expiry		=> $expiry || $prog->{expiry},
-		versions	=> $versions || $prog->{versions},
-		guidance	=> $guidance || $prog->{guidance},
-		categories	=> $categories || $prog->{categories},
-		desc		=> $longdesc || $prog->{desc},
-		player		=> $player,
-		thumbnail	=> $thumbnail || $prog->{thumbnail},
-		web		=> $prog->{web},
-	);
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode};
+	$prog->{type}		= $prog_type || $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{available}	= $available || $prog->{available};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions || $prog->{versions};
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	# just use the default modelist
+	$prog->{modes}		= 'default: '.$prog->modelist();
+	return 0;
 }
 
 
@@ -4872,16 +5015,8 @@ sub get_links {
 
 
 sub download {
-	my ( $prog, $ua ) = ( @_ );
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 	my %streamdata;
-
-	# stream data
-	# Display media stream data if required
-	if ( $opt->{streaminfo} ) {
-		main::display_stream_info( $prog, undef, 'all' );
-		$opt->{quiet} = 1;
-		return 'skip';
-	}
 
 	# if subsonly required then skip
 	return 'skip' if $opt->{subsonly};
@@ -4894,10 +5029,11 @@ sub download {
 
 	%streamdata = %{ $prog->get_stream_data( undef, 'itv') };
 
-	$prog->{ext} = $streamdata{ext};
+	# Get extension from streamdata if defined and raw not specified
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 	$prog->{ext} = 'asf' if $opt->{raw};
 	
-	my @url_list = split /\|/, $streamdata{streamurl};
+	my @url_list = split /\|/, $prog->{streams}->{$version}->{$mode}->{streamurl};
 
 	if ( $#url_list < 0 ) {
 		main::logger "WARNING: No programme stream URLs were found, skipping\n";
@@ -4911,18 +5047,18 @@ sub download {
 	return 'skip' if $opt->{test};
 
 	# Instantiate new streamer from streamdata
-	my $class = "Streamer::$streamdata{streamer}";
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 	my $stream = $class->new;
 
 	# Do the download
-	return $stream->get( $ua, $streamdata{streamurl}, $prog );
+	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog );
 }
 
 
 
 # Generic
 # Gets media streams data for this version pid
-# $media = all|itv
+# $media = undef|itv
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -4934,14 +5070,16 @@ sub get_stream_data {
 	# ITV streams
 	my $prog_type = 'itv';
 	$data{$prog_type}{type} = 'ITV ASF Video stream';
-	$data{$prog_type}{ext} = 'mp4';
+	# Use asf until we can create mp4 from it
+	#$data{$prog_type}{ext} = 'mp4';
+	$data{$prog_type}{ext} = 'asf';
 	$data{$prog_type}{streamer} = 'mms';
 	$opt->{quiet} = 1 if $opt->{streaminfo};
 	$data{$prog_type}{streamurl} = join('|', Streamer::mms->get_url( $ua, $prog->{pid} ) );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
-	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
-	if ( $media eq 'all' ) {
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
 		return %data;
 	} else {
 		# Make sure this hash exists before we pass it back...
@@ -5168,24 +5306,22 @@ sub get_metadata {
 	$duration = $1 if $xml =~ m{dur="(.+?)\d\d\dms"};
 
 	# Fill in from cache if not got from metadata
-	return (
-		pid		=> $prog->{pid},
-		index		=> $prog->{index},
-		name		=> $name || $prog->{name},
-		episode		=> $episode || $prog->{episode},
-		type		=> $prog_type || $prog->{type},
-		duration	=> $duration || $prog->{duration},
-		channel		=> $channel || $prog->{channel},
-		available	=> $available || $prog->{available},
-		expiry		=> $expiry || $prog->{expiry},
-		versions	=> $versions || $prog->{versions},
-		guidance	=> $guidance || $prog->{guidance},
-		categories	=> $categories || $prog->{categories},
-		desc		=> $longdesc || $prog->{desc},
-		player		=> $player,
-		thumbnail	=> $thumbnail || $prog->{thumbnail},
-		web		=> $prog->{web},
-	);
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode};
+	$prog->{type}		= $prog_type || $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{available}	= $available || $prog->{available};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions || $prog->{versions};
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	# just use the default modelist
+	$prog->{modes}		= 'default: '.$prog->modelist();
+	return 0;
 }
 
 
@@ -5363,21 +5499,9 @@ sub get_links {
 
 # Usage: download (<prog>, <ua>)
 sub download {
-	my $prog = shift;
-	my $ua = shift; 
-	my $mode = shift;
-	my %version_pids;
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 	my %streamdata;
-	my $url;
-
-	# stream data
-	# Display media stream data if required
-	if ( $opt->{streaminfo} ) {
-		main::display_stream_info( $prog, undef, 'all' );
-		$opt->{quiet} = 1;
-		return 'skip';
-	}
-
+	
 	# if rtmpdump does not exist
 	if ( ! main::exists_in_path($rtmpdump) ) {
 		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
@@ -5389,18 +5513,12 @@ sub download {
 		$opt->{raw} = 1;
 	}
 
-	# Get all streams data because we might need the subtitles url also later
-	my %all_stream_data = $prog->get_stream_data( undef, 'all');
-	%streamdata = %{ $all_stream_data{$mode} } if $all_stream_data{$mode};
+	# Get streams into this hash from prog object
+	%streamdata = %{ $prog->{streams}->{$version}->{$mode} } if defined $prog->{streams}->{$version}->{$mode};
 
 	# Set filename extension
-	$prog->{ext} = $streamdata{ext};
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 	$prog->{ext} = 'flv' if $opt->{raw};
-
-	if ( ! $streamdata{streamurl} ) {
-		main::logger "WARNING: No programme stream URLs were found for $mode, skipping\n";
-		return 'next';
-	}
 
 	# Determine the correct filenames for this download
 	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> $mode" ) ) {
@@ -5420,18 +5538,18 @@ sub download {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
 		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-		$prog->download_subtitles( $ua, $subfile, $all_stream_data{subtitles}{streamurl} );
+		$prog->download_subtitles( $ua, $subfile, $prog->{streams}->{$version}->{subtitles}->{streamurl} );
 		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
 	}
 
 	my $return = 0;
 	if ( ! $opt->{subsonly} ) {
 		# Instantiate new streamer from streamdata
-		my $class = "Streamer::$streamdata{streamer}";
+		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 		my $stream = $class->new;
 
 		# Do download
-		$return = $stream->get( $ua, undef, $prog, %streamdata );
+		$return = $stream->get( $ua, undef, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 	}
 
 	# Rename the subtitle file accordingly
@@ -5619,7 +5737,7 @@ sub get_metadata_url {
 
 
 # Gets media streams data for this version pid
-# $media = flashhigh|flashnormal|flashlow|all
+# $media = flashhigh|flashnormal|flashlow|undef
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
@@ -5789,8 +5907,8 @@ sub get_stream_data {
 		$data{subtitles}{streamurl} = $prog->{subtitle_url};
 	}
 
-	# Return a hash with media => url if 'all' is specified - otherwise just the specified url
-	if ( $media eq 'all' ) {
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
 		return %data;
 	} else {
 		# Make sure this hash exists before we pass it back...
@@ -5881,7 +5999,7 @@ sub get_url {
 	main::logger "INFO: media stream download URL = $url_1\n" if $opt->{verbose};
 		
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-	main::logger "\rGetting iplayer download URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
+	#main::logger "\rGetting iplayer download URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -6434,6 +6552,14 @@ sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 	my $childpid;
 
+	# Resolve URL if required
+	if ( $url =~ /^http/ ) {
+		my $url1 = main::request_url_retry($ua, $url, 2, '', '');
+		chomp($url1);
+		$url1 =~ s/[\s\n]//g;
+		$url = $url1;
+	}
+	
 	# Create named pipe
 	if ( $^O !~ /^MSWin32$/ ) {
 		mkfifo($namedpipe, 0700) if (! $opt->{wav}) && (! $opt->{raw});
@@ -6690,7 +6816,7 @@ sub get {
 	my @file_tmp_list;
 	my %threadpid;
 	my $retries = 3;
-		
+
 	main::logger "INFO: MMS_URLs: ".(join ', ', @url_list).", file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Start marker
@@ -6699,8 +6825,18 @@ sub get {
 	my $file_part_prefix = "$prog->{dir}/$prog->{fileprefix}_part";
 	for ( my $count = 0; $count <= $#url_list; $count++ ) {
 
+		# Resolve the MMS url if it is an http ref
+		if ( $url_list[$count] =~ /^http/ ) {
+			my $url = main::request_url_retry($ua, $url_list[$count], 2, '', '');
+			chomp($url);
+			$url =~ s/[\s\n]//g;
+			# HREF="mms://a1899.v394403.c39440.g.vm.akamaistream.net/7/1899/39440/1/bbcworldservice.download.akamai.com/39440//worldservice/css/nb/410060838.wma"
+			$url =~ s/^.*href=\"(.+?)\".*$/$1/gi;
+			$url_list[$count] = $url;
+		}
+
 		# Create temp download filename
-		$file_tmp = sprintf( "%s%02d.asf", $file_part_prefix, $count+1);
+		$file_tmp = sprintf( "%s%02d.".$prog->{ext}, $file_part_prefix, $count+1);
 		$file_tmp_list[$count] = $file_tmp;
 		#my $null;
 		#$null = '-really-quiet' if ! $opt->{quiet};
@@ -6900,6 +7036,13 @@ use URI;
 sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 
+	# Resolve URL if required
+	if ( $url =~ /^http/ ) {
+		my $url1 = main::request_url_retry($ua, $url, 2, '', '');
+		chomp($url1);
+		$url = $url1;
+	}
+	
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 	if ( ! $opt->{stdout} ) {
 		main::logger "INFO: Downloading Low Quality H.264 stream\n";
@@ -7381,4 +7524,3 @@ sub enable {
 
 
 ############## End OO ##############
-
