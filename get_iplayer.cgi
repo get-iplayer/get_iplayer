@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.09';
+my $VERSION = '0.10';
 
 # Features:
 # * Search for progs
@@ -34,9 +34,12 @@ use IO::File;
 use URI::Escape;
 my $DEBUG = 0;
 $| = 1;
+my $fh;
+
+
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
-my $home = '/var/www';
+my $home = $ENV{HOME};
 my $get_iplayer = '/usr/bin/get_iplayer';
 my $get_iplayer_cmd = "export HOME=$home; $get_iplayer";
 
@@ -90,11 +93,7 @@ my %prog_types = (
 
 my $icons_base_url = './icons/';
 
-# Else web version
-my $cgi = new CGI();
-
-begin_html();
-
+my $cgi;
 my $nextpage;
 
 # Page routing based on NEXTPAGE CGI parameter
@@ -104,39 +103,273 @@ my %nextpages = (
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'			=> \&pvr_add,
+	'show_info'			=> \&show_info,
 #	'pvr_enable'			=> \&pvr_enable,
 #	'pvr_disable'			=> \&pvr_disable,
 );
 
 
+### Crude Single-Threaded Perl CGI Web Server ###
+use Socket;
+use IO::Socket;
+my $IGNOREEXIT = 0;
+my $port = shift @ARGV;
+# If the specified port number is  > 1024 then run embedded web server
+if ( $port =~ /\d+/ && $port > 1024 ) {
+	my $port = 1935;
+	# Setup signal handlers
+	$SIG{INT} = $SIG{PIPE} = \&cleanup;
+	# Autoreap zombies
+	$SIG{CHLD} = 'IGNORE';
+	# Need this because with $SIG{CHLD} = 'IGNORE', backticks and systems calls always return -1
+	$IGNOREEXIT = 1;
+	for (;;) {
+		# Setup and create socket
+		my $server = new IO::Socket::INET(
+			Proto => 'tcp',
+			LocalPort => $port,
+			Listen => SOMAXCONN,
+			Reuse => 1
+		);
+		$server or die "Unable to create server socket: $!";
+		print "INFO: Listening on port $port\n";
+		# Await requests and handle them as they arrive
+		while (my $client = $server->accept()) {
+			my $procid = fork();
+			die "Cannot fork" unless defined $procid;
+			# Parent
+			if ( $procid ) {
+				close $client;
+				next;
+			}
+			# Child
+			$client->autoflush(1);
+			my %request = ();
+			my $query_string;
+			my %data;
+			{
+				# Read Request
+				local $/ = Socket::CRLF;
+				while (<$client>) {
+					# Main http request
+					chomp;
+					if (/\s*(\w+)\s*([^\s]+)\s*HTTP\/(\d.\d)/) {
+						$request{METHOD} = uc $1;
+						$request{URL} = $2;
+						$request{HTTP_VERSION} = $3;
+					# Standard headers
+					} elsif (/:/) {
+						my ( $type, $val ) = split /:/, $_, 2;
+						$type =~ s/^\s+//;
+						for ($type, $val) {
+							s/^\s+//;
+							s/\s+$//;
+						}
+						$request{lc $type} = $val;
+					# POST data
+					} elsif (/^$/) {
+						read( $client, $request{CONTENT}, $request{'content-length'} ) if defined $request{'content-length'};
+						last;
+					}
+				}
+			}
 
-# Page Routing
-$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
-form_header();
-if ( $DEBUG ) {
-	print Dump();
+			# Determine method and parse parameters
+			if ($request{METHOD} eq 'GET') {
+				#if ($request{URL} =~ /(.*)\?(.*)/) {
+				#	$request{URL} = $1;
+				#	$request{CONTENT} = $2;
+				#	%data = parse_form($request{CONTENT});
+				#} else {
+				#	%data = ();
+				#}
+				$data{"_method"} = "GET";
 	
-}
-if ($nextpages{$nextpage}) {
-	# call the correct subroutine
-	$nextpages{$nextpage}->();
+			} elsif ($request{METHOD} eq 'POST') {
+				$query_string = parse_post_form_string( $request{CONTENT} );
+				$data{"_method"} = "POST";
+	
+			} else {
+				$data{"_method"} = "ERROR";
+			}
+
+			# Serve image file
+#			my $localfile = $home.$request{URL};
+#	
+#			# Send Response
+#			if (open(FILE, "<$localfile")) {
+#				print $client "HTTP/1.0 200 OK", Socket::CRLF;
+#				print $client "Content-type: text/html", Socket::CRLF;
+#				print $client Socket::CRLF;
+#				my $buffer;
+#				while (read(FILE, $buffer, 4096)) {
+#					print $client $buffer;
+#				}
+#				$data{"_status"} = "200";
+#			} else {
+#				print $client "HTTP/1.0 404 Not Found", Socket::CRLF;
+#				print $client Socket::CRLF;
+#				print $client "<html><body>404 Not Found</body></html>";
+#				$data{"_status"} = "404";
+#			}
+#			close(FILE);
+
+			# Log Request
+			print "$data{_method}: ${home}$request{URL}\n";
+
+			# Is this the CGI ?
+			if ( $request{URL} =~ /^\/?iplayer/ ) {
+				# remove any vars that might affect the CGI
+				%ENV = ();
+				@ARGV = ();
+				# Setup CGI http vars
+				print "QUERY_STRING = $query_string\n";
+				$ENV{'QUERY_STRING'} = $query_string;
+				$ENV{'REQUEST_URI'} = $request{URL};
+				$ENV{'SERVER_PORT'} = $port;
+				# respond OK to browser
+				print $client "HTTP/1.0 200 OK", Socket::CRLF;
+				# Invoke CGI
+				run_cgi( $client, $query_string );
+
+			# Else 404
+			} else {
+				print "ERROR: 404 Not Found\n";
+				print $client "HTTP/1.0 404 Not Found", Socket::CRLF;
+				print $client Socket::CRLF;
+				print $client "<html><body>404 Not Found</body></html>";
+				$data{"_status"} = "404";
+			}
+
+			# Close Connection
+			close $client;
+			# Exit child
+			exit 0;
+		}
+	}
+
+# If we're running as a proper CGI from a web server...
+} else {
+	run_cgi( *STDOUT );
 }
 
-form_footer();
-html_end();
-	
 exit 0;
 
+
+sub cleanup {
+	print "INFO: Cleaning up PID $$\n";
+	exit 1;
+}
+
+
+
+sub parse_form {
+	my $data = $_[0];
+	my %data;
+	for (split /&/, $data) {
+		my ($key, $val) = split /=/;
+		$val =~ s/\+/ /g;
+		$val =~ s/%(..)/chr(hex($1))/eg;
+		$data{$key} = $val;
+	}
+	return %data;
+}
+
+
+
+sub parse_post_form_string {
+	my $form = $_[0];
+	my @data;
+	while ( $form =~ /Content-Disposition:(.+?)--/sg ) {
+		$_ = $1;
+		# form-data; name = "KEY"
+		m{name.+?"(.+?)"[\n\r\s]*(.+)}sg;
+		my ($key, $val) = ( $1, $2 );
+		next if ! $1;
+		$val =~ s/[\r\n]//g;
+		$val =~ s/\+/ /g;
+		$val =~ s/%(..)/chr(hex($1))/eg;
+		push @data, "$key=$val";
+	}
+	return join '&', @data;
+}
+
+
+
+# Use --webrequest to specify options in urlencoded format
+sub parse_url_args {
+	my @args;
+	# parse GET args
+	my @webopts = split /[\&\?]/, $_[0];
+	for (@webopts) {
+		# URL decode it
+		s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
+		my ( $optname, $value );
+		# opt val pair
+		if ( m{^\s*([\w\-]+?)[\s=](.+)$} ) {
+			( $optname, $value ) = ( $1, $2 );
+		# flag only
+		} elsif ( m{^\s*([\w\-]+)$} ) {
+			( $optname, $value ) = ( $1, 1 );
+		}
+		# if the option is valid then add it
+		if ( $optname && defined $value ) {
+			push @args, "$optname=$value";
+			print "OPT: $optname=$value\n";
+		}
+	}
+	return @args;
+}
+
+
+sub run_cgi {
+	# Get filehandle for output
+	$fh = shift;
+	my $query_string = shift;
+	
+	# Clean globals
+	%prog = ();
+	@pids = ();
+	@displaycols = ();
+
+	# new cgi instance
+	$cgi->delete_all() if defined $cgi;
+	$cgi = new CGI( $query_string );
+
+	begin_html();
+
+	# Page Routing
+	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
+	form_header();
+	if ( $DEBUG ) {
+		print $fh $cgi->Dump();
+		for my $key (sort keys %ENV) {
+		    print $fh $key, " = ", $ENV{$key}, "\n";
+		}    
+	}
+	if ($nextpages{$nextpage}) {
+		# call the correct subroutine
+		$nextpages{$nextpage}->();
+	}
+
+	form_footer();
+	html_end();
+
+	$cgi->delete_all();
+
+	return 0;
+}
 
 
 sub get_pvr_list {
 	my $pvrsearch;
-	my $out = `$get_iplayer_cmd --pvrlist 2>&1`;
+	my $out = `$get_iplayer_cmd --nocopyright --pvrlist 2>&1`;
 	
 	# Remove text before first pvrsearch entry
 	$out =~ s/^.+?(pvrsearch\s.+)$/$1/s;
 	# Parse all 'pvrsearch' elements
 	for ( split /pvrsearch\s+\=\s+/, $out ) {
+		next if /^get_iplayer/;
 		my $name;
 		$_ = "pvrsearch = $_";
 		# Get each element
@@ -146,7 +379,10 @@ sub get_pvr_list {
 			}
 			$pvrsearch->{$name}->{$1} = $2;
 			# Remove disabled entries
-			delete $pvrsearch->{$name} if $pvrsearch->{$name}->{disable} == 1;
+			if ( $pvrsearch->{$name}->{disable} == 1 ) {
+				delete $pvrsearch->{$name};
+				last;
+			}
 		}
 	}
 	return $pvrsearch;
@@ -157,8 +393,8 @@ sub get_pvr_list {
 sub show_pvr_list {
 	my %fields;
 	my $pvrsearch = get_pvr_list();
-	my $sort_field = param( 'PVRSORT' ) || 'name';
-	my $reverse = param( 'PVRREVERSE' ) || '0';
+	my $sort_field = $cgi->param( 'PVRSORT' ) || 'name';
+	my $reverse = $cgi->param( 'PVRREVERSE' ) || '0';
 
 	# Sort data
 	my @pvrsearches = get_sorted( $pvrsearch, $sort_field, $reverse );
@@ -221,12 +457,12 @@ sub show_pvr_list {
 
 	
 	# Search form
-	print start_form(
+	print $fh start_form(
 		-name   => "form",
 		-method => "POST",
 	);
 
-	print button(
+	print $fh button(
 		-class		=> 'search',
 		-name		=> 'Delete Selected PVR Entries',
 		-value		=> 'Delete Selected PVR Entries',
@@ -234,25 +470,25 @@ sub show_pvr_list {
 		-onClick 	=> "form.NEXTPAGE.value='pvr_del'; submit()",
 	);
 
-	print table( {-class=>'search'} , @html );
+	print $fh table( {-class=>'search'} , @html );
 	# Make sure we go to the correct nextpage for processing
-	print hidden(
+	print $fh hidden(
 		-name		=> "NEXTPAGE",
 		-value		=> "pvr_list",
 		-override	=> 1,
 	);
 	# Reverse sort value
-	print hidden(
+	print $fh hidden(
 		-name		=> "PVRREVERSE",
 		-value		=> 0,
 		-override	=> 1,
 	);
-	print hidden(
+	print $fh hidden(
 		-name		=> "PVRSORT",
 		-value		=> $sort_field,
 		-override	=> 1,
 	);
-	print end_form();
+	print $fh end_form();
 
 	return 0;
 }
@@ -305,14 +541,39 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@download) {
 		chomp();
-		my $cmd = "$get_iplayer_cmd --pvrdel '$name' 2>&1";
-		print p("Command: $cmd");
+		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel '$name' 2>&1";
+		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
-		return p("ERROR: ".$out) if $?;
-		print p("Deleted: $name");
+		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+		print $fh p("Deleted: $name");
 		$out .= $cmdout;
 	}
-	print p("Output: $out");
+	print $fh pre($out);
+	return $out;
+}
+
+
+
+sub show_info {
+	my $progdata = ( $cgi->param( 'INFO' ) );
+	my $out;
+	my @html;
+	my ( $type, $pid ) = split /\|/, $progdata;
+
+	# Queue all selected '<type>|<pid>' entries in the PVR
+	chomp();
+	my $cmd = "$get_iplayer_cmd --nocopyright --info --fields=pid --type=$type $pid 2>&1";
+	print $fh p("Command: $cmd");
+	my @cmdout = `$cmd`;
+	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
+	print $fh p("Info for $pid");
+	for ( @cmdout ) {
+		my ( $key, $val ) = ( $1, $2 ) if m{^(\w+?):\s*(.+?)\s*$};
+		next if $key =~ /(^$|^\d+$)/ || $val =~ /Matching Program/i;
+		$out .= "$key: $val\n";
+		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
+	}
+	print $fh table( { -class => 'info' }, @html );
 	return $out;
 }
 
@@ -329,23 +590,23 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;		
-		my $cmd = "$get_iplayer_cmd --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")' 2>&1";
-		print p("Command: $cmd");
+		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")' 2>&1";
+		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
-		return p("ERROR: ".$out) if $?;
-		print p("Queued: $type: '$name - $episode' ($pid)");
+		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+		print $fh p("Queued: $type: '$name - $episode' ($pid)");
 		$out .= $cmdout;
 	}
-	print p("Output: $out");
+	print $fh pre($out);
 	return $out;
 }
 
 
 
 sub pvr_add {
-	my $search = shift || param( 'SEARCH' ) || '.*';
-	my $searchfields = join(",", param( 'SEARCHFIELDS' )) || 'name';
-	my $typelist = join(",", param( 'PROGTYPES' )) || 'tv';
+	my $search = shift || $cgi->param( 'SEARCH' ) || '.*';
+	my $searchfields = join(",", $cgi->param( 'SEARCHFIELDS' )) || 'name';
+	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	my $out;
 
 	# Only allow alphanumerics,_,-,. here for security reasons
@@ -358,18 +619,18 @@ sub pvr_add {
 	get_progs( $typelist, $search, $searchfields );
 	my $matches = keys %prog;
 	if ( $matches > 30 ) {
-		print p("ERROR: Search term '$search' currently matches $matches programmes - keep below 30 current matches");
+		print $fh p("ERROR: Search term '$search' currently matches $matches programmes - keep below 30 current matches");
 		return 1;
 	} else {
-		print p("Current Matches: ".(keys %prog));
+		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$get_iplayer_cmd --pvradd '$searchname' --type $typelist --versions default --fields $searchfields -- $search";
-	print p("Command: $cmd");
+	my $cmd  = "$get_iplayer_cmd --nocopyright --pvradd '$searchname' --type $typelist --versions default --fields $searchfields -- $search";
+	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
-	return p("ERROR: ".$out) if $?;
-	print p("Added PVR Search ($searchname):\n\tTypes: $typelist\n\tSearch: $search\n\tSearch Fields: $searchfields\n");
-	print p("Output: $out");
+	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+	print $fh p("Added PVR Search ($searchname):\n\tTypes: $typelist\n\tSearch: $search\n\tSearch Fields: $searchfields\n");
+	print $fh pre($out);
 
 	return $out;
 }
@@ -377,12 +638,12 @@ sub pvr_add {
 
 
 sub search_progs {
-	my $search = shift || param( 'SEARCH' ) || '.*';
-	my $cols = join(",", param( 'COLS' )) || undef;
-	my $searchfields = join(",", param( 'SEARCHFIELDS' )) || 'name';
-	my $typelist = join(",", param( 'PROGTYPES' )) || 'tv';
-	my $pagesize = param( 'PAGESIZE' ) || 17;
-	my $pageno = param( 'PAGE' ) || 1;
+	my $search = shift || $cgi->param( 'SEARCH' ) || '.*';
+	my $cols = join(",", $cgi->param( 'COLS' )) || undef;
+	my $searchfields = join(",", $cgi->param( 'SEARCHFIELDS' )) || 'name';
+	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	my $pagesize = $cgi->param( 'PAGESIZE' ) || 17;
+	my $pageno = $cgi->param( 'PAGE' ) || 1;
 	my @html;
 	my %type;
 
@@ -398,12 +659,12 @@ sub search_progs {
 	# Get prog data
 	my $response;
 	if ( $response = get_progs( $typelist, $search, $searchfields ) ) {
-		print p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
+		print $fh p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
 		return 1;
 	}
 
-        my $sort_field = param( 'SORT' ) || 'name';
-        my $reverse = param( 'REVERSE' ) || '0';
+        my $sort_field = $cgi->param( 'SORT' ) || 'name';
+        my $reverse = $cgi->param( 'REVERSE' ) || '0';
 
 	# Sort
 	@pids = get_sorted( \%prog, $sort_field, $reverse );
@@ -473,7 +734,7 @@ sub search_progs {
 		);
 		for ( @displaycols ) {
 			if ( ! /thumbnail/ ) {
-				push @row, td( {-class=>'search'}, $prog{$pid}->{$_} );
+				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
 			} else {
 				push @row, td( {-class=>'search'}, a( { -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			}
@@ -501,18 +762,19 @@ sub search_progs {
 	}
 
 	# Search form
-	print start_form(
+	print $fh start_form(
 		-name   => "form",
 		-method => "POST",
 	);
 
-	print table( { -class=>'header' },
+	print $fh table( { -class=>'header' },
 	  Tr( { -class=>'header' }, 
 	    td( { -class=>'header' }, [
 	      "Name Search",
 	      textfield(
 	        -class		=> 'header',
 		-name		=> 'SEARCH',
+		-value		=> $search,
 		-size		=> 20,
               ),
 
@@ -522,7 +784,7 @@ sub search_progs {
 	        -name		=> 'SEARCHFIELDS',
                 -values		=> [(@headings,'name,episode','name,episode,desc')],
 		-labels		=> \%fieldname,
-                -default	=> 'name',
+                -default	=> $searchfields,
               ),
 
               button({
@@ -555,8 +817,8 @@ sub search_progs {
             ]),
           ),
         );
-	print table( { -class=>'types' }, Tr( { -class=>'types' }, @typeselect ) );
-	print table( { -class=>'actions' },
+	print $fh table( { -class=>'types' }, Tr( { -class=>'types' }, @typeselect ) );
+	print $fh table( { -class=>'actions' },
 		Tr( { -class=>'actions' },
 			td( { -class=>'actions' }, [
 				button(
@@ -577,9 +839,9 @@ sub search_progs {
 			]),
 		),
 	);
-	print @pagetrail;
-	print table( {-class=>'search' }, @html );
-	print @pagetrail;
+	print $fh @pagetrail;
+	print $fh table( {-class=>'search' }, @html );
+	print $fh @pagetrail;
 
 	my @columnselect;
 	for my $heading (@headings) {
@@ -603,7 +865,7 @@ sub search_progs {
 	unshift @columnselect, Tr( { -class=>'colselect' }, th( { -class=>'colselect' }, "Enable these columns:" ) ) if @columnselect;
 
 	# Display drop down menu with multiple select for columns shown
-	print (
+	print $fh (
           table( { -class => 'colselect' }, @columnselect ).
           # Make sure we go to the correct nextpage for processing
           hidden(
@@ -621,6 +883,12 @@ sub search_progs {
           hidden(
             -name	=> "PAGE",
             -value	=> "1",
+            -override	=> 1,
+          ).
+          # INFO for page info if clicked
+          hidden(
+            -name	=> "INFO",
+            -value	=> 0,
             -override	=> 1,
           ).
           end_form()
@@ -695,8 +963,8 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 
-	my @list = `$get_iplayer_cmd --nopurge --type $types --listformat 'ENTRY${fields}' --fields $searchfields -- $search`;
-	return join("\n", @list) if $?;
+	my @list = `$get_iplayer_cmd --nocopyright --nopurge --type $types --listformat 'ENTRY${fields}' --fields $searchfields -- $search`;
+	return join("\n", @list) if $? && not $IGNOREEXIT;
 
 	for ( grep /^ENTRY/, @list ) {
 		chomp();
@@ -726,7 +994,7 @@ sub get_display_cols {
         @displaycols = ();
 
         # Determine which columns to display (all if $cols not defined)
-        my $cols = join(",", param( 'COLS' )) || undef;
+        my $cols = join(",", $cgi->param( 'COLS' )) || undef;
 
         # Re-sort selected display columns into original header order
         my @columns = split /,/, $cols;
@@ -750,13 +1018,13 @@ sub get_display_cols {
 ######################################################################
 sub begin_html {
 
-	print $cgi->header(-type=>'text/html', -charset=>'utf-8' );
-	print "<html>";
-	print "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
+	print $fh $cgi->header(-type=>'text/html', -charset=>'utf-8' );
+	print $fh "<html>";
+	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
 	insert_stylesheet();
-	print "</HEAD>\n";
+	print $fh "</HEAD>\n";
 	insert_javascript();
-	print "<body>\n";
+	print $fh "<body>\n";
 }
 
 
@@ -772,13 +1040,13 @@ sub form_header {
 	my $advanced = shift || $cgi->param( 'ADVANCED' );
 	my $menu;
 
-	print $cgi->start_form(
+	print $fh $cgi->start_form(
 			-name   => "formheader",
 			-method => "POST",
 		);
 
 
-	print table( {-class=>'title'},
+	print $fh table( {-class=>'title'},
 	Tr( {-class=>'title'},
 		td( { -class=>'title' }, "get_iplayer Manager"),
 		td( { -class=>'title', -align=>'right' -width=>'131' }, a( {-href=>"http://linuxcentre.net/get_iplayer/"}, img( { -src=>"$icons_base_url/logo_white_131x28.gif", -align=>'right' }) ) ),
@@ -790,6 +1058,7 @@ sub form_header {
 
 	Tr( { -class=>'icons' }, td( { -class=>'icons' }, [
 		img({
+			-class => 'icons',
 			-alt => 'Back',
 			-title => 'Back',
 			-src => "$icons_base_url/back.png",
@@ -798,6 +1067,7 @@ sub form_header {
 		# go to search page
 		#image_button(-name=>'button_name', -src=>image URL, -align=>alignment, -alt=>text, -value=>text)
 		image_button({
+			-class => 'icons',
 			-alt => 'Search',
 			-title => 'Programme Search',
 			-src => "$icons_base_url/index.png",
@@ -805,6 +1075,7 @@ sub form_header {
 		}),
 		# go back to parent page - set no params
 		image_button({
+			-class => 'icons',
 			-alt => 'PVR Searches',
 			-title => 'PVR Searches',
 			-src => "$icons_base_url/pie2.png",
@@ -812,6 +1083,7 @@ sub form_header {
 		}),
 		# Open the help page in a different window
 		img({
+			-class => 'icons',
 			-alt => 'Help',
 			-title => 'Help',
 			-src => "$icons_base_url/unknown.png",
@@ -843,7 +1115,7 @@ sub form_header {
 #
 #############################################
 sub form_footer {
-	print p( b({-class=>"footer"},
+	print $fh p( b({-class=>"footer"},
 		"Note: Changes cannot be undone".
 		br()."&copy;2009 Phil Lewis - Licensed under GPLv3"
 	));
@@ -856,9 +1128,8 @@ sub form_footer {
 #
 #############################################
 sub html_end {
-	print $cgi->dump if $DEBUG;
-	print "\n</body>";
-	print "\n</html>\n";
+	print $fh "\n</body>";
+	print $fh "\n</html>\n";
 }
 
 
@@ -869,7 +1140,7 @@ sub html_end {
 #############################################
 sub insert_javascript {
 
-	print <<EOF;
+	print $fh <<EOF;
 
 	<script type="text/javascript">
 	
@@ -919,7 +1190,7 @@ EOF
 #
 #############################################
 sub insert_stylesheet {
-	print <<EOF;
+	print $fh <<EOF;
 
 	<STYLE type="text/css">
 	
@@ -929,7 +1200,10 @@ sub insert_stylesheet {
 	TABLE.title		{ font-size: 120%; border-spacing: 1px; padding: 0; }
 	TR.title		{ font-weight: bold; }
 
-	TABLE.icons		{ border-spacing: 10px 0; padding: 0px; }
+	TABLE.icons		{ font-size: 100%; border-spacing: 10px 0; padding: 0px; }
+	IMG.icons		{ font-size: 100%; }
+	INPUT.icons		{ font-size: 100%; }
+	TD.icons		{ border: 1px solid #666666; background: #FFF; }
 	TD.icons:hover		{ background: #CCC; }
 	
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
@@ -966,6 +1240,11 @@ sub insert_stylesheet {
 	LABEL.sorted            { Color: #cfc; }
 	LABEL.unsorted          { Color: #fff; }
 	LABEL.sorted_reverse    { Color: #fcc; }
+
+	TABLE.info		{ font-size: 70%; border-spacing: 2px; padding: 0; width: 100%; }
+	TR.info			{ background: #EEE; }
+	TH.info			{ Color: white; text-align: center; background: #999; text-align: center; }
+	TD.info			{ text-align: left; }
 
 	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
 	</STYLE>

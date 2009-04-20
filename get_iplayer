@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.64;
+my $version = 1.65;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -133,13 +133,16 @@ Streamer->new();
 
 # Print to STDERR/STDOUT if not quiet unless verbose or debug
 sub logger(@) {
+	my $msg = shift;
 	# Make sure quiet can be overridden by verbose and debug options
 	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
+		# Wrap in html <p> tags if --webrequest f specified
+		$msg =~ s/^(.*)$/<p>$1<\/p>/g if $opt->{webrequest};
 		# Only send messages to STDERR if pvr or stdout options are being used.
 		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} ) {
-			print STDERR $_[0];
+			print STDERR $msg;
 		} else {
-			print STDOUT $_[0];
+			print STDOUT $msg;
 		}
 	}
 }
@@ -151,7 +154,7 @@ my %opt_format = (
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
-	conditions	=> [ 0, "conditions", '', '', 'Shows GPL conditions'],
+	conditions	=> [ 1, "conditions", 'Misc', '--conditions', 'Shows GPL conditions'],
 	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
 	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <regex>', "Narrow search to exclude matched programme names"],
@@ -173,9 +176,11 @@ my %opt_format = (
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
-	mp3audio	=> [ 0, "mp3audio", '', '', ""],
+	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
+	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio amode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
+	nocopyright	=> [ 1, "nocopyright", 'Misc', '--nocopyright', "Don't display copyright header"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes downloaded over 30 days ago"],	
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
@@ -186,6 +191,7 @@ my %opt_format = (
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	save 		=> [ 0, "save", 'Config', '--save', "Save specified options as default"],
+	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	stdout		=> [ 1, "stdout|x", 'Download', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
@@ -207,7 +213,8 @@ my %opt_format = (
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
 	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
-	warranty	=> [ 0, "warranty", '', '', 'Displays warranty section of GPL'],
+	warranty	=> [ 1, "warranty", 'Misc', '--warranty', 'Displays warranty section of GPL'],
+	webrequest	=> [ 1, "webrequest=s", 'Misc', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
@@ -282,7 +289,7 @@ $opt->copy_set_options_from( $opt_cmdline );
 $opt->save( $opt_cmdline, $optfile ) if $save;
 
 # Show copyright notice
-logger Options->copyright_notice;
+logger Options->copyright_notice if not $opt->{nocopyright};
 
 # Display prefs dirs if required
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
@@ -300,6 +307,12 @@ my %user_agent = (
 # Display Usage
 if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
 	logger Options->usage( \%opt_format, $opt_cmdline->{helplong} );
+	exit 1;
+}
+
+# Generate man page
+if ( $opt_cmdline->{manpage} ) {
+	Options->usage( \%opt_format, 1, $opt_cmdline->{manpage} );
 	exit 1;
 }
 
@@ -367,6 +380,35 @@ my @search_args = @ARGV;
 
 
 ########### Main processing ###########
+
+# Use --webrequest to specify options in urlencoded format
+if ( $opt->{webrequest} ) {
+	# parse GET args
+	my @webopts = split /[\&\?]/, $opt->{webrequest};
+	for (@webopts) {
+		# URL decode it
+		s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
+		my ( $optname, $value );
+		# opt val pair
+		if ( m{^\s*([\w\-]+?)[\s=](.+)$} ) {
+			( $optname, $value ) = ( $1, $2 );
+		# flag only
+		} elsif ( m{^\s*([\w\-]+)$} ) {
+			( $optname, $value ) = ( $1, 1 );
+		}
+		# if the option is valid then add it
+		if ( defined $opt_format{$optname} ) {
+			$opt->{$optname} = $value;
+			logger "INFO: webrequest OPT: '$optname' = '$value'\n" if $opt->{verbose};
+		# Ignore invalid opts
+		} else {
+			logger "ERROR: Invalid webrequest OPT: '$optname' = '$value'\n" if $opt->{verbose};
+		}
+	}
+}
+
+# Add --search option to @search_args if specified
+push @search_args, $opt->{search} if defined $opt->{search};
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0];
 
@@ -1881,22 +1923,51 @@ EOF
 
 
 
-# Usage: $opt_cmdline->usage( \%opt_format, <helplong> );
+# Usage: $opt_cmdline->usage( \%opt_format, <helplong>, <manpage> );
 sub usage {
 	my $this = shift;
 	my $opt_format_ref = shift;
 	my $helplong = shift;
+	my $manpage = shift;
 	my %section_name;
 	my %name_syntax;
 	my %name_desc;
-	my $usage;
-	$usage .= "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):\n";
-	$usage .= " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]\n";
-	$usage .= " Download Programmes:           get_iplayer --get [<search options>] <regex|index> ...\n";
-	$usage .= "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
-	$usage .= " Stream Downloads:              get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -\n" if $helplong;
-	$usage .= " Update get_iplayer:            get_iplayer --update\n";
-	$usage .= " Advanced Options:              get_iplayer --long-help\n" if ! $helplong;
+	my @usage;
+	my @man;
+	push @man, 
+		'.TH GET_IPLAYER "1" "April 2009" "Jonathan Wiltshire" "get_iplayer Manual"',
+		'.SH NAME', 'get_iplayer - Download tool and PVR for BBC iPlayer, Podcasts and ITV Player',
+		'.SH SYNOPSIS',
+		'\fBget_iplayer\fR [<search options>] [<regex|index> ...]',
+		'.PP',
+		'\fBget_iplayer\fR \fB--get\fR [<search options>] <regex|index> ...',
+		'.br',
+		'\fBget_iplayer\fR \fB--pid\fR <type>:<pid> [<options>]',
+		'.PP',
+		'\fBget_iplayer\fR \fB--stdout\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
+		'.PP',
+		'\fBget_iplayer\fR \fB--update\fR',
+		'.SH DESCRIPTION',
+		'\fBget_iplayer\fR lists, searches and downloads BBC iPlayer TV/Radio, BBC Podcast and ITVplayer TV programmes.',
+		'.PP',
+		'\fBget_iplayer\fR has three modes: downloading a complete programme for later playback, streaming a programme',
+		'directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to',
+		'search terms and downloading programmes automatically.',
+		'.PP',
+		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available BBC iPlayer, podcast and ITV programmes.',
+		'Each available programme has a numerical identifier, \fBpid\fR.',
+		'\fBget_iplayer\fR downloads BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for download.',
+		'It can also utilise the \fBrtmpdump\fR tool to download programmes from RTMP flash streams at various qualities.',
+		'.PP',
+		'In PVR mode, \fBget_iplayer\fR can be called from cron to download programmes to a schedule.',
+		'.SH "OPTIONS"' if $manpage;
+	push @usage, "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):";
+	push @usage, " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]";
+	push @usage, " Download Programmes:           get_iplayer --get [<search options>] <regex|index> ...";
+	push @usage, "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
+	push @usage, " Stream Downloads:              get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
+	push @usage, " Update get_iplayer:            get_iplayer --update";
+	push @usage, " Advanced Options:              get_iplayer --long-help" if ! $helplong;
 
 	for my $name (keys %{$opt_format_ref} ) {
 		next if not $opt_format_ref->{$name};
@@ -1910,17 +1981,43 @@ sub usage {
 
 	# Build the help usage text
 	# Each section
-	for my $section ( keys %section_name ) {
+	for my $section ( 'Search', 'Display', 'Download', 'Output', 'PVR', 'Config', 'External Program' ) {
+	#for my $section ( keys %section_name ) {
 		my @lines;
-		$usage .= "\n$section Options:\n";
+		my @manlines;
+		#Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)
+		push @man, ".SS \"$section Options:\"" if $manpage;
+		push @usage, '', "$section Options:";
 		# Each name in this section array
 		for my $name ( sort @{ $section_name{$section} } ) {
-			push @lines, sprintf(" %-30s %s\n", $name_syntax{$name}, $name_desc{$name} );
+			push @manlines, '.TP'."\n".'\fB'.$name_syntax{$name}."\n".$name_desc{$name} if $manpage;
+			push @lines, sprintf(" %-30s %s", $name_syntax{$name}, $name_desc{$name} );
 		}
-		$usage .= $_ for sort @lines;
+		push @usage, sort @lines;
+		push @man, sort @manlines;
 	}
 
-	return $usage;
+	if ( $manpage ) {
+		push @man,
+			'.SH AUTHOR',
+			'get_iplayer is written and maintained by Phil Lewis <iplayer (at sign) linuxcentre.net>.',
+			'.PP',
+			'This manual page was originally written by Jonathan Wiltshire <debian@jwiltshire.org.uk> for the Debian project (but may be used by others).',
+			'.SH COPYRIGHT NOTICE';
+		push @man, Options->copyright_notice;
+		# Escape '-'
+		s/\-/\\-/g for @man;
+		# Open manpage file and write contents
+		if (! open (MAN, "> $manpage") ) {
+			main::logger "ERROR: Cannot write to manpage file '$manpage'\n";
+			exit 1;
+		}
+		print MAN join "\n", @man, "\n";
+		close MAN;
+		main::logger "INFO: Wrote manpage file '$manpage'\n";
+	}
+
+	return join "\n", @usage, "\n";
 }
 
 
@@ -2979,7 +3076,7 @@ sub parse_attributes {
 	$_ = shift;
 	my $attribs;
 	# Parse all attributes
-	while ( /([\w]+?)="(.+?)"/sg ) {
+	while ( /([\w]+?)="(.*?)"/sg ) {
 		$attribs->{$1} = $2;
 	}
 	return $attribs;
@@ -3446,7 +3543,7 @@ sub get_stream_data {
 				}
 			}
 
-                        
+
 
 		# flashaudio modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
@@ -3634,7 +3731,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		n95		=> [ 0, "n95", '', '', ""],
+		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 vmode"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Download output directory for tv"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 	};
@@ -4156,7 +4253,7 @@ sub opt_format {
 		bandwidth 	=> [ 1, "bandwidth=n", 'Download', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Download output directory for radio"],
-		realaudio	=> [ 0, "realaudio", '', '', ""],
+		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio amode"],
 		wav		=> [ 1, "wav", 'Download', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
 	};
 }
@@ -6408,7 +6505,7 @@ use URI;
 sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
-		rtmp		=> [ 0, "rtmp", '', '', ""],
+		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
 		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
 		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream downloaded OK"],
 	};
@@ -7172,7 +7269,7 @@ sub opt_format {
 		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
 		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off downloading using the --pvr option"],
-		comment		=> [ 0, "comment=s", '', '', "Adds a comment to a PVR search"],
+		comment		=> [ 1, "comment=s", 'Misc', '--comment <string>', "Adds a comment to a PVR search"],
 	};
 }
 
