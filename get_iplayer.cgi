@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.10';
+my $VERSION = '0.11';
 
 # Features:
 # * Search for progs
@@ -625,7 +625,7 @@ sub pvr_add {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$get_iplayer_cmd --nocopyright --pvradd '$searchname' --type $typelist --versions default --fields $searchfields -- $search";
+	my $cmd  = "$get_iplayer_cmd --pvradd '$searchname' --type $typelist --versions default --fields $searchfields -- $search";
 	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
