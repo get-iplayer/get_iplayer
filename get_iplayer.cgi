@@ -104,6 +104,7 @@ my %nextpages = (
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'			=> \&pvr_add,
 	'show_info'			=> \&show_info,
+	'flush'				=> \&flush,
 #	'pvr_enable'			=> \&pvr_enable,
 #	'pvr_disable'			=> \&pvr_disable,
 );
@@ -223,7 +224,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				%ENV = ();
 				@ARGV = ();
 				# Setup CGI http vars
-				print "QUERY_STRING = $query_string\n";
+				print "QUERY_STRING = $query_string\n" if defined $query_string;
 				$ENV{'QUERY_STRING'} = $query_string;
 				$ENV{'REQUEST_URI'} = $request{URL};
 				$ENV{'SERVER_PORT'} = $port;
@@ -465,8 +466,6 @@ sub show_pvr_list {
 	print $fh button(
 		-class		=> 'search',
 		-name		=> 'Delete Selected PVR Entries',
-		-value		=> 'Delete Selected PVR Entries',
-		-title		=> 'Delete Selected PVR Entries',
 		-onClick 	=> "form.NEXTPAGE.value='pvr_del'; submit()",
 	);
 
@@ -512,7 +511,7 @@ sub get_sorted {
 	}
 
 	# If this a purely numerical field
-	if ( $sorttype{$sort_field} eq 'numeric' ) {
+	if ( defined $sorttype{$sort_field} && $sorttype{$sort_field} eq 'numeric' ) {
 		if ($reverse) {
 			@sorted = reverse sort {$a <=> $b} @unsorted;
 		} else {
@@ -636,29 +635,146 @@ sub pvr_add {
 }
 
 
+# Build templated HTML for an option specified as
+# '<Option text>', <webvar>, <get_iplayer opt>, 'onoff', 	'status: 1|0'
+# '<Option text>', <webvar>, <get_iplayer opt>, 'multionoff',	<hashref 'order => value' >, <hashref 'values => label'>, <hash ref: 'value => status'>
+# '<Option text>', <webvar>, <get_iplayer opt>, 'popup',	'<default>', \%<hash for multi or popup values>
+# '<Option text>', <webvar>, <get_iplayer opt>, 'text',	'<default>', \%<hash for multi or popup values>
+# '<Option text>', <webvar>, <get_iplayer opt>, 'filebrowse',	'<default>', \%<hash for multi or popup values>
+# e.g.
+# 'Programme type', 'PROGTYPES', '--types', 'multionoff', \%{ tv => 1 }, \%{ tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' }
+# 'Output Folder', 'OUTDIR', '--output', 'filebrowse', ''
+# 'Hide Downloaded Programmes', 'HIDE', '--hide', 'onoff'
+
+# 'Programme type', 'PROGTYPES', '--types', 'multionoff', { 1=>tv, 2=>radio, 3=>podcast, 4=>itv}, { tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' } , { tv => 1 }
+
+
+sub build_option_html {
+	my $text = shift;
+	my $webvar = shift;
+	my $option = shift;
+	my $opttype = shift;
+	my $label = shift;
+	my $default = shift;
+	my @html;
+
+	# On/Off
+	if ( $opttype eq 'onoff' ) {
+		my $value = shift;
+		push @html, th( { -class => 'options' }, $text );
+		push @html, td( { -class => 'options' }, [
+			'',
+			checkbox(
+				-class		=> 'options',
+				-name		=> $webvar,
+				-label		=> '',
+				-value 		=> 1,
+				-checked	=> $value,
+				-override	=> 1,
+			)
+		] );
+
+
+	# Multi-On/Off
+	} elsif ( $opttype eq 'multionoff' ) {
+		my $value = shift;
+		# values in hash of $value->{<order>} => value
+		# labels in hash of $label->{$value}
+		# selected status in $default->{$value}
+		push @html, th( { -class => 'options' }, $text );
+		for (sort keys %{ $value } ) {
+			my $val = $value->{$_};
+			push @html,
+				td( { -class => 'options' }, [
+					'',
+					$label->{$val},
+					checkbox(
+						-class		=> 'options',
+						-name		=> $webvar,
+						-label		=> '',
+						-value 		=> $val,
+						-checked	=> $default->{$val},
+						-override	=> 1,
+					)
+				]
+			);
+		}
+
+	# Popup type
+	} elsif ( $opttype eq 'popup' ) {
+		my @value = @_;
+		push @html, th( { -class => 'options' }, $text );
+		push @html, td( { -class => 'options' }, [
+			'',
+			popup_menu(
+				-class		=> 'options',
+				-name		=> $webvar,
+				-values		=> @value,
+				-labels		=> $label,
+				-default	=> $default,
+			)
+		] );
+
+	# text field
+	} elsif ( $opttype eq 'text' ) {
+		my $value = shift;
+		push @html, th( { -class => 'options' }, $text );
+		push @html, td( { -class => 'options' }, [
+			'',
+			textfield(
+				-class		=> 'options',
+				-name		=> $webvar,
+				-value		=> $default,
+				-size		=> $value,
+			)
+		] );
+
+	}
+	return table( { -class=>'options' }, Tr( { -class=>'options' }, @html ) );
+}
+
+
+sub flush {
+	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	my $out;
+
+	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist";
+	print $fh p("Command: $cmd");
+	my $cmdout = `$cmd`;
+	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+	print $fh p("Flushed Programme Caches for Types: $typelist");
+	print $fh pre($out);
+
+	return $out;
+}
+
+
 
 sub search_progs {
 	my $search = shift || $cgi->param( 'SEARCH' ) || '.*';
 	my $cols = join(",", $cgi->param( 'COLS' )) || undef;
 	my $searchfields = join(",", $cgi->param( 'SEARCHFIELDS' )) || 'name';
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	my $vmode = $cgi->param( 'VMODE' ) || 'iphone,flashhigh,flashnormal';
+	my $amode = $cgi->param( 'AMODE' ) || 'iphone,flashaudio,flashaac,realaudio';
 	my $pagesize = $cgi->param( 'PAGESIZE' ) || 17;
 	my $pageno = $cgi->param( 'PAGE' ) || 1;
+	my $since = $cgi->param( 'SINCE' );
+	my $hide = $cgi->param( 'HIDE' ) || 0;
 	my @html;
 	my %type;
+	my %vmode;
 
 
-	# Populate %types
+	# Populate %type, %vmode
 	$type{$_} = 1 for split /,/, $typelist;
-
 
 	# Determine which cols to display
 	get_display_cols();
 
-
 	# Get prog data
 	my $response;
-	if ( $response = get_progs( $typelist, $search, $searchfields ) ) {
+	if ( $response = get_progs( $typelist, $search, $searchfields, $hide, $since ) ) {
 		print $fh p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
 		return 1;
 	}
@@ -742,24 +858,8 @@ sub search_progs {
 		push @html, Tr( {-class=>'search'}, @row );
 	}
 
-	my @typeselect;
-	push @typeselect, td({ -class=>'types' }, 'Programme Types:');
-	for my $prog_type (keys %prog_types) {
-		push @typeselect,
-			td( { -class => 'types' }, [
-				'',
-				"$prog_types{$prog_type}",
-				checkbox(
-					-class		=> 'types',
-					-name		=> 'PROGTYPES',
-					-label		=> '',
-					-value 		=> $prog_type,
-					-checked	=> $type{$prog_type},
-					-override	=> 1,
-				)
-			]
-		);
-	}
+	##### Options #####
+	my @optrows;
 
 	# Search form
 	print $fh start_form(
@@ -767,72 +867,132 @@ sub search_progs {
 		-method => "POST",
 	);
 
-	print $fh table( { -class=>'header' },
-	  Tr( { -class=>'header' }, 
-	    td( { -class=>'header' }, [
-	      "Name Search",
-	      textfield(
-	        -class		=> 'header',
-		-name		=> 'SEARCH',
-		-value		=> $search,
-		-size		=> 20,
-              ),
+	push @optrows, build_option_html(
+		'Search', # Title
+		'SEARCH', # webvar
+		'--search', # option
+		'text', # type
+		undef,
+		$search, # default
+		20, # width values
+	);
+	push @optrows, build_option_html(
+		'Search in', # Title
+		'SEARCHFIELDS', # webvar
+		'--fields', # option
+		'popup', # type
+		\%fieldname, # labels
+		$searchfields, # default
+		[ (@headings,'name,episode','name,episode,desc') ], # values
+	);
 
-              "in",
-              popup_menu(
-	        -class		=> 'header',
-	        -name		=> 'SEARCHFIELDS',
-                -values		=> [(@headings,'name,episode','name,episode,desc')],
-		-labels		=> \%fieldname,
-                -default	=> $searchfields,
-              ),
+	#### -onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
+	push @optrows, build_option_html(
+		'Programmes per Page', # Title
+		'PAGESIZE', # webvar
+		'', # option
+		'popup', # type
+		undef, # labels
+		$pagesize, # default
+		['17','50','100','200','500'], # values
+	);
 
-              button({
-	        -class		=> 'header',
-                -tabindex	=> '1',
-                -name		=> "Search",
-                -value		=> "Search",
-                -title		=> "Search",
-		-onClick 	=> "form.NEXTPAGE.value='search_progs'; submit()",
-              }),
+	#### -onChange 	=> "form.NEXTPAGE.value='search_progs'; submit()",
+	push @optrows, build_option_html(
+		'Sort by', # Title
+		'SORT', # webvar
+		'', # option
+		'popup', # type
+		\%fieldname, # labels
+		$sort_field, # default
+		[@headings], # values
+	);
+
+	push @optrows, build_option_html(
+		'Programme type', # Title
+		'PROGTYPES', # webvar
+		'--types', # option
+		'multionoff', # type
+		\%prog_types, # labels
+		\%type, # default status
+		{ 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv' }, # order of values
+	);
+
+	# 0=>'iphone', 1=>'flashhd', 2=>'flashvhigh', 3=>'flashhigh', 4=>'flashnormal', 5=>'flashlow', 6=>'n95_wifi', 7=>'n95_3gp'
+	push @optrows, build_option_html(
+		'Video Download Modes', # Title
+		'VMODE', # webvar
+		'--vmode', # option
+		'text', # type
+		undef,
+		$vmode, # default
+		40, # width values
+	);
 	
-              "Programmes per Page",
-              popup_menu(
-	        -class		=> 'header',
-	        -name		=> 'PAGESIZE',
-                -values		=> ['17','50','100','200','500'],
-                -default	=> $pagesize,
-                -onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
-              ),
+	push @optrows, build_option_html(
+		'Audio Download Modes', # Title
+		'AMODE', # webvar
+		'--amode', # option
+		'text', # type
+		undef,
+		$amode, # default
+		40, # width values
+	);
 
-              "Sort",            
-              popup_menu(
-	        -class		=> 'header',
-		-name		=> 'SORT',
-		-values		=> [@headings],
-		-labels		=> \%fieldname,
-		-onChange 	=> "form.NEXTPAGE.value='search_progs'; submit()",
-              ),
+	push @optrows, build_option_html(
+		'Hide Downloaded', # Title
+		'HIDE', # webvar
+		'--hide', # option
+		'onoff', # type
+		undef, 
+		undef,
+		$hide, # value
+	);
 
-            ]),
-          ),
-        );
-	print $fh table( { -class=>'types' }, Tr( { -class=>'types' }, @typeselect ) );
-	print $fh table( { -class=>'actions' },
-		Tr( { -class=>'actions' },
-			td( { -class=>'actions' }, [
+	push @optrows, build_option_html(
+		'Added Since (hours)', # Title
+		'SINCE', # webvar
+		'--since', # option
+		'text', # type
+		undef,
+		$since, # default
+		3, # width values
+	);
+	
+	print $fh table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) );
+
+	print $fh table( { -class=>'options' },
+		Tr( { -class=>'options' },
+			td( { -class=>'options' }, [
+				# Seacrh button
 				button(
-					-class		=> 'actions',
+					-class		=> 'options',
+					-tabindex	=> '1',
+					-name		=> "Search",
+					-onClick 	=> "form.NEXTPAGE.value='search_progs'; submit()",
+				),
+				# Flush button
+				button(
+					-class		=> 'options',
+					-name		=> 'Refresh Caches (takes a while)',
+					-onClick 	=> "form.NEXTPAGE.value='flush'; submit()",
+				),
+			]),
+		),
+	);
+	
+
+	print $fh table( { -class=>'options' },
+		Tr( { -class=>'options' },
+			td( { -class=>'options' }, [
+				button(
+					-class		=> 'options',
 					-name		=> 'Queue Selected for Download',
-					-value		=> 'Queue Selected for Download',
-					-title		=> 'Queue Selected for Download',
 					-onClick 	=> "form.NEXTPAGE.value='pvr_queue'; submit()",
 				),
 				button(
-					-class		=> 'actions',
+					-class		=> 'options',
 					-name		=> 'Add Current Search to PVR',
-					-value		=> 'Add Current Search to PVR',
-					-title		=> 'Add Current Search to PVR',
 					-onClick 	=> "form.NEXTPAGE.value='pvr_add'; submit()",
 				),
 				"Results ".($first+1)." - $last of ".($#pids+1),
@@ -959,11 +1119,17 @@ sub get_progs {
 	my $types = shift;
 	my $search = shift;
 	my $searchfields = shift;
+	my $hide = shift;
+	my $since = shift;
 	
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-
-	my @list = `$get_iplayer_cmd --nocopyright --nopurge --type $types --listformat 'ENTRY${fields}' --fields $searchfields -- $search`;
+	my $options = '';
+	$options .= " --since $since" if $since;
+	$options .= " --hide" if $hide;
+	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --type $types --listformat 'ENTRY${fields}' --fields $searchfields -- $search";
+	print "DEBUG: Command: $cmd\n" if $DEBUG;
+	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
 	for ( grep /^ENTRY/, @list ) {
@@ -994,7 +1160,7 @@ sub get_display_cols {
         @displaycols = ();
 
         # Determine which columns to display (all if $cols not defined)
-        my $cols = join(",", $cgi->param( 'COLS' )) || undef;
+        my $cols = join(",", $cgi->param( 'COLS' )) || '';
 
         # Re-sort selected display columns into original header order
         my @columns = split /,/, $cols;
@@ -1035,76 +1201,64 @@ sub begin_html {
 #
 #############################################
 sub form_header {
-
 	my $nextpage = shift || $cgi->param( 'NEXTPAGE' );
-	my $advanced = shift || $cgi->param( 'ADVANCED' );
-	my $menu;
 
 	print $fh $cgi->start_form(
 			-name   => "formheader",
 			-method => "POST",
-		);
+	);
+	
+	print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
+		a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
+			img({
+				-class=>'title',
+				-src=>"$icons_base_url/logo_white_131x28.gif",
+				-alt=>'get_iplayer Manager',
+			} )
+		)
+	)));
 
-
-	print $fh table( {-class=>'title'},
-	Tr( {-class=>'title'},
-		td( { -class=>'title' }, "get_iplayer Manager"),
-		td( { -class=>'title', -align=>'right' -width=>'131' }, a( {-href=>"http://linuxcentre.net/get_iplayer/"}, img( { -src=>"$icons_base_url/logo_white_131x28.gif", -align=>'right' }) ) ),
-	) ).
-
-	hr({-size=>1}).
-
-	table({ -class=>'icons' },
-
-	Tr( { -class=>'icons' }, td( { -class=>'icons' }, [
-		img({
-			-class => 'icons',
-			-alt => 'Back',
-			-title => 'Back',
-			-src => "$icons_base_url/back.png",
-			-onClick  => "history.back()",
-		}),
-		# go to search page
-		#image_button(-name=>'button_name', -src=>image URL, -align=>alignment, -alt=>text, -value=>text)
-		image_button({
-			-class => 'icons',
-			-alt => 'Search',
-			-title => 'Programme Search',
-			-src => "$icons_base_url/index.png",
-			-onClick  => "formheader.NEXTPAGE.value='search_progs'; submit()",
-		}),
-		# go back to parent page - set no params
-		image_button({
-			-class => 'icons',
-			-alt => 'PVR Searches',
-			-title => 'PVR Searches',
-			-src => "$icons_base_url/pie2.png",
-			-onClick  => "formheader.NEXTPAGE.value='pvr_list'; submit()",
-		}),
-		# Open the help page in a different window
-		img({
-			-class => 'icons',
-			-alt => 'Help',
-			-title => 'Help',
-			-src => "$icons_base_url/unknown.png",
-			-onClick  => "parent.location='http://linuxcentre.net/getiplayer/documentation'",
-		}),
-		$menu,
-	] )	) ).
-	hidden(
-		-name => "ADVANCED",
-		-value => $advanced,
-		-override => 1,
-	).
-	hidden(
-		-name => "NEXTPAGE",
-		-value => 'search_progs',
-		-override => 1,
-	).
-
-	$cgi->end_form().
-
-	hr({-size=>1});
+	print $fh table({ -class=>'icons' },
+		Tr( { -class=>'icons' }, td( { -class=>'icons' }, [
+			img({
+				-class => 'icons',
+				-alt => 'Back',
+				-title => 'Back',
+				-src => "$icons_base_url/back.png",
+				-onClick  => "history.back()",
+			}),
+			# go to search page
+			#image_button(-name=>'button_name', -src=>image URL, -align=>alignment, -alt=>text, -value=>text)
+			image_button({
+				-class => 'icons',
+				-alt => 'Search',
+				-title => 'Programme Search',
+				-src => "$icons_base_url/index.png",
+				-onClick  => "formheader.NEXTPAGE.value='search_progs'; submit()",
+			}),
+			# go back to parent page - set no params
+			image_button({
+				-class => 'icons',
+				-alt => 'PVR Searches',
+				-title => 'PVR Searches',
+				-src => "$icons_base_url/pie2.png",
+				-onClick  => "formheader.NEXTPAGE.value='pvr_list'; submit()",
+			}),
+			# Open the help page in a different window
+			img({
+				-class => 'icons',
+				-alt => 'Help',
+				-title => 'Help',
+				-src => "$icons_base_url/unknown.png",
+				-onClick  => "parent.location='http://linuxcentre.net/getiplayer/documentation'",
+			}),
+		] )	
+	) );
+	
+	print $fh hidden( -name => "NEXTPAGE", -value => 'search_progs', -override => 1 );
+	print $fh $cgi->end_form();
+	
+	#hr({-size=>1});
 }
 
 
@@ -1197,14 +1351,14 @@ sub insert_stylesheet {
 	BODY			{ color: #000; background: white; font-size: 90%; font-family: verdana, sans-serif;}
 	IMG			{ border: 0; }
 
-	TABLE.title		{ font-size: 120%; border-spacing: 1px; padding: 0; }
-	TR.title		{ font-weight: bold; }
-
-	TABLE.icons		{ font-size: 100%; border-spacing: 10px 0; padding: 0px; }
+	TABLE.title 		{ font-size: 130%; border-spacing: 0px; padding: 0px; }
+	A.title			{ color: #F55; text-decoration: none; }
+	
+	TABLE.icons		{ font-size: 100%; border-spacing: 10px 0px; padding: 0px; }
 	IMG.icons		{ font-size: 100%; }
 	INPUT.icons		{ font-size: 100%; }
-	TD.icons		{ border: 1px solid #666666; background: #FFF; }
-	TD.icons:hover		{ background: #CCC; }
+	TD.icons		{ border: 1px solid #666666; background: #DDD; }
+	TD.icons:hover		{ background: #BBB; }
 	
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
 	INPUT.header		{ font-size: 80%; } 
@@ -1214,9 +1368,12 @@ sub insert_stylesheet {
 	TR.types		{ white-space: nowrap; }
 	TD.types		{ width: 20px }
 	
-	TABLE.actions		{ font-size: 80%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
-	TD.actions		{ font-weight: bold; }
-	INPUT.actions		{ font-size: 80%; }
+	TABLE.options		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	TR.options		{ white-space: nowrap; }
+	TH.options		{ width: 20px }
+	TD.options		{ width: 20px }
+	INPUT.options		{ font-size: 100%; } 
+	SELECT.options		{ font-size: 100%; } 
 	
 	TABLE.pagetrail		{ font-size: 80%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
 	TD.pagetrail:hover	{ background: #CCC; }
