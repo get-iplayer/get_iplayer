@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.65;
+my $version = 1.66;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1656,7 +1656,7 @@ sub load_download_history {
 
 	logger "INFO: Loading download history\n" if $opt->{verbose};
 	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n";
+		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
 		return 0;
 	}
 	while ( <HIST> ) {
@@ -1679,7 +1679,7 @@ sub check_download_history {
 	return 0 if $opt->{forcedownload} || $opt->{stdout} || $opt->{nowrite};
 	
 	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n";
+		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
 		return 0;
 	}
 
@@ -1713,7 +1713,7 @@ sub purge_downloaded_files {
 	return 0 if $opt->{nopurge} || $opt->{stdout} || $opt->{nowrite} || $opt->{quiet};
 	
 	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n";
+		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
 		return 0;
 	}
 
@@ -2559,6 +2559,11 @@ sub generate_filenames {
 		}
 	}
 
+	print "DEBUG: File ext $prog->{ext}\n" if $opt->{debug};
+	print "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
+	print "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
+	print "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
+
 	return 0;
 }
 
@@ -2942,6 +2947,8 @@ sub get_metadata {
 	$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
 	$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
 	$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
+	$prog_type = 'tv' if $prog_type eq 'video';
+	$prog_type = 'radio' if $prog_type eq 'audio';
 	$longdesc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
 	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
@@ -3661,6 +3668,7 @@ sub get_stream_data {
 		# Get iphone redirect
 		$data{$mode}{streamurl} = $streamurl;
 		$data{$mode}{streamer} = 'iphone';
+		$data{$mode}{ext} = 'mov';
 	} else {
 		main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
 	}
@@ -4021,6 +4029,7 @@ sub download {
 	$prog->{ext} = 'wav' if $opt->{wav} &&  $mode =~ /^real/;
 	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^(flash|rtmp)/;
+
 
 	# Determine the correct filenames for this download
 	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
@@ -6142,6 +6151,7 @@ sub get {
 
 	# Override the $rearrange value is --raw option is specified
 	$rearrange = 1 if $prog->{type} eq 'tv' && not $opt->{raw};
+	print "DEBUG: Rearrang mov file mode = $rearrange (type: $prog->{type}, raw: $opt->{raw})\n" if $opt->{debug};
 		
 	# Setup request header
 	my $h = new HTTP::Headers(
