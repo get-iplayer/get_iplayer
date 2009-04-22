@@ -30,6 +30,7 @@ my $VERSION = '0.11';
 
 use strict;
 use CGI ':all';
+use CGI::Cookie;
 use IO::File;
 use URI::Escape;
 my $DEBUG = 0;
@@ -105,9 +106,211 @@ my %nextpages = (
 	'pvr_add'			=> \&pvr_add,
 	'show_info'			=> \&show_info,
 	'flush'				=> \&flush,
-#	'pvr_enable'			=> \&pvr_enable,
-#	'pvr_disable'			=> \&pvr_disable,
 );
+
+
+
+##### Options #####
+my $opt;
+
+# Options Ordering on page
+my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
+my @order_adv_opts = qw/ OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
+my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+# Store options definition here as hash of 'name' => [options]
+	$opt->{SEARCH} = {
+		title	=> 'Search', # Title
+		webvar	=> 'SEARCH', # webvar
+		optname	=> '--search', # option
+		type	=> 'text', # type
+		default	=> '.*', # default
+		value	=> 20, # width values
+	};
+	
+	$opt->{SEARCHFIELDS} = {
+		title	=> 'Search in', # Title
+		webvar	=> 'SEARCHFIELDS', # webvar
+		optname	=> '--fields', # option
+		type	=> 'popup', # type
+		label	=> \%fieldname, # labels
+		default	=> 'name', # default
+		value	=> [ (@headings,'name,episode','name,episode,desc') ], # values
+	};
+
+	$opt->{PAGESIZE} = {
+		title	=> 'Programmes per Page', # Title
+		webvar	=> 'PAGESIZE', # webvar
+		type	=> 'popup', # type
+		default	=> 17, # default
+		value	=> ['17','50','100','200','500'], # values
+		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+	};
+
+	$opt->{SORT} = {
+		title	=> 'Sort by', # Title
+		webvar	=> 'SORT', # webvar
+		type	=> 'popup', # type
+		label	=> \%fieldname, # labels
+		default	=> 'index', # default
+		value	=> [@headings], # values
+		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+	};
+
+	$opt->{PROGTYPES} = {
+		title	=> 'Programme type', # Title
+		webvar	=> 'PROGTYPES', # webvar
+		optname	=> '--type', # option
+		type	=> 'multiboolean', # type
+		label	=> \%prog_types, # labels
+		default => 'tv',
+		#status	=> \%type, # default status
+		value	=> { 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv' }, # order of values
+	};
+
+	$opt->{VMODE} = {
+		title	=> 'Video Download Modes', # Title
+		webvar	=> 'VMODE', # webvar
+		optname	=> '--vmode', # option
+		type	=> 'text', # type
+		default	=> 'iphone,flashhigh,flashnormal', # default
+		value	=> 40, # width values
+	};
+	
+	$opt->{OUTPUT} = {
+		title	=> 'Override Download Folder', # Title
+		webvar	=> 'OUTPUT', # webvar
+		optname	=> '--output', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+	};
+	
+	$opt->{AMODE} = {
+		title	=> 'Audio Download Modes', # Title
+		webvar	=> 'AMODE', # webvar
+		optname	=> '--amode', # option
+		type	=> 'text', # type
+		default	=> 'iphone,flashaudio,flashaac,realaudio', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{VERSIONS} = {
+		title	=> 'Programme Versions', # Title
+		webvar	=> 'VERSIONS', # webvar
+		optname	=> '--versions', # option
+		type	=> 'text', # type
+		default	=> 'default', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{CATEGORY} = {
+		title	=> 'Categories Containing', # Title
+		webvar	=> 'CATEGORY', # webvar
+		optname	=> '--category', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{EXCLUDECATEGORY} = {
+		title	=> 'Exclude Categories Containing', # Title
+		webvar	=> 'EXCLUDECATEGORY', # webvar
+		optname	=> '--exclude-category', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{CHANNEL} = {
+		title	=> 'Channels Containing', # Title
+		webvar	=> 'CHANNEL', # webvar
+		optname	=> '--channel', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{EXCLUDECHANNEL} = {
+		title	=> 'Exclude Channels Containing', # Title
+		webvar	=> 'EXCLUDECHANNEL', # webvar
+		optname	=> '--exclude-channel', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+	};
+
+	$opt->{HIDE} = {
+		title	=> 'Hide Downloaded', # Title
+		webvar	=> 'HIDE', # webvar
+		optname	=> '--hide', # option
+		type	=> 'boolean', # type
+		default	=> '0', # value
+	};
+
+	$opt->{SINCE} = {
+		title	=> 'Added Since (hours)', # Title
+		webvar	=> 'SINCE', # webvar
+		optname	=> '--since', # option
+		type	=> 'text', # type
+		value	=> 3, # width values
+		default => '',
+	};
+
+	### Non-visible options ##
+	$opt->{COLS} = {
+		webvar	=> 'COLS', # webvar
+		default	=> undef, # width values
+	};
+
+	$opt->{NEXTPAGE} = {
+		webvar  => 'NEXTPAGE',
+		type	=> 'hidden',
+		value	=> 'search_progs',
+	};
+
+	# Make sure we go to the correct nextpage for processing
+	$opt->{NEXTPAGE} = {
+		webvar  => 'NEXTPAGE',
+		type	=> 'hidden',
+		default	=> 'search_progs',
+	};
+
+	# Reverse sort value
+	$opt->{REVERSE} = {
+		webvar  => 'REVERSE',
+		type	=> 'hidden',
+		default	=> 0,
+	};
+
+	# Make sure we go to the correct next page no.
+	$opt->{PAGENO} = {
+		webvar  => 'PAGENO',
+		type	=> 'hidden',
+		default	=> 1,
+	};
+
+	# Remeber the status of the Advanced options display
+	$opt->{ADVANCED} = {
+		webvar	=> 'ADVANCED', # webvar
+		type	=> 'hidden', # type
+		default	=> '0', # value
+	};
+
+	# Save the status of the Advanced options settings
+	$opt->{SAVE} = {
+		webvar	=> 'SAVE', # webvar
+		type	=> 'hidden', # type
+		default	=> '0', # value
+	};
+
+	# INFO for page info if clicked
+	$opt->{INFO} = {
+		webvar  => 'INFO',
+		type	=> 'hidden',
+		default	=> 0,
+	};
+
 
 
 ### Crude Single-Threaded Perl CGI Web Server ###
@@ -336,6 +539,9 @@ sub run_cgi {
 	# new cgi instance
 	$cgi->delete_all() if defined $cgi;
 	$cgi = new CGI( $query_string );
+
+	# Process All options
+	process_params();
 
 	begin_html();
 
@@ -602,33 +808,66 @@ sub pvr_queue {
 
 
 
+sub build_cmd_options {
+	my $options = '';
+
+	for ( @_ ) {
+		# skip non-options
+		next if $opt->{$_}->{optname} eq '' || not defined $opt->{$_}->{optname} || not $opt->{$_}->{optname};
+		# If this is a boolean option
+		if ( $opt->{$_}->{type} eq 'boolean' ) {
+			$options .= " $opt->{$_}->{optname}" if $opt->{$_}->{current};
+		# Normal option with value
+		} else {
+			$options .= " $opt->{$_}->{optname} $opt->{$_}->{current}" if $opt->{$_}->{current} ne '';
+		}
+	}
+	return $options;
+}
+
+
+
+sub get_search_params {
+	my @params;
+
+	for ( keys %{ $opt } ) {
+		# skip non-options
+		next if $opt->{$_}->{optname} eq '' || not defined $opt->{$_}->{optname} || not $opt->{$_}->{optname};
+		push @params, $_;
+	}
+	return @params;
+}
+
+
+
 sub pvr_add {
-	my $search = shift || $cgi->param( 'SEARCH' ) || '.*';
-	my $searchfields = join(",", $cgi->param( 'SEARCHFIELDS' )) || 'name';
-	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+
 	my $out;
+	my @params = get_search_params();
+	my $options = build_cmd_options( @params );
 
 	# Only allow alphanumerics,_,-,. here for security reasons
-	my $searchname = "${search}_${searchfields}_${typelist}";
+	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
 	#$searchname =~ s/(["'&])/\\$1/g;
 	$searchname =~ s/[^\w\-\. \+\(\)]/_/g;
 	
 
 	# Check how many matches first
-	get_progs( $typelist, $search, $searchfields );
+	get_progs( @params );
 	my $matches = keys %prog;
 	if ( $matches > 30 ) {
-		print $fh p("ERROR: Search term '$search' currently matches $matches programmes - keep below 30 current matches");
+		print $fh p("ERROR: Search term '$opt->{SEARCH}->{current}' currently matches $matches programmes - keep below 30 current matches");
 		return 1;
 	} else {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$get_iplayer_cmd --pvradd '$searchname' --type $typelist --versions default --fields $searchfields -- $search";
+	my $cmd  = "$get_iplayer_cmd $options --pvradd '$searchname'";
+	print "Command: $cmd"; #if $DEBUG;
 	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
-	print $fh p("Added PVR Search ($searchname):\n\tTypes: $typelist\n\tSearch: $search\n\tSearch Fields: $searchfields\n");
+	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
 	print $fh pre($out);
 
 	return $out;
@@ -636,101 +875,116 @@ sub pvr_add {
 
 
 # Build templated HTML for an option specified as
-# '<Option text>', <webvar>, <get_iplayer opt>, 'onoff', 	'status: 1|0'
-# '<Option text>', <webvar>, <get_iplayer opt>, 'multionoff',	<hashref 'order => value' >, <hashref 'values => label'>, <hash ref: 'value => status'>
+# '<Option text>', <webvar>, <get_iplayer opt>, 'boolean', 	'status: 1|0'
+# '<Option text>', <webvar>, <get_iplayer opt>, 'multiboolean',	<hashref 'order => value' >, <hashref 'values => label'>, <hash ref: 'value => status'>
 # '<Option text>', <webvar>, <get_iplayer opt>, 'popup',	'<default>', \%<hash for multi or popup values>
 # '<Option text>', <webvar>, <get_iplayer opt>, 'text',	'<default>', \%<hash for multi or popup values>
 # '<Option text>', <webvar>, <get_iplayer opt>, 'filebrowse',	'<default>', \%<hash for multi or popup values>
 # e.g.
-# 'Programme type', 'PROGTYPES', '--types', 'multionoff', \%{ tv => 1 }, \%{ tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' }
+# 'Programme type', 'PROGTYPES', '--types', 'multiboolean', \%{ tv => 1 }, \%{ tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' }
 # 'Output Folder', 'OUTDIR', '--output', 'filebrowse', ''
-# 'Hide Downloaded Programmes', 'HIDE', '--hide', 'onoff'
-
-# 'Programme type', 'PROGTYPES', '--types', 'multionoff', { 1=>tv, 2=>radio, 3=>podcast, 4=>itv}, { tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' } , { tv => 1 }
-
-
+# 'Hide Downloaded Programmes', 'HIDE', '--hide', 'boolean'
+# 'Programme type', 'PROGTYPES', '--types', 'multiboolean', { 1=>tv, 2=>radio, 3=>podcast, 4=>itv}, { tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' } , { tv => 1 }
 sub build_option_html {
-	my $text = shift;
-	my $webvar = shift;
-	my $option = shift;
-	my $opttype = shift;
-	my $label = shift;
-	my $default = shift;
+	my $arg = shift;
+	
+	my $title = $arg->{title};
+	my $webvar = $arg->{webvar};
+	my $option = $arg->{option};
+	my $type = $arg->{type};
+	my $label = $arg->{label};
+	my $current = $arg->{current};
+	my $value = $arg->{value};
+	my $status = $arg->{status};
 	my @html;
 
 	# On/Off
-	if ( $opttype eq 'onoff' ) {
-		my $value = shift;
-		push @html, th( { -class => 'options' }, $text );
-		push @html, td( { -class => 'options' }, [
-			'',
+	if ( $type eq 'hidden' ) {
+		push @html, hidden(
+			-name		=> $webvar,
+			-id		=> "option_$webvar",
+			#-value		=> $arg->{default},
+			-value		=> $current,
+			-override	=> 1,
+		);
+
+	# On/Off
+	} elsif ( $type eq 'boolean' ) {
+		push @html, th( { -class => 'options' }, $title ).
+		td( { -class => 'options' },
 			checkbox(
 				-class		=> 'options',
 				-name		=> $webvar,
+				-id		=> "option_$webvar",
 				-label		=> '',
 				-value 		=> 1,
-				-checked	=> $value,
+				-checked	=> $current,
 				-override	=> 1,
 			)
-		] );
+		);
 
 
 	# Multi-On/Off
-	} elsif ( $opttype eq 'multionoff' ) {
-		my $value = shift;
+	} elsif ( $type eq 'multiboolean' ) {
+		my $element;
 		# values in hash of $value->{<order>} => value
 		# labels in hash of $label->{$value}
-		# selected status in $default->{$value}
-		push @html, th( { -class => 'options' }, $text );
+		# selected status in $status->{$value}
 		for (sort keys %{ $value } ) {
 			my $val = $value->{$_};
-			push @html,
-				td( { -class => 'options' }, [
-					'',
-					$label->{$val},
-					checkbox(
-						-class		=> 'options',
-						-name		=> $webvar,
-						-label		=> '',
-						-value 		=> $val,
-						-checked	=> $default->{$val},
-						-override	=> 1,
-					)
-				]
+			$element .=
+				td( { -class => 'options' },
+					table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
+						'',
+						$label->{$val},
+						checkbox(
+							-class		=> 'options',
+							-name		=> $webvar,
+							-id		=> "option_${webvar}_$val",
+							-label		=> '',
+							-value 		=> $val,
+							-checked	=> $status->{$val},
+							-override	=> 1,
+						)
+					] ) ) )
 			);
 		}
-
+		my $inner_table = table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' },
+			$element
+		) ) );
+			
+		push @html, th( { -class => 'options' }, $title ).td( { -class => 'options' }, $inner_table );
 	# Popup type
-	} elsif ( $opttype eq 'popup' ) {
-		my @value = @_;
-		push @html, th( { -class => 'options' }, $text );
-		push @html, td( { -class => 'options' }, [
-			'',
+	} elsif ( $type eq 'popup' ) {
+		my @value = $arg->{value};
+		push @html, th( { -class => 'options' }, $title ).
+		td( { -class => 'options' }, 
 			popup_menu(
 				-class		=> 'options',
 				-name		=> $webvar,
+				-id		=> "option_$webvar",
 				-values		=> @value,
 				-labels		=> $label,
-				-default	=> $default,
+				-default	=> $current,
+				-onChange	=> $arg->{onChange},
 			)
-		] );
+		);
 
 	# text field
-	} elsif ( $opttype eq 'text' ) {
-		my $value = shift;
-		push @html, th( { -class => 'options' }, $text );
-		push @html, td( { -class => 'options' }, [
-			'',
+	} elsif ( $type eq 'text' ) {
+		push @html, th( { -class => 'options' }, $title ).
+		td( { -class => 'options' },
 			textfield(
 				-class		=> 'options',
 				-name		=> $webvar,
-				-value		=> $default,
+				-value		=> $current,
 				-size		=> $value,
 			)
-		] );
+		);
 
 	}
-	return table( { -class=>'options' }, Tr( { -class=>'options' }, @html ) );
+	#return table( { -class=>'options' }, Tr( { -class=>'options' }, @html ) );
+	return @html;
 }
 
 
@@ -751,44 +1005,33 @@ sub flush {
 
 
 sub search_progs {
-	my $search = shift || $cgi->param( 'SEARCH' ) || '.*';
-	my $cols = join(",", $cgi->param( 'COLS' )) || undef;
-	my $searchfields = join(",", $cgi->param( 'SEARCHFIELDS' )) || 'name';
-	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
-	my $vmode = $cgi->param( 'VMODE' ) || 'iphone,flashhigh,flashnormal';
-	my $amode = $cgi->param( 'AMODE' ) || 'iphone,flashaudio,flashaac,realaudio';
-	my $pagesize = $cgi->param( 'PAGESIZE' ) || 17;
-	my $pageno = $cgi->param( 'PAGE' ) || 1;
-	my $since = $cgi->param( 'SINCE' );
-	my $hide = $cgi->param( 'HIDE' ) || 0;
-	my @html;
+
+	$opt->{SEARCH}->{current} = shift;
+
+	# Set default status for progtypes
 	my %type;
-	my %vmode;
-
-
-	# Populate %type, %vmode
-	$type{$_} = 1 for split /,/, $typelist;
+	$type{$_} = 1 for split /,/, $opt->{PROGTYPES}->{current};
+	$opt->{PROGTYPES}->{status} = \%type;
 
 	# Determine which cols to display
 	get_display_cols();
 
 	# Get prog data
 	my $response;
-	if ( $response = get_progs( $typelist, $search, $searchfields, $hide, $since ) ) {
+	my @params = get_search_params();
+	if ( $response = get_progs( @params ) ) {
 		print $fh p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
 		return 1;
 	}
 
-        my $sort_field = $cgi->param( 'SORT' ) || 'name';
-        my $reverse = $cgi->param( 'REVERSE' ) || '0';
-
 	# Sort
-	@pids = get_sorted( \%prog, $sort_field, $reverse );
+	@pids = get_sorted( \%prog, $opt->{SORT}->{current}, $opt->{REVERSE}->{current} );
 
-	my ($first, $last, @pagetrail) = pagetrail( $pageno, $pagesize, $#pids+1, 7 );
+	my ($first, $last, @pagetrail) = pagetrail( $opt->{PAGENO}->{current}, $opt->{PAGESIZE}->{current}, $#pids+1, 7 );
 
 
 	# Default displaycols
+	my @html;
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Display data in nested table
@@ -796,12 +1039,12 @@ sub search_progs {
 
 		# Sort by column click and change display class (colour) according to sort status
 		my ($title, $class, $onclick);
-		if ( $sort_field eq $heading && not $reverse ) {
+		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
 			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
 		} else {
 			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; submit()");
 		}
-		$class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
+		$class = 'sorted_reverse' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
 		push @html, 
 			th( { -class => 'search' },
@@ -858,8 +1101,6 @@ sub search_progs {
 		push @html, Tr( {-class=>'search'}, @row );
 	}
 
-	##### Options #####
-	my @optrows;
 
 	# Search form
 	print $fh start_form(
@@ -867,138 +1108,100 @@ sub search_progs {
 		-method => "POST",
 	);
 
-	push @optrows, build_option_html(
-		'Search', # Title
-		'SEARCH', # webvar
-		'--search', # option
-		'text', # type
-		undef,
-		$search, # default
-		20, # width values
-	);
-	push @optrows, build_option_html(
-		'Search in', # Title
-		'SEARCHFIELDS', # webvar
-		'--fields', # option
-		'popup', # type
-		\%fieldname, # labels
-		$searchfields, # default
-		[ (@headings,'name,episode','name,episode,desc') ], # values
-	);
 
-	#### -onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
-	push @optrows, build_option_html(
-		'Programmes per Page', # Title
-		'PAGESIZE', # webvar
-		'', # option
-		'popup', # type
-		undef, # labels
-		$pagesize, # default
-		['17','50','100','200','500'], # values
-	);
-
-	#### -onChange 	=> "form.NEXTPAGE.value='search_progs'; submit()",
-	push @optrows, build_option_html(
-		'Sort by', # Title
-		'SORT', # webvar
-		'', # option
-		'popup', # type
-		\%fieldname, # labels
-		$sort_field, # default
-		[@headings], # values
-	);
-
-	push @optrows, build_option_html(
-		'Programme type', # Title
-		'PROGTYPES', # webvar
-		'--types', # option
-		'multionoff', # type
-		\%prog_types, # labels
-		\%type, # default status
-		{ 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv' }, # order of values
-	);
-
-	# 0=>'iphone', 1=>'flashhd', 2=>'flashvhigh', 3=>'flashhigh', 4=>'flashnormal', 5=>'flashlow', 6=>'n95_wifi', 7=>'n95_3gp'
-	push @optrows, build_option_html(
-		'Video Download Modes', # Title
-		'VMODE', # webvar
-		'--vmode', # option
-		'text', # type
-		undef,
-		$vmode, # default
-		40, # width values
-	);
+	# Generate the html for all these options in THIS ORDER
+	# Build basic options tables + hidden
+	my @optrows_basic;
+	for ( @order_basic_opts, @hidden_opts ) {
+		push @optrows_basic, build_option_html( $opt->{$_} );
+	}
+	# Build Advanced options tables
+	my @optrows_advanced;
+	for ( @order_adv_opts ) {
+		push @optrows_advanced, build_option_html( $opt->{$_} );
+	}
 	
-	push @optrows, build_option_html(
-		'Audio Download Modes', # Title
-		'AMODE', # webvar
-		'--amode', # option
-		'text', # type
-		undef,
-		$amode, # default
-		40, # width values
+
+	# Set advanced options cell status
+	my $adv_style;
+	if ( not $opt->{ADVANCED}->{current} ) {
+		$adv_style = "display: none;";
+	} else {
+		$adv_style = "display: table;";
+	}
+
+	# Render outer options table frame (keeping advanced cell initially hidden)
+	print $fh table( { -class=>'options_outer' },
+		Tr( { -class=>'options_outer' },
+			td( { -class=>'options_outer' },
+				# Advanced Options button
+				label( {
+					-class		=> 'options_outer',
+					-id		=> 'advanced_opts_button',
+					-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', 'Show Advanced Options', 'Hide Advanced Options' );",
+					},
+					'Show Advanced Options',
+				),
+			)
+			#td( { -class=>'options_outer' },
+			#	# Save Options button
+			#	label( {
+			#		-class		=> 'options_outer',
+			#		-onClick	=> "form.SAVE.value=1; submit();",
+			#		},
+			#		'Remember Options',
+			#	),
+			#)
+		),
+		Tr( { -class=>'options_outer' }, 
+			td( { -class=>'options_outer' },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_basic ] ) )
+			).
+			td( { -class=>'options_outer', -id=>'advanced_opts', -style=>"$adv_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_advanced ] ) )
+			)
+		),
 	);
 
-	push @optrows, build_option_html(
-		'Hide Downloaded', # Title
-		'HIDE', # webvar
-		'--hide', # option
-		'onoff', # type
-		undef, 
-		undef,
-		$hide, # value
-	);
-
-	push @optrows, build_option_html(
-		'Added Since (hours)', # Title
-		'SINCE', # webvar
-		'--since', # option
-		'text', # type
-		undef,
-		$since, # default
-		3, # width values
-	);
-	
-	print $fh table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) );
-
-	print $fh table( { -class=>'options' },
-		Tr( { -class=>'options' },
-			td( { -class=>'options' }, [
-				# Seacrh button
+	# Render options actions
+	print $fh table( { -class=>'options_outer' },
+		Tr( { -class=>'options_outer' },
+			td( { -class=>'options_outer' }, [
+				# Search button
 				button(
-					-class		=> 'options',
+					-class		=> 'options_outer',
 					-tabindex	=> '1',
 					-name		=> "Search",
 					-onClick 	=> "form.NEXTPAGE.value='search_progs'; submit()",
 				),
 				# Flush button
 				button(
-					-class		=> 'options',
+					-class		=> 'options_outer',
 					-name		=> 'Refresh Caches (takes a while)',
 					-onClick 	=> "form.NEXTPAGE.value='flush'; submit()",
 				),
-			]),
-		),
-	);
-	
-
-	print $fh table( { -class=>'options' },
-		Tr( { -class=>'options' },
-			td( { -class=>'options' }, [
+				# Queue Selected for Download button
 				button(
-					-class		=> 'options',
+					-class		=> 'options_outer',
 					-name		=> 'Queue Selected for Download',
 					-onClick 	=> "form.NEXTPAGE.value='pvr_queue'; submit()",
 				),
+				# Add Current Search to PVR
 				button(
-					-class		=> 'options',
+					-class		=> 'options_outer',
 					-name		=> 'Add Current Search to PVR',
 					-onClick 	=> "form.NEXTPAGE.value='pvr_add'; submit()",
 				),
-				"Results ".($first+1)." - $last of ".($#pids+1),
+				# Add Current Search to PVR
+				#reset(
+				#	-class		=> 'options_outer',
+				#	-name		=> 'Reset',
+				#),
 			]),
 		),
 	);
+
+
 	print $fh @pagetrail;
 	print $fh table( {-class=>'search' }, @html );
 	print $fh @pagetrail;
@@ -1025,34 +1228,10 @@ sub search_progs {
 	unshift @columnselect, Tr( { -class=>'colselect' }, th( { -class=>'colselect' }, "Enable these columns:" ) ) if @columnselect;
 
 	# Display drop down menu with multiple select for columns shown
-	print $fh (
-          table( { -class => 'colselect' }, @columnselect ).
-          # Make sure we go to the correct nextpage for processing
-          hidden(
-            -name	=> "NEXTPAGE",
-            -value	=> "search_progs",
-            -override	=> 1,
-          ).
-          # Reverse sort value
-          hidden(
-            -name	=> "REVERSE",
-            -value	=> 0,
-            -override	=> 1,
-          ).
-          # Make sure we go to the correct next page no.
-          hidden(
-            -name	=> "PAGE",
-            -value	=> "1",
-            -override	=> 1,
-          ).
-          # INFO for page info if clicked
-          hidden(
-            -name	=> "INFO",
-            -value	=> 0,
-            -override	=> 1,
-          ).
-          end_form()
-        );
+	print $fh table( { -class => 'colselect' }, @columnselect );
+
+
+	print $fh end_form();
 
 	return 0;
 }
@@ -1063,31 +1242,40 @@ sub search_progs {
 sub pagetrail {
 	my ( $page, $pagesize, $count, $trailsize ) = ( @_ );
 
+	# How many pages
+	my $pages = int( $count / $pagesize ) + 1;
+	# If we request a page that is too high
+	$page = $pages if $page > $pages;
+	# Calc first and last programme numbers
 	my $first = $pagesize * ($page - 1);
 	my $last = $first + $pagesize;
 	$last = $count if $last > $count;
-	# How many pages
-	my $pages = int( $count / $pagesize ) + 1;
+
+print "PAGETRAIL: page=$page, first=$first, last=$first, pages=$pages, trailsize=$trailsize\n";
 	# Page trail
 	my @pagetrail;
+
 	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Previous Page",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$page-1; submit()",},
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; submit()",},
 		"<<",
 	)) if $page > 1;
+
 	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Page 1",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=1; submit()",},
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",},
 		"1",
 	)) if $page > 1;
+
 	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page > $trailsize+2;
+
  	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
 		push @pagetrail, td( { -class=>'pagetrail' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail',
-			-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value='$pn'; submit()",},
+			-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; submit()",},
 			"$pn",
 		)) if $pn > 1 && $pn != $page && $pn < $pages;
 		push @pagetrail, td( { -class=>'pagetrail' }, label( {
@@ -1097,18 +1285,27 @@ sub pagetrail {
 		)) if $pn == $page;
 	}
 	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page < $pages-$trailsize-1;
+
 	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Page ".$pages,
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$pages; submit()",},
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; submit()",},
 		"$pages",
 	)) if $page < $pages;
+
 	push @pagetrail, td( { -class=>'pagetrail' }, label( {
 		-title		=> "Next Page",
 		-class		=> 'pagetrail',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGE.value=$page+1; submit()",},
+		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; submit()",},
 		">>",
 	)) if $page < $pages;
+
+	push @pagetrail, td( { -class=>'pagetrail' }, label( {
+		-title		=> "Matches",
+		-class		=> 'pagetrail',},
+		"($count programmes)",
+	));
+
 	my @html = table( { -id=>'centered', -class=>'pagetrail' }, Tr( { -class=>'pagetrail' }, @pagetrail ));
 	return ($first, $last, @html);
 }
@@ -1116,19 +1313,15 @@ sub pagetrail {
 
 
 sub get_progs {
-	my $types = shift;
-	my $search = shift;
-	my $searchfields = shift;
-	my $hide = shift;
-	my $since = shift;
-	
+	my @params = @_;
+	my $options = '';
+
+	my $options = build_cmd_options( @params );
+
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-	my $options = '';
-	$options .= " --since $since" if $since;
-	$options .= " --hide" if $hide;
-	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --type $types --listformat 'ENTRY${fields}' --fields $searchfields -- $search";
-	print "DEBUG: Command: $cmd\n" if $DEBUG;
+	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --listformat='ENTRY${fields}'";
+	print "DEBUG: Command: $cmd\n"; # if $DEBUG;
 	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
@@ -1184,7 +1377,24 @@ sub get_display_cols {
 ######################################################################
 sub begin_html {
 
-	print $fh $cgi->header(-type=>'text/html', -charset=>'utf-8' );
+	# Save settings if selected
+	#my @cookies;
+	#if ( $cgi->param('SAVE') ) {
+	#	print "DEBUG: Sending cookies\n";
+	#	for ( @save_opts ) {
+	#		push @cookies, $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' );
+	#		print "DEBUG: Sending cookie: ".$cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' )."\n";
+	#	}
+	#	# Ensure SAVE state is reset to off
+	#	$opt->{SAVE}->{current} = 0;
+	#}
+	print $fh $cgi->header(
+		-type=>'text/html',
+		-charset=>'utf-8',
+	#	-cookie=>[@cookies],
+	);
+
+
 	print $fh "<html>";
 	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
 	insert_stylesheet();
@@ -1287,6 +1497,17 @@ sub html_end {
 }
 
 
+
+# Gets and sets the CGI parameters (POST/Cookie) in the $opt hash - also sets $opt{VAR}->{current} from default or POST
+sub process_params {
+	for ( keys %{ $opt } ) {
+		print "DEBUG: GOT Cookie $_ = $cgi->cookie($_)\n" if defined $cgi->cookie($_);
+		$opt->{$_}->{current} = join(",", ( $cgi->cookie($_) || $cgi->param($_) ) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
+	}
+}
+
+
+
 #############################################
 #
 # Javascript Functions here
@@ -1297,6 +1518,30 @@ sub insert_javascript {
 	print $fh <<EOF;
 
 	<script type="text/javascript">
+
+	//
+	// Hide show an element (and modify the text of the button/label)
+	// e.g. document.getElementById('advanced_opts').style.display='table';
+	//
+	function toggle_display( optid, hideid, labelid, showtext, hidetext) {
+	
+		// get unique element for specified id
+		var e = document.getElementById(hideid);
+		var l = document.getElementById(labelid);
+
+		// toggle hide and show
+		// then update the text value of the calling element
+		if ( e.style.display != 'none' ) {
+			e.style.display = 'none';
+			l.textContent = showtext;
+			document.getElementById(optid).value = 0;
+		} else {
+			e.style.display = '';
+			l.textContent = hidetext;
+			document.getElementById(optid).value = 1;
+		}
+		return true;
+	}
 	
 	//
 	// Check/Uncheck all checkboxes named <name>
@@ -1368,12 +1613,26 @@ sub insert_stylesheet {
 	TR.types		{ white-space: nowrap; }
 	TD.types		{ width: 20px }
 	
-	TABLE.options		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	TABLE.options_embedded	{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	TR.options_embedded	{ white-space: nowrap; }
+	TH.options_embedded	{ width: 20px }
+	TD.options_embedded	{ width: 20px }
+
+	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TR.options		{ white-space: nowrap; }
 	TH.options		{ width: 20px }
 	TD.options		{ width: 20px }
+	LABEL.options		{ font-size: 100%; } 
 	INPUT.options		{ font-size: 100%; } 
 	SELECT.options		{ font-size: 100%; } 
+
+	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 10px 0px; padding: 0; white-space: nowrap; }
+	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
+	TH.options_outer	{ }
+	TD.options_outer	{ }
+	LABEL.options_outer	{ font-weight: bold; font-size: 110%; color: #4A4; } 
+	INPUT.options_outer	{ font-size: 100%; } 
+	SELECT.options_outer	{ font-size: 100%; } 
 	
 	TABLE.pagetrail		{ font-size: 80%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
 	TD.pagetrail:hover	{ background: #CCC; }
