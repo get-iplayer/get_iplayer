@@ -36,7 +36,8 @@ use URI::Escape;
 my $DEBUG = 0;
 $| = 1;
 my $fh;
-
+# Send log messages to this fh
+my $se = *STDERR;
 
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
@@ -117,7 +118,11 @@ my $opt;
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
 my @order_adv_opts = qw/ OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
+# Any params that should never get into the get_iplayer pvr-add search
+my @nosearch_params = qw/ /;
+# Which options can be saved
 my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+
 # Store options definition here as hash of 'name' => [options]
 	$opt->{SEARCH} = {
 		title	=> 'Search', # Title
@@ -336,7 +341,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			Reuse => 1
 		);
 		$server or die "Unable to create server socket: $!";
-		print "INFO: Listening on port $port\n";
+		print $se "INFO: Listening on port $port\n";
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
 			my $procid = fork();
@@ -419,7 +424,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 #			close(FILE);
 
 			# Log Request
-			print "$data{_method}: ${home}$request{URL}\n";
+			print $se "$data{_method}: ${home}$request{URL}\n";
 
 			# Is this the CGI ?
 			if ( $request{URL} =~ /^\/?iplayer/ ) {
@@ -427,7 +432,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				%ENV = ();
 				@ARGV = ();
 				# Setup CGI http vars
-				print "QUERY_STRING = $query_string\n" if defined $query_string;
+				print $se "QUERY_STRING = $query_string\n" if defined $query_string;
 				$ENV{'QUERY_STRING'} = $query_string;
 				$ENV{'REQUEST_URI'} = $request{URL};
 				$ENV{'SERVER_PORT'} = $port;
@@ -438,7 +443,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 
 			# Else 404
 			} else {
-				print "ERROR: 404 Not Found\n";
+				print $se "ERROR: 404 Not Found\n";
 				print $client "HTTP/1.0 404 Not Found", Socket::CRLF;
 				print $client Socket::CRLF;
 				print $client "<html><body>404 Not Found</body></html>";
@@ -461,7 +466,7 @@ exit 0;
 
 
 sub cleanup {
-	print "INFO: Cleaning up PID $$\n";
+	print $se "INFO: Cleaning up PID $$\n";
 	exit 1;
 }
 
@@ -519,7 +524,7 @@ sub parse_url_args {
 		# if the option is valid then add it
 		if ( $optname && defined $value ) {
 			push @args, "$optname=$value";
-			print "OPT: $optname=$value\n";
+			print $se "OPT: $optname=$value\n";
 		}
 	}
 	return @args;
@@ -819,7 +824,7 @@ sub build_cmd_options {
 			$options .= " $opt->{$_}->{optname}" if $opt->{$_}->{current};
 		# Normal option with value
 		} else {
-			$options .= " $opt->{$_}->{optname} $opt->{$_}->{current}" if $opt->{$_}->{current} ne '';
+			$options .= " $opt->{$_}->{optname}=$opt->{$_}->{current}" if $opt->{$_}->{current} ne '';
 		}
 	}
 	return $options;
@@ -833,6 +838,7 @@ sub get_search_params {
 	for ( keys %{ $opt } ) {
 		# skip non-options
 		next if $opt->{$_}->{optname} eq '' || not defined $opt->{$_}->{optname} || not $opt->{$_}->{optname};
+		next if grep /^$_$/, @nosearch_params;
 		push @params, $_;
 	}
 	return @params;
@@ -863,7 +869,7 @@ sub pvr_add {
 	}
 
 	my $cmd  = "$get_iplayer_cmd $options --pvradd '$searchname'";
-	print "Command: $cmd"; #if $DEBUG;
+	print $se "Command: $cmd"; #if $DEBUG;
 	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1005,9 +1011,6 @@ sub flush {
 
 
 sub search_progs {
-
-	$opt->{SEARCH}->{current} = shift;
-
 	# Set default status for progtypes
 	my %type;
 	$type{$_} = 1 for split /,/, $opt->{PROGTYPES}->{current};
@@ -1251,7 +1254,7 @@ sub pagetrail {
 	my $last = $first + $pagesize;
 	$last = $count if $last > $count;
 
-print "PAGETRAIL: page=$page, first=$first, last=$first, pages=$pages, trailsize=$trailsize\n";
+	#print $se "PAGETRAIL: page=$page, first=$first, last=$first, pages=$pages, trailsize=$trailsize\n";
 	# Page trail
 	my @pagetrail;
 
@@ -1321,7 +1324,7 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --listformat='ENTRY${fields}'";
-	print "DEBUG: Command: $cmd\n"; # if $DEBUG;
+	print $se "DEBUG: Command: $cmd\n"; # if $DEBUG;
 	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
@@ -1380,10 +1383,10 @@ sub begin_html {
 	# Save settings if selected
 	#my @cookies;
 	#if ( $cgi->param('SAVE') ) {
-	#	print "DEBUG: Sending cookies\n";
+	#	print $se "DEBUG: Sending cookies\n";
 	#	for ( @save_opts ) {
 	#		push @cookies, $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' );
-	#		print "DEBUG: Sending cookie: ".$cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' )."\n";
+	#		print $se "DEBUG: Sending cookie: ".$cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' )."\n";
 	#	}
 	#	# Ensure SAVE state is reset to off
 	#	$opt->{SAVE}->{current} = 0;
@@ -1501,7 +1504,7 @@ sub html_end {
 # Gets and sets the CGI parameters (POST/Cookie) in the $opt hash - also sets $opt{VAR}->{current} from default or POST
 sub process_params {
 	for ( keys %{ $opt } ) {
-		print "DEBUG: GOT Cookie $_ = $cgi->cookie($_)\n" if defined $cgi->cookie($_);
+		print $se "DEBUG: GOT Cookie $_ = $cgi->cookie($_)\n" if defined $cgi->cookie($_);
 		$opt->{$_}->{current} = join(",", ( $cgi->cookie($_) || $cgi->param($_) ) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
 	}
 }
