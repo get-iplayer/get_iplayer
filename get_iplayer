@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.66;
+my $version = 1.67;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -136,8 +136,6 @@ sub logger(@) {
 	my $msg = shift;
 	# Make sure quiet can be overridden by verbose and debug options
 	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
-		# Wrap in html <p> tags if --webrequest f specified
-		$msg =~ s/^(.*)$/<p>$1<\/p>/g if $opt->{webrequest};
 		# Only send messages to STDERR if pvr or stdout options are being used.
 		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} ) {
 			print STDERR $msg;
@@ -399,10 +397,10 @@ if ( $opt->{webrequest} ) {
 		# if the option is valid then add it
 		if ( defined $opt_format{$optname} ) {
 			$opt->{$optname} = $value;
-			logger "INFO: webrequest OPT: '$optname' = '$value'\n" if $opt->{verbose};
+			logger "INFO: webrequest OPT: $optname=$value\n" if $opt->{verbose};
 		# Ignore invalid opts
 		} else {
-			logger "ERROR: Invalid webrequest OPT: '$optname' = '$value'\n" if $opt->{verbose};
+			logger "ERROR: Invalid webrequest OPT: $optname=$value\n" if $opt->{verbose};
 		}
 	}
 }
@@ -877,8 +875,11 @@ sub progclass {
 	my $prog_type = shift;
 	if ( $prog_type ) {
 		return $prog_types{$prog_type};
-	} else {
+	} elsif ( not defined $prog_type ) {
 		return keys %prog_types;
+	} else {
+		main::logger "ERROR: Programe Type '$prog_type' does not exist. Try using --flush\n";
+		exit 3;
 	}
 }
 
@@ -3915,6 +3916,8 @@ sub get_links {
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
+			# Remove unwanted html tags
+			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
 
 			# Parse the categories into hash
 			# <category term="Factual" />

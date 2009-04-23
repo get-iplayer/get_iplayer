@@ -6,19 +6,26 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.11';
+my $VERSION = '0.13';
 
 # Features:
 # * Search for progs
 # * Lists/Adds/Removes PVR entries
 #
-# Installation:
+# Installation as Apache CGI script:
 # * By default this will run as apache user and save all settings files in /var/www/.get_iplayer
 # * Change the $get_iplayer variable to tell this script where get_iplayer can be found (may need to set $HOME also)
 # * Ensure that the output dir ($home) is writable by apache user
-# * Add a line in /etc/crontab to do the pvr downloads: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
+#
+# Run with embedded web server:
+# * By default this will run as the user you start the script with
+# * Start with: ./get_iplayer.cgi 1935
+# * Access using: http://localhost:1935/iplayer
+#
+# Setup crontab
+# * Add a line in /etc/crontab to do the pvr downloads: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 #
 # Caveats:
 # * Sometimes takes a while to load page while refreshing caches
@@ -120,27 +127,27 @@ my @order_adv_opts = qw/ OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CH
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
-# Which options can be saved
-my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
 
 # Store options definition here as hash of 'name' => [options]
 	$opt->{SEARCH} = {
 		title	=> 'Search', # Title
 		webvar	=> 'SEARCH', # webvar
-		optname	=> '--search', # option
+		optkey	=> 'search', # option key
 		type	=> 'text', # type
 		default	=> '.*', # default
 		value	=> 20, # width values
+		save	=> 0,
 	};
 	
 	$opt->{SEARCHFIELDS} = {
 		title	=> 'Search in', # Title
 		webvar	=> 'SEARCHFIELDS', # webvar
-		optname	=> '--fields', # option
+		optkey	=> 'fields', # option
 		type	=> 'popup', # type
 		label	=> \%fieldname, # labels
 		default	=> 'name', # default
 		value	=> [ (@headings,'name,episode','name,episode,desc') ], # values
+		save	=> 1,
 	};
 
 	$opt->{PAGESIZE} = {
@@ -150,6 +157,7 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		default	=> 17, # default
 		value	=> ['17','50','100','200','500'], # values
 		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		save	=> 1,
 	};
 
 	$opt->{SORT} = {
@@ -160,118 +168,125 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		default	=> 'index', # default
 		value	=> [@headings], # values
 		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		save	=> 1,
 	};
 
 	$opt->{PROGTYPES} = {
 		title	=> 'Programme type', # Title
 		webvar	=> 'PROGTYPES', # webvar
-		optname	=> '--type', # option
+		optkey	=> 'type', # option
 		type	=> 'multiboolean', # type
 		label	=> \%prog_types, # labels
 		default => 'tv',
 		#status	=> \%type, # default status
 		value	=> { 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv' }, # order of values
+		save	=> 1,
 	};
 
 	$opt->{VMODE} = {
 		title	=> 'Video Download Modes', # Title
 		webvar	=> 'VMODE', # webvar
-		optname	=> '--vmode', # option
+		optkey	=> 'vmode', # option
 		type	=> 'text', # type
 		default	=> 'iphone,flashhigh,flashnormal', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 	
 	$opt->{OUTPUT} = {
 		title	=> 'Override Download Folder', # Title
 		webvar	=> 'OUTPUT', # webvar
-		optname	=> '--output', # option
+		optkey	=> 'output', # option
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 	
 	$opt->{AMODE} = {
 		title	=> 'Audio Download Modes', # Title
 		webvar	=> 'AMODE', # webvar
-		optname	=> '--amode', # option
+		optkey	=> 'amode', # option
 		type	=> 'text', # type
 		default	=> 'iphone,flashaudio,flashaac,realaudio', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{VERSIONS} = {
 		title	=> 'Programme Versions', # Title
 		webvar	=> 'VERSIONS', # webvar
-		optname	=> '--versions', # option
+		optkey	=> 'versions', # option
 		type	=> 'text', # type
 		default	=> 'default', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{CATEGORY} = {
 		title	=> 'Categories Containing', # Title
 		webvar	=> 'CATEGORY', # webvar
-		optname	=> '--category', # option
+		optkey	=> 'category', # option
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{EXCLUDECATEGORY} = {
 		title	=> 'Exclude Categories Containing', # Title
 		webvar	=> 'EXCLUDECATEGORY', # webvar
-		optname	=> '--exclude-category', # option
+		optkey	=> 'excludecategory', # option
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{CHANNEL} = {
 		title	=> 'Channels Containing', # Title
 		webvar	=> 'CHANNEL', # webvar
-		optname	=> '--channel', # option
+		optkey	=> 'channel', # option
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{EXCLUDECHANNEL} = {
 		title	=> 'Exclude Channels Containing', # Title
 		webvar	=> 'EXCLUDECHANNEL', # webvar
-		optname	=> '--exclude-channel', # option
+		optkey	=> 'excludechannel', # option
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 40, # width values
+		save	=> 1,
 	};
 
 	$opt->{HIDE} = {
 		title	=> 'Hide Downloaded', # Title
 		webvar	=> 'HIDE', # webvar
-		optname	=> '--hide', # option
+		optkey	=> 'hide', # option
 		type	=> 'boolean', # type
 		default	=> '0', # value
+		save	=> 1,
 	};
 
 	$opt->{SINCE} = {
 		title	=> 'Added Since (hours)', # Title
 		webvar	=> 'SINCE', # webvar
-		optname	=> '--since', # option
+		optkey	=> 'since', # option
 		type	=> 'text', # type
 		value	=> 3, # width values
 		default => '',
+		save	=> 1,
 	};
 
 	### Non-visible options ##
 	$opt->{COLS} = {
 		webvar	=> 'COLS', # webvar
 		default	=> undef, # width values
-	};
-
-	$opt->{NEXTPAGE} = {
-		webvar  => 'NEXTPAGE',
-		type	=> 'hidden',
-		value	=> 'search_progs',
+		save	=> 0,
 	};
 
 	# Make sure we go to the correct nextpage for processing
@@ -279,6 +294,7 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		webvar  => 'NEXTPAGE',
 		type	=> 'hidden',
 		default	=> 'search_progs',
+		save	=> 0,
 	};
 
 	# Reverse sort value
@@ -286,6 +302,7 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		webvar  => 'REVERSE',
 		type	=> 'hidden',
 		default	=> 0,
+		save	=> 1,
 	};
 
 	# Make sure we go to the correct next page no.
@@ -293,13 +310,15 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		webvar  => 'PAGENO',
 		type	=> 'hidden',
 		default	=> 1,
+		save	=> 0,
 	};
 
 	# Remeber the status of the Advanced options display
 	$opt->{ADVANCED} = {
 		webvar	=> 'ADVANCED', # webvar
 		type	=> 'hidden', # type
-		default	=> '0', # value
+		default	=> 'no', # value
+		save	=> 1,
 	};
 
 	# Save the status of the Advanced options settings
@@ -307,6 +326,7 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		webvar	=> 'SAVE', # webvar
 		type	=> 'hidden', # type
 		default	=> '0', # value
+		save	=> 0,
 	};
 
 	# INFO for page info if clicked
@@ -314,6 +334,7 @@ my @save_opts = qw/ SEARCHFIELDS PAGESIZE SORT PROGTYPES OUTPUT VMODE AMODE VERS
 		webvar  => 'INFO',
 		type	=> 'hidden',
 		default	=> 0,
+		save	=> 0,
 	};
 
 
@@ -435,6 +456,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				print $se "QUERY_STRING = $query_string\n" if defined $query_string;
 				$ENV{'QUERY_STRING'} = $query_string;
 				$ENV{'REQUEST_URI'} = $request{URL};
+				$ENV{'COOKIE'} = $request{cookie};
 				$ENV{'SERVER_PORT'} = $port;
 				# respond OK to browser
 				print $client "HTTP/1.0 200 OK", Socket::CRLF;
@@ -503,32 +525,6 @@ sub parse_post_form_string {
 	return join '&', @data;
 }
 
-
-
-# Use --webrequest to specify options in urlencoded format
-sub parse_url_args {
-	my @args;
-	# parse GET args
-	my @webopts = split /[\&\?]/, $_[0];
-	for (@webopts) {
-		# URL decode it
-		s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
-		my ( $optname, $value );
-		# opt val pair
-		if ( m{^\s*([\w\-]+?)[\s=](.+)$} ) {
-			( $optname, $value ) = ( $1, $2 );
-		# flag only
-		} elsif ( m{^\s*([\w\-]+)$} ) {
-			( $optname, $value ) = ( $1, 1 );
-		}
-		# if the option is valid then add it
-		if ( $optname && defined $value ) {
-			push @args, "$optname=$value";
-			print $se "OPT: $optname=$value\n";
-		}
-	}
-	return @args;
-}
 
 
 sub run_cgi {
@@ -813,21 +809,24 @@ sub pvr_queue {
 
 
 
-sub build_cmd_options {
-	my $options = '';
-
+sub build_cmd_options_urlencoded {
+	my @options;
 	for ( @_ ) {
 		# skip non-options
-		next if $opt->{$_}->{optname} eq '' || not defined $opt->{$_}->{optname} || not $opt->{$_}->{optname};
+		next if $opt->{$_}->{optkey} eq '' || not defined $opt->{$_}->{optkey} || not $opt->{$_}->{optkey};
+		my $value = $opt->{$_}->{current};
 		# If this is a boolean option
 		if ( $opt->{$_}->{type} eq 'boolean' ) {
-			$options .= " $opt->{$_}->{optname}" if $opt->{$_}->{current};
+			push @options, CGI::escape("$opt->{$_}->{optkey}") if $value;
 		# Normal option with value
 		} else {
-			$options .= " $opt->{$_}->{optname}=$opt->{$_}->{current}" if $opt->{$_}->{current} ne '';
+			push @options, CGI::escape("$opt->{$_}->{optkey}=$value") if $value ne '';
 		}
 	}
-	return $options;
+
+	# Return option with urlencoded values
+	return "--webrequest '".(join '&', @options)."'";
+	
 }
 
 
@@ -837,7 +836,7 @@ sub get_search_params {
 
 	for ( keys %{ $opt } ) {
 		# skip non-options
-		next if $opt->{$_}->{optname} eq '' || not defined $opt->{$_}->{optname} || not $opt->{$_}->{optname};
+		next if $opt->{$_}->{optkey} eq '' || not defined $opt->{$_}->{optkey} || not $opt->{$_}->{optkey};
 		next if grep /^$_$/, @nosearch_params;
 		push @params, $_;
 	}
@@ -850,13 +849,11 @@ sub pvr_add {
 
 	my $out;
 	my @params = get_search_params();
-	my $options = build_cmd_options( @params );
+	my $options = build_cmd_options_urlencoded( @params );
 
 	# Only allow alphanumerics,_,-,. here for security reasons
 	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
-	#$searchname =~ s/(["'&])/\\$1/g;
 	$searchname =~ s/[^\w\-\. \+\(\)]/_/g;
-	
 
 	# Check how many matches first
 	get_progs( @params );
@@ -985,6 +982,7 @@ sub build_option_html {
 				-name		=> $webvar,
 				-value		=> $current,
 				-size		=> $value,
+				-onKeyDown	=> 'return submitonEnter(event);',
 			)
 		);
 
@@ -1125,12 +1123,15 @@ sub search_progs {
 	}
 	
 
-	# Set advanced options cell status
+	# Set advanced options cell status and label
 	my $adv_style;
-	if ( not $opt->{ADVANCED}->{current} ) {
+	my $adv_label;
+	if ( $opt->{ADVANCED}->{current} eq 'no' || not $opt->{ADVANCED}->{current} ) {
 		$adv_style = "display: none;";
+		$adv_label = 'Show Advanced Options';
 	} else {
 		$adv_style = "display: table;";
+		$adv_label = 'Hide Advanced Options';
 	}
 
 	# Render outer options table frame (keeping advanced cell initially hidden)
@@ -1143,18 +1144,18 @@ sub search_progs {
 					-id		=> 'advanced_opts_button',
 					-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', 'Show Advanced Options', 'Hide Advanced Options' );",
 					},
-					'Show Advanced Options',
+					$adv_label,
+				),
+			),
+			td( { -class=>'options_outer' },
+				# Save Options button
+				label( {
+					-class		=> 'options_outer',
+					-onClick	=> "form.SAVE.value=1; submit();",
+					},
+					'Remember Options',
 				),
 			)
-			#td( { -class=>'options_outer' },
-			#	# Save Options button
-			#	label( {
-			#		-class		=> 'options_outer',
-			#		-onClick	=> "form.SAVE.value=1; submit();",
-			#		},
-			#		'Remember Options',
-			#	),
-			#)
 		),
 		Tr( { -class=>'options_outer' }, 
 			td( { -class=>'options_outer' },
@@ -1170,12 +1171,11 @@ sub search_progs {
 	print $fh table( { -class=>'options_outer' },
 		Tr( { -class=>'options_outer' },
 			td( { -class=>'options_outer' }, [
-				# Search button
+				# Search button (set PAGENO=1)
 				button(
 					-class		=> 'options_outer',
-					-tabindex	=> '1',
 					-name		=> "Search",
-					-onClick 	=> "form.NEXTPAGE.value='search_progs'; submit()",
+					-onClick 	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",
 				),
 				# Flush button
 				button(
@@ -1319,7 +1319,7 @@ sub get_progs {
 	my @params = @_;
 	my $options = '';
 
-	my $options = build_cmd_options( @params );
+	my $options = build_cmd_options_urlencoded( @params );
 
 	my $fields;
 	$fields .= "|<$_>" for @headings;
@@ -1381,22 +1381,26 @@ sub get_display_cols {
 sub begin_html {
 
 	# Save settings if selected
-	#my @cookies;
-	#if ( $cgi->param('SAVE') ) {
-	#	print $se "DEBUG: Sending cookies\n";
-	#	for ( @save_opts ) {
-	#		push @cookies, $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' );
-	#		print $se "DEBUG: Sending cookie: ".$cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y', -path=>'/' )."\n";
-	#	}
-	#	# Ensure SAVE state is reset to off
-	#	$opt->{SAVE}->{current} = 0;
-	#}
-	print $fh $cgi->header(
-		-type=>'text/html',
-		-charset=>'utf-8',
-	#	-cookie=>[@cookies],
-	);
+	my @cookies;
+	if ( $cgi->param('SAVE') ) {
+		print $se "DEBUG: Sending cookies\n";
+		for ( %{ $opt } ) {
+			# skip if opt not allowed to be saved
+			next if not $opt->{$_}->{save};
+			my $cookie = $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y' );
+			push @cookies, $cookie;
+			print $se "DEBUG: Sending cookie: $cookie\n" if $DEBUG;
+		}
+		# Ensure SAVE state is reset to off
+		$opt->{SAVE}->{current} = 0;
+	}
 
+	# Send the headers to the browser
+	print $fh $cgi->header(
+		-type		=> 'text/html',
+		-charset	=> 'utf-8',
+		-cookie		=> [@cookies],
+	);
 
 	print $fh "<html>";
 	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
@@ -1441,7 +1445,6 @@ sub form_header {
 				-onClick  => "history.back()",
 			}),
 			# go to search page
-			#image_button(-name=>'button_name', -src=>image URL, -align=>alignment, -alt=>text, -value=>text)
 			image_button({
 				-class => 'icons',
 				-alt => 'Search',
@@ -1504,8 +1507,21 @@ sub html_end {
 # Gets and sets the CGI parameters (POST/Cookie) in the $opt hash - also sets $opt{VAR}->{current} from default or POST
 sub process_params {
 	for ( keys %{ $opt } ) {
-		print $se "DEBUG: GOT Cookie $_ = $cgi->cookie($_)\n" if defined $cgi->cookie($_);
-		$opt->{$_}->{current} = join(",", ( $cgi->cookie($_) || $cgi->param($_) ) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
+		# Ignore cookies if we are saving new ones
+		if ( not $cgi->param('SAVE') ) {
+			if ( defined $cgi->param($_) ) {
+				print $se "DEBUG: GOT Param  $_ = ".$cgi->param($_)."\n" if $DEBUG;
+				$opt->{$_}->{current} = join ",", $cgi->param($_);
+			} elsif (  defined $cgi->cookie($_) ) {
+				print $se "DEBUG: GOT Cookie $_ = ".$cgi->cookie($_)."\n" if $DEBUG;
+				$opt->{$_}->{current} = join ",", $cgi->cookie($_);
+			} else {
+				$opt->{$_}->{current} =  join ",", $opt->{$_}->{default};
+			}
+			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $DEBUG;
+		} else {
+			$opt->{$_}->{current} = join(",", $cgi->param($_) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
+		}
 	}
 }
 
@@ -1537,11 +1553,11 @@ sub insert_javascript {
 		if ( e.style.display != 'none' ) {
 			e.style.display = 'none';
 			l.textContent = showtext;
-			document.getElementById(optid).value = 0;
+			document.getElementById(optid).value = 'no';
 		} else {
 			e.style.display = '';
 			l.textContent = hidetext;
-			document.getElementById(optid).value = 1;
+			document.getElementById(optid).value = 'yes';
 		}
 		return true;
 	}
@@ -1578,6 +1594,19 @@ sub insert_javascript {
 			}
 		}
 		return true;
+	}
+
+	//
+	// Submit Search only if enter is pressed from a textfield
+	// Called as: onKeyDown="return submitonEnter(event);"
+	//
+	function submitonEnter(evt){
+		var charCode = (evt.which) ? evt.which : event.keyCode
+		if ( charCode == "13" ) {
+			document.form.NEXTPAGE.value='search_progs';
+			document.form.PAGENO.value=1;
+			document.form.submit();
+		}
 	}
 
 	</SCRIPT>
