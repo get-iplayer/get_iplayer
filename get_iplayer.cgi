@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.13';
+my $VERSION = '0.14';
 
 # Features:
 # * Search for progs
@@ -40,6 +40,7 @@ use CGI ':all';
 use CGI::Cookie;
 use IO::File;
 use URI::Escape;
+use IO::Handle;
 my $DEBUG = 0;
 $| = 1;
 my $fh;
@@ -338,7 +339,6 @@ my @nosearch_params = qw/ /;
 	};
 
 
-
 ### Crude Single-Threaded Perl CGI Web Server ###
 use Socket;
 use IO::Socket;
@@ -396,6 +396,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 							s/\s+$//;
 						}
 						$request{lc $type} = $val;
+						print "REQUEST HEADER: $type: $val\n";# if $DEBUG;
 					# POST data
 					} elsif (/^$/) {
 						read( $client, $request{CONTENT}, $request{'content-length'} ) if defined $request{'content-length'};
@@ -406,13 +407,13 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 
 			# Determine method and parse parameters
 			if ($request{METHOD} eq 'GET') {
-				#if ($request{URL} =~ /(.*)\?(.*)/) {
-				#	$request{URL} = $1;
-				#	$request{CONTENT} = $2;
-				#	%data = parse_form($request{CONTENT});
-				#} else {
-				#	%data = ();
-				#}
+				if ($request{URL} =~ /(.*)\?(.*)/) {
+					$request{URL} = $1;
+					$request{CONTENT} = $2;
+					$query_string = $request{CONTENT};
+				} else {
+					%data = ();
+				}
 				$data{"_method"} = "GET";
 	
 			} elsif ($request{METHOD} eq 'POST') {
@@ -448,7 +449,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			print $se "$data{_method}: ${home}$request{URL}\n";
 
 			# Is this the CGI ?
-			if ( $request{URL} =~ /^\/?iplayer/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|download)/ ) {
 				# remove any vars that might affect the CGI
 				%ENV = ();
 				@ARGV = ();
@@ -459,9 +460,9 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				$ENV{'COOKIE'} = $request{cookie};
 				$ENV{'SERVER_PORT'} = $port;
 				# respond OK to browser
-				print $client "HTTP/1.0 200 OK", Socket::CRLF;
+				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
-				run_cgi( $client, $query_string );
+				run_cgi( $client, $query_string, $request{URL} );
 
 			# Else 404
 			} else {
@@ -531,6 +532,7 @@ sub run_cgi {
 	# Get filehandle for output
 	$fh = shift;
 	my $query_string = shift;
+	my $request_url = shift;
 	
 	# Clean globals
 	%prog = ();
@@ -541,32 +543,92 @@ sub run_cgi {
 	$cgi->delete_all() if defined $cgi;
 	$cgi = new CGI( $query_string );
 
+	# Get next page
+	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
+
 	# Process All options
 	process_params();
 
-	begin_html();
+	# Stream
+	if ( $request_url =~ /stream/i ) {
+		# Output headers
+		# to stream file
+		# This will enable seekable -Accept_Ranges=>'bytes',
+		my $headers = $cgi->header( -type => 'video/quicktime', -Connection => 'close' );
 
-	# Page Routing
-	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
-	form_header();
-	if ( $DEBUG ) {
-		print $fh $cgi->Dump();
-		for my $key (sort keys %ENV) {
-		    print $fh $key, " = ", $ENV{$key}, "\n";
-		}    
-	}
-	if ($nextpages{$nextpage}) {
-		# call the correct subroutine
-		$nextpages{$nextpage}->();
-	}
+		# Send the headers to the browser
+		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $fh $headers;
 
-	form_footer();
-	html_end();
+		stream_mov( $opt->{SEARCH}->{current} );
+
+	# Download file
+	} elsif ( $request_url =~ /download/i ) {
+		# Output headers
+		# To save file
+		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $opt->{SEARCH}->{current}.'.mov' );
+
+		# Send the headers to the browser
+		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $fh $headers;
+
+		stream_mov( $opt->{SEARCH}->{current} );
+
+	# HTML page
+	} else {
+		# Output headers
+		http_headers();
+	
+		# html start
+		begin_html();
+
+		# Page Routing
+		form_header();
+		if ( $DEBUG ) {
+			print $fh $cgi->Dump();
+			for my $key (sort keys %ENV) {
+			    print $fh $key, " = ", $ENV{$key}, "\n";
+			}    
+		}
+		if ($nextpages{$nextpage}) {
+			# call the correct subroutine
+			$nextpages{$nextpage}->();
+		}
+
+		form_footer();
+		html_end();
+	}
 
 	$cgi->delete_all();
 
 	return 0;
 }
+
+
+
+sub stream_mov {
+	my $pid = shift;
+
+	print $se "INFO: Start Streaming $pid to browser\n";
+
+	#STDOUT->fdopen( $fh, 'w' ) or die $!;
+	my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --vmode=iphone --stdout --nowrite --pid '$pid'";
+	print $se "DEBUG: running: $cmd\n";
+
+	my $buffer;
+	open (STREAM, "$cmd |") or die $!;
+
+	# Openn streaming command and redirect output to browser socket
+	while (read(STREAM, $buffer, 102400)) {
+		print $fh $buffer;
+		print $se '.';
+	}
+	
+	print $se "INFO: Finished Streaming $pid to browser\n";
+
+	return 0;
+}
+
 
 
 sub get_pvr_list {
@@ -1035,6 +1097,8 @@ sub search_progs {
 	my @html;
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+	# Pad empty column for D/S
+	push @html, th( { -class => 'search' }, 'D/S' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -1092,11 +1156,18 @@ sub search_progs {
 				-override	=> 1,
 			)
 		);
+		# Download and stream links
+		push @row, td( {-class=>'search'}, 
+			a( { -class=>'search', -title=>'Download', -href=>'/download?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'D' )
+			.'/'.
+			a( { -class=>'search', -title=>'Stream', -href=>'/stream?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid") }, 'S' )
+		);
+
 		for ( @displaycols ) {
-			if ( ! /thumbnail/ ) {
-				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
+			if ( /^thumbnail$/ ) {
+				push @row, td( {-class=>'search'}, a( { -title=>"Open URL", -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			} else {
-				push @row, td( {-class=>'search'}, a( { -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>'search'}, @row );
@@ -1379,7 +1450,21 @@ sub get_display_cols {
 #
 ######################################################################
 sub begin_html {
+	print $fh "<html>";
+	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
+	insert_stylesheet();
+	print $fh "</HEAD>\n";
+	insert_javascript();
+	print $fh "<body>\n";
+}
 
+
+
+# Send HTTP headers to browser
+sub http_headers {
+	my $mimetype = 'text/html';
+	my $filename = shift;
+	
 	# Save settings if selected
 	my @cookies;
 	if ( $cgi->param('SAVE') ) {
@@ -1396,18 +1481,14 @@ sub begin_html {
 	}
 
 	# Send the headers to the browser
-	print $fh $cgi->header(
-		-type		=> 'text/html',
+	my $headers = $cgi->header(
+		-type		=> $mimetype,
 		-charset	=> 'utf-8',
 		-cookie		=> [@cookies],
 	);
 
-	print $fh "<html>";
-	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
-	insert_stylesheet();
-	print $fh "</HEAD>\n";
-	insert_javascript();
-	print $fh "<body>\n";
+	print $se "\nHEADERS:\n$headers\n"; #if $DEBUG;
+	print $fh $headers;
 }
 
 
@@ -1680,10 +1761,12 @@ sub insert_stylesheet {
 	
 	TABLE.search		{ font-size: 70%; border-spacing: 2px; padding: 0; width: 100%; }
 	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
-	TR.search		{ background: #EEE; }
+	TR.search		{ background: #DDD; }
 	TR.search:hover		{ background: #CCC; }
 	TH.search		{ Color: white; text-align: center; background: #999; text-align: center; }
 	TD.search		{ text-align: left; }
+	A.search		{ text-decoration: none; }
+	LABEL.search		{ text-decoration: none; }
 	INPUT.search		{ font-size: 70%; background: #EEE; }
 	LABEL.sorted            { Color: #cfc; }
 	LABEL.unsorted          { Color: #fff; }
