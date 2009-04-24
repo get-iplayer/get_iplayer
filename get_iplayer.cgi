@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.14';
+my $VERSION = '0.15';
 
 # Features:
 # * Search for progs
@@ -25,7 +25,11 @@ my $VERSION = '0.14';
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
 #
-# 
+# Direct Streaming/Download from embedded web server
+# * Use these URLs directly to stream or download the mov file
+# * Stream: http://localhost:1935/stream?SEARCH=tv:<PID>
+# * Download: http://localhost:1935/download?SEARCH=tv:<PID>&FILENAME=<filename>
+#
 # Setup crontab
 # * Add a line in /etc/crontab to do the pvr downloads: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 #
