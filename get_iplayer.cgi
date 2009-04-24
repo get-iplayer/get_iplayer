@@ -11,29 +11,33 @@ my $VERSION = '0.14';
 # Features:
 # * Search for progs
 # * Lists/Adds/Removes PVR entries
+# (get_iplayer should be installed and working from /usr/bin/get_iplayer)
 #
-# Installation as Apache CGI script:
+# Run with embedded web server (preferred method):
+# * By default this will run as the user you start the script with
+# * Start with: ./get_iplayer.cgi 1935
+# * Access using: http://localhost:1935/
+#
+# Installation as Apache CGI script (not the preferred method):
 # * By default this will run as apache user and save all settings files in /var/www/.get_iplayer
 # * Change the $get_iplayer variable to tell this script where get_iplayer can be found (may need to set $HOME also)
 # * Ensure that the output dir ($home) is writable by apache user
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
 #
-# Run with embedded web server:
-# * By default this will run as the user you start the script with
-# * Start with: ./get_iplayer.cgi 1935
-# * Access using: http://localhost:1935/iplayer
-#
+# 
 # Setup crontab
 # * Add a line in /etc/crontab to do the pvr downloads: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 #
 # Caveats:
 # * Sometimes takes a while to load page while refreshing caches
+# * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
 #
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
 # * Add loads of options
 # * in general, take presentation data out of the html and into css, take scripting out of the html and into the js
+# * Get rtmpdump to stream to stdout in get_iplayer
 
 use strict;
 use CGI ':all';
@@ -411,8 +415,6 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 					$request{URL} = $1;
 					$request{CONTENT} = $2;
 					$query_string = $request{CONTENT};
-				} else {
-					%data = ();
 				}
 				$data{"_method"} = "GET";
 	
@@ -446,10 +448,10 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 #			close(FILE);
 
 			# Log Request
-			print $se "$data{_method}: ${home}$request{URL}\n";
+			print $se "$data{_method}: $request{URL}\n";
 
-			# Is this the CGI ?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|download)/ ) {
+			# Is this the CGI or some other file request?
+			if ( $request{URL} =~ /^\/?(iplayer|stream|download|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				%ENV = ();
 				@ARGV = ();
@@ -467,7 +469,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			# Else 404
 			} else {
 				print $se "ERROR: 404 Not Found\n";
-				print $client "HTTP/1.0 404 Not Found", Socket::CRLF;
+				print $client "HTTP/1.1 404 Not Found", Socket::CRLF;
 				print $client Socket::CRLF;
 				print $client "<html><body>404 Not Found</body></html>";
 				$data{"_status"} = "404";
@@ -489,8 +491,9 @@ exit 0;
 
 
 sub cleanup {
-	print $se "INFO: Cleaning up PID $$\n";
-	exit 1;
+	my $signal = shift;
+	print $se "INFO: Cleaning up PID $$ (signal = $signal)\n";
+	exit 0;
 }
 
 
@@ -550,7 +553,7 @@ sub run_cgi {
 	process_params();
 
 	# Stream
-	if ( $request_url =~ /stream/i ) {
+	if ( $request_url =~ /^\/?stream/i ) {
 		# Output headers
 		# to stream file
 		# This will enable seekable -Accept_Ranges=>'bytes',
@@ -563,7 +566,7 @@ sub run_cgi {
 		stream_mov( $opt->{SEARCH}->{current} );
 
 	# Download file
-	} elsif ( $request_url =~ /download/i ) {
+	} elsif ( $request_url =~ /^\/?download/i ) {
 		# Output headers
 		# To save file
 		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $opt->{SEARCH}->{current}.'.mov' );
@@ -575,7 +578,7 @@ sub run_cgi {
 		stream_mov( $opt->{SEARCH}->{current} );
 
 	# HTML page
-	} else {
+	} elsif ( $request_url =~ /^\/?(iplayer|)$/i ) {
 		# Output headers
 		http_headers();
 	
