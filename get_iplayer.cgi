@@ -619,10 +619,18 @@ sub run_cgi {
 
 sub pvr_run {
 	print $se "INFO: Starting Manual PVR Run\n";
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd = "$get_iplayer_cmd --nopurge --nocopyright --hash --pvr 2>&1";
+	my $cmd = "$get_iplayer_cmd --nopurge --nocopyright --hash --pvr";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
+
+	# Unbuffered output
+	STDOUT->autoflush(1);
+	STDERR->autoflush(1);
+
+	# Redirect both STDOUT and STDERR to client browser socket
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+
+	# Run cmd
 	system $cmd;
 	print $fh '</pre>';
 }
@@ -647,7 +655,7 @@ sub stream_mov {
 
 sub get_pvr_list {
 	my $pvrsearch;
-	my $out = `$get_iplayer_cmd --nocopyright --pvrlist 2>&1`;
+	my $out = `$get_iplayer_cmd --nocopyright --pvrlist`;
 	
 	# Remove text before first pvrsearch entry
 	$out =~ s/^.+?(pvrsearch\s.+)$/$1/s;
@@ -823,7 +831,7 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@download) {
 		chomp();
-		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel '$name' 2>&1";
+		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel '$name'";
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -844,7 +852,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$get_iplayer_cmd --nocopyright --info --fields=pid --type=$type $pid 2>&1";
+	my $cmd = "$get_iplayer_cmd --nocopyright --info --fields=pid --type=$type $pid";
 	print $fh p("Command: $cmd");
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -872,7 +880,7 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
-		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")' 2>&1";
+		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")'";
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1070,7 +1078,7 @@ sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist --search='no search just flush' 2>&1";
+	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist --search='no search just flush'";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	system $cmd;
