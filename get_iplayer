@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.67;
+my $version = 1.68;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -164,6 +164,7 @@ my %opt_format = (
 	forcedownload	=> [ 1, "force-download", 'Download', '--force-download', "Ignore download history (unsets --hide option also)"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	get		=> [ 0, "get|g", 'Download', '--get, -g', "Download matching programmes"],
+	hash		=> [ 1, "hash", 'Download', '--hash', "Show download progress as hashes"],
 	help		=> [ 0, "help|h", 'Config', '--help, -h', "This help text"],
 	helplong	=> [ 0, "help-long|advanced|long-help|longhelp|lh|hl|helplong", 'Config', '--helplong', "Advanced options help text"],
 	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
@@ -1084,7 +1085,7 @@ sub download_block {
 	my $buffer;
 	my $lastpercent = 0;
 	my $now = time();
-
+	
 	# If this is an 'append to file' mode call
 	if ( defined $file && $fh && (!$opt->{nowrite}) ) {
 		# Stage 3b: Download File
@@ -1121,28 +1122,36 @@ sub download_block {
 		# Download percent
 		my $percent = 100.0 * $size / $file_len;
 		# Don't update display if we haven't dowloaded at least another 0.1%
-		return if ($percent - $lastpercent) < 0.1;
-		$lastpercent = $percent;
-		# download rates in bytes per second and time remaining
-		my $rate_bps;
-		my $rate;
-		my $time;
-		my $timecalled = time();
-		if ($timecalled - $now < 1) {
-			$rate = '-----kbps';
-			$time = '--:--:--';
+		if ( not $opt->{hash} ) {
+			return if ($percent - $lastpercent) < 0.1;
 		} else {
-			$rate_bps = ($size - $orig_length) / ($timecalled - $now);
-			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
-			$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
+			return if ($percent - $lastpercent) < 1;
 		}
-		logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
-			$size / 1024.0 / 1024.0, 
-			$file_len / 1024.0 / 1024.0,
-			$rate,
-			$percent,
-			$time,
-		;
+		$lastpercent = $percent;
+		if ( $opt->{hash} ) {
+			logger '#';
+		} else {
+			# download rates in bytes per second and time remaining
+			my $rate_bps;
+			my $rate;
+			my $time;
+			my $timecalled = time();
+			if ($timecalled - $now < 1) {
+				$rate = '-----kbps';
+				$time = '--:--:--';
+			} else {
+				$rate_bps = ($size - $orig_length) / ($timecalled - $now);
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
+			}
+			logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
+				$size / 1024.0 / 1024.0, 
+				$file_len / 1024.0 / 1024.0,
+				$rate,
+				$percent,
+				$time,
+			;
+		}
 	};
 
 	my $callback_memory = sub {
@@ -1163,26 +1172,34 @@ sub download_block {
 			$file_len = $res->header("Content-Length") if ! defined $file_len;
 			# Download percent
 			$percent = 100.0 * $size / $file_len;
-			return if ($percent - $lastpercent) < 0.1;
-			$lastpercent = $percent;
-			# Block length
-			$file_len = $res->header("Content-Length");
-			if ($timecalled - $now < 0.1) {
-				$rate = '-----kbps';
-				$time = '--:--:--';
+			if ( not $opt->{hash} ) {
+				return if ($percent - $lastpercent) < 0.1;
 			} else {
-				$rate_bps = $size / ($timecalled - $now);
-				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps );
-				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
+				return if ($percent - $lastpercent) < 1;
 			}
-			# time remaining
-			logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
-				$size / 1024.0 / 1024.0,
-				$file_len / 1024.0 / 1024.0,
-				$rate,
-				$percent,
-				$time,
-			;
+			$lastpercent = $percent;
+			if ( $opt->{hash} ) {
+				logger '#';
+			} else {
+				# Block length
+				$file_len = $res->header("Content-Length");
+				if ($timecalled - $now < 0.1) {
+					$rate = '-----kbps';
+					$time = '--:--:--';
+				} else {
+					$rate_bps = $size / ($timecalled - $now);
+					$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps );
+					$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
+				}
+				# time remaining
+				logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r", 
+					$size / 1024.0 / 1024.0,
+					$file_len / 1024.0 / 1024.0,
+					$rate,
+					$percent,
+					$time,
+				;
+			}
 		# Just used simple for if we cannot determine content length
 		} else {
 			if ($timecalled - $now < 0.1) {
@@ -1196,7 +1213,7 @@ sub download_block {
 
 	# send request
 	logger "\nINFO: Downloading range ${start}-${end}\n" if $opt->{verbose};
-	logger "\r                              \r";
+	logger "\r                              \r" if not $opt->{hash};
 	my $res;
 
 	# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
@@ -6258,7 +6275,7 @@ sub get {
 		if ( $opt->{stdout} || $opt->{nowrite} || stat($prog->{filepart})->size < ($moov_length+$mdat_start+1024) ) {
 			# get moov chunk into memory
 			$moovdata = main::download_block( undef, $url_2, $ua, $moov_start, (${download_len}-1) );
-
+			main::logger "                                                                                                         \r" if $opt->{hash};
 			# Create new udta atom with child atoms for metadata
 			my $udta_new = create_qt_atom('udta',
 				create_qt_atom( chr(0xa9).'nam', $prog->{name}.' - '.$prog->{episode}, 'string' ).
@@ -6339,7 +6356,7 @@ sub get {
 		}
 		# Get block from URL and append to $prog->{filepart}
 		if ( main::download_block($prog->{filepart}, $url_2, $ua, $s, $e, $download_len, $fh ) ) {
-			main::logger "ERROR: Could not download block $s - $e from $prog->{filepart}\n\n";
+			main::logger "\rERROR: Could not download block $s - $e from $prog->{filepart}\n\n";
 			return 'retry';
 		}
 	}
@@ -6348,7 +6365,7 @@ sub get {
 	my $end_time = time() + 0.0001;
 
 	# Calculate average speed, duration and total bytes downloaded
-	main::logger sprintf("INFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+	main::logger sprintf("\rINFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
 		($moov_start - 1 - $restart_offset) / (1024.0 * 1024.0),
 		sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
 		( $moov_start - 1 - $restart_offset ) / ($end_time - $start_time) / 1024.0 * 8.0, 
@@ -7227,7 +7244,7 @@ sub get {
 	my $fh = main::open_file_append($prog->{filepart});
 
 	if ( main::download_block($prog->{filepart}, $url, $ua, $start, undef, undef, $fh) != 0 ) {
-		main::logger "ERROR: Download failed\n";
+		main::logger "\rERROR: Download failed\n";
 		return 'next';
 	} else {
 		# end marker
@@ -7235,7 +7252,7 @@ sub get {
 		# Final file size
 		my $size = stat($prog->{filepart})->size;
 		# Calculate average speed, duration and total bytes downloaded
-		main::logger sprintf("INFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+		main::logger sprintf("\rINFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
 			($size - $start) / (1024.0 * 1024.0),
 			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
 			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0, 
@@ -7550,6 +7567,8 @@ sub save {
 	my $pvr = shift;
 	my $name = shift;
 	my @options = @_;
+	# Sanitize name
+	$name = StringUtils::sanitize_path( $name );
 	# Make dir if not existing
 	mkpath $vars{pvr_dir} if ! -d $vars{pvr_dir};
 	main::logger "INFO: Saving PVR search '$name':\n";
