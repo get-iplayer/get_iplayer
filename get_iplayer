@@ -7420,7 +7420,7 @@ sub queue {
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
 		if ( $opt_cmdline->{type} && $opt_cmdline->{type} !~ ',' ) {
-			$pvr->add( "ONCE: ($opt_cmdline->{pid})" ) if ! main::check_download_history( $opt_cmdline->{pid} );
+			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ! main::check_download_history( $opt_cmdline->{pid} );
 		} else {
 			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
 			return 1;
@@ -7433,7 +7433,7 @@ sub queue {
 		for my $this ( @matches ) {
 			$opt_cmdline->{pid} = $this->{pid};
 			$opt_cmdline->{type} = $this->{type};
-			$pvr->add( $this->substitute('ONCE: <name> - <episode> (<pid>)') );
+			$pvr->add( $this->substitute('ONCE_<name> - <episode> <pid>') );
 		}
 
 	}
