@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.15';
+my $VERSION = '0.16';
 
 # Features:
 # * Search for progs
@@ -21,7 +21,7 @@ my $VERSION = '0.15';
 # Installation as Apache CGI script (not the preferred method):
 # * By default this will run as apache user and save all settings files in /var/www/.get_iplayer
 # * Change the $get_iplayer variable to tell this script where get_iplayer can be found (may need to set $HOME also)
-# * Ensure that the output dir ($home) is writable by apache user
+# * Ensure that the output dir is writable by apache user
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
 #
@@ -36,6 +36,8 @@ my $VERSION = '0.15';
 # Caveats:
 # * Sometimes takes a while to load page while refreshing caches
 # * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
+# * If a boolean param is in the cookies then it overrides the unchecked status on the form regardless
+# * rtmpdump has way too much debug output to STDOUT so 'Run PVR' locks up browser after a while.
 #
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
@@ -59,7 +61,7 @@ my $se = *STDERR;
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
 my $get_iplayer = '/usr/bin/get_iplayer';
-my $get_iplayer_cmd = "export HOME=$home; $get_iplayer";
+my $get_iplayer_cmd;
 
 my %prog;
 my @pids;
@@ -121,6 +123,7 @@ my %nextpages = (
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'			=> \&pvr_add,
+	'pvr_run'			=> \&pvr_run,
 	'show_info'			=> \&show_info,
 	'flush'				=> \&flush,
 );
@@ -132,7 +135,8 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
-my @order_adv_opts = qw/ OUTPUT VMODE AMODE VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL OUTPUT VMODE AMODE PROXY HIDE SINCE /;
+my @order_settings = qw/ SCRIPTPATH HOMEDIR /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
@@ -212,6 +216,34 @@ my @nosearch_params = qw/ /;
 		save	=> 1,
 	};
 	
+	$opt->{PROXY} = {
+		title	=> 'Web Proxy URL', # Title
+		webvar	=> 'PROXY', # webvar
+		optkey	=> 'proxy', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
+	$opt->{SCRIPTPATH} = {
+		title	=> 'get_iplayer Script Location', # Title
+		webvar	=> 'SCRIPTPATH', # webvar
+		type	=> 'text', # type
+		default	=> $get_iplayer, # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
+	$opt->{HOMEDIR} = {
+		title	=> 'get_iplayer Home Folder', # Title
+		webvar	=> 'HOMEDIR', # webvar
+		type	=> 'text', # type
+		default	=> $home, # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
 	$opt->{AMODE} = {
 		title	=> 'Audio Download Modes', # Title
 		webvar	=> 'AMODE', # webvar
@@ -276,7 +308,7 @@ my @nosearch_params = qw/ /;
 		title	=> 'Hide Downloaded', # Title
 		webvar	=> 'HIDE', # webvar
 		optkey	=> 'hide', # option
-		type	=> 'boolean', # type
+		type	=> 'radioboolean', # type
 		default	=> '0', # value
 		save	=> 1,
 	};
@@ -404,7 +436,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 							s/\s+$//;
 						}
 						$request{lc $type} = $val;
-						print "REQUEST HEADER: $type: $val\n";# if $DEBUG;
+						print "REQUEST HEADER: $type: $val\n" if $DEBUG;
 					# POST data
 					} elsif (/^$/) {
 						read( $client, $request{CONTENT}, $request{'content-length'} ) if defined $request{'content-length'};
@@ -430,34 +462,13 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				$data{"_method"} = "ERROR";
 			}
 
-			# Serve image file
-#			my $localfile = $home.$request{URL};
-#	
-#			# Send Response
-#			if (open(FILE, "<$localfile")) {
-#				print $client "HTTP/1.0 200 OK", Socket::CRLF;
-#				print $client "Content-type: text/html", Socket::CRLF;
-#				print $client Socket::CRLF;
-#				my $buffer;
-#				while (read(FILE, $buffer, 4096)) {
-#					print $client $buffer;
-#				}
-#				$data{"_status"} = "200";
-#			} else {
-#				print $client "HTTP/1.0 404 Not Found", Socket::CRLF;
-#				print $client Socket::CRLF;
-#				print $client "<html><body>404 Not Found</body></html>";
-#				$data{"_status"} = "404";
-#			}
-#			close(FILE);
-
 			# Log Request
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|download|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|download|runpvr|)\/?$/ ) {
 				# remove any vars that might affect the CGI
-				%ENV = ();
+				#%ENV = ();
 				@ARGV = ();
 				# Setup CGI http vars
 				print $se "QUERY_STRING = $query_string\n" if defined $query_string;
@@ -502,20 +513,6 @@ sub cleanup {
 
 
 
-sub parse_form {
-	my $data = $_[0];
-	my %data;
-	for (split /&/, $data) {
-		my ($key, $val) = split /=/;
-		$val =~ s/\+/ /g;
-		$val =~ s/%(..)/chr(hex($1))/eg;
-		$data{$key} = $val;
-	}
-	return %data;
-}
-
-
-
 sub parse_post_form_string {
 	my $form = $_[0];
 	my @data;
@@ -555,6 +552,13 @@ sub run_cgi {
 
 	# Process All options
 	process_params();
+
+	# Set script path dir and home dir
+	$home = $opt->{HOMEDIR}->{current};
+	# Set HOME env var for forked processes
+	$ENV{HOME} = $home;
+	# Set command path
+	$get_iplayer_cmd = $opt->{SCRIPTPATH}->{current};
 
 	# Stream
 	if ( $request_url =~ /^\/?stream/i ) {
@@ -613,24 +617,27 @@ sub run_cgi {
 
 
 
+sub pvr_run {
+	print $se "INFO: Starting Manual PVR Run\n";
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+	my $cmd = "$get_iplayer_cmd --nopurge --nocopyright --hash --pvr 2>&1";
+	print $se "DEBUG: running: $cmd\n";
+	print $fh '<pre>';
+	system $cmd;
+	print $fh '</pre>';
+}
+
+
+
 sub stream_mov {
 	my $pid = shift;
 
 	print $se "INFO: Start Streaming $pid to browser\n";
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', '--vmode=iphone', '--amode=iphone', '--stdout', '--nowrite', "--pid=$pid" );
+	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
+	system @cmd;
 
-	#STDOUT->fdopen( $fh, 'w' ) or die $!;
-	my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --vmode=iphone --stdout --nowrite --pid '$pid'";
-	print $se "DEBUG: running: $cmd\n";
-
-	my $buffer;
-	open (STREAM, "$cmd |") or die $!;
-
-	# Openn streaming command and redirect output to browser socket
-	while (read(STREAM, $buffer, 102400)) {
-		print $fh $buffer;
-		print $se '.';
-	}
-	
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
 	return 0;
@@ -864,7 +871,7 @@ sub pvr_queue {
 		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
-		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;		
+		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
 		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")' 2>&1";
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
@@ -884,13 +891,7 @@ sub build_cmd_options_urlencoded {
 		# skip non-options
 		next if $opt->{$_}->{optkey} eq '' || not defined $opt->{$_}->{optkey} || not $opt->{$_}->{optkey};
 		my $value = $opt->{$_}->{current};
-		# If this is a boolean option
-		if ( $opt->{$_}->{type} eq 'boolean' ) {
-			push @options, CGI::escape("$opt->{$_}->{optkey}") if $value;
-		# Normal option with value
-		} else {
-			push @options, CGI::escape("$opt->{$_}->{optkey}=$value") if $value ne '';
-		}
+		push @options, CGI::escape("$opt->{$_}->{optkey}=$value") if $value ne '';
 	}
 
 	# Return option with urlencoded values
@@ -946,17 +947,7 @@ sub pvr_add {
 }
 
 
-# Build templated HTML for an option specified as
-# '<Option text>', <webvar>, <get_iplayer opt>, 'boolean', 	'status: 1|0'
-# '<Option text>', <webvar>, <get_iplayer opt>, 'multiboolean',	<hashref 'order => value' >, <hashref 'values => label'>, <hash ref: 'value => status'>
-# '<Option text>', <webvar>, <get_iplayer opt>, 'popup',	'<default>', \%<hash for multi or popup values>
-# '<Option text>', <webvar>, <get_iplayer opt>, 'text',	'<default>', \%<hash for multi or popup values>
-# '<Option text>', <webvar>, <get_iplayer opt>, 'filebrowse',	'<default>', \%<hash for multi or popup values>
-# e.g.
-# 'Programme type', 'PROGTYPES', '--types', 'multiboolean', \%{ tv => 1 }, \%{ tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' }
-# 'Output Folder', 'OUTDIR', '--output', 'filebrowse', ''
-# 'Hide Downloaded Programmes', 'HIDE', '--hide', 'boolean'
-# 'Programme type', 'PROGTYPES', '--types', 'multiboolean', { 1=>tv, 2=>radio, 3=>podcast, 4=>itv}, { tv => 'BBC TV', radio => 'BBC Radio', podcast => 'BBC Podcast', itv => 'ITV' } , { tv => 1 }
+# Build templated HTML for an option specified by passed hashref
 sub build_option_html {
 	my $arg = shift;
 	
@@ -989,9 +980,23 @@ sub build_option_html {
 				-name		=> $webvar,
 				-id		=> "option_$webvar",
 				-label		=> '',
-				-value 		=> 1,
+				#-value 		=> 1,
 				-checked	=> $current,
 				-override	=> 1,
+			)
+		);
+
+
+	# On/Off
+	} elsif ( $type eq 'radioboolean' ) {
+		push @html, th( { -class => 'options' }, $title ).
+		td( { -class => 'options' },
+			radio_group(
+				-class		=> 'options',
+				-name		=> $webvar,
+				-values		=> { 0=>'Off' , 1=>'On' },
+				-default	=> $current,
+				-override	=> 1,				
 			)
 		);
 
@@ -1063,16 +1068,14 @@ sub build_option_html {
 
 sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
-	my $out;
-
-	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist";
-	print $fh p("Command: $cmd");
-	my $cmdout = `$cmd`;
-	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+	print $se "INFO: Flushing\n";
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist --search='no search just flush' 2>&1";
+	print $se "DEBUG: running: $cmd\n";
+	print $fh '<pre>';
+	system $cmd;
+	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
-	print $fh pre($out);
-
-	return $out;
 }
 
 
@@ -1194,9 +1197,16 @@ sub search_progs {
 	for ( @order_basic_opts, @hidden_opts ) {
 		push @optrows_basic, build_option_html( $opt->{$_} );
 	}
-	# Build Advanced options tables
+	# Build Advanced options table cells
 	my @optrows_advanced;
 	for ( @order_adv_opts ) {
+		push @optrows_advanced, build_option_html( $opt->{$_} );
+	}
+	# Add 'Settings' title
+	push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_outer' }, 'Settings' ) );
+	# Build Settings table cells
+	my @optrows_settings;
+	for ( @order_settings ) {
 		push @optrows_advanced, build_option_html( $opt->{$_} );
 	}
 	
@@ -1494,7 +1504,7 @@ sub http_headers {
 		-cookie		=> [@cookies],
 	);
 
-	print $se "\nHEADERS:\n$headers\n"; #if $DEBUG;
+	print $se "\nHEADERS:\n$headers\n" if $DEBUG;
 	print $fh $headers;
 }
 
@@ -1547,6 +1557,14 @@ sub form_header {
 				-title => 'PVR Searches',
 				-src => "$icons_base_url/pie2.png",
 				-onClick  => "formheader.NEXTPAGE.value='pvr_list'; submit()",
+			}),
+			# Run PVR
+			image_button({
+				-class => 'icons',
+				-alt => 'Run PVR',
+				-title => 'Run PVR',
+				-src => "$icons_base_url/pie2.png",
+				-onClick  => "formheader.NEXTPAGE.value='pvr_run'; submit()",
 			}),
 			# Open the help page in a different window
 			img({
