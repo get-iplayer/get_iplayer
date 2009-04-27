@@ -38,6 +38,7 @@ my $VERSION = '0.16';
 # * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
 # * If a boolean param is in the cookies then it overrides the unchecked status on the form regardless
 # * rtmpdump has way too much debug output to STDOUT so 'Run PVR' locks up browser after a while.
+# * When using the stream or download links directly, cookies are not sent and the settings are not applied such as SCRIPTPATH
 #
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
@@ -1264,42 +1265,24 @@ sub search_progs {
 	);
 
 	# Render options actions
-	print $fh table( { -class=>'options_outer' },
-		Tr( { -class=>'options_outer' },
-			td( { -class=>'options_outer' }, [
-				# Search button (set PAGENO=1)
-				button(
-					-class		=> 'options_outer',
-					-name		=> "Search",
-					-onClick 	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a( { -class=>'action', -onClick  => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()", },
+					'Search'
 				),
-				# Flush button
-				button(
-					-class		=> 'options_outer',
-					-name		=> 'Refresh Caches (takes a while)',
-					-onClick 	=> "form.NEXTPAGE.value='flush'; submit()",
+				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()", },
+					'Queue Selected for Download'
 				),
-				# Queue Selected for Download button
-				button(
-					-class		=> 'options_outer',
-					-name		=> 'Queue Selected for Download',
-					-onClick 	=> "form.NEXTPAGE.value='pvr_queue'; submit()",
+				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()", },
+					'Add Current Search to PVR'
 				),
-				# Add Current Search to PVR
-				button(
-					-class		=> 'options_outer',
-					-name		=> 'Add Current Search to PVR',
-					-onClick 	=> "form.NEXTPAGE.value='pvr_add'; submit()",
+				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='flush'; form.submit()", },
+					'Refresh Cache'
 				),
-				# Add Current Search to PVR
-				#reset(
-				#	-class		=> 'options_outer',
-				#	-name		=> 'Reset',
-				#),
 			]),
 		),
 	);
-
 
 	print $fh @pagetrail;
 	print $fh table( {-class=>'search' }, @html );
@@ -1533,58 +1516,42 @@ sub form_header {
 	
 	print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
 		a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
-			img({
-				-class=>'title',
-				-src=>"$icons_base_url/logo_white_131x28.gif",
-				-alt=>'get_iplayer Manager',
-			} )
+			label({ -class=>'title' },
+				'get_iplayer Manager',
+			)
 		)
 	)));
 
-	print $fh table({ -class=>'icons' },
-		Tr( { -class=>'icons' }, td( { -class=>'icons' }, [
-			img({
-				-class => 'icons',
-				-alt => 'Back',
-				-title => 'Back',
-				-src => "$icons_base_url/back.png",
-				-onClick  => "history.back()",
-			}),
-			# go to search page
-			image_button({
-				-class => 'icons',
-				-alt => 'Search',
-				-title => 'Programme Search',
-				-src => "$icons_base_url/index.png",
-				-onClick  => "formheader.NEXTPAGE.value='search_progs'; submit()",
-			}),
-			# go back to parent page - set no params
-			image_button({
-				-class => 'icons',
-				-alt => 'PVR Searches',
-				-title => 'PVR Searches',
-				-src => "$icons_base_url/pie2.png",
-				-onClick  => "formheader.NEXTPAGE.value='pvr_list'; submit()",
-			}),
-			# Run PVR
-			image_button({
-				-class => 'icons',
-				-alt => 'Run PVR',
-				-title => 'Run PVR',
-				-src => "$icons_base_url/pie2.png",
-				-onClick  => "formheader.NEXTPAGE.value='pvr_run'; submit()",
-			}),
-			# Open the help page in a different window
-			img({
-				-class => 'icons',
-				-alt => 'Help',
-				-title => 'Help',
-				-src => "$icons_base_url/unknown.png",
-				-onClick  => "parent.location='http://linuxcentre.net/getiplayer/documentation'",
-			}),
-		] )	
-	) );
-	
+	print $fh div( { -class=>'nav' },
+		ul( { -class=>'nav' },
+			li( { -class=>'nav' }, [
+				a( { -class=>'nav', -href=>"/" },
+					img({
+						-class => 'nav',
+						-width => 99,
+						-height => 32,
+						-src => "http://www.bbc.co.uk/iplayer/img/iplayer_logo.gif",
+					}),
+				),
+				a( { -class=>'nav', -onClick  => "history.back()", },
+					'Back'
+				),
+				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='search_progs'; formheader.submit()", },
+					'Search'
+				),
+				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_list'; formheader.submit()", },
+					'PVR List'
+				),
+				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()", },
+					'Run PVR'
+				),
+				a( { -class=>'nav', -onClick => "parent.location='http://linuxcentre.net/getiplayer/documentation'", },
+					'Help'
+				),
+			]),
+		),
+	);
+
 	print $fh hidden( -name => "NEXTPAGE", -value => 'search_progs', -override => 1 );
 	print $fh $cgi->end_form();
 	
@@ -1739,18 +1706,21 @@ sub insert_stylesheet {
 
 	<STYLE type="text/css">
 	
-	BODY			{ color: #000; background: white; font-size: 90%; font-family: verdana, sans-serif;}
+	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
+	INPUT			{ border: 0 none; background: #ddd; }
 
-	TABLE.title 		{ font-size: 130%; border-spacing: 0px; padding: 0px; }
-	A.title			{ color: #F55; text-decoration: none; }
-	
-	TABLE.icons		{ font-size: 100%; border-spacing: 10px 0px; padding: 0px; }
-	IMG.icons		{ font-size: 100%; }
-	INPUT.icons		{ font-size: 100%; }
-	TD.icons		{ border: 1px solid #666666; background: #DDD; }
-	TD.icons:hover		{ background: #BBB; }
-	
+	TABLE.title 		{ font-size: 150%; border-spacing: 0px; padding: 0px; }
+	A.title			{ color: #F54997; text-decoration: none; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
+
+	/* Nav bar */
+	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	LI.nav			{ padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 16.2%; }
+	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
+	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
+	A.nav:hover		{ color: #ADADAD; text-decoration: none; }
+
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
 	INPUT.header		{ font-size: 80%; } 
 	SELECT.header		{ font-size: 80%; } 
@@ -1777,37 +1747,44 @@ sub insert_stylesheet {
 	TH.options_outer	{ }
 	TD.options_outer	{ }
 	LABEL.options_outer	{ font-weight: bold; font-size: 110%; color: #4A4; } 
-	INPUT.options_outer	{ font-size: 100%; } 
-	SELECT.options_outer	{ font-size: 100%; } 
 	
-	TABLE.pagetrail		{ font-size: 80%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
-	TD.pagetrail:hover	{ background: #CCC; }
-	#centered		{ height:20px; margin:0px auto 0; position: relative; }
-	LABEL.pagetrail		{ Color: #009; }
-	LABEL.pagetrail-current	{ Color: #900; }
+	/* Action bar */
+	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	LI.action		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 24.5%; }
+	A.action		{ display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
+	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
+	A.action:hover		{ color: #ADADAD; text-decoration: none; }
 
-	TABLE.colselect		{ font-size: 70%; padding: 0; border-spacing: 0px; }
+	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
+	TD.pagetrail:hover	{ text-decoration: underline; }
+	#centered		{ height:20px; margin:0px auto 0; position: relative; }
+	LABEL.pagetrail		{ Color: #FFF; }
+	LABEL.pagetrail-current	{ Color: #F54997; }
+
+	TABLE.colselect		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; }
 	TR.colselect		{ text-align: left; }
 	TH.colselect		{ font-weight: bold; }
 	INPUT.colselect		{ font-size: 70%; }
 	LABEL.colselect		{ font-size: 70%; }
 	
-	TABLE.search		{ font-size: 70%; border-spacing: 2px; padding: 0; width: 100%; }
+	TABLE.search		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
 	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
-	TR.search		{ background: #DDD; }
-	TR.search:hover		{ background: #CCC; }
-	TH.search		{ Color: white; text-align: center; background: #999; text-align: center; }
+	TR.search		{ background: #444; }
+	TR.search:hover		{ background: #555; }
+	TH.search		{ Color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.search		{ text-align: left; }
-	A.search		{ text-decoration: none; }
+	A.search		{ Color: #FFF; text-decoration: none; }
 	LABEL.search		{ text-decoration: none; }
-	INPUT.search		{ font-size: 70%; background: #EEE; }
-	LABEL.sorted            { Color: #cfc; }
-	LABEL.unsorted          { Color: #fff; }
-	LABEL.sorted_reverse    { Color: #fcc; }
+	INPUT.search		{ font-size: 70%; background: #DDD; }
+	LABEL.sorted            { Color: #CFC; }
+	LABEL.unsorted          { Color: #FFF; }
+	LABEL.sorted_reverse    { Color: #FCC; }
 
-	TABLE.info		{ font-size: 70%; border-spacing: 2px; padding: 0; width: 100%; }
-	TR.info			{ background: #EEE; }
-	TH.info			{ Color: white; text-align: center; background: #999; text-align: center; }
+	TABLE.info		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; }
+	TR.info			{ background: #444; }
+	TR.info:hover		{ background: #555; }
+	TH.info			{ Color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.info			{ text-align: left; }
 
 	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
