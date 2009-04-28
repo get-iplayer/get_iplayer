@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.69;
+my $version = 1.70;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -50,7 +50,6 @@ my $version = 1.69;
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * Create template parsers for each BBC iPlayer CDN as the parsing does appear to be similar
-# * Scrape and index Channel4 Catch-up website for programme data
 # * Add Channel4 subtitles stream type into metadata
 #
 # Known Issues:
@@ -4031,7 +4030,7 @@ sub download {
 	if ( $mode eq 'n95' && (! main::exists_in_path($vlc)) ) {
 		main::logger "\nWARNING: Required $vlc does not exist\n";
 		return 'next';
-	}		
+	}
 	# if rtmpdump does not exist
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
 		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
@@ -5158,7 +5157,7 @@ sub download {
 	# Check for mplayer (required)
 	if (! main::exists_in_path($mplayer)) {
 		main::logger "ERROR: Required $mplayer does not exist, skipping\n";
-		return 21;
+		return 'next';
 	}
 
 	%streamdata = %{ $prog->get_stream_data( undef, 'itv') };
@@ -5388,16 +5387,170 @@ sub get_metadata {
 
 
 
-# Usage: Programme::itv->get_links( \%prog, 'itv' );
+# Usage: Programme::tv->get_links( \%prog, 'ch4' );
 # Uses: %{ channels() }, \%prog
 sub get_links {
 	shift; # ignore obj ref
 	my $progref = shift;
 	my $prog_type = shift;
-	my %channels = %{ channels() };
+	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
+	my %channels = %{ main::progclass($prog_type)->channels() };
 
 	# page scraping here
+	# GET http://www.channel4.com/programmes/catch-up/ | grep -P 'href="\/programmes\/.+?\/catch-up\">'
 
+	my $xml;
+	my $feed_data;
+	my $res;
+	main::logger "INFO: Getting $prog_type Programmes List\n";
+
+	# Setup User agent
+	my $ua = main::create_ua('desktop');
+
+	my $baseurl = 'http://www.channel4.com';
+
+	my $url = $baseurl.'/programmes/catch-up/';
+	$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get series list from from channel4 site\n");
+
+	# Hash of <name> => <uri>;
+	my %names;
+	# <li><a href="/programmes/time-team/catch-up">Time Team</a></li>
+	while ( $xml =~ m{<li><a href="(/programmes/.+?/catch-up)">(.+?)</a></li>}sg ) {
+		$names{$2} = $1;
+		main::logger "DEBUG: Series '$2', URI: $1\n" if $opt->{debug};
+	}
+
+	# Download index feed
+	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
+	for my $name ( keys %names ) {
+
+		my $url = $baseurl.$names{$name};
+		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
+		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
+		decode_entities($xml);
+
+		#<tr>
+		#        <td class="broadcastDetails">
+		#                <ul>
+		#                        <li>Thursday</li>
+		#                        <li>05 February 2009</li>
+		#                        <li><span class="broadCastTime">7:59 PM</span></li>
+		#                        <li><span class="channel">Channel 4</span></li>
+		#                </ul>
+		#        </td>
+		#        <td>
+		#                <div class="episodeDetails">
+		#                        <h3>
+		#                                <span class="episodeNumber">Series 6 Episode 1</span>
+		#                                <span class="episodeTitle">Kathleen and Mary</span>
+		#                        </h3>
+		#                        <p>Cleaning company manager Mary Gibson has the body of a 30-something
+		#                           but her face tells a very different story. A lifetime of sunbeds and
+		#                           smoking have piled on the years, leaving Mary with no choice&hellip;</p>
+		#                        <p class="guidance">Contains scenes of surgery</p>
+		#                        <ul class="jumpPoints lgIcn">
+		#                                <li><a href="/programmes/10-years-younger/episode-guide/series-6/episode-1" class="episodesLink">Episode Guide</a></li>
+		#                        </ul>
+		#                </div>
+		#        </td>
+		#        <td>
+		#                5 days left
+		#        </td>
+		#        <td>
+		#                <a class="playLink hide" href="#2870776"><span>Play</span></a>
+		#                <span class="playingLabel hide">Now</span>
+		#                <span class="playingLabel hide">Playing</span>
+		#                <!-- Image for this video clip when it's not playing -->
+		#                <input type="hidden" value="/assets/programmes/images/10-years-younger/series-6/episode-1/10-years-younger-s6e1_625x352.jpg"/>
+		#        </td>
+		#</tr>
+
+		# Parse XML
+
+		# get list of entries within <entry> </entry> tags
+		my @entries = split /broadcastDetails/, $xml;
+		# Discard first element == header
+		shift @entries;
+
+		main::logger "INFO: Got ".($#entries + 1)." episodes\n" if $opt->{verbose};
+
+		foreach my $entry (@entries) {
+			my ( $episode, $desc, $pid, $available, $expiry, $channel, $duration, $thumbnail, $versions, $guidance );
+
+			$entry =~ s/[\r\n]/ /g;
+			$entry =~ s/\s+/ /g;
+
+			#main::logger "DEBUG: Entry = $entry\n" if $opt->{debug};
+
+			# <a class="playLink hide" href="#2870776"><span>Play</span></a>
+			$pid = $1 if $entry =~ m{<a\s+class="playLink hide"\s+href="#(\d+)"><span>Play</span></a>}i;
+
+			# Date broadcast
+			# <td class="broadcastDetails"> <ul> <li>Sunday</li> <li>26 April 2009</li> <li> <span class="broadCastTime">10:00 AM</span> </li>
+			$available = "$1 $2" if $entry =~ m{>\s*<ul>\s*<li>.+?</li>\s*<li>(.+?)</li>\s*<li>\s*<span class="broadCastTime">(.+?)</span>}i;
+
+			#<td> 5 days left </td>
+			#$expiry = $1 if $entry =~ m{<td>\s*(\d+\s+\w+\s+left)\s*</td>}i;
+
+			# parse episode and s??e??
+			$episode = $1 if $entry =~ m{<span\s+class=\"episodeTitle\">\s*(.*?)\s*<\/span>}i;
+			$episode = '' if $episode eq $name;
+			$episode .= sprintf( ' s%02de%02d', $1, $2 ) if $entry =~ m{<span\s+class="episodeNumber">\s*Series\s+(\d+)\s+Episode\s+(\d+)\s*</span>}i;
+			$episode .= " $1" if $entry =~ m{<span\s+class="episodeNumber">\s*(Series\s+\d+)\s*</span>}i;
+			$episode =~ s/(^\s+|\s+$)//g;
+			$episode = $available if not $episode;
+
+			# <div class="episodeDetails"> .... <p> description </p>....<a class="playLink hide"
+			$desc = $1 if $entry =~ m{<div\s+class="episodeDetails">.+?<p>(.*?)</p>};
+			$desc = '' if $desc =~ /<span/i;
+			# Remove unwanted html tags and extra whitespace
+			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
+			$desc =~ s/\s+/ /g;
+
+			# <span class="channel">Channel 4</span>
+			$channel =  $1 if $entry =~ m{<span\s+class="channel">\s*(.+?)\s*</span>}i;
+
+			# This is not the availability!
+			# <updated>2008-06-22T05:01:49Z</updated>
+			#$available = Programme::get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+
+			# Merge and Skip if this pid is a duplicate
+			if ( defined $progref->{$pid} ) {
+				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+				next;
+			}
+
+			# Set guidance based on category
+			# <p class="guidance">Contains scenes of surgery</p>
+			$guidance = $1 if $entry =~ m{<p\s+class="guidance">(.+?)</p>};
+
+			# Thumbnail
+			$thumbnail = $1 if $entry =~ m{<input\s+type="hidden"\s+value="(/assets/programmes/images/.+?.jpg)"/>};
+			# use a smaller size
+			$thumbnail =~ s/625x352/145x82/g;
+
+			main::logger "DEBUG: pid='$pid',name='$name', episode='$episode', channel='$channel', url='${url}'\n" if $opt->{debug};
+
+			# build data structure
+			$progref->{$pid} = main::progclass($prog_type)->new(
+				'pid'		=> $pid,
+				'name'		=> $name,
+				'versions'	=> 'default',
+				'episode'	=> $episode,
+				'desc'		=> $desc,
+				'guidance'	=> $guidance,
+				'available'	=> $available,
+				#'expiry'	=> $expiry,
+				'duration'	=> 'Unknown',
+				'thumbnail'	=> $baseurl.$thumbnail,
+				'channel'	=> $channel,
+				'categories'	=> 'tv',
+				'type'		=> $prog_type,
+				'web'		=> "${url}#${pid}",
+			);
+		}
+	}
+	main::logger "\n";
 	return 0;
 }
 
@@ -5410,10 +5563,10 @@ sub download {
 	# if subsonly required then skip
 	return 'skip' if $opt->{subsonly};
 
-	# Check for rtmpdump (required)
-	if (! main::exists_in_path($rtmpdump)) {
-		main::logger "ERROR: Required $rtmpdump does not exist, skipping\n";
-		return 21;
+	# if rtmpdump does not exist
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
+		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+		return 'next';
 	}
 
 	%streamdata = %{ $prog->get_stream_data( undef, 'flashnormal') };
