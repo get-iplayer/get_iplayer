@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.68;
+my $version = 1.69;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -50,12 +50,15 @@ my $version = 1.68;
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * Create template parsers for each BBC iPlayer CDN as the parsing does appear to be similar
-
+# * Scrape and index Channel4 Catch-up website for programme data
+# * Add Channel4 subtitles stream type into metadata
+#
 # Known Issues:
 # * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
 # * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
 # * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
+# * Channel4 downloads require rtmpdump-v1.5
 
 use Env qw[@PATH];
 use Fcntl;
@@ -87,6 +90,7 @@ my %prog_types = (
 	radio	=> 'Programme::radio',
 	podcast	=> 'Programme::podcast',
 	itv	=> 'Programme::itv',
+	ch4	=> 'Programme::ch4',
 	hulu	=> 'Programme::hulu',
 );
 
@@ -102,7 +106,7 @@ my %prog_types = (
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <channel>
 #	'categories'	=> <Comma separated list of categories>
-# 	'type'		=> <Type: tv, radio, itv or podcast>
+# 	'type'		=> <Type: tv, radio, itv, ch4 or podcast>
 #	'timeadded'	=> <timestamp when programme was added to cache>
 #	'longname'	=> <Long name (only parsed in stage 1 download)>,
 #	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
@@ -206,7 +210,7 @@ my %opt_format = (
 	thumb		=> [ 1, "thumb", 'Download', '--thumb', "Download Thumbnail image if available"],
 	thumbext	=> [ 1, "thumbext=s", 'Download', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
-	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio,tv,podcast,itv,hulu,all (tv is default)"],
+	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio,tv,podcast,itv,ch4,hulu,all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
@@ -5220,6 +5224,292 @@ sub get_stream_data {
 
 
 
+################### ch4 class #################
+package Programme::ch4;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme';
+
+# Class vars
+sub index_min { return 40001 }
+sub index_max { return 49999 }
+sub channels {
+	return {
+	};
+}
+
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputch4	=> [ 1, "outputch4=s", 'Output', '--outputch4 <dir>', "Download output directory for ch4"],
+	};
+}
+
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	my $prog = shift;
+	return ", $prog->{channel}, $prog->{categories}, $prog->{guidance}";
+}
+
+
+
+# Returns the modes to try for this prog type
+sub modelist {
+	return 'flashnormal';
+}
+
+
+
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+	# extract numerical format - remove surrounding url
+	$prog->{pid} = $1 if $prog->{pid} =~ m{(\d{2,8})};
+}
+
+
+
+# get full episode metadata given pid and ua. Uses two different urls to get data
+sub get_metadata {
+	my $prog = shift;
+	my $ua = shift;
+	my $metadata;
+	my $entry;
+	my ($name, $episode, $episodeno, $seriesno, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
+
+	# Detailed metadata
+	my $prog_metadata_url = 'http://www.channel4.com/services/catchup-availability/asset-info/'; # + <assetno>?<epoch now>
+	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}?".time(), 3, '', '');
+	decode_entities($entry);
+	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+	# Flatten
+	$entry =~ s|[\r\n]||g;
+
+	#<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+	#<Channel4ServiceResult serviceName="Asset Information Service" status="OK" xmlns:ns2="http://domain.catchup.channel4.com/CatchupAvailability">
+	#    <serviceReport returnCode="200">
+	#        <description>OK</description>
+	#    </serviceReport>
+	#    <assetInfo>
+	#        <assetId>CH4_08_02_16_47244016001001_001</assetId>
+	#        <contractId>47244</contractId>
+	#        <brandTitle>Smallville</brandTitle>
+	#        <webSafeBrandTitle>smallville</webSafeBrandTitle>
+	#        <seriesNumber>8</seriesNumber>
+	#        <episodeNumber>16</episodeNumber>
+	#        <episodeTitle>Smallville</episodeTitle>
+	#        <duration>2385</duration>
+	#        <sinceBroadcast>511570</sinceBroadcast>
+	#        <location>CH4_08_02_16_47244016001001_001.mp4</location>
+	#        <subtitlesFileUri></subtitlesFileUri>
+	#        <adverts>
+	#            <targetingUri>http://realmedia.channel4.com/RealMedia/ads/adstream_sx.ads/channel4.newcu/channel4/channel4/c4drama/47244/47244/016/1956465544</targetingUri>
+	#            <breaks>
+	#                <break>
+	#                    <breakOffset>0</breakOffset>
+	#                    <resumeOffset>0</resumeOffset>
+	#                    <data>PRE:x60,x61,x90,x91</data>
+	#                </break>
+	#                <break>
+	#                    <breakOffset>1330020</breakOffset>
+	#                    <resumeOffset>1330020</resumeOffset>
+	#                    <data>CEN:x92,x80,x81,x93</data>
+	#                </break>
+	#            </breaks>
+	#            <parameters></parameters>
+	#        </adverts>
+	#        <uriData>
+	#            <streamUri>rtmpe://securestream.channel4.com/4oD/mp4:assets/CH4_08_02_16_47244016001001_001</streamUri>
+	#            <token>da_b6b5cVaVcPc3dSdqb6abdUavdPaRb8cx-bj9GTZ-eS-lyT-r7rwk9pIowp8svlGqtlFlnn6ksn8sfrtrnrVlfphoqp7sblGq7lyl5nKk5nIr7rgrbqgl8pIoeqGsblG</token>
+	#            <fingerprint>v002</fingerprint>
+	#            <slist>assets/CH4_08_02_16_47244016001001_001</slist>
+	#        </uriData>
+	#    </assetInfo>
+	#</Channel4ServiceResult>
+
+	$name = $1 if $entry =~ m{<brandTitle>(.+?)</brandTitle>};
+
+	# episode
+	$episode = $1 if $entry =~ m{<episodeTitle>(.+?)</episodeTitle>};
+	$seriesno = $1 if $entry =~ m{<seriesNumber>(.+?)</seriesNumber>};
+	$episodeno = $1 if $entry =~ m{<episodeNumber>(.+?)</episodeNumber>};
+	$episode = '' if $episode eq $name;
+	$episode .= sprintf('s%02de%02d', $seriesno, $episodeno ) if $seriesno && $episodeno;
+
+	$duration = $1 if $entry =~ m{<duration>(.+?)</duration>};
+	#$ = $1 if $entry =~ m{<>(.+?)</>};
+	#$ = $1 if $entry =~ m{<>(.+?)</>};
+	#$ = $1 if $entry =~ m{<>(.+?)</>};
+
+	#$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	#$guidance = $1 if $entry =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
+	#$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+	#$thumbnail = $1 if $entry =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
+
+	# Fill in from cache if not got from metadata
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode};
+	$prog->{type}		= $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{available}	= $available || $prog->{available};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions || $prog->{versions};
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	# just use the default modelist
+	$prog->{modes}		= 'default: '.$prog->modelist();
+	return 0;
+}
+
+
+
+# Usage: Programme::itv->get_links( \%prog, 'itv' );
+# Uses: %{ channels() }, \%prog
+sub get_links {
+	shift; # ignore obj ref
+	my $progref = shift;
+	my $prog_type = shift;
+	my %channels = %{ channels() };
+
+	# page scraping here
+
+	return 0;
+}
+
+
+
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my %streamdata;
+
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
+
+	# Check for rtmpdump (required)
+	if (! main::exists_in_path($rtmpdump)) {
+		main::logger "ERROR: Required $rtmpdump does not exist, skipping\n";
+		return 21;
+	}
+
+	%streamdata = %{ $prog->get_stream_data( undef, 'flashnormal') };
+
+	# Get extension from streamdata if defined and raw not specified
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	$prog->{ext} = 'flv' if $opt->{raw};
+	
+	my $url = $prog->{streams}->{$version}->{$mode}->{streamurl};
+
+	if ( not $url ) {
+		main::logger "WARNING: No programme stream URL was found, skipping\n";
+		return 'skip';
+	}
+	
+	# Determine the correct filenames for this download
+	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>" );
+
+	# Skip from here if we are only testing downloads
+	return 'skip' if $opt->{test};
+
+	# Instantiate new streamer from streamdata
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+	my $stream = $class->new;
+
+	# Do the download
+	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
+}
+
+
+
+# Generic
+# Gets media streams data for this version pid
+# $media = undef|flashnormal
+sub get_stream_data {
+	my ( $prog, undef, $media ) = @_;
+	my %data;
+
+	# Setup user agent with redirection enabled
+	my $ua = main::create_ua('desktop');
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+
+	# Detailed metadata
+	my $prog_metadata_url = 'http://www.channel4.com/services/catchup-availability/asset-info/'; # + <assetno>?<epoch now>
+	my $entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}?".time(), 3, '', '');
+	decode_entities($entry);
+	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+	# Flatten
+	$entry =~ s|[\r\n]||g;
+
+	my ( $stremuri, $token, $fingerprint, $slist );
+	#        <subtitlesFileUri></subtitlesFileUri>
+	#        <uriData>
+	#            <streamUri>rtmpe://securestream.channel4.com/4oD/mp4:assets/CH4_08_02_16_47244016001001_001</streamUri>
+	#            <token>da_b6b5cVaVcPc3dSdqb6abdUavdPaRb8cx-bj9GTZ-eS-lyT-r7rwk9pIowp8svlGqtlFlnn6ksn8sfrtrnrVlfphoqp7sblGq7lyl5nKk5nIr7rgrbqgl8pIoeqGsblG</token>
+	#            <fingerprint>v002</fingerprint>
+	#            <slist>assets/CH4_08_02_16_47244016001001_001</slist>
+	#        </uriData>
+
+	$stremuri = $1 if $entry =~ m{<streamUri>(.+?)</streamUri>};
+	$token = $1 if $entry =~ m{<token>(.+?)</token>};
+	$fingerprint = $1 if $entry =~ m{<fingerprint>(.+?)</fingerprint>};
+	$slist = $1 if $entry =~ m{<slist>(.+?)</slist>};
+
+	# streams
+	my $mode = 'flashnormal';
+	$data{$mode}{ext} = 'mp4';
+	$data{$mode}{streamer} = 'rtmp';
+
+	$data{$mode}{server} = $1 if $stremuri =~ m{rtmpe://(.+?)/};
+	$data{$mode}{identifier} = $1 if $stremuri =~ m{rtmpe://.+?/(.+)$};
+	$data{$mode}{authstring} = $token;
+	$data{$mode}{type} = 'Flash RTMPE h264 stream';
+	$data{$mode}{playpath} = "$data{$mode}{identifier}";
+	$data{$mode}{playpath} =~ s|^4oD/||i;
+	$data{$mode}{streamurl} = $stremuri;
+	$data{$mode}{identifier} =~ s|^4oD/mp4:||;
+	$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=${fingerprint}&slist=$data{$mode}{identifier}";
+	$data{$mode}{tcurl} = "rtmpe://$data{$mode}{server}:1935/$data{$mode}{application}";
+	$data{$mode}{swfurl} = 'http://www.channel4.com/static/programmes/asset/flash/swf/4odplayer-3.14.1.swf';
+	$data{$mode}{protocol} = 3;
+	$data{$mode}{extraopts} = '--swfsize 668128 --swfhash c103ab360cd0164b7d0611b4e8c738ffb7c4b6bcc8b94f11e13225421d2ab969';
+	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return %data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data{$media}{exists} = 0 if not defined $data{$media};
+		return $data{$media};
+	}
+}
+
+
+
 ################### Hulu class #################
 package Programme::hulu;
 
@@ -6556,7 +6846,9 @@ sub get {
 	my $swfurl 	= $streamdata{swfurl};
 	my $playpath 	= $streamdata{playpath};
 	my $port 	= $streamdata{port} || '1935';
+	my $protocol	= $streamdata{protocol} || 0;
 	my $mode	= $prog->{mode};
+	my $extraopts	= $streamdata{extraopts} || '';
 
 	my $file_tmp;
 	my $cmd;
@@ -6572,10 +6864,12 @@ sub get {
 		unlink( $file_tmp );
 	}
 		
-	# rtmpdump version detection
+	# rtmpdump version detection e.g. 'RTMPDump v1.5'
 	my $rtmpver;
 	chomp( $rtmpver = (grep /^RTMPDump/, `$rtmpdump`)[0] );
 	$rtmpver =~ s/^RTMPDump\s+v([\.\d]+).*$/$1/g;
+	# rtmpdump outputs ver to stderr so default to 1.5
+	$rtmpver = '1.5' if not $rtmpver;
 	main::logger "INFO: rtmpdump version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
@@ -6587,7 +6881,7 @@ sub get {
 	if ($rtmpver < 1.4 ) {
 		$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	} else {
-		$cmd = "$rtmpdump --resume --port $port --protocol \"rtmp\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$rtmpdump --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
