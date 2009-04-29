@@ -110,6 +110,7 @@ my %prog_types = (
 	podcast	=> 'BBC Podcast',
 	itv	=> 'ITV',
 	ch4	=> 'Channel4',
+	five	=> 'Demand Five',
 #	hulu	=> 'Hulu TV',
 );
 
@@ -194,7 +195,7 @@ my @nosearch_params = qw/ /;
 		label	=> \%prog_types, # labels
 		default => 'tv',
 		#status	=> \%type, # default status
-		value	=> { 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv', 5=>'ch4' }, # order of values
+		value	=> { 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv', 5=>'ch4', 6=>'five' }, # order of values
 		save	=> 1,
 	};
 
