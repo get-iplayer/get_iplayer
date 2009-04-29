@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.16';
+my $VERSION = '0.17';
 
 # Features:
 # * Search for progs
@@ -58,10 +58,12 @@ my $fh;
 # Send log messages to this fh
 my $se = *STDERR;
 
+# Port for embeded web server
+my $port = shift @ARGV;
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
-my $get_iplayer = '/usr/bin/get_iplayer';
+my $get_iplayer = shift @ARGV || '/usr/bin/get_iplayer';
 my $get_iplayer_cmd;
 
 my %prog;
@@ -386,7 +388,6 @@ my @nosearch_params = qw/ /;
 use Socket;
 use IO::Socket;
 my $IGNOREEXIT = 0;
-my $port = shift @ARGV;
 # If the specified port number is  > 1024 then run embedded web server
 if ( $port =~ /\d+/ && $port > 1024 ) {
 	my $port = 1935;
