@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.70;
+my $version = 1.71;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -71,7 +71,7 @@ use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
-#use LWP::Debug qw(+);
+use LWP::Debug qw(+);
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use strict;
@@ -90,6 +90,7 @@ my %prog_types = (
 	podcast	=> 'Programme::podcast',
 	itv	=> 'Programme::itv',
 	ch4	=> 'Programme::ch4',
+	five	=> 'Programme::five',
 	hulu	=> 'Programme::hulu',
 );
 
@@ -1249,13 +1250,14 @@ sub download_block {
 # Generic
 sub create_ua {
 	my $agent = shift;
+	my $nocookiejar = shift || 0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy};
 	$ua->agent( $user_agent{$agent} );
 	$ua->conn_cache(LWP::ConnCache->new());
 	#$ua->conn_cache->total_capacity(50);
-	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) );
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) ) if not $nocookiejar;
 	return $ua;
 };	
 
@@ -1603,7 +1605,7 @@ sub create_html {
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
 sub request_url_retry {
-	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_; 
+	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
 	my $res;
 
 	# Malformed URL check
@@ -1808,6 +1810,15 @@ sub StringUtils::esc_chars {
 	return $_;
 }
 
+
+
+sub StringUtils::clean_utf8_and_whitespace {
+	# Remove non utf8
+	$_[0] =~ s/[^\x{21}-\x{7E}\s\t\n\r]//g;
+	# Strip beginning/end/extra whitespace
+	$_[0] =~ s/\s+/ /g;
+	$_[0] =~ s/(^\s+|\s+$)//g;
+}
 
 
 # Generic
@@ -4869,6 +4880,8 @@ sub get_links {
 		# <li><a href="http://www.itv.com/ClassicTVshows/familydrama/achristmascarol/default.html">A Christmas Carol</a><br></li>
 		# Get page, search for relevent lines which contain series links and loop through each matching line
 		for my $s_line ( grep /(<li><a\s+href=".+?"><img\s+src=".+?"\s+alt=".+?"><\/a><h4>|<li.*?><a href=".+?">.+?<\/a><br><\/li>)/, ( split /\n/, main::request_url_retry($ua, $itv_index_shows_url.${channel}.'/default.html', 3, '.', "WARNING: Failed to get itv ${channel} index from site\n") ) ) {
+			# Remove non utf8
+			$s_line =~ s/[^\x{21}-\x{7E}\s\t\n\r]//g;
 			my ($url, $name);
 			# Extract series url + series description
 			($url, $name) = ($1, $2) if $s_line =~ m{<li><a\s+href="\s*(.+?)\s*"><img\s+src=".+?"\s+alt="\s*(.+?)\s*"><\/a><h4>};
@@ -4878,6 +4891,7 @@ sub get_links {
 			next if ! ($url && $name);
 			# decode
 			decode_entities($name);
+			StringUtils::clean_utf8_and_whitespace($name);
 			main::logger "DEBUG: Channel: '$channel' Series: '$name' URL: '$url'\n" if $opt->{verbose};
 
 			# Get list of episodes for this series
@@ -4902,10 +4916,8 @@ sub get_links {
 				# decode
 				decode_entities($episode);
 				decode_entities($guidance);
-				# Strip non-printables
-				$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
-				#$guidance =~ s|[^\w\s\-\!"£\$\\/%\^&\*\(\)\+=,\.\?':;@~\[\]]+||gi;
-				#$guidance =~ s/(\s\s)+//g;
+				StringUtils::clean_utf8_and_whitespace($guidance);
+				StringUtils::clean_utf8_and_whitespace($episode);
 				main::logger "DEBUG: PID: '$pid' Episode: '$episode' Guidance: '$guidance'\n" if $opt->{debug};
 
 				# Skip if this pid is a duplicate
@@ -4965,6 +4977,8 @@ sub get_links {
 		main::logger "\n\nDEBUG: XML: $feedxml\n"  if $opt->{debug}; 
 
 		decode_entities($feedxml);
+		# Remove non utf8
+		StringUtils::clean_utf8_and_whitespace($feedxml);
 
 		# <EpisodeCount>1</EpisodeCount>
 		$episodecount = $1 if $feedxml =~ m{<EpisodeCount>\s*(\d+)\s*<\/EpisodeCount>};
@@ -5003,8 +5017,8 @@ sub get_links {
 			$guidance = $1 if $feedxml =~ m{<DentonRating>\s*(.+?)\s*<\/DentonRating>};
 			$thumbnail = $1 if $feedxml =~ m{<ProgrammeMediaUrl>\s*(.+?)\s*<\/ProgrammeMediaUrl>};
 			$episode = $pid;
-			# Strip non-printable chars
-			$guidance =~ s/[\s\x00\xc2\xa0]+$//ig;
+			# Strip end/extra whitespace
+			StringUtils::clean_utf8_and_whitespace($guidance);
 
 			# build data structure
 			$progref->{$pid} = Programme::itv->new(
@@ -5022,9 +5036,6 @@ sub get_links {
 				'type'		=> 'itv',
 				'web'		=> ${itv_catchup_page_prefix}.${pid},
 			);
-
-
-
 
 
 		# Get next episode list and parse
@@ -5077,10 +5088,10 @@ sub get_links {
 
 			# skip if no data
 			next if ! $xml;
-
 			decode_entities($xml);
 			# Flatten entry
 			$xml =~ s/[\n\r]//g;
+			StringUtils::clean_utf8_and_whitespace($xml);
 
 			# Extract Filter (pids) from this list
 			# e.g. <h3><a href="http://www.itv.com/CatchUp/Video/default.html?ViewType=5&amp;Filter=32042">Emmerdale</a></h3>
@@ -5304,6 +5315,7 @@ sub get_metadata {
 	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
 	# Flatten
 	$entry =~ s|[\r\n]||g;
+	StringUtils::clean_utf8_and_whitespace($entry);
 
 	#<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 	#<Channel4ServiceResult serviceName="Asset Information Service" status="OK" xmlns:ns2="http://domain.catchup.channel4.com/CatchupAvailability">
@@ -5426,9 +5438,9 @@ sub get_links {
 
 		my $url = $baseurl.$names{$name};
 		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
+		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from 4oD site\n");
 		decode_entities($xml);
-
+		StringUtils::clean_utf8_and_whitespace($xml);
 		#<tr>
 		#        <td class="broadcastDetails">
 		#                <ul>
@@ -5649,6 +5661,480 @@ sub get_stream_data {
 	$data{$mode}{swfurl} = 'http://www.channel4.com/static/programmes/asset/flash/swf/4odplayer-3.14.1.swf';
 	$data{$mode}{protocol} = 3;
 	$data{$mode}{extraopts} = '--swfsize 668128 --swfhash c103ab360cd0164b7d0611b4e8c738ffb7c4b6bcc8b94f11e13225421d2ab969';
+	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return %data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data{$media}{exists} = 0 if not defined $data{$media};
+		return $data{$media};
+	}
+}
+
+
+
+################### five class #################
+package Programme::five;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme';
+
+# Class vars
+sub index_min { return 50001 }
+sub index_max { return 59999 }
+sub channels {
+	return {
+	};
+}
+
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputfive	=> [ 1, "outputfive=s", 'Output', '--outputfive <dir>', "Download output directory for five"],
+	};
+}
+
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	my $prog = shift;
+	return ", $prog->{channel}, $prog->{categories}, $prog->{guidance}";
+}
+
+
+
+# Returns the modes to try for this prog type
+sub modelist {
+	return 'flashhigh';
+}
+
+
+
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+	# extract numerical format - remove surrounding url 
+	$prog->{pid} = $1 if $prog->{pid} =~ m{(C\d{8,11})};
+}
+
+
+
+# get full episode metadata given pid and ua. Uses two different urls to get data
+sub get_metadata {
+	my $prog = shift;
+	my $ua = shift;
+	my $metadata;
+	my $entry;
+	my ($name, $episode, $episodeno, $seriesno, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
+
+	# Setup user agent with redirection enabled and cookie-jar disabled
+	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
+	my $ua = main::create_ua('desktop', 1 );
+
+	# Detailed metadata
+	# Need to add temporary cookie with request of "handlerReferer=<pid>"
+	# e.g. Set-Cookie: handlerReferer=C5144920007; path=/; domain=.demand.five.tv;
+	$ua->default_header('Cookie' => "handlerReferer=$prog->{pid}; path=/;");
+
+	# Get XML
+	my $prog_metadata_url = 'http://demand.five.tv/Handlers/FlashEpisode.ashx?baseName='; # + <pid>
+	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}", 3 );
+	decode_entities($entry);
+	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+	# Flatten
+	$entry =~ s|[\r\n]||g;
+	StringUtils::clean_utf8_and_whitespace($entry);
+
+	# <?xml version="1.0" encoding="utf-8"?>
+	# <item>                                
+	#   <baseName>                          
+	#     <![CDATA[C5144920007]]>           
+	# </baseName>                           
+	#   <seriesBaseName>                    
+	#     <![CDATA[TheGadgetShow]]>         
+	# </seriesBaseName>                     
+	#   <seasonBaseName>                    
+	#     <![CDATA[TheGadgetShowSeason11]]> 
+	# </seasonBaseName>                     
+	#   <title>                             
+	#     <![CDATA[Episode 7]]>             
+	# </title>                              
+	#   <shortDescription>                  
+	#     <![CDATA[Jon examines new-fangled TVs and Ortis encounters an automaton.)]]>
+	# </shortDescription>                                                             
+	#   <longDescription>                                                             
+	#     <![CDATA[On this action-packed show, Gail Porter and Jason Bradbury go head-to-head in a series of three competitive challenges to put some nifty technology through its paces. First to be tested is a new style of high-tech bicycle that combines the benefits of a BMX and a mountain bike. In the first stage of their bike challenge, the presenters must wow some pro riders with a trick or stunt. They then embark upon a hell-for-leather race over a mountain-biking course, before enjoying a spot of relaxation �� but in a competitive way. <br/><br/>Once fitted with brainwave sensors, the pair play a game using their minds to control the software �� the more relaxed they are, the more successful they will be. Next, Gail and Jason are fitted with heart-rate monitors to see which type of console game makes the player more relaxed. Gail plays a peaceful and tranquil game, one of a new trend in computer games designed to subvert the image of gaming as being aggressive and violent. Jason, meanwhile, plays a violent shoot-��"em-up. Which presenter will come out on top? And will they manage to keep their eyes open long enough to see the results? <br/><br/>In the final part of their competitive challenge, Gail and Jason test the very latest in gadgety wet suits. Gail��"s suit features built-in solar panels, whilst Jason��"s incorporates a rechargeable battery to heat the wearer��"s core. Which presenter will remain the toastier? To find out, the intrepid presenters plunge into an ice-cold pool for five minutes, during which time their temperatures will be monitored using a thermal-imaging camera. It is not all about warmth, though �� a good wet suit needs to be flexible. As soon as they have thawed out, Gail and Jason race through some fierce white-water rapids �� on lilos. <br/><br/>Elsewhere this time, Jon Bentley discovers how good eco TVs really are; Ortis Deley meets an awesome modular robot that can rebuild itself if it breaks; and Gail presents a rundown of the best gadgets she found at the Gadget Show Live event.]]>                                                                                                                                                       
+	# </longDescription>
+	#   <image>
+	#     <![CDATA[]]>
+	# </image>
+	#   <video>
+	#     <![CDATA[rtmpe://streamflv.download.five.tv/a800/o10/mp4:bthttp/five/downloadstore/secure/thegadgetshow/movies/The-Gadget-Show_S11_E7_Episode-7_FLVSTREAM.mp4?e=1241001311&h=62a13cc33a4f88fccbdef4baccc80c41]]>
+	# </video>
+	#   <sponsorPreRoll>
+	#     <![CDATA[]]>
+	# </sponsorPreRoll>
+	#   <genre>
+	#     <![CDATA[entertainment]]>
+	# </genre>
+	#   <parentalRating>
+	#     <ratingGrade>
+	#       <![CDATA[]]>
+	# </ratingGrade>
+	#     <ratingDescription>
+	#       <![CDATA[]]>
+	# </ratingDescription>
+	#   </parentalRating>
+	#   <parentalAdvisory>
+	#     <advisoryValue />
+	#   </parentalAdvisory>
+	#   <ssPlaylist>
+	#     <![CDATA[entertainment]]>
+	# </ssPlaylist>
+	#   <ssProgramme>
+	#     <![CDATA[TheGadgetShowSeason11]]>
+	# </ssProgramme>
+	#   <ssEpisode>
+	#     <![CDATA[C5144920007 Episode 7: Episode 7]]>
+	# </ssEpisode>
+	#   <ads></ads>
+	# </item>
+
+	# Name
+	# <seasonBaseName> <![CDATA[TheGadgetShowSeason11]]> </seasonBaseName>
+	$name = $1 if $entry =~ m{<seasonBaseName>\s*<\!\[CDATA\[(.+?)\]\]>\s*</seasonBaseName>};
+
+	# episode
+	# <title> <![CDATA[Episode 7]]> </title>
+	$episode = $1 if $entry =~ m{<title>\s*<\!\[CDATA\[(.+?)\]\]>\s*</title>};
+
+	#   <longDescription> <![CDATA[On this action... way. <br/><br/>Once fitted .. <br/><br/>... on lilos. <br/><br/> ...event.]]> </longDescription>
+	$longdesc = $1 if $entry =~ m{<longDescription>\s*<\!\[CDATA\[(.+?)\]\]>\s*</longDescription>};
+	# Remove unwanted html tags and extra whitespace
+	$longdesc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
+	$longdesc =~ s/\s+/ /g;
+
+	$categories = $1 if $entry =~ m{<genre>\s*<\!\[CDATA\[(.+?)\]\]>\s*</genre>};
+	#$ = $1 if $entry =~ m{<>(.+?)</>};
+	#$ = $1 if $entry =~ m{<>(.+?)</>};
+
+	#$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	#$guidance = $1 if $entry =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
+	#$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+	#$thumbnail = $1 if $entry =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
+
+	# Fill in from cache if not got from metadata
+	$prog->{name} 		= $prog->{name} || $name;
+	$prog->{episode} 	= $episode || $prog->{episode};
+	$prog->{type}		= $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{available}	= $available || $prog->{available};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions || $prog->{versions};
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	# just use the default modelist
+	$prog->{modes}		= 'default: '.$prog->modelist();
+	return 0;
+}
+
+
+
+# Usage: Programme::tv->get_links( \%prog, 'five' );
+# Uses: %{ channels() }, \%prog
+sub get_links {
+	shift; # ignore obj ref
+	my $progref = shift;
+	my $prog_type = shift;
+	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
+	my %channels = %{ main::progclass($prog_type)->channels() };
+
+	# page scraping here
+	# GET http://www.channel4.com/programmes/catch-up/ | grep -P 'href="\/programmes\/.+?\/catch-up\">'
+
+	my $xml;
+	my $feed_data;
+	my $res;
+	main::logger "INFO: Getting $prog_type Programmes List\n";
+
+	# Setup User agent
+	my $ua = main::create_ua('desktop');
+
+	my $baseurl = 'http://demand.five.tv';
+
+	my $url = $baseurl.'/SeriesAZ.aspx';
+	$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get series list from from Demand Five site\n");
+
+	# Hash of <name> => <uri>;
+	my %names;
+	# class="episodeLink" href="Series.aspx?seriesBaseName=HiddenLives">Hidden Lives</a>
+	while ( $xml =~ m{class="episodeLink"\s+href="(.+?)">\s*(.+?)</a>}sg ) {
+		$names{$2} = "/$1";
+		main::logger "DEBUG: Series '$2', URI: /$1\n" if $opt->{debug};
+	}
+
+	# Download index feed
+	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
+	for my $name ( keys %names ) {
+
+		my $url = $baseurl.$names{$name};
+		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
+		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from Demand Five site\n");
+		decode_entities($xml);
+		StringUtils::clean_utf8_and_whitespace($xml);
+
+		# <div id="episode4" class="episodesOff">
+		# 	<div class="serepisodesdtls">
+		# 		<div class="fltlt">
+		# 			<a href="javascript:void(0);" class="episodeClose" onclick="toggleEpisode('episode4');">
+		# 				<img src="/images/ico_episode_close.gif" alt="View Details" vspace="2" border="0"  title="View Details" />
+		# 			</a>
+		# 			<a href="javascript:void(0);" class="episodeOpen" onclick="toggleEpisode('episode4');">
+		# 				<img src="/images/ico_episode_open.gif" alt="View Details" vspace="2" border="0"  title="View Details" />
+		# 			</a>
+		# 		</div>
+		#		<div class="serepiinfo">
+		#			<a href="javascript:void(0);" onclick="toggleEpisode('episode4');">episode 24 :</a> 
+		#			<a href="javascript:void(0);" onclick="toggleEpisode('episode4');" class="epititle"> I Want To Cook</a> 
+		#			<!-- Parental Guidance REMEMBER TO SET THE ALT AND TITLE FROM DATA -->
+		#			<!-- Subtitles image -->
+		#			<!-- Schedule -->
+		#			<br />
+		#			<!-- Ratings image -->
+		#			<br />Avg Rating:
+		#			<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars" class="userRating" itemid="C5116040024">
+		#		<img id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars_AvgStars" src="images/avg_star_5.png" style="border-width:0px;" /><span id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars_Count" class="countLabel">(1 vote)</span>
+		#	</div>
+		#	<!-- FileSize -->
+		#	<br />
+		#	<div style="float:left;">
+		#		11 mins - 60.5 MB
+		#	</div>
+		#	<!-- Expires image -->
+		#	<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_ExpiresVisible" style="float:left;">
+		#		<img src="/images/ico_epi_expires.gif" alt="expires" width="14" height="12" hspace="5" />
+		#		<span class="expires">Available for another <strong>6</strong> days</span>
+		#	</div>
+		#</div>
+		#</div>
+		#<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_divPlayItem">
+		#	<div class="serepirent" >
+		#	<a href="Episode.aspx?episodeBaseName=C5116040024" class="PlayEpisodeItem" >
+		#		<img src="/images/btn_play.gif" alt="rent" border="0" align="top" title="play" />
+		#	</a> 
+		#</div>
+		#</div>
+		#<div class="seperator"><img src="/images/seperator.gif" alt="" title="" /></div>
+		#<div class="epimoreinfo">
+		#	<div class="moreinfort">
+		#		<img src="http://content.download.five.tv/bthttp/five/downloadstore/images/LittlePrincess_ESmall.png" alt="episode image"/>	
+		#	</div>
+		#	<div class="findmore">Little Princess is baking a cake.
+		#	<div>
+		#		<img src="/images/find_more.gif" alt="find more" width="12" height="12" align="top" title="find more" /> 
+		#		<a href="Episode.aspx?episodeBaseName=C5116040024"> find out more</a></div>
+		#	</div>
+		#</div>
+		#</div>
+
+		# Parse XML
+
+		# get list of entries within <entry> </entry> tags
+		my @entries = split /<div id="episode\d+"/, $xml;
+		# Discard first element == header
+		shift @entries;
+
+		main::logger "INFO: Got ".($#entries + 1)." episodes\n" if $opt->{verbose};
+
+		foreach my $entry (@entries) {
+			my ( $episode, $desc, $pid, $available, $expiry, $channel, $duration, $thumbnail, $versions, $guidance );
+
+			$entry =~ s/[\r\n]/ /g;
+			$entry =~ s/\s+/ /g;
+
+			# main::logger "DEBUG: Entry = $entry\n" if $opt->{debug};
+
+			# PID
+			# <a href="Episode.aspx?episodeBaseName=C5116040024">
+			$pid = $1 if $entry =~ m{Episode.aspx\?episodeBaseName=(C\d+)"}i;
+
+			# Episode
+			## <a href="javascript:void(0);" onclick="toggleEpisode('episode4');">episode 24 :</a>
+			# <a href="javascript:void(0);" onclick="toggleEpisode('episode4');" class="epititle"> I Want To Cook</a>
+			$episode = $1 if $entry =~ m{class="epititle">\s*(.+?)\s*</a>}i;
+
+			# Available
+			# <span class="expires">Available for another <strong>6</strong> days</span>
+			$available = $1 if $entry =~ m{<span class="expires">Available for another (.+?)</span>}i;
+			$available =~ s|<\/?.+?>||g;
+
+			# Duration
+			# <!-- FileSize -->
+			# <br />
+			# <div style="float:left;">
+			#	11 mins - 60.5 MB
+			# </div>
+			$duration = $1 if $entry =~ m{FileSize\s*-->\s*<b.+?>\s*<div.+?>\s*(.+?)\s*</div>}i;
+
+			# Desc
+			# <div class="findmore">Little Princess is baking a cake.
+			# <div>
+			$desc = $1 if $entry =~ m{<div class="findmore">\s*(.+?)\s*<div>};
+			# Remove unwanted html tags and extra whitespace
+			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
+			$desc =~ s/\s+/ /g;
+
+			# <span class="channel">Channel 4</span>
+			#$channel =  $1 if $entry =~ m{<span\s+class="channel">\s*(.+?)\s*</span>}i;
+
+			# Merge and Skip if this pid is a duplicate
+			if ( defined $progref->{$pid} ) {
+				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+				next;
+			}
+
+			# Thumbnail
+			#	<div class="moreinfort">
+			#		<img src="http://content.download.five.tv/bthttp/five/downloadstore/images/LittlePrincess_ESmall.png" alt="episode image"/>	
+			#	</div>
+			$thumbnail = $1 if $entry =~ m{<div class="moreinfort">\s*<img src="(.+?)"};
+			main::logger "DEBUG: pid='$pid',name='$name', episode='$episode', duration='$duration', available='${available}'\n" if $opt->{debug};
+
+			# build data structure
+			$progref->{$pid} = main::progclass($prog_type)->new(
+				'pid'		=> $pid,
+				'name'		=> $name,
+				'versions'	=> 'default',
+				'episode'	=> $episode,
+				'desc'		=> $desc,
+				'guidance'	=> $guidance,
+				'available'	=> $available,
+				'duration'	=> $duration,
+				'thumbnail'	=> $thumbnail,
+				'channel'	=> 'five',
+				'categories'	=> 'tv',
+				'type'		=> $prog_type,
+				'web'		=> "http://demand.five.tv/Episode.aspx?episodeBaseName=${pid}",
+			);
+		}
+	}
+	main::logger "\n";
+	return 0;
+}
+
+
+
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my %streamdata;
+
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
+
+	# if rtmpdump does not exist
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
+		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+		return 'next';
+	}
+
+	%streamdata = %{ $prog->get_stream_data( undef, 'flashhigh') };
+
+	# Get extension from streamdata if defined and raw not specified
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	$prog->{ext} = 'flv' if $opt->{raw};
+	
+	my $url = $prog->{streams}->{$version}->{$mode}->{streamurl};
+
+	if ( not $url ) {
+		main::logger "WARNING: No programme stream URL was found, skipping\n";
+		return 'skip';
+	}
+	
+	# Determine the correct filenames for this download
+	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>" );
+
+	# Skip from here if we are only testing downloads
+	return 'skip' if $opt->{test};
+
+	# Instantiate new streamer from streamdata
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+	my $stream = $class->new;
+
+	# Do the download
+	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
+}
+
+
+
+# Generic
+# Gets media streams data for this version pid
+# $media = undef|flashhigh
+sub get_stream_data {
+	my ( $prog, undef, $media ) = @_;
+	my %data;
+	my $entry;
+
+	# Setup user agent with redirection enabled and cookie-jar disabled
+	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
+	my $ua = main::create_ua('desktop', 1 );
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+
+	# Need to add temporary cookie with request of "handlerReferer=<pid>"
+	# e.g. Set-Cookie: handlerReferer=C5144920007; path=/; domain=.demand.five.tv;
+	$ua->default_header('Cookie' => "handlerReferer=$prog->{pid}; path=/;");
+	main::logger "DEBUG: Sending Cookie: Cookie: handlerReferer=$prog->{pid}; path=/;\n" if $opt->{debug};
+	# Get XML
+	my $prog_metadata_url = 'http://demand.five.tv/Handlers/FlashEpisode.ashx?baseName='; # + <pid>
+	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}", 3 );
+
+	decode_entities($entry);
+	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+	# Flatten
+	$entry =~ s|[\r\n]||g;
+
+	my $stremuri;
+
+	#   <video>
+	#     <![CDATA[rtmpe://streamflv.download.five.tv/a800/o10/mp4:bthttp/five/downloadstore/secure/thegadgetshow/movies/The-Gadget-Show_S11_E7_Episode-7_FLVSTREAM.mp4?e=1241001311&h=62a13cc33a4f88fccbdef4baccc80c41]]>
+	# </video>
+
+	$stremuri = $1 if $entry =~ m{\[(rtmpe://.+?)\]};
+
+	# streams
+	my $mode = 'flashhigh';
+	$data{$mode}{ext} = 'mp4';
+	$data{$mode}{streamer} = 'rtmp';
+
+	$data{$mode}{type} = 'Flash RTMPE h264 stream';
+	$data{$mode}{streamurl} = $stremuri;
+	$data{$mode}{protocol} = 3;
+	$data{$mode}{extraopts} = '--swfsize 848259 --swfhash 75a4a2a2dc7e7c198478161bb1c8826721034f4f36bed7d23c6bf42910a500a1';
 	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
@@ -7019,10 +7505,8 @@ sub get {
 		
 	# rtmpdump version detection e.g. 'RTMPDump v1.5'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^RTMPDump/, `$rtmpdump`)[0] );
+	chomp( $rtmpver = (grep /^RTMPDump/, `$rtmpdump 2>&1`)[0] );
 	$rtmpver =~ s/^RTMPDump\s+v([\.\d]+).*$/$1/g;
-	# rtmpdump outputs ver to stderr so default to 1.5
-	$rtmpver = '1.5' if not $rtmpver;
 	main::logger "INFO: rtmpdump version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
@@ -7031,10 +7515,15 @@ sub get {
 
 	my $return;
 	# Different invocation dependant on version
-	if ($rtmpver < 1.4 ) {
+	# For ver < 1.4
+	if ( $rtmpver < 1.4 ) {
 		$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
-	} else {
+	# For ver 1.4+
+	} elsif ( $playpath ) {
 		$cmd = "$rtmpdump --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+	# Using just streamurl (i.e. no playpath defined)
+	} else {
+		$cmd = "$rtmpdump -r \"$streamdata{streamurl}\" --resume $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
