@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.71;
+my $version = 1.73;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -71,7 +71,7 @@ use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
-use LWP::Debug qw(+);
+#use LWP::Debug qw(+);
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use strict;
@@ -5883,8 +5883,9 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting $prog_type Programmes List\n";
 
-	# Setup User agent
-	my $ua = main::create_ua('desktop');
+	# Setup user agent with redirection enabled and cookie-jar disabled
+	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
+	my $ua = main::create_ua('desktop', 1 );
 
 	my $baseurl = 'http://demand.five.tv';
 
