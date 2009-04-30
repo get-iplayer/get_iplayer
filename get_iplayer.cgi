@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.17';
+my $VERSION = '0.18';
 
 # Features:
 # * Search for progs
@@ -15,7 +15,7 @@ my $VERSION = '0.17';
 #
 # Run with embedded web server (preferred method):
 # * By default this will run as the user you start the script with
-# * Start with: ./get_iplayer.cgi 1935
+# * Start with: ./get_iplayer.cgi 1935 /path/to/get_iplayer
 # * Access using: http://localhost:1935/
 #
 # Installation as Apache CGI script (not the preferred method):
@@ -601,9 +601,9 @@ sub run_cgi {
 		form_header();
 		if ( $DEBUG ) {
 			print $fh $cgi->Dump();
-			for my $key (sort keys %ENV) {
-			    print $fh $key, " = ", $ENV{$key}, "\n";
-			}    
+			#for my $key (sort keys %ENV) {
+			#    print $fh $key, " = ", $ENV{$key}, "\n";
+			#}    
 		}
 		if ($nextpages{$nextpage}) {
 			# call the correct subroutine
@@ -1129,7 +1129,7 @@ sub search_progs {
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
 			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; submit()");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=0; submit()");
 		}
 		$class = 'sorted_reverse' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
