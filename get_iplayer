@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.73;
+my $version = 1.74;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -303,9 +303,22 @@ my %user_agent = (
   	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
   	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
   	update		=> "get_iplayer updater (v${version} - $^O)",
-  	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9) Gecko/2008052906 Firefox/3.0',
+	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 6.0; en-GB; rv:1.9.0.9) Gecko/2009040821 Firefox/3.0.9 (.NET CLR 3.5.30729)',
   	get_iplayer	=> "get_iplayer/$version $^O/$^V",
 );
+# Create user agents list
+my @user_agent_list = (
+	'(Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.5 (KHTML, like Gecko) Chrome/2.0.172.8 Safari/<RAND>.5',
+	'(compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04506.30; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>)',
+	'(compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
+	'(Macintosh; U; Intel Mac OS X 10_5_6; en-us) AppleWebKit/<RAND>.16 (KHTML, like Gecko) Version/4.0 Safari/<RAND>.16',
+	'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
+	'(compatible; MSIE 7.0; Windows NT 6.0; WOW64; Trident/4.0;  Embedded Web Browser from: http://bsalsa.com/; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>)',
+);
+for (@user_agent_list) {
+	my $code = sprintf( "%03d", int(rand(1000)) );
+	s/<RAND>/$code/g;
+}
 
 # Display Usage
 if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
@@ -5417,7 +5430,7 @@ sub get_links {
 	main::logger "INFO: Getting $prog_type Programmes List\n";
 
 	# Setup User agent
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( rand @user_agent_list );
 
 	my $baseurl = 'http://www.channel4.com';
 
@@ -5437,6 +5450,10 @@ sub get_links {
 	for my $name ( keys %names ) {
 
 		my $url = $baseurl.$names{$name};
+		# Setup User agent
+		my $ua = main::create_ua( rand @user_agent_list );
+		# Set referer
+		$ua->default_header( 'Referer' => "$baseurl.'/programmes/catch-up" );
 		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from 4oD site\n");
 		decode_entities($xml);
