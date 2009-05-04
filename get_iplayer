@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.74;
+my $version = 1.77;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -308,17 +308,15 @@ my %user_agent = (
 );
 # Create user agents list
 my @user_agent_list = (
-	'(Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.5 (KHTML, like Gecko) Chrome/2.0.172.8 Safari/<RAND>.5',
-	'(compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 1.1.4322; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04506.30; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>)',
-	'(compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
-	'(Macintosh; U; Intel Mac OS X 10_5_6; en-us) AppleWebKit/<RAND>.16 (KHTML, like Gecko) Version/4.0 Safari/<RAND>.16',
+	'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.8 (KHTML, like Gecko) Chrome/2.0.178.0 Safari/<RAND>.8',
+	'Mozilla/5.0 (compatible; MSIE 7.0; Windows NT 6.0; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; c .NET CLR 3.0.0<RAND>6; .NET CLR 3.5.30<RAND>; InfoPath.1; el-GR)',
+	'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
+	'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; YPC 3.2.0; SLCC1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04<RAND>)',
+	'Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_4_11; tr) AppleWebKit/<RAND>.4+ (KHTML, like Gecko) Version/4.0dp1 Safari/<RAND>.11.2',
 	'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
-	'(compatible; MSIE 7.0; Windows NT 6.0; WOW64; Trident/4.0;  Embedded Web Browser from: http://bsalsa.com/; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>)',
+	'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; WOW64; Trident/4.0; SLCC2; .NET CLR 2.0.50<RAND>; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>; Media Center PC 6.0; InfoPath.2; MS-RTC LM 8)',
+	'Mozilla/6.0 (Windows; U; Windows NT 7.0; en-US; rv:1.9.0.8) Gecko/2009032609 Firefox/3.0.9 (.NET CLR 3.5.30<RAND>)',
 );
-for (@user_agent_list) {
-	my $code = sprintf( "%03d", int(rand(1000)) );
-	s/<RAND>/$code/g;
-}
 
 # Display Usage
 if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
@@ -335,7 +333,7 @@ if ( $opt_cmdline->{manpage} ) {
 # Display GPL stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
-	logger request_url_retry( create_ua('get_iplayer'), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
+	logger request_url_retry( create_ua( $user_agent{get_iplayer} ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
 
@@ -758,7 +756,7 @@ sub download_matches {
 sub list_progs {
 	my $typeref = shift;
 	my $number_of_types = keys %{$typeref};
-	my $ua = create_ua('desktop');
+	my $ua = create_ua( $user_agent{desktop} );
 	my %names;
 	
 	# Setup user agent for a persistent connection to get programme metadata
@@ -1260,17 +1258,35 @@ sub download_block {
 
 
 
+# Returns a random user agent string
+sub random_ua {
+	# Randomize strings
+	my $code = sprintf( "%03d", int(rand(1000)) );
+	my $uas = $user_agent_list[ int( rand($#user_agent_list + 0.5) ) ];
+	$uas =~ s/<RAND>/$code/g;
+	logger "DEBUG: Using user-agent string: '$uas'\n" if $opt->{debug};
+	return $uas;
+}
+
+
+
 # Generic
+# create_ua( <agent>, [<cookie mode>] )
+# cookie mode:	0: retain cookies
+#		1: no cookies
+#		2: retain cookies but discard if site requires it
 sub create_ua {
-	my $agent = shift;
+	my $agent = shift || random_ua();
 	my $nocookiejar = shift || 0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy};
-	$ua->agent( $user_agent{$agent} );
+	$ua->agent( $agent );
+	main::logger "DEBUG: Using user-agent '$agent'\n" if $opt->{debug};
 	$ua->conn_cache(LWP::ConnCache->new());
 	#$ua->conn_cache->total_capacity(50);
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) ) if not $nocookiejar;
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1 ) ) if $nocookiejar == 2;
 	return $ua;
 };	
 
@@ -1349,7 +1365,7 @@ sub open_file_append {
 sub update_script {
 	# Get version URL
 	my $script_file = $0;
-	my $ua = create_ua('update');
+	my $ua = create_ua( $user_agent{update} );
 	logger "INFO: Current version is $version\n";
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
 	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
@@ -1618,6 +1634,11 @@ sub create_html {
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
 sub request_url_retry {
+
+	my %OPTS = @LWP::Protocol::http::EXTRA_SOCK_OPTS;
+	$OPTS{SendTE} = 0;
+	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
+	
 	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
 	my $res;
 
@@ -2304,7 +2325,7 @@ sub download_retry_loop {
 	}
 
 	# Setup user-agent
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 
 	# Order with which to search for programme versions (can be overridden by --versionlist option)
 	# maybe we need this array per prog type??
@@ -2751,7 +2772,7 @@ sub download_thumbnail {
 		$file = "$prog->{dir}/$prog->{fileprefix}.${ext}";
 
 		# Download subs
-		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
+		$image = main::request_url_retry( main::create_ua( $user_agent{get_iplayer} ), $prog->{thumbnail}, 1);
 		if (! $image ) {
 			main::logger "\nERROR: Thumbnail Download failed\n";
 			return 1;
@@ -3145,7 +3166,7 @@ sub get_stream_data {
 	my %data;
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# BBC streams
@@ -3876,7 +3897,7 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting $prog_type Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 
 	# Download index feed
 	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
@@ -4447,7 +4468,7 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting podcast Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua('get_iplayer');
+	my $ua = main::create_ua( $user_agent{get_iplayer} );
 	
 	# Method
 	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
@@ -4873,7 +4894,7 @@ sub get_links {
 	my %episode_pid;
 	main::logger "INFO: Getting itv Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 
 	# Method
 	# http://www.itv.com/_data/xml/CatchUpData/CatchUp360/CatchUpMenu.xml (gets list of urls for each prog series) =>
@@ -5221,7 +5242,7 @@ sub get_stream_data {
 	my %data;
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# ITV streams
@@ -5318,6 +5339,16 @@ sub get_metadata {
 	my $metadata;
 	my $entry;
 	my ($name, $episode, $episodeno, $seriesno, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	# Setup User agent
+	my $ua = main::create_ua();
+	# Required for ch4
+	$ua->default_header(
+		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+		'Accept-Language'	=> 'en-gb,en;q=0.5',
+		'Accept-Encoding'	=> 'gzip,deflate',
+		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+	);
 
 	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
 
@@ -5430,11 +5461,18 @@ sub get_links {
 	main::logger "INFO: Getting $prog_type Programmes List\n";
 
 	# Setup User agent
-	my $ua = main::create_ua( rand @user_agent_list );
-
+	my $ua = main::create_ua();
+	$ua->default_header(
+		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+		'Accept-Language'	=> 'en-gb,en;q=0.5',
+		'Accept-Encoding'	=> 'gzip,deflate',
+		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+		'Pragma'		=> 'no-cache',
+		'Cache-Control'		=> 'no-cache',
+	);
 	my $baseurl = 'http://www.channel4.com';
 
-	my $url = $baseurl.'/programmes/catch-up/';
+	my $url = $baseurl.'/programmes/catch-up';
 	$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get series list from from channel4 site\n");
 
 	# Hash of <name> => <uri>;
@@ -5451,9 +5489,18 @@ sub get_links {
 
 		my $url = $baseurl.$names{$name};
 		# Setup User agent
-		my $ua = main::create_ua( rand @user_agent_list );
-		# Set referer
-		$ua->default_header( 'Referer' => "$baseurl.'/programmes/catch-up" );
+		my $ua = main::create_ua();
+		# Required for ch4
+		$ua->default_header(
+			'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+			'Accept-Language'	=> 'en-gb,en;q=0.5',
+			'Accept-Encoding'	=> 'gzip,deflate',
+			'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+			'Pragma'		=> 'no-cache',
+			'Cache-Control'		=> 'no-cache',
+			'Referer'		=> $baseurl.'/programmes/catch-up',
+		);
+	
 		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from 4oD site\n");
 		decode_entities($xml);
@@ -5634,8 +5681,16 @@ sub get_stream_data {
 	my ( $prog, undef, $media ) = @_;
 	my %data;
 
-	# Setup user agent with redirection enabled
-	my $ua = main::create_ua('desktop');
+	# Setup User agent
+	my $ua = main::create_ua();
+	# Required for ch4
+	$ua->default_header(
+		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+		'Accept-Language'	=> 'en-gb,en;q=0.5',
+		'Accept-Encoding'	=> 'gzip,deflate',
+		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+	);
+
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# Detailed metadata
@@ -5664,7 +5719,6 @@ sub get_stream_data {
 	my $mode = 'flashnormal';
 	$data{$mode}{ext} = 'mp4';
 	$data{$mode}{streamer} = 'rtmp';
-
 	$data{$mode}{server} = $1 if $stremuri =~ m{rtmpe://(.+?)/};
 	$data{$mode}{identifier} = $1 if $stremuri =~ m{rtmpe://.+?/(.+)$};
 	$data{$mode}{authstring} = $token;
@@ -5768,7 +5822,7 @@ sub get_metadata {
 
 	# Setup user agent with redirection enabled and cookie-jar disabled
 	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua('desktop', 1 );
+	my $ua = main::create_ua( undef, 1 );
 
 	# Detailed metadata
 	# Need to add temporary cookie with request of "handlerReferer=<pid>"
@@ -5902,7 +5956,7 @@ sub get_links {
 
 	# Setup user agent with redirection enabled and cookie-jar disabled
 	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua('desktop', 1 );
+	my $ua = main::create_ua( undef, 1 );
 
 	my $baseurl = 'http://demand.five.tv';
 
@@ -6120,7 +6174,7 @@ sub get_stream_data {
 
 	# Setup user agent with redirection enabled and cookie-jar disabled
 	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua('desktop', 1 );
+	my $ua = main::create_ua( undef, 1 );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# Need to add temporary cookie with request of "handlerReferer=<pid>"
@@ -6425,7 +6479,7 @@ sub get_links {
 
 	main::logger "INFO: Getting hulu Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 
 	# Extract channels names from http://www.hulu.com/browse/network/episodes
 
@@ -6820,7 +6874,7 @@ sub get_stream_data {
 	my %data;
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua('desktop');
+	my $ua = main::create_ua( $user_agent{desktop} );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	my $url = $prog->get_metadata_url( $ua );
@@ -7493,7 +7547,7 @@ sub opt_format {
 # %prog (only for {ext} and {mode})
 # Actually do the RTMP stream downloading
 sub get {
-	my ( $stream, $ua, undef, $prog, %streamdata ) = @_;
+	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
 
 	my $url_2 	= $streamdata{streamurl};
 	my $server	= $streamdata{server};
