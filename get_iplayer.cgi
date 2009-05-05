@@ -59,7 +59,7 @@ my $fh;
 my $se = *STDERR;
 
 # Port for embeded web server
-my $port = shift @ARGV;
+my $port = shift @ARGV || 1935;
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
@@ -390,7 +390,6 @@ use IO::Socket;
 my $IGNOREEXIT = 0;
 # If the specified port number is  > 1024 then run embedded web server
 if ( $port =~ /\d+/ && $port > 1024 ) {
-	my $port = 1935;
 	# Setup signal handlers
 	$SIG{INT} = $SIG{PIPE} = \&cleanup;
 	# Autoreap zombies
@@ -856,7 +855,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$get_iplayer_cmd --nocopyright --info --fields=pid --type=$type $pid";
+	my $cmd = "$get_iplayer_cmd --nocopyright --info --type=$type pid:$pid";
 	print $fh p("Command: $cmd");
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
