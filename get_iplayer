@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.81;
+my $version = 1.82;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -586,11 +586,12 @@ sub find_matches {
 		
 		# Maybe we don't want to populate caches - this slows down --pid downloads ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
-		# only get links if > 1 type is specified
-		if ( $#try_types >= 1 ) {
-			for my $t ( @try_types ) {
-				get_links( \%prog, \%index_prog, $t );
-			}
+		# only get links and possibly refresh caches if > 1 type is specified
+		# else only load cached data from file if it exists.
+		my $load_from_file_only;
+		$load_from_file_only = 1 if $#try_types == 0;
+		for my $t ( @try_types ) {
+			get_links( \%prog, \%index_prog, $t, $load_from_file_only );
 		}
 		
 		# Try to get pid using each speficied prog type
@@ -940,12 +941,13 @@ sub progclass {
 #	http://www.bbc.co.uk/cbbc/programmes/genres/childrens/player
 #	http://www.bbc.co.uk/programmes/genres/childrens/schedules/upcoming.ics
 #
-# Usage: get_links( \%prog, \%index_prog, <prog_type> )
+# Usage: get_links( \%prog, \%index_prog, <prog_type>, <only load from file flag> )
 sub get_links {
 	my $progref = shift;
 	my $index_progref = shift;
 	my $prog_type = shift;
-
+	my $only_load_from_cache = shift;
+	
 	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
 
@@ -984,7 +986,13 @@ sub get_links {
 	}
 
 	# if a cache file doesn't exist/corrupted/empty, flush option is specified or original file is older than $cache_sec then download new data
-	if ( (! keys %prog_old) || (! -f $cachefile) || $opt->{flush} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) ) {
+	if ( (! $only_load_from_cache) && ( 
+			(! keys %prog_old) || 
+			(! -f $cachefile) || 
+			$opt->{flush} || 
+			($now >= ( stat($cachefile)->mtime + $cache_secs ))
+			)
+		) {
 
 		# Get links for specific type of programme class
 		progclass( $prog_type )->get_links( $progref, $prog_type );
@@ -2630,8 +2638,8 @@ sub substitute {
 sub generate_filenames {
 	my ($prog, $ua, $format, $multipart) = (@_);
 
-	# Get and set more meta data - Set the %prog values from metadata
-	$prog->get_metadata($ua); 
+	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
+	$prog->get_metadata($ua) if ! $prog->{name};
 
 	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
 
@@ -5281,6 +5289,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
+		rtmpport	=> [ 1, "rtmpport=n", 'Download', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
 		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream downloaded OK"],
 	};
@@ -5299,7 +5308,7 @@ sub get {
 	my $authstring 	= $streamdata{authstring};
 	my $swfurl 	= $streamdata{swfurl};
 	my $playpath 	= $streamdata{playpath};
-	my $port 	= $streamdata{port} || '1935';
+	my $port 	= $streamdata{port} || $opt->{rtmpport} || 1935;
 	my $protocol	= $streamdata{protocol} || 0;
 	my $mode	= $prog->{mode};
 	my $extraopts	= $streamdata{extraopts} || '';
@@ -5338,7 +5347,7 @@ sub get {
 		$cmd = "$bin->{rtmpdump} --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	# Using just streamurl (i.e. no playpath defined)
 	} else {
-		$cmd = "$bin->{rtmpdump} -r \"$streamdata{streamurl}\" --resume $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$bin->{rtmpdump} --resume --port $port --rtmp \"$streamdata{streamurl}\" $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
