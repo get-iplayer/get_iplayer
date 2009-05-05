@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.77;
+my $version = 1.80;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -81,6 +81,8 @@ use URI;
 use POSIX qw(:termios_h);
 $|=1;
 
+# Hash of where plugin files were found so that the correct ones can be updated
+my %plugin_files;
 
 # Hash of all prog types => Programme class
 # Add an entry here if another Programme class is added
@@ -89,9 +91,14 @@ my %prog_types = (
 	radio	=> 'Programme::radio',
 	podcast	=> 'Programme::podcast',
 	itv	=> 'Programme::itv',
-	ch4	=> 'Programme::ch4',
-	five	=> 'Programme::five',
-	hulu	=> 'Programme::hulu',
+);
+
+# User Agents
+my %user_agent = (
+  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
+	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
+	update		=> "get_iplayer updater (v${version} - $^O)",
+	get_iplayer	=> "get_iplayer/$version $^O/$^V",
 );
 
 # Programme instance data
@@ -106,7 +113,7 @@ my %prog_types = (
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <channel>
 #	'categories'	=> <Comma separated list of categories>
-# 	'type'		=> <Type: tv, radio, itv, ch4, five or podcast>
+# 	'type'		=> <prog_type>
 #	'timeadded'	=> <timestamp when programme was added to cache>
 #	'longname'	=> <Long name (only parsed in stage 1 download)>,
 #	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
@@ -148,6 +155,55 @@ sub logger(@) {
 		}
 	}
 }
+
+my $save;
+# This is where all profile data/caches/cookies etc goes
+my $profile_dir;
+# This is where system-wide default options are specified
+my $optfile_system;
+
+# Options directories specified by env vars
+if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
+	$profile_dir = $ENV{GETIPLAYERUSERPREFS};
+	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
+
+# Options on unix-like systems
+} elsif ( defined $ENV{HOME} ) {
+	$profile_dir = $ENV{HOME}.'/.get_iplayer';
+	$optfile_system = '/etc/get_iplayer/options';
+
+# Otherwise look for windows style file locations
+} elsif ( defined $ENV{USERPROFILE} ) {
+	$profile_dir = $ENV{USERPROFILE}.'/.get_iplayer';
+	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+}
+# Make profile dir if it doesnt exist
+mkpath $profile_dir if ! -d $profile_dir;
+
+
+# get list of additional user plugins and load plugin
+for my $plugin_dir ( ("$profile_dir/plugins", '/usr/share/get_iplayer/plugins') ) {
+	if ( opendir( DIR, $plugin_dir ) ) {
+		#logger "INFO: Checking for plugins in $plugin_dir\n";
+		my @plugin_files = grep /^.+\.plugin$/, readdir DIR;
+		closedir DIR;
+		for ( @plugin_files ) {
+			#logger "INFO: Got $_\n";
+			chomp();
+			$_ = "$plugin_dir/$_";
+			m{^.*\/(.+?).plugin$};
+			# Skip if we have this plugin already
+			next if (! $1) || $prog_types{$1};
+			# Register the plugin
+			$prog_types{$1} = "Programme::$1";
+			# keep in a hash for update
+			$plugin_files{"$1.plugin"} = $_;
+			#logger "INFO: Loading $_\n";
+			require $_;
+		}
+	}
+}
+
 
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
@@ -201,7 +257,7 @@ my %opt_format = (
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Downloaded files into Programme name subdirectory"],
 	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "In tv/hulu modes, download subtitles into srt/SubRip format if available"],
+	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
 	subsonly	=> [ 1, "subtitlessonly|subsonly", 'Download', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subsraw", 'Download', '--subsraw', "Additionally save the raw subtitles file"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
@@ -210,7 +266,7 @@ my %opt_format = (
 	thumb		=> [ 1, "thumb", 'Download', '--thumb', "Download Thumbnail image if available"],
 	thumbext	=> [ 1, "thumbext=s", 'Download', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
-	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: radio,tv,podcast,itv,ch4,five,hulu,all (tv is default)"],
+	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
@@ -224,29 +280,7 @@ my %opt_format = (
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
 );
 
-my $save;
-# This is where all profile data/caches/cookies etc goes
-my $profile_dir;
-# This is where system-wide default options are specified
-my $optfile_system;
 
-# Options directories specified by env vars
-if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
-	$profile_dir = $ENV{GETIPLAYERUSERPREFS};
-	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
-
-# Options on unix-like systems
-} elsif ( defined $ENV{HOME} ) {
-	$profile_dir = $ENV{HOME}.'/.get_iplayer';
-	$optfile_system = '/etc/get_iplayer/options';
-
-# Otherwise look for windows style file locations
-} elsif ( defined $ENV{USERPROFILE} ) {
-	$profile_dir = $ENV{USERPROFILE}.'/.get_iplayer';
-	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
-}
-# Make profile dir if it doesnt exist
-mkpath $profile_dir if ! -d $profile_dir;
 # Personal options go here
 my $optfile = "${profile_dir}/options";
 # Parse options if we're not saving options (system-wide options are overridden by personal options)
@@ -298,26 +332,6 @@ logger Options->copyright_notice if not $opt->{nocopyright};
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
 main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
 
-# User Agents
-my %user_agent = (
-  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
-  	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
-  	update		=> "get_iplayer updater (v${version} - $^O)",
-	desktop		=> 'Mozilla/5.0 (Windows; U; Windows NT 6.0; en-GB; rv:1.9.0.9) Gecko/2009040821 Firefox/3.0.9 (.NET CLR 3.5.30729)',
-  	get_iplayer	=> "get_iplayer/$version $^O/$^V",
-);
-# Create user agents list
-my @user_agent_list = (
-	'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.8 (KHTML, like Gecko) Chrome/2.0.178.0 Safari/<RAND>.8',
-	'Mozilla/5.0 (compatible; MSIE 7.0; Windows NT 6.0; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; c .NET CLR 3.0.0<RAND>6; .NET CLR 3.5.30<RAND>; InfoPath.1; el-GR)',
-	'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
-	'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; YPC 3.2.0; SLCC1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04<RAND>)',
-	'Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_4_11; tr) AppleWebKit/<RAND>.4+ (KHTML, like Gecko) Version/4.0dp1 Safari/<RAND>.11.2',
-	'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
-	'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; WOW64; Trident/4.0; SLCC2; .NET CLR 2.0.50<RAND>; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>; Media Center PC 6.0; InfoPath.2; MS-RTC LM 8)',
-	'Mozilla/6.0 (Windows; U; Windows NT 7.0; en-US; rv:1.9.0.8) Gecko/2009032609 Firefox/3.0.9 (.NET CLR 3.5.30<RAND>)',
-);
-
 # Display Usage
 if ( $opt_cmdline->{help} || $opt_cmdline->{helplong} ) {
 	logger Options->usage( \%opt_format, $opt_cmdline->{helplong} );
@@ -333,9 +347,11 @@ if ( $opt_cmdline->{manpage} ) {
 # Display GPL stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
-	logger request_url_retry( create_ua( $user_agent{get_iplayer} ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
+	logger request_url_retry( create_ua( 'get_iplayer' ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
+
+
 
 ########## Global vars ###########
 
@@ -376,20 +392,9 @@ my $iphone_block_size	= 0x2000000; # 32MB
 
 # Option dependant var definitions
 my $cache_secs;
-my $mplayer;
-my $ffmpeg;
-my $ffmpeg_opts;
-my $rtmpdump;
-my $mplayer_opts;
-my $lame;
-my $lame_opts;
-my $vlc;
-my $vlc_opts;
-my $id3v2;
-my $tee;
-my $bandwidth;
+my $bin;
+my $binopts;
 my @search_args = @ARGV;
-
 
 
 
@@ -500,21 +505,20 @@ sub find_matches {
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
 	$cache_secs 		= $opt->{expiry} || 14400;
-	$mplayer		= $opt->{mplayer} || 'mplayer';
-	$mplayer_opts		= '-nolirc';
-	$mplayer_opts		.= ' -v' if $opt->{debug};
-	$mplayer_opts		.= ' -really-quiet' if $opt->{quiet};
-	$ffmpeg			= $opt->{ffmpeg} || 'ffmpeg';
-	$ffmpeg_opts		= '';
-	$lame			= $opt->{lame} || 'lame';
-	$lame_opts		= '-f';
-	$lame_opts		.= ' --quiet ' if $opt->{quiet};
-	$vlc			= $opt->{vlc} || 'cvlc';
-	$vlc_opts		= '-vv' if $opt->{verbose} || $opt->{debug};
-	$id3v2			= $opt->{id3v2} || 'id3v2';
-	$tee			= 'tee';
-	$rtmpdump		= $opt->{rtmpdump} || 'rtmpdump';
-	$bandwidth		= $opt->{bandwidth} || 512000; # Download bandwidth bps used for rtsp streams
+	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
+	$binopts->{mplayer}	= '-nolirc';
+	$binopts->{mplayer}	.= ' -v' if $opt->{debug};
+	$binopts->{mplayer}	.= ' -really-quiet' if $opt->{quiet};
+	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'ffmpeg';
+	$binopts->{ffmpeg}	= '';
+	$bin->{lame}		= $opt->{lame} || 'lame';
+	$binopts->{lame}	= '-f';
+	$binopts->{lame}	.= ' --quiet ' if $opt->{quiet};
+	$bin->{vlc}		= $opt->{vlc} || 'cvlc';
+	$binopts->{vlc}		= '-vv' if $opt->{verbose} || $opt->{debug};
+	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
+	$bin->{tee}		= 'tee';
+	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
 	# Set quiet, test and get options if we're asked for streaminfo
 	if ( $opt->{streaminfo} ) {
 		$opt->{test} 	= 1;
@@ -756,7 +760,7 @@ sub download_matches {
 sub list_progs {
 	my $typeref = shift;
 	my $number_of_types = keys %{$typeref};
-	my $ua = create_ua( $user_agent{desktop} );
+	my $ua = create_ua();
 	my %names;
 	
 	# Setup user agent for a persistent connection to get programme metadata
@@ -1260,6 +1264,18 @@ sub download_block {
 
 # Returns a random user agent string
 sub random_ua {
+	# Create user agents list
+	my @user_agent_list = (
+		'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.8 (KHTML, like Gecko) Chrome/2.0.178.0 Safari/<RAND>.8',
+		'Mozilla/5.0 (compatible; MSIE 7.0; Windows NT 6.0; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; c .NET CLR 3.0.0<RAND>6; .NET CLR 3.5.30<RAND>; InfoPath.1; el-GR)',
+		'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
+		'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; YPC 3.2.0; SLCC1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04<RAND>)',
+		'Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_4_11; tr) AppleWebKit/<RAND>.4+ (KHTML, like Gecko) Version/4.0dp1 Safari/<RAND>.11.2',
+		'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
+		'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; WOW64; Trident/4.0; SLCC2; .NET CLR 2.0.50<RAND>; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>; Media Center PC 6.0; InfoPath.2; MS-RTC LM 8)',
+		'Mozilla/6.0 (Windows; U; Windows NT 7.0; en-US; rv:1.9.0.8) Gecko/2009032609 Firefox/3.0.9 (.NET CLR 3.5.30<RAND>)',
+	);
+
 	# Randomize strings
 	my $code = sprintf( "%03d", int(rand(1000)) );
 	my $uas = $user_agent_list[ int( rand($#user_agent_list + 0.5) ) ];
@@ -1271,13 +1287,15 @@ sub random_ua {
 
 
 # Generic
-# create_ua( <agent>, [<cookie mode>] )
+# create_ua( <agentname>|'', [<cookie mode>] )
 # cookie mode:	0: retain cookies
 #		1: no cookies
 #		2: retain cookies but discard if site requires it
 sub create_ua {
-	my $agent = shift || random_ua();
-	my $nocookiejar = shift || 0;
+
+	# Use either the key from the function arg if it exists or a random ua string
+	my $agent = $user_agent{ $_[0] } || random_ua();
+	my $nocookiejar = $_[1] || 0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy};
@@ -1363,41 +1381,56 @@ sub open_file_append {
 # Generic
 # Updates and overwrites this script - makes backup as <this file>.old
 sub update_script {
+
+	# Force update if no plugins dir
+	if ( ! -d "$profile_dir/plugins" ) {
+		mkpath "$profile_dir/plugins";
+		$opt->{forcedownload} = 1;
+	}
+
 	# Get version URL
 	my $script_file = $0;
-	my $ua = create_ua( $user_agent{update} );
+	my $ua = create_ua('update');
 	logger "INFO: Current version is $version\n";
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
 	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
 	chomp( my $latest_ver = $res->content );
 	if ( $res->is_success ) {
 		# Compare version numbers
-		if ( $latest_ver > $version ) {
-			logger "INFO: New version $latest_ver available, downloading\n";
-			# Check if we are writable
-			if ( ! -w $script_file ) {
-				logger "ERROR: $script_file is not writable by the current user - Update aborted\n";
-				exit 1;
+		if ( $latest_ver > $version || $opt->{forcedownload} ) {
+			# reformat version number
+			$latest_ver = sprintf('%.2f', $latest_ver);
+			logger "INFO: New version $latest_ver available, downloading files\n";
+			
+			# Get the manifest of files to be updated
+			my $base_url = "${update_url}-${latest_ver}";
+			my $req = HTTP::Request->new ('GET', "$base_url/MANIFEST.txt" );
+			my $res = $ua->request( $req );
+			if (! $res->is_success ) {
+				logger "ERROR: Failed to obtain update file manifest - Update aborted\n";
+				exit 3;
 			}
-			my $req = HTTP::Request->new ('GET', $update_url);
-			# Save content into a $script_file
-			my $res = $ua->request($req, $script_file.'.tmp');
-			if ( ! -f $script_file.'.tmp' ) {
-				logger "ERROR: Could not download update to ${script_file}.tmp - Update aborted\n";
-				exit 1;
-			}
-			# If the download was successful then copy over this script and make executable after making a backup of this script
-			if ( $res->is_success ) {
-				if ( copy($script_file, $script_file.'.old') ) {
-					move($script_file.'.tmp', $script_file);
-					chmod 0755, $script_file;
-					logger "INFO: Copied new version $latest_ver into place (previous version is now called '${script_file}.old')\n";
-					logger "INFO: Please see: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
-				} else {
-					logger "ERROR: Could not create backup file ${script_file}.old - Update aborted\n";
-					exit 1;
+
+			# update each file
+			for ( split /\n/, $res->content ) {
+				chomp();
+				my ( $type, $url) = split /\s/;
+				main::logger "INFO: Getting $type file from $url\n" if $opt->{verbose};
+				if ( $type eq 'bin' ) {
+					update_file( $ua, $url, $script_file );
+				} elsif ( $type eq 'plugins' ) {
+					my $filename = $url;
+					$filename =~ s|^.+/(.+?)$|$1|g;
+					# If the plugin file already exists
+					if ( $plugin_files{ $filename } ) {
+						update_file( $ua, $url, $plugin_files{ $filename } );
+					# else use user profile location
+					} else {
+						update_file( $ua, $url, "$profile_dir/plugins/$filename" );
+					}
 				}
 			}
+
 		} else {
 			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
 		}
@@ -1405,7 +1438,42 @@ sub update_script {
 		logger "ERROR: Failed to connect to update site - Update aborted\n";
 		exit 2;
 	}
+	logger "INFO: Please see: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
 	exit 0;
+}
+
+
+
+# Updates a file:
+# Usage: update_file( <ua>, <url>, <dest filename> )
+sub update_file {
+	my $ua = shift;
+	my $url = shift;
+	my $dest_file = shift;
+	# Check if we are writable
+	if ( -f $dest_file && ! -w $dest_file ) {
+		logger "ERROR: $dest_file is not writable by the current user - Update aborted\n";
+		exit 1;
+	}
+	my $req = HTTP::Request->new ('GET', $url);
+	# Save content into a $script_file
+	my $res = $ua->request($req, $dest_file.'.tmp');
+	if ( ! -f $dest_file.'.tmp' ) {
+		logger "ERROR: Could not download update to ${dest_file}.tmp - Update aborted\n";
+		exit 1;
+	}
+	# If the download was successful then copy over this script and make executable after making a backup of this script
+	if ( $res->is_success ) {
+		if ( -f $dest_file ) {
+			if ( ! copy($dest_file, $dest_file.'.old') ) {
+				logger "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
+				exit 1;
+			}
+		}
+		move($dest_file.'.tmp', $dest_file);
+		chmod 0755, $dest_file;
+		logger "INFO: Copied new version into place (any previous version is now called '${dest_file}.old')\n";
+	}
 }
 
 
@@ -1670,12 +1738,12 @@ sub request_url_retry {
 # Generic
 # Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
-	my $file = shift;
+	my $name = shift;
 	# If this has a path specified, does file exist
-	return 1 if $file =~ /[\/\\]/ && (-f $file || -f "${file}.exe");
+	return 1 if $bin->{$name} =~ /[\/\\]/ && (-f $bin->{$name} || -f "$bin->{$name}.exe");
 	# Search PATH
 	for (@PATH) {
-		return 1 if -f "${_}/${file}" || -f "${_}/${file}.exe";
+		return 1 if -f "${_}/$bin->{$name}" || -f "${_}/$bin->{$name}.exe";
 	}
 	return 0;
 }
@@ -2197,6 +2265,24 @@ use strict;
 use Time::Local;
 use URI;
 
+
+# Auto-load plugins
+#sub AUTOLOAD {
+#	our $AUTOLOAD;
+#	main::logger "INFO: Attempt to call $AUTOLOAD.\n";
+#	
+#	my $pname = $AUTOLOAD;
+#	$pname = $1 if $pname =~ m{^Programme\:\:(.+?)\:\:.+$};
+#	return if ! $1;
+#	main::logger "INFO: Loading Programme::$pname\n";
+#	open (PLUGIN, "< ${profile_dir}/plugins/${pname}.plugin") || die "ERROR: Cannot open plugin ${profile_dir}/plugins/${pname}.plugin - $!\n";
+#	my @plugin = <PLUGIN>;
+##	print "@plugin";
+#	eval join("\n", @plugin); # || die "ERROR: $!\n";
+#
+#}
+        
+        
 # Class vars
 # Global options
 my $optref;
@@ -2325,7 +2411,7 @@ sub download_retry_loop {
 	}
 
 	# Setup user-agent
-	my $ua = main::create_ua( $user_agent{desktop} );
+	my $ua = main::create_ua();
 
 	# Order with which to search for programme versions (can be overridden by --versionlist option)
 	# maybe we need this array per prog type??
@@ -2492,9 +2578,9 @@ sub tag_file {
 		my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
 		$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
 		# Only tag if the required tool exists
-		if ( main::exists_in_path($id3v2) ) {
+		if ( main::exists_in_path('id3v2') ) {
 			main::logger "INFO: id3 tagging $prog->{ext} file\n";
-			my $cmd = "$id3v2 --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." \"$prog->{filename}\" 1>&2";
+			my $cmd = "$bin->{id3v2} --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." \"$prog->{filename}\" 1>&2";
 			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 			if ( system($cmd) ) {
 				main::logger "WARNING: Failed to tag $prog->{ext} file\n";
@@ -2772,7 +2858,7 @@ sub download_thumbnail {
 		$file = "$prog->{dir}/$prog->{fileprefix}.${ext}";
 
 		# Download subs
-		$image = main::request_url_retry( main::create_ua( $user_agent{get_iplayer} ), $prog->{thumbnail}, 1);
+		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
 		if (! $image ) {
 			main::logger "\nERROR: Thumbnail Download failed\n";
 			return 1;
@@ -2795,6 +2881,8 @@ sub download_thumbnail {
 
 	return 0;
 }
+
+
 
 
 
@@ -3166,7 +3254,7 @@ sub get_stream_data {
 	my %data;
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua( $user_agent{desktop} );
+	my $ua = main::create_ua();
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# BBC streams
@@ -3828,7 +3916,7 @@ sub modelist {
 	
 	# Defaults
 	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
-		if ( ! main::exists_in_path($rtmpdump) ) {
+		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$opt->{vmode} = 'iphone';	
 		} else {
@@ -3897,7 +3985,7 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting $prog_type Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua( $user_agent{desktop} );
+	my $ua = main::create_ua();
 
 	# Download index feed
 	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
@@ -4058,32 +4146,32 @@ sub download {
 	return 'skip' if $opt->{subsonly} && $prog->{type} ne 'tv';
 
 	# Check if we need 'tee'
-	if ( $mode =~ /^real/ && (! main::exists_in_path($tee)) && $opt->{stdout} && (! $opt->{nowrite}) ) {
-		main::logger "\nERROR: $tee does not exist in path, skipping\n";
+	if ( $mode =~ /^real/ && (! main::exists_in_path('tee')) && $opt->{stdout} && (! $opt->{nowrite}) ) {
+		main::logger "\nERROR: tee does not exist in path, skipping\n";
 		return 'next';
 	}
-	if ( $mode =~ /^real/ && (! main::exists_in_path($mplayer)) ) {
-		main::logger "\nWARNING: Required $mplayer does not exist\n";
+	if ( $mode =~ /^real/ && (! main::exists_in_path('mplayer')) ) {
+		main::logger "\nWARNING: Required mplayer does not exist\n";
 		return 'next';
 	}
 	# Check if we have mplayer and lame
-	if ( $mode =~ /^real/ && (! $opt->{wav}) && (! $opt->{raw}) && (! main::exists_in_path($lame)) ) {
-		main::logger "\nWARNING: Required $lame does not exist, will save file in wav format\n";
+	if ( $mode =~ /^real/ && (! $opt->{wav}) && (! $opt->{raw}) && (! main::exists_in_path('lame')) ) {
+		main::logger "\nWARNING: Required lame does not exist, will save file in wav format\n";
 		$opt->{wav} = 1;
 	}
 	# Check if we have vlc
-	if ( $mode eq 'n95' && (! main::exists_in_path($vlc)) ) {
-		main::logger "\nWARNING: Required $vlc does not exist\n";
+	if ( $mode eq 'n95' && (! main::exists_in_path('vlc')) ) {
+		main::logger "\nWARNING: Required vlc does not exist\n";
 		return 'next';
 	}
 	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
-		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
+		main::logger "WARNING: Required program rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
-	if ( $mode =~ /^(flash|rtmp)/ && ! main::exists_in_path($ffmpeg)) {
-		main::logger "\nWARNING: $ffmpeg does not exist - not converting flv file\n";
+	if ( $mode =~ /^(flash|rtmp)/ && ! main::exists_in_path('ffmpeg')) {
+		main::logger "\nWARNING: ffmpeg does not exist - not converting flv file\n";
 		$opt->{raw} = 1;
 	}
 
@@ -4352,7 +4440,7 @@ sub modelist {
 	
 	# Defaults
 	if ( $opt->{amode} eq 'auto' || ! $opt->{amode} ) {
-		if ( ! main::exists_in_path($rtmpdump) ) {
+		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$opt->{amode} = 'iphone,realaudio';
 		} else {
@@ -4468,7 +4556,7 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting podcast Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua( $user_agent{get_iplayer} );
+	my $ua = main::create_ua('get_iplayer');
 	
 	# Method
 	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
@@ -4894,7 +4982,7 @@ sub get_links {
 	my %episode_pid;
 	main::logger "INFO: Getting itv Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua( $user_agent{desktop} );
+	my $ua = main::create_ua();
 
 	# Method
 	# http://www.itv.com/_data/xml/CatchUpData/CatchUp360/CatchUpMenu.xml (gets list of urls for each prog series) =>
@@ -5200,8 +5288,8 @@ sub download {
 	return 'skip' if $opt->{subsonly};
 
 	# Check for mplayer (required)
-	if (! main::exists_in_path($mplayer)) {
-		main::logger "ERROR: Required $mplayer does not exist, skipping\n";
+	if (! main::exists_in_path('mplayer')) {
+		main::logger "ERROR: Required mplayer does not exist, skipping\n";
 		return 'next';
 	}
 
@@ -5242,7 +5330,7 @@ sub get_stream_data {
 	my %data;
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua( $user_agent{desktop} );
+	my $ua = main::create_ua();
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# ITV streams
@@ -5255,1788 +5343,6 @@ sub get_stream_data {
 	$opt->{quiet} = 1 if $opt->{streaminfo};
 	$data{$prog_type}{streamurl} = join('|', Streamer::mms->get_url( $ua, $prog->{pid} ) );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
-
-	# Return a hash with media => url if '' is specified - otherwise just the specified url
-	if ( ! $media ) {
-		return %data;
-	} else {
-		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
-	}
-}
-
-
-
-################### ch4 class #################
-package Programme::ch4;
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-# Inherit from Programme class
-use base 'Programme';
-
-# Class vars
-sub index_min { return 40001 }
-sub index_max { return 49999 }
-sub channels {
-	return {
-	};
-}
-
-
-# Class cmdline Options
-sub opt_format {
-	return {
-		outputch4	=> [ 1, "outputch4=s", 'Output', '--outputch4 <dir>', "Download output directory for ch4"],
-	};
-}
-
-
-# Method to return optional list_entry format
-sub optional_list_entry_format {
-	my $prog = shift;
-	return ", $prog->{channel}, $prog->{categories}, $prog->{guidance}";
-}
-
-
-
-# Returns the modes to try for this prog type
-sub modelist {
-	return 'flashnormal';
-}
-
-
-
-# Cleans up a pid and removes url parts that might be specified
-sub clean_pid {
-	my $prog = shift;
-	# extract numerical format - remove surrounding url
-	$prog->{pid} = $1 if $prog->{pid} =~ m{(\d{2,8})};
-}
-
-
-
-# get full episode metadata given pid and ua. Uses two different urls to get data
-sub get_metadata {
-	my $prog = shift;
-	my $ua = shift;
-	my $metadata;
-	my $entry;
-	my ($name, $episode, $episodeno, $seriesno, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
-
-	# Setup User agent
-	my $ua = main::create_ua();
-	# Required for ch4
-	$ua->default_header(
-		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-		'Accept-Language'	=> 'en-gb,en;q=0.5',
-		'Accept-Encoding'	=> 'gzip,deflate',
-		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-	);
-
-	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
-
-	# Detailed metadata
-	my $prog_metadata_url = 'http://www.channel4.com/services/catchup-availability/asset-info/'; # + <assetno>?<epoch now>
-	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}?".time(), 3, '', '');
-	decode_entities($entry);
-	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
-	# Flatten
-	$entry =~ s|[\r\n]||g;
-	StringUtils::clean_utf8_and_whitespace($entry);
-
-	#<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-	#<Channel4ServiceResult serviceName="Asset Information Service" status="OK" xmlns:ns2="http://domain.catchup.channel4.com/CatchupAvailability">
-	#    <serviceReport returnCode="200">
-	#        <description>OK</description>
-	#    </serviceReport>
-	#    <assetInfo>
-	#        <assetId>CH4_08_02_16_47244016001001_001</assetId>
-	#        <contractId>47244</contractId>
-	#        <brandTitle>Smallville</brandTitle>
-	#        <webSafeBrandTitle>smallville</webSafeBrandTitle>
-	#        <seriesNumber>8</seriesNumber>
-	#        <episodeNumber>16</episodeNumber>
-	#        <episodeTitle>Smallville</episodeTitle>
-	#        <duration>2385</duration>
-	#        <sinceBroadcast>511570</sinceBroadcast>
-	#        <location>CH4_08_02_16_47244016001001_001.mp4</location>
-	#        <subtitlesFileUri></subtitlesFileUri>
-	#        <adverts>
-	#            <targetingUri>http://realmedia.channel4.com/RealMedia/ads/adstream_sx.ads/channel4.newcu/channel4/channel4/c4drama/47244/47244/016/1956465544</targetingUri>
-	#            <breaks>
-	#                <break>
-	#                    <breakOffset>0</breakOffset>
-	#                    <resumeOffset>0</resumeOffset>
-	#                    <data>PRE:x60,x61,x90,x91</data>
-	#                </break>
-	#                <break>
-	#                    <breakOffset>1330020</breakOffset>
-	#                    <resumeOffset>1330020</resumeOffset>
-	#                    <data>CEN:x92,x80,x81,x93</data>
-	#                </break>
-	#            </breaks>
-	#            <parameters></parameters>
-	#        </adverts>
-	#        <uriData>
-	#            <streamUri>rtmpe://securestream.channel4.com/4oD/mp4:assets/CH4_08_02_16_47244016001001_001</streamUri>
-	#            <token>da_b6b5cVaVcPc3dSdqb6abdUavdPaRb8cx-bj9GTZ-eS-lyT-r7rwk9pIowp8svlGqtlFlnn6ksn8sfrtrnrVlfphoqp7sblGq7lyl5nKk5nIr7rgrbqgl8pIoeqGsblG</token>
-	#            <fingerprint>v002</fingerprint>
-	#            <slist>assets/CH4_08_02_16_47244016001001_001</slist>
-	#        </uriData>
-	#    </assetInfo>
-	#</Channel4ServiceResult>
-
-	$name = $1 if $entry =~ m{<brandTitle>(.+?)</brandTitle>};
-
-	# episode
-	$episode = $1 if $entry =~ m{<episodeTitle>(.+?)</episodeTitle>};
-	$seriesno = $1 if $entry =~ m{<seriesNumber>(.+?)</seriesNumber>};
-	$episodeno = $1 if $entry =~ m{<episodeNumber>(.+?)</episodeNumber>};
-	$episode = '' if $episode eq $name;
-	$episode .= sprintf('s%02de%02d', $seriesno, $episodeno ) if $seriesno && $episodeno;
-
-	$duration = $1 if $entry =~ m{<duration>(.+?)</duration>};
-	#$ = $1 if $entry =~ m{<>(.+?)</>};
-	#$ = $1 if $entry =~ m{<>(.+?)</>};
-	#$ = $1 if $entry =~ m{<>(.+?)</>};
-
-	#$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
-	#$guidance = $1 if $entry =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
-	#$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-	#$thumbnail = $1 if $entry =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
-
-	# Fill in from cache if not got from metadata
-	$prog->{name} 		= $name || $prog->{name};
-	$prog->{episode} 	= $episode || $prog->{episode};
-	$prog->{type}		= $prog->{type};
-	$prog->{duration}	= $duration || $prog->{duration};
-	$prog->{channel}	= $channel || $prog->{channel};
-	$prog->{available}	= $available || $prog->{available};
-	$prog->{expiry}		= $expiry || $prog->{expiry};
-	$prog->{versions}	= $versions || $prog->{versions};
-	$prog->{guidance}	= $guidance || $prog->{guidance};
-	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{desc}		= $longdesc || $prog->{desc};
-	$prog->{player}		= $player;
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
-	# just use the default modelist
-	$prog->{modes}		= 'default: '.$prog->modelist();
-	return 0;
-}
-
-
-
-# Usage: Programme::tv->get_links( \%prog, 'ch4' );
-# Uses: %{ channels() }, \%prog
-sub get_links {
-	shift; # ignore obj ref
-	my $progref = shift;
-	my $prog_type = shift;
-	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels() };
-
-	# page scraping here
-	# GET http://www.channel4.com/programmes/catch-up/ | grep -P 'href="\/programmes\/.+?\/catch-up\">'
-
-	my $xml;
-	my $feed_data;
-	my $res;
-	main::logger "INFO: Getting $prog_type Programmes List\n";
-
-	# Setup User agent
-	my $ua = main::create_ua();
-	$ua->default_header(
-		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-		'Accept-Language'	=> 'en-gb,en;q=0.5',
-		'Accept-Encoding'	=> 'gzip,deflate',
-		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-		'Pragma'		=> 'no-cache',
-		'Cache-Control'		=> 'no-cache',
-	);
-	my $baseurl = 'http://www.channel4.com';
-
-	my $url = $baseurl.'/programmes/catch-up';
-	$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get series list from from channel4 site\n");
-
-	# Hash of <name> => <uri>;
-	my %names;
-	# <li><a href="/programmes/time-team/catch-up">Time Team</a></li>
-	while ( $xml =~ m{<li><a href="(/programmes/.+?/catch-up)">(.+?)</a></li>}sg ) {
-		$names{$2} = $1;
-		main::logger "DEBUG: Series '$2', URI: $1\n" if $opt->{debug};
-	}
-
-	# Download index feed
-	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
-	for my $name ( keys %names ) {
-
-		my $url = $baseurl.$names{$name};
-		# Setup User agent
-		my $ua = main::create_ua();
-		# Required for ch4
-		$ua->default_header(
-			'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-			'Accept-Language'	=> 'en-gb,en;q=0.5',
-			'Accept-Encoding'	=> 'gzip,deflate',
-			'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-			'Pragma'		=> 'no-cache',
-			'Cache-Control'		=> 'no-cache',
-			'Referer'		=> $baseurl.'/programmes/catch-up',
-		);
-	
-		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from 4oD site\n");
-		decode_entities($xml);
-		StringUtils::clean_utf8_and_whitespace($xml);
-		#<tr>
-		#        <td class="broadcastDetails">
-		#                <ul>
-		#                        <li>Thursday</li>
-		#                        <li>05 February 2009</li>
-		#                        <li><span class="broadCastTime">7:59 PM</span></li>
-		#                        <li><span class="channel">Channel 4</span></li>
-		#                </ul>
-		#        </td>
-		#        <td>
-		#                <div class="episodeDetails">
-		#                        <h3>
-		#                                <span class="episodeNumber">Series 6 Episode 1</span>
-		#                                <span class="episodeTitle">Kathleen and Mary</span>
-		#                        </h3>
-		#                        <p>Cleaning company manager Mary Gibson has the body of a 30-something
-		#                           but her face tells a very different story. A lifetime of sunbeds and
-		#                           smoking have piled on the years, leaving Mary with no choice&hellip;</p>
-		#                        <p class="guidance">Contains scenes of surgery</p>
-		#                        <ul class="jumpPoints lgIcn">
-		#                                <li><a href="/programmes/10-years-younger/episode-guide/series-6/episode-1" class="episodesLink">Episode Guide</a></li>
-		#                        </ul>
-		#                </div>
-		#        </td>
-		#        <td>
-		#                5 days left
-		#        </td>
-		#        <td>
-		#                <a class="playLink hide" href="#2870776"><span>Play</span></a>
-		#                <span class="playingLabel hide">Now</span>
-		#                <span class="playingLabel hide">Playing</span>
-		#                <!-- Image for this video clip when it's not playing -->
-		#                <input type="hidden" value="/assets/programmes/images/10-years-younger/series-6/episode-1/10-years-younger-s6e1_625x352.jpg"/>
-		#        </td>
-		#</tr>
-
-		# Parse XML
-
-		# get list of entries within <entry> </entry> tags
-		my @entries = split /broadcastDetails/, $xml;
-		# Discard first element == header
-		shift @entries;
-
-		main::logger "INFO: Got ".($#entries + 1)." episodes\n" if $opt->{verbose};
-
-		foreach my $entry (@entries) {
-			my ( $episode, $desc, $pid, $available, $expiry, $channel, $duration, $thumbnail, $versions, $guidance );
-
-			$entry =~ s/[\r\n]/ /g;
-			$entry =~ s/\s+/ /g;
-
-			#main::logger "DEBUG: Entry = $entry\n" if $opt->{debug};
-
-			# <a class="playLink hide" href="#2870776"><span>Play</span></a>
-			$pid = $1 if $entry =~ m{<a\s+class="playLink hide"\s+href="#(\d+)"><span>Play</span></a>}i;
-
-			# Date broadcast
-			# <td class="broadcastDetails"> <ul> <li>Sunday</li> <li>26 April 2009</li> <li> <span class="broadCastTime">10:00 AM</span> </li>
-			$available = "$1 $2" if $entry =~ m{>\s*<ul>\s*<li>.+?</li>\s*<li>(.+?)</li>\s*<li>\s*<span class="broadCastTime">(.+?)</span>}i;
-
-			#<td> 5 days left </td>
-			#$expiry = $1 if $entry =~ m{<td>\s*(\d+\s+\w+\s+left)\s*</td>}i;
-
-			# parse episode and s??e??
-			$episode = $1 if $entry =~ m{<span\s+class=\"episodeTitle\">\s*(.*?)\s*<\/span>}i;
-			$episode = '' if $episode eq $name;
-			$episode .= sprintf( ' s%02de%02d', $1, $2 ) if $entry =~ m{<span\s+class="episodeNumber">\s*Series\s+(\d+)\s+Episode\s+(\d+)\s*</span>}i;
-			$episode .= " $1" if $entry =~ m{<span\s+class="episodeNumber">\s*(Series\s+\d+)\s*</span>}i;
-			$episode =~ s/(^\s+|\s+$)//g;
-			$episode = $available if not $episode;
-
-			# <div class="episodeDetails"> .... <p> description </p>....<a class="playLink hide"
-			$desc = $1 if $entry =~ m{<div\s+class="episodeDetails">.+?<p>(.*?)</p>};
-			$desc = '' if $desc =~ /<span/i;
-			# Remove unwanted html tags and extra whitespace
-			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
-			$desc =~ s/\s+/ /g;
-
-			# <span class="channel">Channel 4</span>
-			$channel =  $1 if $entry =~ m{<span\s+class="channel">\s*(.+?)\s*</span>}i;
-
-			# This is not the availability!
-			# <updated>2008-06-22T05:01:49Z</updated>
-			#$available = Programme::get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
-
-			# Merge and Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-				next;
-			}
-
-			# Set guidance based on category
-			# <p class="guidance">Contains scenes of surgery</p>
-			$guidance = $1 if $entry =~ m{<p\s+class="guidance">(.+?)</p>};
-
-			# Thumbnail
-			$thumbnail = $1 if $entry =~ m{<input\s+type="hidden"\s+value="(/assets/programmes/images/.+?.jpg)"/>};
-			# use a smaller size
-			$thumbnail =~ s/625x352/145x82/g;
-
-			main::logger "DEBUG: pid='$pid',name='$name', episode='$episode', channel='$channel', url='${url}'\n" if $opt->{debug};
-
-			# build data structure
-			$progref->{$pid} = main::progclass($prog_type)->new(
-				'pid'		=> $pid,
-				'name'		=> $name,
-				'versions'	=> 'default',
-				'episode'	=> $episode,
-				'desc'		=> $desc,
-				'guidance'	=> $guidance,
-				'available'	=> $available,
-				#'expiry'	=> $expiry,
-				'duration'	=> 'Unknown',
-				'thumbnail'	=> $baseurl.$thumbnail,
-				'channel'	=> $channel,
-				'categories'	=> 'tv',
-				'type'		=> $prog_type,
-				'web'		=> "${url}#${pid}",
-			);
-		}
-	}
-	main::logger "\n";
-	return 0;
-}
-
-
-
-sub download {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	my %streamdata;
-
-	# if subsonly required then skip
-	return 'skip' if $opt->{subsonly};
-
-	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
-		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
-		return 'next';
-	}
-
-	%streamdata = %{ $prog->get_stream_data( undef, 'flashnormal') };
-
-	# Get extension from streamdata if defined and raw not specified
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-	$prog->{ext} = 'flv' if $opt->{raw};
-	
-	my $url = $prog->{streams}->{$version}->{$mode}->{streamurl};
-
-	if ( not $url ) {
-		main::logger "WARNING: No programme stream URL was found, skipping\n";
-		return 'skip';
-	}
-	
-	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>" );
-
-	# Skip from here if we are only testing downloads
-	return 'skip' if $opt->{test};
-
-	# Instantiate new streamer from streamdata
-	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
-	my $stream = $class->new;
-
-	# Do the download
-	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
-}
-
-
-
-# Generic
-# Gets media streams data for this version pid
-# $media = undef|flashnormal
-sub get_stream_data {
-	my ( $prog, undef, $media ) = @_;
-	my %data;
-
-	# Setup User agent
-	my $ua = main::create_ua();
-	# Required for ch4
-	$ua->default_header(
-		'Accept'		=> 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-		'Accept-Language'	=> 'en-gb,en;q=0.5',
-		'Accept-Encoding'	=> 'gzip,deflate',
-		'Accept-Charset'	=> 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
-	);
-
-	$opt->{quiet} = 0 if $opt->{streaminfo};
-
-	# Detailed metadata
-	my $prog_metadata_url = 'http://www.channel4.com/services/catchup-availability/asset-info/'; # + <assetno>?<epoch now>
-	my $entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}?".time(), 3, '', '');
-	decode_entities($entry);
-	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
-	# Flatten
-	$entry =~ s|[\r\n]||g;
-
-	my ( $stremuri, $token, $fingerprint, $slist );
-	#        <subtitlesFileUri></subtitlesFileUri>
-	#        <uriData>
-	#            <streamUri>rtmpe://securestream.channel4.com/4oD/mp4:assets/CH4_08_02_16_47244016001001_001</streamUri>
-	#            <token>da_b6b5cVaVcPc3dSdqb6abdUavdPaRb8cx-bj9GTZ-eS-lyT-r7rwk9pIowp8svlGqtlFlnn6ksn8sfrtrnrVlfphoqp7sblGq7lyl5nKk5nIr7rgrbqgl8pIoeqGsblG</token>
-	#            <fingerprint>v002</fingerprint>
-	#            <slist>assets/CH4_08_02_16_47244016001001_001</slist>
-	#        </uriData>
-
-	$stremuri = $1 if $entry =~ m{<streamUri>(.+?)</streamUri>};
-	$token = $1 if $entry =~ m{<token>(.+?)</token>};
-	$fingerprint = $1 if $entry =~ m{<fingerprint>(.+?)</fingerprint>};
-	$slist = $1 if $entry =~ m{<slist>(.+?)</slist>};
-
-	# streams
-	my $mode = 'flashnormal';
-	$data{$mode}{ext} = 'mp4';
-	$data{$mode}{streamer} = 'rtmp';
-	$data{$mode}{server} = $1 if $stremuri =~ m{rtmpe://(.+?)/};
-	$data{$mode}{identifier} = $1 if $stremuri =~ m{rtmpe://.+?/(.+)$};
-	$data{$mode}{authstring} = $token;
-	$data{$mode}{type} = 'Flash RTMPE h264 stream';
-	$data{$mode}{playpath} = "$data{$mode}{identifier}";
-	$data{$mode}{playpath} =~ s|^4oD/||i;
-	$data{$mode}{streamurl} = $stremuri;
-	$data{$mode}{identifier} =~ s|^4oD/mp4:||;
-	$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=${fingerprint}&slist=$data{$mode}{identifier}";
-	$data{$mode}{tcurl} = "rtmpe://$data{$mode}{server}:1935/$data{$mode}{application}";
-	$data{$mode}{swfurl} = 'http://www.channel4.com/static/programmes/asset/flash/swf/4odplayer-3.14.1.swf';
-	$data{$mode}{protocol} = 3;
-	$data{$mode}{extraopts} = '--swfsize 668128 --swfhash c103ab360cd0164b7d0611b4e8c738ffb7c4b6bcc8b94f11e13225421d2ab969';
-	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-	# Return a hash with media => url if '' is specified - otherwise just the specified url
-	if ( ! $media ) {
-		return %data;
-	} else {
-		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
-	}
-}
-
-
-
-################### five class #################
-package Programme::five;
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-# Inherit from Programme class
-use base 'Programme';
-
-# Class vars
-sub index_min { return 50001 }
-sub index_max { return 59999 }
-sub channels {
-	return {
-	};
-}
-
-
-# Class cmdline Options
-sub opt_format {
-	return {
-		outputfive	=> [ 1, "outputfive=s", 'Output', '--outputfive <dir>', "Download output directory for five"],
-	};
-}
-
-
-# Method to return optional list_entry format
-sub optional_list_entry_format {
-	my $prog = shift;
-	return ", $prog->{channel}, $prog->{categories}, $prog->{guidance}";
-}
-
-
-
-# Returns the modes to try for this prog type
-sub modelist {
-	return 'flashhigh';
-}
-
-
-
-# Cleans up a pid and removes url parts that might be specified
-sub clean_pid {
-	my $prog = shift;
-	# extract numerical format - remove surrounding url 
-	$prog->{pid} = $1 if $prog->{pid} =~ m{(C\d{8,11})};
-}
-
-
-
-# get full episode metadata given pid and ua. Uses two different urls to get data
-sub get_metadata {
-	my $prog = shift;
-	my $ua = shift;
-	my $metadata;
-	my $entry;
-	my ($name, $episode, $episodeno, $seriesno, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
-
-	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
-
-	# Setup user agent with redirection enabled and cookie-jar disabled
-	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua( undef, 1 );
-
-	# Detailed metadata
-	# Need to add temporary cookie with request of "handlerReferer=<pid>"
-	# e.g. Set-Cookie: handlerReferer=C5144920007; path=/; domain=.demand.five.tv;
-	$ua->default_header('Cookie' => "handlerReferer=$prog->{pid}; path=/;");
-
-	# Get XML
-	my $prog_metadata_url = 'http://demand.five.tv/Handlers/FlashEpisode.ashx?baseName='; # + <pid>
-	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}", 3 );
-	decode_entities($entry);
-	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
-	# Flatten
-	$entry =~ s|[\r\n]||g;
-	StringUtils::clean_utf8_and_whitespace($entry);
-
-	# <?xml version="1.0" encoding="utf-8"?>
-	# <item>                                
-	#   <baseName>                          
-	#     <![CDATA[C5144920007]]>           
-	# </baseName>                           
-	#   <seriesBaseName>                    
-	#     <![CDATA[TheGadgetShow]]>         
-	# </seriesBaseName>                     
-	#   <seasonBaseName>                    
-	#     <![CDATA[TheGadgetShowSeason11]]> 
-	# </seasonBaseName>                     
-	#   <title>                             
-	#     <![CDATA[Episode 7]]>             
-	# </title>                              
-	#   <shortDescription>                  
-	#     <![CDATA[Jon examines new-fangled TVs and Ortis encounters an automaton.)]]>
-	# </shortDescription>                                                             
-	#   <longDescription>                                                             
-	#     <![CDATA[On this action-packed show, Gail Porter and Jason Bradbury go head-to-head in a series of three competitive challenges to put some nifty technology through its paces. First to be tested is a new style of high-tech bicycle that combines the benefits of a BMX and a mountain bike. In the first stage of their bike challenge, the presenters must wow some pro riders with a trick or stunt. They then embark upon a hell-for-leather race over a mountain-biking course, before enjoying a spot of relaxation �� but in a competitive way. <br/><br/>Once fitted with brainwave sensors, the pair play a game using their minds to control the software �� the more relaxed they are, the more successful they will be. Next, Gail and Jason are fitted with heart-rate monitors to see which type of console game makes the player more relaxed. Gail plays a peaceful and tranquil game, one of a new trend in computer games designed to subvert the image of gaming as being aggressive and violent. Jason, meanwhile, plays a violent shoot-��"em-up. Which presenter will come out on top? And will they manage to keep their eyes open long enough to see the results? <br/><br/>In the final part of their competitive challenge, Gail and Jason test the very latest in gadgety wet suits. Gail��"s suit features built-in solar panels, whilst Jason��"s incorporates a rechargeable battery to heat the wearer��"s core. Which presenter will remain the toastier? To find out, the intrepid presenters plunge into an ice-cold pool for five minutes, during which time their temperatures will be monitored using a thermal-imaging camera. It is not all about warmth, though �� a good wet suit needs to be flexible. As soon as they have thawed out, Gail and Jason race through some fierce white-water rapids �� on lilos. <br/><br/>Elsewhere this time, Jon Bentley discovers how good eco TVs really are; Ortis Deley meets an awesome modular robot that can rebuild itself if it breaks; and Gail presents a rundown of the best gadgets she found at the Gadget Show Live event.]]>                                                                                                                                                       
-	# </longDescription>
-	#   <image>
-	#     <![CDATA[]]>
-	# </image>
-	#   <video>
-	#     <![CDATA[rtmpe://streamflv.download.five.tv/a800/o10/mp4:bthttp/five/downloadstore/secure/thegadgetshow/movies/The-Gadget-Show_S11_E7_Episode-7_FLVSTREAM.mp4?e=1241001311&h=62a13cc33a4f88fccbdef4baccc80c41]]>
-	# </video>
-	#   <sponsorPreRoll>
-	#     <![CDATA[]]>
-	# </sponsorPreRoll>
-	#   <genre>
-	#     <![CDATA[entertainment]]>
-	# </genre>
-	#   <parentalRating>
-	#     <ratingGrade>
-	#       <![CDATA[]]>
-	# </ratingGrade>
-	#     <ratingDescription>
-	#       <![CDATA[]]>
-	# </ratingDescription>
-	#   </parentalRating>
-	#   <parentalAdvisory>
-	#     <advisoryValue />
-	#   </parentalAdvisory>
-	#   <ssPlaylist>
-	#     <![CDATA[entertainment]]>
-	# </ssPlaylist>
-	#   <ssProgramme>
-	#     <![CDATA[TheGadgetShowSeason11]]>
-	# </ssProgramme>
-	#   <ssEpisode>
-	#     <![CDATA[C5144920007 Episode 7: Episode 7]]>
-	# </ssEpisode>
-	#   <ads></ads>
-	# </item>
-
-	# Name
-	# <seasonBaseName> <![CDATA[TheGadgetShowSeason11]]> </seasonBaseName>
-	$name = $1 if $entry =~ m{<seasonBaseName>\s*<\!\[CDATA\[(.+?)\]\]>\s*</seasonBaseName>};
-
-	# episode
-	# <title> <![CDATA[Episode 7]]> </title>
-	$episode = $1 if $entry =~ m{<title>\s*<\!\[CDATA\[(.+?)\]\]>\s*</title>};
-
-	#   <longDescription> <![CDATA[On this action... way. <br/><br/>Once fitted .. <br/><br/>... on lilos. <br/><br/> ...event.]]> </longDescription>
-	$longdesc = $1 if $entry =~ m{<longDescription>\s*<\!\[CDATA\[(.+?)\]\]>\s*</longDescription>};
-	# Remove unwanted html tags and extra whitespace
-	$longdesc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
-	$longdesc =~ s/\s+/ /g;
-
-	$categories = $1 if $entry =~ m{<genre>\s*<\!\[CDATA\[(.+?)\]\]>\s*</genre>};
-	#$ = $1 if $entry =~ m{<>(.+?)</>};
-	#$ = $1 if $entry =~ m{<>(.+?)</>};
-
-	#$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
-	#$guidance = $1 if $entry =~ m{ITV Video Guidance<\/strong><p>\s*(.+?)[\W\s]*<\/p>};
-	#$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-	#$thumbnail = $1 if $entry =~ m{<div id="cu-2-0-ItemMediaUrl">(.+?)</div>};
-
-	# Fill in from cache if not got from metadata
-	$prog->{name} 		= $prog->{name} || $name;
-	$prog->{episode} 	= $episode || $prog->{episode};
-	$prog->{type}		= $prog->{type};
-	$prog->{duration}	= $duration || $prog->{duration};
-	$prog->{channel}	= $channel || $prog->{channel};
-	$prog->{available}	= $available || $prog->{available};
-	$prog->{expiry}		= $expiry || $prog->{expiry};
-	$prog->{versions}	= $versions || $prog->{versions};
-	$prog->{guidance}	= $guidance || $prog->{guidance};
-	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{desc}		= $longdesc || $prog->{desc};
-	$prog->{player}		= $player;
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
-	# just use the default modelist
-	$prog->{modes}		= 'default: '.$prog->modelist();
-	return 0;
-}
-
-
-
-# Usage: Programme::tv->get_links( \%prog, 'five' );
-# Uses: %{ channels() }, \%prog
-sub get_links {
-	shift; # ignore obj ref
-	my $progref = shift;
-	my $prog_type = shift;
-	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels() };
-
-	# page scraping here
-	# GET http://www.channel4.com/programmes/catch-up/ | grep -P 'href="\/programmes\/.+?\/catch-up\">'
-
-	my $xml;
-	my $feed_data;
-	my $res;
-	main::logger "INFO: Getting $prog_type Programmes List\n";
-
-	# Setup user agent with redirection enabled and cookie-jar disabled
-	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua( undef, 1 );
-
-	my $baseurl = 'http://demand.five.tv';
-
-	my $url = $baseurl.'/SeriesAZ.aspx';
-	$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get series list from from Demand Five site\n");
-
-	# Hash of <name> => <uri>;
-	my %names;
-	# class="episodeLink" href="Series.aspx?seriesBaseName=HiddenLives">Hidden Lives</a>
-	while ( $xml =~ m{class="episodeLink"\s+href="(.+?)">\s*(.+?)</a>}sg ) {
-		$names{$2} = "/$1";
-		main::logger "DEBUG: Series '$2', URI: /$1\n" if $opt->{debug};
-	}
-
-	# Download index feed
-	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
-	for my $name ( keys %names ) {
-
-		my $url = $baseurl.$names{$name};
-		main::logger "DEBUG: Getting Episodes for $name\n" if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from Demand Five site\n");
-		decode_entities($xml);
-		StringUtils::clean_utf8_and_whitespace($xml);
-
-		# <div id="episode4" class="episodesOff">
-		# 	<div class="serepisodesdtls">
-		# 		<div class="fltlt">
-		# 			<a href="javascript:void(0);" class="episodeClose" onclick="toggleEpisode('episode4');">
-		# 				<img src="/images/ico_episode_close.gif" alt="View Details" vspace="2" border="0"  title="View Details" />
-		# 			</a>
-		# 			<a href="javascript:void(0);" class="episodeOpen" onclick="toggleEpisode('episode4');">
-		# 				<img src="/images/ico_episode_open.gif" alt="View Details" vspace="2" border="0"  title="View Details" />
-		# 			</a>
-		# 		</div>
-		#		<div class="serepiinfo">
-		#			<a href="javascript:void(0);" onclick="toggleEpisode('episode4');">episode 24 :</a> 
-		#			<a href="javascript:void(0);" onclick="toggleEpisode('episode4');" class="epititle"> I Want To Cook</a> 
-		#			<!-- Parental Guidance REMEMBER TO SET THE ALT AND TITLE FROM DATA -->
-		#			<!-- Subtitles image -->
-		#			<!-- Schedule -->
-		#			<br />
-		#			<!-- Ratings image -->
-		#			<br />Avg Rating:
-		#			<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars" class="userRating" itemid="C5116040024">
-		#		<img id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars_AvgStars" src="images/avg_star_5.png" style="border-width:0px;" /><span id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_AvgRatingStars_Count" class="countLabel">(1 vote)</span>
-		#	</div>
-		#	<!-- FileSize -->
-		#	<br />
-		#	<div style="float:left;">
-		#		11 mins - 60.5 MB
-		#	</div>
-		#	<!-- Expires image -->
-		#	<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_ExpiresVisible" style="float:left;">
-		#		<img src="/images/ico_epi_expires.gif" alt="expires" width="14" height="12" hspace="5" />
-		#		<span class="expires">Available for another <strong>6</strong> days</span>
-		#	</div>
-		#</div>
-		#</div>
-		#<div id="ctl00_MainContent_EpisodeList_EpisodeList_ctl03_divPlayItem">
-		#	<div class="serepirent" >
-		#	<a href="Episode.aspx?episodeBaseName=C5116040024" class="PlayEpisodeItem" >
-		#		<img src="/images/btn_play.gif" alt="rent" border="0" align="top" title="play" />
-		#	</a> 
-		#</div>
-		#</div>
-		#<div class="seperator"><img src="/images/seperator.gif" alt="" title="" /></div>
-		#<div class="epimoreinfo">
-		#	<div class="moreinfort">
-		#		<img src="http://content.download.five.tv/bthttp/five/downloadstore/images/LittlePrincess_ESmall.png" alt="episode image"/>	
-		#	</div>
-		#	<div class="findmore">Little Princess is baking a cake.
-		#	<div>
-		#		<img src="/images/find_more.gif" alt="find more" width="12" height="12" align="top" title="find more" /> 
-		#		<a href="Episode.aspx?episodeBaseName=C5116040024"> find out more</a></div>
-		#	</div>
-		#</div>
-		#</div>
-
-		# Parse XML
-
-		# get list of entries within <entry> </entry> tags
-		my @entries = split /<div id="episode\d+"/, $xml;
-		# Discard first element == header
-		shift @entries;
-
-		main::logger "INFO: Got ".($#entries + 1)." episodes\n" if $opt->{verbose};
-
-		foreach my $entry (@entries) {
-			my ( $episode, $desc, $pid, $available, $expiry, $channel, $duration, $thumbnail, $versions, $guidance );
-
-			$entry =~ s/[\r\n]/ /g;
-			$entry =~ s/\s+/ /g;
-
-			# main::logger "DEBUG: Entry = $entry\n" if $opt->{debug};
-
-			# PID
-			# <a href="Episode.aspx?episodeBaseName=C5116040024">
-			$pid = $1 if $entry =~ m{Episode.aspx\?episodeBaseName=(C\d+)"}i;
-
-			# Episode
-			## <a href="javascript:void(0);" onclick="toggleEpisode('episode4');">episode 24 :</a>
-			# <a href="javascript:void(0);" onclick="toggleEpisode('episode4');" class="epititle"> I Want To Cook</a>
-			$episode = $1 if $entry =~ m{class="epititle">\s*(.+?)\s*</a>}i;
-
-			# Available
-			# <span class="expires">Available for another <strong>6</strong> days</span>
-			$available = $1 if $entry =~ m{<span class="expires">Available for another (.+?)</span>}i;
-			$available =~ s|<\/?.+?>||g;
-
-			# Duration
-			# <!-- FileSize -->
-			# <br />
-			# <div style="float:left;">
-			#	11 mins - 60.5 MB
-			# </div>
-			$duration = $1 if $entry =~ m{FileSize\s*-->\s*<b.+?>\s*<div.+?>\s*(.+?)\s*</div>}i;
-
-			# Desc
-			# <div class="findmore">Little Princess is baking a cake.
-			# <div>
-			$desc = $1 if $entry =~ m{<div class="findmore">\s*(.+?)\s*<div>};
-			# Remove unwanted html tags and extra whitespace
-			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
-			$desc =~ s/\s+/ /g;
-
-			# <span class="channel">Channel 4</span>
-			#$channel =  $1 if $entry =~ m{<span\s+class="channel">\s*(.+?)\s*</span>}i;
-
-			# Merge and Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-				next;
-			}
-
-			# Thumbnail
-			#	<div class="moreinfort">
-			#		<img src="http://content.download.five.tv/bthttp/five/downloadstore/images/LittlePrincess_ESmall.png" alt="episode image"/>	
-			#	</div>
-			$thumbnail = $1 if $entry =~ m{<div class="moreinfort">\s*<img src="(.+?)"};
-			main::logger "DEBUG: pid='$pid',name='$name', episode='$episode', duration='$duration', available='${available}'\n" if $opt->{debug};
-
-			# build data structure
-			$progref->{$pid} = main::progclass($prog_type)->new(
-				'pid'		=> $pid,
-				'name'		=> $name,
-				'versions'	=> 'default',
-				'episode'	=> $episode,
-				'desc'		=> $desc,
-				'guidance'	=> $guidance,
-				'available'	=> $available,
-				'duration'	=> $duration,
-				'thumbnail'	=> $thumbnail,
-				'channel'	=> 'five',
-				'categories'	=> 'tv',
-				'type'		=> $prog_type,
-				'web'		=> "http://demand.five.tv/Episode.aspx?episodeBaseName=${pid}",
-			);
-		}
-	}
-	main::logger "\n";
-	return 0;
-}
-
-
-
-sub download {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	my %streamdata;
-
-	# if subsonly required then skip
-	return 'skip' if $opt->{subsonly};
-
-	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path($rtmpdump)) {
-		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
-		return 'next';
-	}
-
-	%streamdata = %{ $prog->get_stream_data( undef, 'flashhigh') };
-
-	# Get extension from streamdata if defined and raw not specified
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-	$prog->{ext} = 'flv' if $opt->{raw};
-	
-	my $url = $prog->{streams}->{$version}->{$mode}->{streamurl};
-
-	if ( not $url ) {
-		main::logger "WARNING: No programme stream URL was found, skipping\n";
-		return 'skip';
-	}
-	
-	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>" );
-
-	# Skip from here if we are only testing downloads
-	return 'skip' if $opt->{test};
-
-	# Instantiate new streamer from streamdata
-	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
-	my $stream = $class->new;
-
-	# Do the download
-	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
-}
-
-
-
-# Generic
-# Gets media streams data for this version pid
-# $media = undef|flashhigh
-sub get_stream_data {
-	my ( $prog, undef, $media ) = @_;
-	my %data;
-	my $entry;
-
-	# Setup user agent with redirection enabled and cookie-jar disabled
-	# Disable cookie jar (otherwise it saves cookies that prevent further XML downloads for a prog)
-	my $ua = main::create_ua( undef, 1 );
-	$opt->{quiet} = 0 if $opt->{streaminfo};
-
-	# Need to add temporary cookie with request of "handlerReferer=<pid>"
-	# e.g. Set-Cookie: handlerReferer=C5144920007; path=/; domain=.demand.five.tv;
-	$ua->default_header('Cookie' => "handlerReferer=$prog->{pid}; path=/;");
-	main::logger "DEBUG: Sending Cookie: Cookie: handlerReferer=$prog->{pid}; path=/;\n" if $opt->{debug};
-	# Get XML
-	my $prog_metadata_url = 'http://demand.five.tv/Handlers/FlashEpisode.ashx?baseName='; # + <pid>
-	$entry = main::request_url_retry($ua, "${prog_metadata_url}$prog->{pid}", 3 );
-
-	decode_entities($entry);
-	main::logger "DEBUG: ${prog_metadata_url}$prog->{pid}:\n$entry\n\n" if $opt->{debug};
-	# Flatten
-	$entry =~ s|[\r\n]||g;
-
-	my $stremuri;
-
-	#   <video>
-	#     <![CDATA[rtmpe://streamflv.download.five.tv/a800/o10/mp4:bthttp/five/downloadstore/secure/thegadgetshow/movies/The-Gadget-Show_S11_E7_Episode-7_FLVSTREAM.mp4?e=1241001311&h=62a13cc33a4f88fccbdef4baccc80c41]]>
-	# </video>
-
-	$stremuri = $1 if $entry =~ m{\[(rtmpe://.+?)\]};
-
-	# streams
-	my $mode = 'flashhigh';
-	$data{$mode}{ext} = 'mp4';
-	$data{$mode}{streamer} = 'rtmp';
-
-	$data{$mode}{type} = 'Flash RTMPE h264 stream';
-	$data{$mode}{streamurl} = $stremuri;
-	$data{$mode}{protocol} = 3;
-	$data{$mode}{extraopts} = '--swfsize 848259 --swfhash 75a4a2a2dc7e7c198478161bb1c8826721034f4f36bed7d23c6bf42910a500a1';
-	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-	# Return a hash with media => url if '' is specified - otherwise just the specified url
-	if ( ! $media ) {
-		return %data;
-	} else {
-		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
-	}
-}
-
-
-
-################### Hulu class #################
-package Programme::hulu;
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-# Inherit from Programme class
-use base 'Programme';
-
-# Class vars
-sub index_min { return 200001 }
-sub index_max { return 299999 }
-sub channels {
-	return {
-		'Action and Adventure'		=> 'Action and Adventure',
-		'Action and Adventure/Espionage'		=> 'Action and Adventure, Espionage',
-		'Action and Adventure/Martial Arts'		=> 'Action and Adventure, Martial Arts',
-		'Action and Adventure/Military and War'		=> 'Action and Adventure, Military and War',
-		'Action and Adventure/Westerns'		=> 'Action and Adventure, Westerns',
-		'Animation and Cartoons'		=> 'Animation and Cartoons',
-		'Animation and Cartoons/Anime'		=> 'Animation and Cartoons, Anime',
-		'Comedy'		=> 'Comedy',
-		'Comedy/Romance'		=> 'Comedy, Romance',
-		'Comedy/Satire'		=> 'Comedy, Satire',
-		'Comedy/Sitcoms'		=> 'Comedy, Sitcoms',
-		'Comedy/Sketch'		=> 'Comedy, Sketch',
-		'Comedy/Stand Up'		=> 'Comedy, Stand Up',
-		'Drama'		=> 'Drama',
-		'Drama/Crime and Courtroom'		=> 'Drama, Crime and Courtroom',
-		'Drama/Medical'		=> 'Drama, Medical',
-		'Drama/Soap Operas'		=> 'Drama, Soap Operas',
-		'Family'		=> 'Family',
-		'Food and Leisure'		=> 'Food and Leisure',
-		'Food and Leisure/Entertaining'		=> 'Food and Leisure, Entertaining',
-		'Food and Leisure/Fashion and Beauty'		=> 'Food and Leisure, Fashion and Beauty',
-		'Food and Leisure/Food and Beverage'		=> 'Food and Leisure, Food and Beverage',
-		'Food and Leisure/Health and Fitness'		=> 'Food and Leisure, Health and Fitness',
-		'Food and Leisure/Recipes'		=> 'Food and Leisure, Recipes',
-		'Food and Leisure/Travel'		=> 'Food and Leisure, Travel',
-		'Home and Garden'		=> 'Home and Garden',
-		'Home and Garden/Decorating'		=> 'Home and Garden, Decorating',
-		'Home and Garden/Do it Yourself'		=> 'Home and Garden, Do it Yourself',
-		'Home and Garden/Home Improvement'		=> 'Home and Garden, Home Improvement',
-		'Home and Garden/Real Estate'		=> 'Home and Garden, Real Estate',
-		'Horror and Suspense'		=> 'Horror and Suspense',
-		'Horror and Suspense/Mystery'		=> 'Horror and Suspense, Mystery',
-		'Horror and Suspense/Paranormal'		=> 'Horror and Suspense, Paranormal',
-		'Music'		=> 'Music',
-		'News and Information'		=> 'News and Information',
-		'News and Information/Celebrity and Gossip'		=> 'News and Information, Celebrity and Gossip',
-		'News and Information/Current News'		=> 'News and Information, Current News',
-		'News and Information/Documentary and Biography'		=> 'News and Information, Documentary and Biography',
-		'News and Information/Live Events and Specials'		=> 'News and Information, Live Events and Specials',
-		'News and Information/Politics'		=> 'News and Information, Politics',
-		'News and Information/Science and Technology'		=> 'News and Information, Science and Technology',
-		'Other'		=> 'Other',
-		'Reality and Game Shows'		=> 'Reality and Game Shows',
-		'Science Fiction'		=> 'Science Fiction',
-		'Sports'		=> 'Sports',
-		'Sports/College Football'		=> 'Sports, College Football',
-		'Sports/Extreme Sports'		=> 'Sports, Extreme Sports',
-		'Sports/Fighting and Martial Arts'		=> 'Sports, Fighting and Martial Arts',
-		'Sports/Gaming'		=> 'Sports, Gaming',
-		'Sports/NBA'		=> 'Sports, NBA',
-		'Sports/NHL'		=> 'Sports, NHL',
-		'Sports/WWE'		=> 'Sports, WWE',
-		'Talk and Interview'		=> 'Talk and Interview',
-		'Talk and Interview/Celebrity and Gossip'		=> 'Talk and Interview, Celebrity and Gossip',
-		'Talk and Interview/Late Night'		=> 'Talk and Interview, Late Night',
-		'Videogames'		=> 'Videogames',
-		'Videogames/Previews'		=> 'Videogames, Previews',
-		'Videogames/Reviews'		=> 'Videogames, Reviews',
-		'Web'		=> 'Web',
-		'Web/Web Originals'		=> 'Web, Web Originals',
-	};
-}
-
-
-# Class cmdline Options
-sub opt_format {
-	return {
-		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
-		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity,release,rating"],
-		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
-		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
-	};
-}
-
-
-
-# Method to return optional list_entry format
-sub optional_list_entry_format {
-	my $prog = shift;
-	return ", $prog->{channel}";
-}
-
-
-
-# Returns the modes to try for this prog type
-sub modelist {
-	my $prog = shift;
-	my $modelist;
-	
-	# Deal with Hulu fallback modes
-	# Valid modes are flashhigh,flashnormal,flashlow
-	# flashhigh doesn't seem to be supported yet by rtmpdump due to requiring RTMPE (encrypted streaming)
-	# 'rtmp' or 'flash' => 'flashnormal,flashlow'
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashnormal,flashlow' if $_ eq 'rtmp' || $_ eq 'flash';
-	}
-	$opt->{vmode} = join ',', @modes;
-	# Defaults
-	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
-		$modelist = 'flashnormal,flashlow';
-	} else {
-		$modelist = $opt->{vmode};
-	}
-	return $modelist;
-}
-
-
-
-# Cleans up a pid and removes url parts that might be specified
-sub clean_pid {
-	my $prog = shift;
-
-	# strip out any prefix leaving just numbers
-	$prog->{pid} =~ s/[^\d]//g;
-	# rewrite pid to be in correct form
-	$prog->{pid} = 'hulu-'.$prog->{pid};
-}
-
-
-
-# get full episode metadata given pid and ua.
-sub get_metadata {
-	my $prog = shift;
-	my $ua = shift;
-	my $metadata;
-	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
-
-	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
-
-	my $url = $prog->get_metadata_url( $ua );
-
-	#    <switch>
-	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"                                                                                                                                                 
-	#      system-bitrate="516701" width="384" height="288"
-	#      profile="4x3 24fps Medium" />
-	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEc1dkbdalc7c9cabbd1chagdzdMb2drbU-bjI2E9-8-ZqFCuCo0Jzn&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g"
-	#      system-bitrate="750859" width="480" height="360"
-	#      profile="4x3 24fps High" />
-	#      <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv?auth=daEbBb8a7aqdEbMdRcbdXcDd7cNdmbMdAaz-bjI2E9-4q-3oFBACt1Ayu&amp;aifp=sll02152008&amp;slist=hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv;.international=false"
-	#      system-bitrate="998383" width="640" height="480"
-	#      profile="4x3 24fps H264 Medium" />
-	#      <ref src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
-	#      title="What Makes Doogie Run"
-	#      abstract="Vinnie convinces Doogie to enroll in an acting class. Enlightened by the experience, Doogie decides he has been on the fast tract too long, and decides to resign from Eastman and travel abroad."
-	#      copyright="(c) 1992-1993 Twentieth Century Fox Film Corporation"
-	#      dur="1380087ms" width="384" height="288"
-	#      keywords="doogie,howser,comedy,neil,patrick,harris,vinnie,delphino,classics,fox,doctor,genius,david,kelley,steven,bochco,Best,Friend,Child,Prodigy,Dramedy,California,Operating,Room,Computer,Family,Medical,Sitcom,Boy,Genius,Doctor,Genius,Hospital,Journal"
-	#      tp:Ad_Model="longform" tp:Aspect_Ratio="4x3"
-	#      tp:CP_Promotional_Link="http://www.amazon.com/dp/B000EBGF6I?tag=hulu-20"
-	#      tp:CP_Promotional_Text="Buy this season today"
-	#      tp:CPIdentifier="Twentieth Century Fox Television"
-	#      tp:Channel="Fox Television Classics" tp:Daypart="Prime Time"
-	#      tp:Episode_Number="22" tp:Frame_Rate="24"
-	#      tp:Primary_Category="Comedy"
-	#      tp:Programming_Type="Full Episode"
-	#      tp:Promotional_Type="non-promo" tp:Season_Number="4"
-	#      tp:Segments="00:04:19;18,00:11:18;02,00:22:04;02"
-	#      tp:Series_Title="Doogie Howser, M.D."
-	#      tp:TMS_Program_ID="EP000171090113"
-	#      tp:TMS_Series_ID="SH000171090000"
-	#      tp:endCreditsTime="00:22:07;00" tp:hasBug="false"
-	#      tp:isEmbeddable="True" tp:requiresEncryption="no"
-	#      tp:seriesIdentifier="doogie-howser-md"
-	#      tp:siteChannels="Drama|Comedy~Sitcoms" />
-	#    </switch>
-	my $xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme stream data for $prog->{name} from site\n");
-	# flatten xml
-	$xml =~ s/[\n\r]//g;
-
-	decode_entities($xml);
-	main::logger "DEBUG: $url:\n$xml\n\n" if $opt->{debug};
-	# Flatten
-	$xml =~ s|[\r\n]||g;
-	
-	# Extract categories
-	$categories = $1 if $xml =~ m{tp:siteChannels="(.+?)"};
-	$categories =~ s/\|/,/g;
-
-	$name = $1 if $xml =~ m{tp:Series_Title="(.+?)"};
-
-	$channel = $1 if $xml =~ m{tp:Channel="(.+?)"};
-
-	( $episode, $longdesc ) = ( $1, $2 ) if $xml =~ m{title="([^"]+?)"\s+abstract="(.+?)"};
-
-	$duration = $1 if $xml =~ m{dur="(.+?)\d\d\dms"};
-
-	# Fill in from cache if not got from metadata
-	$prog->{name} 		= $name || $prog->{name};
-	$prog->{episode} 	= $episode || $prog->{episode};
-	$prog->{type}		= $prog_type || $prog->{type};
-	$prog->{duration}	= $duration || $prog->{duration};
-	$prog->{channel}	= $channel || $prog->{channel};
-	$prog->{available}	= $available || $prog->{available};
-	$prog->{expiry}		= $expiry || $prog->{expiry};
-	$prog->{versions}	= $versions || $prog->{versions};
-	$prog->{guidance}	= $guidance || $prog->{guidance};
-	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{desc}		= $longdesc || $prog->{desc};
-	$prog->{player}		= $player;
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
-	# just use the default modelist
-	$prog->{modes}		= 'default: '.$prog->modelist();
-	return 0;
-}
-
-
-
-# Usage: Programme::hulu->get_links( \%prog, 'hulu' );
-# Uses: %{ channels() }, \%prog
-sub get_links {
-	shift; # ignore obj ref
-	my $progref = shift;
-	my $prog_type = shift;
-	my %channels = %{ channels() };
-	
-	# What to sort the pages by: popularity, release, rating
-	my $hulu_channel_page_sort = $opt->{hulusort} || 'popularity,release,rating';
-
-	# What hulu prog types to get: episodes, feature_film, tv, clips, film_trailers, film_clips, movies
-	# The two useful ones are episodes (9000+ full length TV episodes) and feature_film (200+ full-length movies)
-	my @htypes;
-	if ( $opt->{hulutypes} ) {
-		@htypes = split /,/, $opt->{hulutypes};
-	} else {
-		@htypes = qw(feature_film episodes);
-	}
-
-	main::logger "INFO: Getting hulu Index Feeds\n";
-	# Setup User agent
-	my $ua = main::create_ua( $user_agent{desktop} );
-
-	# Extract channels names from http://www.hulu.com/browse/network/episodes
-
-	# Search URLs:
-	#http://www.hulu.com/videos/search?sort_by=relevance&company=history&query=* (query must be at end)
-	# Search for all full TV episodes on Fox => 1829 results: 
-	# channels: 15+gigs fox sci-fi 
-	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=episode
-	# Limit by show name, insert: ?showname=doogie+howser%2C+m.d.&
-
-	# Search for all full feature films on <channel>
-	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=feature_film
-
-	# Sorted and categorised Feed
-	# http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}
-
-	# For full-movie pages http://www.hulu.com/browse/alphabetical/feature_film
-	# just search for 
-	# add_to_playlist?video_id=(\d+?)'
-
-	for my $channel ( keys %channels ) {
-
-		# Get incremental pages until no matches
-		# http://www.hulu.com/channels/<channel>?kind=videos&page=<page>&sort=popularity&type=<type>
-
-		# loop through both hulu prog types
-		for my $htype ( @htypes ) {
-			main::logger "DEBUG: Channel: $channel/$htype\n" if $opt->{verbose};
-
-			# loop through each pageno until no episodes found (or max 10 pages per channel)
-			my $page = 0;
-			my $episode_count;
-			for my $page_sort ( split /,/, $hulu_channel_page_sort ) {
-				$page++;
-				$episode_count = 0;
-
-				# Build Hulu URL
-				my $hulu_prog_page_url = "http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}";
-				# Get page
-				my $html = main::request_url_retry($ua, $hulu_prog_page_url, 3, '.', "WARNING: Failed to get episode page for channel ${channel}, page ${page}, type ${htype}\n");
-				# flatten html
-				$html =~ s/[\n\r]//g;
-
-				# Feed format:
-				#   <item>                                                                                                                                
-				#      <title>Burn Notice: Lesser Evil (s2 | e16)</title>
-				#      <guid isPermaLink="true">http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</guid>
-				#      <link>http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</link>
-				#      <description>
-				#        <![CDATA[
-				#		<a href="http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity">
-				#		<img src="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg"
-				#		 align="right" hspace="10" vspace="10" width="145" height="80" border="0" /></a>
-				#		<p>In the explosive season finale, Michael learns some surprising facts about Victor's past, and is forced to take on Carla in a final showdown.</p>
-				#		<p>Added: March 05, 2009<br/>Air date: March 05, 2009<br/>Duration: 43:23<br/>Rating: 4.8 / 5.0<br/></p>
-				#	 ]]>
-				#      </description>
-				#      <pubDate>Thu, 05 Mar 2009 20:35:25 -0000</pubDate>
-				#      <media:thumbnail url="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg" width="145" height="80"/>
-				#      <media:credit>USA</media:credit>
-				#    </item>
-
-				#loop through each episode section
-				for my $entry ( split /<item>/, $html ) { 
-
-					# Extract episode data
-					$entry =~ s/\&nbsp;/ /g;
-					decode_entities($entry);
-
-					my ($title, $guidance, $name, $pid, $episode, $web, $thumbnail, $duration, $description );
-
-					main::logger "DEBUG: Match Line: $entry\n" if $opt->{debug};
-
-					# Extract pid
-					$pid = $1 if $entry =~ m{<link>\s*http://www.hulu.com/watch/(\d+)/};
-					# Construct web url
-					$web = 'http://www.hulu.com/watch/'.$pid;
-
-					# Prepend 'hulu-' to pid to keep as a GUID
-					$pid = 'hulu-'.$pid;
-
-					# Name : Episode
-					$title = $1 if $entry =~ m{<title>\s*(.+?)\s*</title>}i;
-					( $name, $episode ) = (split /:/, $title)[0,1];
-					$name =~ s/(^\s*|\s*$)//g;
-					$episode =~ s/(^\s*|\s*$)//g;
-
-					# Remove any '|'s
-					$episode =~ s/\|/_/g;
-
-					# Films don't have episode names
-					$episode = 'Film' if !$episode;
-
-					# Description
-					( $description , $duration )= ( $1, $2 ) if $entry =~ m{CDATA\[.+?<p>\s*(.+?)\s*</p>.+?Duration:\s+([\d:]+)<.+?\]}i;
-
-					# Extract thumbnail
-					$thumbnail = $1 if $entry =~ m{<media:thumbnail\s+url="(http.+?)"}i;
-
-					# Guidance (subtitles)
-					$guidance = $1 if $entry =~ m{>(Rating:\s*[\d\.]\s*/\s*[\d\.]+)<}i;
-
-					# skip if no data
-					next if ! ($pid && $episode && $name);
-					main::logger "DEBUG: PID: '$pid', Name: '$name', Episode: '$episode'\n" if $opt->{debug};
-					$episode_count++;
-
-					# Skip if this pid is a duplicate
-					if ( defined $progref->{$pid} ) {
-						main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}' in Channel: '$progref->{$pid}->{channel}' already exists (this name-episode = '$name - $episode' pid= $pid, channel = $channel)\n" if $opt->{verbose};
-						# append categories here if we have a dup and category is not there already
-						$progref->{$pid}->{categories} .= ",$channel" if $progref->{$pid}->{categories} !~ /$channel/;
-						next;
-					}
-
-					# build data structure
-					$progref->{$pid} = Programme::hulu->new(
-						'pid'		=> $pid,
-						'name'		=> $name,
-						'versions'	=> 'default',
-						'episode'	=> $episode,
-						'channel'	=> $channel,
-						'guidance'	=> $guidance,
-						'categories'	=> $channel,
-						'desc'		=> $description,
-						'duration'	=> $duration,
-						'type'		=> $prog_type,
-						'web'		=> $web,
-						'thumbnail'	=> $thumbnail,
-					);
-
-
-				} # end of episode loop
-				main::logger "INFO: Got $episode_count programmes\n" if $opt->{verbose};
-
-			} # end of page loop
-
-		} # end of htype loop
-
-	} # end of channel loop
-
-
-	main::logger "\n";
-	return 0;
-}
-
-
-
-# Usage: download (<prog>, <ua>)
-sub download {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	my %streamdata;
-	
-	# if rtmpdump does not exist
-	if ( ! main::exists_in_path($rtmpdump) ) {
-		main::logger "WARNING: Required program $rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
-		return 'next';
-	}
-	# Force raw mode if ffmpeg is not installed
-	if ( ! main::exists_in_path($ffmpeg) ) {
-		main::logger "\nWARNING: $ffmpeg does not exist - not converting flv file\n";
-		$opt->{raw} = 1;
-	}
-
-	# Get streams into this hash from prog object
-	%streamdata = %{ $prog->{streams}->{$version}->{$mode} } if defined $prog->{streams}->{$version}->{$mode};
-
-	# Set filename extension
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-	$prog->{ext} = 'flv' if $opt->{raw};
-
-	# Determine the correct filenames for this download
-	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> $mode" ) ) {
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
-		return 'skip';
-	}
-	
-	# Skip from here if we are only testing downloads
-	return 'skip' if $opt->{test};
-
-	# Get subtitles if they exist and are required 
-	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
-	my $subfile_done;
-	my $subfile;
-	if ( $opt->{subtitles} ) {
-		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
-		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
-		$prog->download_subtitles( $ua, $subfile, $prog->{streams}->{$version}->{subtitles}->{streamurl} );
-		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
-	}
-
-	my $return = 0;
-	if ( ! $opt->{subsonly} ) {
-		# Instantiate new streamer from streamdata
-		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
-		my $stream = $class->new;
-
-		# Do download
-		$return = $stream->get( $ua, undef, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
-	}
-
-	# Rename the subtitle file accordingly
-	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
-
-	return $return;
-}
-
-
-
-# get Hulu subtitles stream then convert to srt
-sub download_subtitles {
-	my $prog = shift;
-	my ( $ua, $file, $suburl ) = @_;
-	my $subs;
-
-	# Return if we have no url
-	if (! $suburl) {
-		main::logger "\nINFO: Subtitles not available\n";
-		return 2;
-	}
-
-	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
-
-
-	# Download subs
-	$subs = main::request_url_retry($ua, $suburl, 2);
-	if (! $subs ) {
-		main::logger "\nERROR: Subtitle Download failed\n";
-		return 1;
-	} else {
-		# Dump raw subs into a file if required
-		if ( $opt->{subsraw} ) {
-			main::logger "\nINFO: Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.smi\n";
-			my $fhraw = main::open_file_append("$prog->{dir}/$prog->{fileprefix}.smi");
-			print $fhraw $subs;
-			close $fhraw;
-		}
-		main::logger "\nINFO: Downloading Subtitles\n";
-	}
-
-	# Convert smil the format to srt
-	# SRT:
-	#1
-	#00:01:22,490 --> 00:01:26,494
-	#Next round!
-	#
-	#2
-	#00:01:33,710 --> 00:01:37,714
-	#Now that we've moved to paradise, there's nothing to eat.
-	#
-	# SMIL:
-	# timestamps are in milliseconds
-	#   <Sync Start="18664">
-	#      <P Class="ENCC">I got a call from an old friend,
-	#      <br />heard Scylla was</P>
-	#    </Sync>
-	#    <Sync Start="20864">
-	#      <P Class="ENCC">in play and he wants to know</P>
-	#    </Sync>
-	#    <Sync Start="21864">
-	#      <P Class="ENCC">if he can get in on it.
-	#      <br />I've set up a safe house</P>
-	#    </Sync>
-	#    <Sync Start="23598">
-	#      <P Class="ENCC">where you can hear him out.</P>
-	#    </Sync>
-	#    <Sync Start="25031">
-	#      <P Class="ENCC">Do you have a pen?
-	#      <br />Just a minute.</P>
-	#    </Sync>
-	#    <Sync Start="26431">
-	#      <P Class="ENCC">1917 Piermont.</P>
-	#    </Sync>
-	
-	# TT:
-	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
-	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
-	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
-
-	my $count = 1;
-	# flatten
-	$subs =~ s/[\r\n]//g;
-	# $subdata{<count>}{start|end|text} = 'value';
-	my %subdata; 
-	my @lines = split /<Sync\s/i, $subs;
-	for ( @lines ) {
-		my ( $begin, $sub );
-		# Remove span elements
-		s|<\/?span.*?>| |g;
-		# Remove <br /> elements
-		s|<br.*?>| |g;
-		# Start="2284698"><P Class="ENCC">I won't have to drink it<br />in this crappy warehouse.</P></Sync>
-		( $begin, $sub ) = ( $1, $2 ) if m{.*Start="(.+?)".+<P.+?>(.+?)<\/p>.*?<\/Sync>}i;
-		decode_entities($sub);
-		if ($begin && $sub ) { ### !~ /^.amp.nbsp.$/ ) {
-			# Convert milliseconds into HH:MM:ss,mmm format
-			my $seconds = int( $begin / 1000.0 );
-			my $ms = $begin - ( $seconds * 1000.0 );
-			$begin = sprintf("%02d:%02d:%02d,%03d", (gmtime($seconds))[2,1,0], $ms );
-			decode_entities($sub);
-			# Remove any simple html elements
-			$sub =~ s|<\/?(\w)+>| |g;
-			# strip multispaces
-			$sub =~ s/\s+/ /g;
-			# Write to file
-			$subdata{$count}{start} = $begin;
-			$subdata{$count}{text} = $sub;
-			# set the end of the previous sub line
-			$subdata{$count-1}{end} = $begin;
-			$count++;
-		}
-	}	
-	$subdata{$count-1}{end} = $subdata{$count-1}{start};
-
-	# Open subs file
-	unlink($file);
-	my $fh = main::open_file_append($file);
-
-	# write each sub to file
-	for my $count ( sort {$a <=> $b} keys %subdata ) {
-		if ( $subdata{$count}{start} && $subdata{$count}{text} && $subdata{$count}{end} ) {
-			#main::logger "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
-			print $fh "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
-		}
-	}
-
-	close $fh;
-
-	return 0;
-}
-
-
-
-# retrieves the metadata URL for hulu and sets $prog->{metadata_url} - also returns it
-sub get_metadata_url {
-	my $prog = shift;
-	my $ua = shift;
-
-	return $prog->{metadata_url} if $prog->{metadata_url};
-
-	# Don't rely on {web} being set (espcially if were called using --pid) - use {pid}
-	$prog->{web} = $prog->{pid};
-	# strip out any prefix leaving just numbers
-	$prog->{web} =~ s/[^\d]//g;
-	# rewrite pid to be in correct form
-	$prog->{pid} = 'hulu-'.$prog->{web};
-	# Add in the web page prefix
-	$prog->{web} = 'http://www.hulu.com/watch/'.$prog->{web};
-
-	# download/stream method.....
-	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
-	# GET http://r.hulu.com/videos?content_id=$cid
-	# $pid = decrypt( ^^^->{video}->{pid} )
-	# $xml = GET http://releasegeo.hulu.com/content.select?pid=$pid&mbr=true&format=smil
-
-	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
-	my $html = main::request_url_retry($ua, $prog->{web}, 3, '.', "WARNING: Failed to get programme page for $prog->{name} from site\n");
-	my $cid = $1 if $html =~ m{UserHistory.add_watched_history\((\d+)\)};
-	main::logger "INFO: CID=$cid\n" if $opt->{verbose};
-
-	# GET http://r.hulu.com/videos?content_id=$cid
-	my $html = main::request_url_retry($ua, "http://r.hulu.com/videos?content_id=$cid", 3, '.', "WARNING: Failed to get programme metadata for $prog->{name} from site\n");
-	main::logger "DEBUG: http://r.hulu.com/videos?content_id=$cid :\n\n$html\n\n" if $opt->{debug};
-	my $hpid = $1 if $html=~ m{<pid>(.+?)<\/pid>};
-	main::logger "INFO: HPID=$hpid\n" if $opt->{verbose};
-
-	# Workaround to get new hulu decrypted pid and auth string using a programme defined in --hulu-decrypt-pid
-	my $auth;
-	if ( $opt->{huludecpid} ) {
-		my $cmd = "$opt->{huludecpid} $hpid";
-		main::logger "INFO: Running command '$cmd'\n" if $opt->{verbose};
-		( $hpid, $auth ) = (split /\s/, `$cmd`)[0,1];
-		main::logger "ERROR: '$cmd' returned a non-zero exit code $?\n" if $?;
-		chomp( $hpid );
-		chomp( $auth );
-		main::logger "INFO: PID=$hpid AUTH=$auth\n" if $opt->{verbose};
-	}
-
-	$prog->{subtitle_url} = "http://www.hulu.com/transcripts/$hpid.smi";
-	$prog->{metadata_url} = "http://releasegeo.hulu.com/select.ashx?pid=$hpid&auth=$auth";
-	return $prog->{metadata_url};
-}
-
-
-
-# Gets media streams data for this version pid
-# $media = flashhigh|flashnormal|flashlow|undef
-sub get_stream_data {
-	my ( $prog, $verpid, $media ) = @_;
-	my %data;
-
-	# Setup user agent with redirection enabled
-	my $ua = main::create_ua( $user_agent{desktop} );
-	$opt->{quiet} = 0 if $opt->{streaminfo};
-
-	my $url = $prog->get_metadata_url( $ua );
-
-	#<smil xmlns="http://www.w3.org/2001/SMIL20/Language"
-	#xmlns:tp="http://xml.theplatform.com/mps/metadata/content/custom">
-	#  <head>                                                          
-	#	#    <meta base="http://p.hulu.com/Default.aspx/" />               
-	#  </head>                                                         
-	#  <body>                                                          
-	#    <switch>                                                      
-	#      <ref src="getPlaylist?nwid=55212&amp;content=9250783&amp;adType=&amp;adsRatingOverride=&amp;level=Comedy:SH000171090000&amp;attr=[Daypart,Prime+Time][ContentProvider,Twentieth+Century+Fox+Television][Series,SH000171090000][Network,Fox+Television+Classics][ContentID,9250783][rating,Not+Rated][AdModel,longform][pid,dT23irk_fUOTvyHuPYQ9kwFy5V_TgovF]"                                                                                                                    
-	#      title="Lightningcast Ads - PreMidPost"                                                                                                                 
-	#      copyright="(c) NS DP Newsite" no-skip="true"                                                                                                           
-	#      tags="pre,mid,post" />                                                                                                                                 
-	#    </switch>                                                                                                                                                
-	#    <switch>                                                                                                                                                 
-	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"                                                                                                                                                 
-	#      system-bitrate="516701" width="384" height="288"                                                                                                       
-	#      profile="4x3 24fps Medium" />
-	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEc1dkbdalc7c9cabbd1chagdzdMb2drbU-bjI2E9-8-ZqFCuCo0Jzn&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g"
-	#      system-bitrate="750859" width="480" height="360"
-	#      profile="4x3 24fps High" />
-	#      <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv?auth=daEbBb8a7aqdEbMdRcbdXcDd7cNdmbMdAaz-bjI2E9-4q-3oFBACt1Ayu&amp;aifp=sll02152008&amp;slist=hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv;.international=false"
-	#      system-bitrate="998383" width="640" height="480"
-	#      profile="4x3 24fps H264 Medium" />
-	#      <ref src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
-	#      title="What Makes Doogie Run"
-	#      abstract="Vinnie convinces Doogie to enroll in an acting class. Enlightened by the experience, Doogie decides he has been on the fast tract too long, and decides to resign from Eastman and travel abroad."
-	#      copyright="(c) 1992-1993 Twentieth Century Fox Film Corporation"
-	#      dur="1380087ms" width="384" height="288"
-	#      keywords="doogie,howser,comedy,neil,patrick,harris,vinnie,delphino,classics,fox,doctor,genius,david,kelley,steven,bochco,Best,Friend,Child,Prodigy,Dramedy,California,Operating,Room,Computer,Family,Medical,Sitcom,Boy,Genius,Doctor,Genius,Hospital,Journal"
-	#      tp:Ad_Model="longform" tp:Aspect_Ratio="4x3"
-	#      tp:CP_Promotional_Link="http://www.amazon.com/dp/B000EBGF6I?tag=hulu-20"
-	#      tp:CP_Promotional_Text="Buy this season today"
-	#      tp:CPIdentifier="Twentieth Century Fox Television"
-	#      tp:Channel="Fox Television Classics" tp:Daypart="Prime Time"
-	#      tp:Episode_Number="22" tp:Frame_Rate="24"
-	#      tp:Primary_Category="Comedy"
-	#      tp:Programming_Type="Full Episode"
-	#      tp:Promotional_Type="non-promo" tp:Season_Number="4"
-	#      tp:Segments="00:04:19;18,00:11:18;02,00:22:04;02"
-	#      tp:Series_Title="Doogie Howser, M.D."
-	#      tp:TMS_Program_ID="EP000171090113"
-	#      tp:TMS_Series_ID="SH000171090000"
-	#      tp:endCreditsTime="00:22:07;00" tp:hasBug="false"
-	#      tp:isEmbeddable="True" tp:requiresEncryption="no"
-	#      tp:seriesIdentifier="doogie-howser-md"
-	#      tp:siteChannels="Drama|Comedy~Sitcoms" />
-	#    </switch>
-	#  </body>
-	#</smil>
-	my $xml1 = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme stream data for $prog->{name} from site\n");
-	# flatten xml1
-	$xml1 =~ s/[\n\r]//g;
-
-	# Each prog has up to 3 different qualities/bitrates available. They start with '<video src='
-	# This loop names them respectively
-	for my $xml ( split /<video/, $xml1 ) {
-		$xml = "<video".$xml;
-		my $prog_type;
-
-		#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&\
-		#	slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ<break>\
-		#	content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
-		#      system-bitrate="516701" width="384" height="288"
-		#      profile="4x3 24fps Medium" />
-		#
-		#     <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_\
-		#	 97__Dd7ie-YcyEq2-8Jf18VTKg.flv?auth=daEbxdldwabdJbBdmb1dzcvd4cebIbRaxcg-bjJb0J-4q-ZqGEtCo1Fyt&aifp=sll02152008&slist=\
-		#	 hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_97__Dd7ie-YcyEq2-8Jf18VTKg.flv;.international=false" 
-		#	system-bitrate="998123" width="640" height="480" 
-		#	profile="4x3 30fps H264 Medium"/>
-		#
-		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=NS20070910&slist=${playpath}"
-		# flashver: "WIN 10,0,1.2,36"
-		# swfurl: "http://www.hulu.com/player.swf"
-		# tcurl: "rtmp://${serverip}:1935/${app}"
-		# pageurl: "http://www.hulu.com/watch/2711/family-guy-padre-de-familia"
-		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=sll02152008&slist=${playpath};.international=false"
-		#
-		decode_entities($xml);
-		# Get RTMPURL, bitrate, width, height, profilename
-		if ( $xml =~ m{<video\s+src="(rtmp.+?)".+?system-bitrate="(\d+?)"\s*width="(\d+?)"\s*height="(\d+?)"\s*profile="(.+?)"}i ) {
-			# initially set the key to be the 'bitrate|profile' so we can sort/rename keys afterwards
-			my ( $streamurl, $bitrate, $width, $height, $profile ) = ($1, $2, $3, $4, $5);
-			# Skip prifiles mentioning H264 - they are rtmpe streams 
-			next if $profile =~ /H264/;
-			$prog_type = "$bitrate|$profile";
-			main::logger "DEBUG: stream XML: $xml\nDEBUG: StreamUrl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
-			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{debug};
-			$data{$prog_type}{ext} = 'avi';
-			$data{$prog_type}{streamer} = 'rtmp';
-			$data{$prog_type}{streamurl} = $streamurl;
-			$data{$prog_type}{type} = "Flash RTMP $profile stream";
-			$data{$prog_type}{bitrate} = $bitrate;
-			$data{$prog_type}{width} = $width;
-			$data{$prog_type}{height} = $height;
-
-			# if <break> is in streamurl then strip from there
-			$data{$prog_type}{streamurl} =~ s|<break>.*$||g;
-			my ( $parameters, $playpath );
-			( $data{$prog_type}{server}, $parameters ) = ( $1, $2 ) if $data{$prog_type}{streamurl} =~ m{rtmp://(.+?)/.*ondemand.*(auth.+)$};
-
-			# get playpath if necessary
-			$playpath = $1 if $data{$prog_type}{streamurl} =~ m{rtmp://.+?ondemand/(.+?)\?};
-			if( $playpath ) {
-				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&slist=$playpath";
-			} else {
-				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
-			}
-			# strip out .international from streamurl
-			$data{$prog_type}{streamurl} =~ s/\;\.international.*$//;
-
-			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
-			$data{$prog_type}{tcurl}   = "rtmp://${data{$prog_type}{server}}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
-			( $data{$prog_type}{playpath}, $data{$prog_type}{auth} ) = ( $3, $1 ) if $parameters =~ m{auth=(.+?)&aifp=(.+?)&slist=(.+?);};
-			$data{$prog_type}{swfurl} = "http://www.hulu.com/player.swf";
-			$data{$prog_type}{flashver} = "WIN 10,0,1.2,36";
-		}
-	}
-
-	# Sort and rename %data keys to flash(high|normal|low) based on bitrate
-	#my @modename = qw( flashhigh flashnormal flashlow flashverylow );
-	#my $count = 1;
-	#for my $old ( reverse sort {$a <=> $b} keys %data ) {
-	#	# Get the next modename
-	#	my $vmode = shift @modename;
-	#	# Create new key
-	#	main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{debug};
-	#	$data{$vmode} = $data{$old};
-	#	# Remove old key
-	#	delete $data{$old};
-	#}
-	# Now do this on bitrate range mapping - works better if there is no 1Mbps version
-	for my $old ( reverse sort {$a <=> $b} keys %data ) {
-		my $vmode;
-		# Get the next modename
-		if ( $data{$old}{bitrate} > 800000 ) {
-			$vmode = 'flashhigh';
-		} elsif ( $data{$old}{bitrate} > 600000 ) {
-			$vmode = 'flashnormal';
-		} elsif ( $data{$old}{bitrate} > 400000 ) {
-			$vmode = 'flashlow';
-		} elsif ( $data{$old}{bitrate} > 200000 ) {
-			$vmode = 'flashverylow';
-		} else {
-			main::logger "INFO: unmatched mode '$old'\n";
-			next;
-		}
-		main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{verbose};
-		$data{$vmode} = $data{$old};
-		delete $data{$old};
-	}
-
-	# Check if subtitles are available (broken with --pid) then creates the URL for the smil file
-	if ( $prog->{subtitle_url} ) { # && $prog->{guidance} =~ /captions|subtitles/i ) {
-		$data{subtitles}{type} = 'Subtitles stream';
-		$data{subtitles}{ext} = 'srt';
-		$data{subtitles}{streamer} = 'http';
-		$data{subtitles}{streamurl} = $prog->{subtitle_url};
-	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
 	if ( ! $media ) {
@@ -7577,7 +5883,7 @@ sub get {
 		
 	# rtmpdump version detection e.g. 'RTMPDump v1.5'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^RTMPDump/, `$rtmpdump 2>&1`)[0] );
+	chomp( $rtmpver = (grep /^RTMPDump/, `$bin->{rtmpdump} 2>&1`)[0] );
 	$rtmpver =~ s/^RTMPDump\s+v([\.\d]+).*$/$1/g;
 	main::logger "INFO: rtmpdump version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
@@ -7589,13 +5895,13 @@ sub get {
 	# Different invocation dependant on version
 	# For ver < 1.4
 	if ( $rtmpver < 1.4 ) {
-		$cmd = "$rtmpdump --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$bin->{rtmpdump} --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	# For ver 1.4+
 	} elsif ( $playpath ) {
-		$cmd = "$rtmpdump --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$bin->{rtmpdump} --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	# Using just streamurl (i.e. no playpath defined)
 	} else {
-		$cmd = "$rtmpdump -r \"$streamdata{streamurl}\" --resume $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$bin->{rtmpdump} -r \"$streamdata{streamurl}\" --resume $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
 	
@@ -7622,18 +5928,18 @@ sub get {
 	} elsif ( $mode =~ /^flashaudio/ ) {
 		# We could do id3 tagging here with ffmpeg but id3v2 does this later anyway
 		# This fails
-		#$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
+		#$cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
 		# This works but it's really bad bacause it re-transcodes mp3 and takes forever :-(
-		# $cmd = "$ffmpeg -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$prog->{filepart}\" 1>&2";
+		# $cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$prog->{filepart}\" 1>&2";
 		# At last this removes the flv container and dumps the mp3 stream! - mplayer dumps core but apparently succeeds
-		$cmd = "$mplayer $mplayer_opts -dumpaudio \"$file_tmp\" -dumpfile \"$prog->{filepart}\" 1>&2";
+		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpaudio \"$file_tmp\" -dumpfile \"$prog->{filepart}\" 1>&2";
 	# Convert flv to aac/mp4a
 	} elsif ( $mode =~ /flashaac/ ) {
 		# This works as long as we specify aac andnot mp4a
-		$cmd = "$ffmpeg -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
+		$cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
 	# Convert video flv to mp4/avi if required
 	} else {
-		$cmd = "$ffmpeg $ffmpeg_opts -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
+		$cmd = "$bin->{ffmpeg} $binopts->{ffmpeg} -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
 	}
 
 	main::logger "\n\nINFO: Command: $cmd\n\n" if $opt->{verbose};
@@ -7691,6 +5997,10 @@ sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 	my $childpid;
 
+	# get bandwidth options value
+	# Download bandwidth bps used for rtsp streams
+	my $bandwidth = $opt->{bandwidth} || 512000;
+
 	# Resolve URL if required
 	if ( $url =~ /^http/ ) {
 		my $url1 = main::request_url_retry($ua, $url, 2, '', '');
@@ -7711,7 +6021,7 @@ sub get {
 	# Create ID3 tagging options for lame (escape " for shell)
 	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
 	$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
-	$lame_opts .= " --ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
+	$binopts->{lame} .= " --ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
 
 	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
@@ -7722,7 +6032,7 @@ sub get {
 		# Remove named pipe
 		unlink $namedpipe;
 		main::logger "INFO: Downloading wav format (followed by transcoding)\n";
-		$cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
+		$cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
 		if ( system($cmd) ) {
@@ -7731,7 +6041,7 @@ sub get {
 		}
 		# Transcode
 		main::logger "INFO: Transcoding $prog->{filepart}.wav\n";
-		$cmd = "$lame $lame_opts \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
+		$cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
 		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
@@ -7750,7 +6060,7 @@ sub get {
 	} elsif ( $opt->{wav} && ! $opt->{stdout} ) {
 		main::logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}\" \"$url\" 1>&2";
+		my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}\" \"$url\" 1>&2";
 		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
@@ -7766,7 +6076,7 @@ sub get {
 		# Write out to .ra ext instead (used on fallback if no fifo support)
 		main::logger "INFO: Writing raw realaudio stream\n";
 		# Start the mplayer process and write to raw file
-		my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$prog->{filepart}\" \"$url\" 1>&2";
+		my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$prog->{filepart}\" \"$url\" 1>&2";
 		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
@@ -7795,9 +6105,9 @@ sub get {
 					# Create symlink if required
 					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
 					tee($namedpipe, $prog->{filepart});
-					#system( "cat $namedpipe 2>/dev/null| $tee $prog->{filepart}");
+					#system( "cat $namedpipe 2>/dev/null| $bin->{tee} $prog->{filepart}");
 				} else {
-					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null| $tee \"$prog->{filepart}\"";
+					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null| $bin->{tee} \"$prog->{filepart}\"";
 					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 					# Create symlink if required
 					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
@@ -7811,14 +6121,14 @@ sub get {
 					tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
-					my $cmd = "$lame $lame_opts $namedpipe - 2>/dev/null";
+					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null";
 					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-					system( "$lame $lame_opts $namedpipe - 2>/dev/null");
+					system( "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt->{stdout} ) {
-				my $cmd = "$lame $lame_opts $namedpipe \"$prog->{filepart}\" >/dev/null 2>/dev/null";
+				my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe \"$prog->{filepart}\" >/dev/null 2>/dev/null";
 				main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 				# Create symlink if required
 				$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
@@ -7837,7 +6147,7 @@ sub get {
 		# Start the mplayer process and write to named pipe
 		# Raw mode
 		if ( $opt->{raw} ) {
-			my $cmd = "$mplayer $mplayer_opts -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$url\" 1>&2";
+			my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$url\" 1>&2";
 			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
@@ -7847,7 +6157,7 @@ sub get {
 			}
 		# WAV / mp3 mode
 		} else {
-			my $cmd = "$mplayer $mplayer_opts -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$url\" 1>&2";
+			my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$url\" 1>&2";
 			if ( system($cmd) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
@@ -7980,9 +6290,9 @@ sub get {
 		#my $null;
 		#$null = '-really-quiet' if ! $opt->{quiet};
 		# Can also use 'mencoder mms://url/ -oac copy -ovc copy -o out.asf' - still gives zero exit code on failed stream...
-		# $cmd = "$mplayer $mplayer_opts -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
+		# $cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
 		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
-		$cmd = "$mplayer $mplayer_opts -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
+		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
 		# fork download threads
@@ -8127,7 +6437,7 @@ sub get {
 #		# Create part of cmd that specifies each partial file
 #		my $filestring;
 #		$filestring .= " -i \"$_\" " for (@file_tmp_list);
-#		$cmd = "$ffmpeg $ffmpeg_opts $filestring -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
+#		$cmd = "$bin->{ffmpeg} $binopts->{ffmpeg} $filestring -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
 #	}
 #
 #	main::logger "INFO: Command: $cmd\n\n" if $opt->{verbose};
@@ -8185,7 +6495,7 @@ sub get {
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 	if ( ! $opt->{stdout} ) {
 		main::logger "INFO: Downloading Low Quality H.264 stream\n";
-		my $cmd = "$vlc $vlc_opts --sout file/ts:$prog->{filepart} $url vlc://quit 1>&2";
+		my $cmd = "$bin->{vlc} $binopts->{vlc} --sout file/ts:$prog->{filepart} $url vlc://quit 1>&2";
 		if ( system($cmd) ) {
 			return 'next';
 		}
@@ -8193,7 +6503,7 @@ sub get {
 	# to STDOUT
 	} else {
 		main::logger "INFO: Streaming Low Quality H.264 stream to stdout\n";
-		my $cmd = "$vlc $vlc_opts --sout file/ts:- $url vlc://quit 1>&2";
+		my $cmd = "$bin->{vlc} $binopts->{vlc} --sout file/ts:- $url vlc://quit 1>&2";
 		if ( system($cmd) ) {
 			return 'next';
 		}	
@@ -8238,7 +6548,7 @@ sub get {
 	my $start_time = time();
 
 	# Set user agent
-	$ua->agent( $user_agent{get_iplayer} );
+	$ua->agent('get_iplayer');
 
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 
@@ -8659,8 +6969,6 @@ sub enable {
 	$pvr->save( $name, @options );	
 	return 0;
 }
-
-
 
 
 

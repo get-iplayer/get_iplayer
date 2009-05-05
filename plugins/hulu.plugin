@@ -1,0 +1,849 @@
+################### Hulu class #################
+package Programme::hulu;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme';
+
+# Class vars
+# Global options
+my $opt;
+
+
+# Constructor
+# Usage: $prog{$pid} = Programme->new( 'pid' => $pid, 'name' => $name, <and so on> );
+sub new {
+	my $type = shift;
+	my %params = @_;
+	my $self = {};
+	for (keys %params) {
+		$self->{$_} = $params{$_};
+	}
+	## Ensure that all instances reference the same class global $optref var
+	# $self->{optref} = $Programme::optref;
+	# Ensure the subclass $opt var is pointing to the Superclass global optref
+	$opt = $Programme::optref;
+	bless $self, $type;
+}
+
+
+sub index_min { return 200001 }
+sub index_max { return 299999 }
+sub channels {
+	return {
+		'Action and Adventure'		=> 'Action and Adventure',
+		'Action and Adventure/Espionage'		=> 'Action and Adventure, Espionage',
+		'Action and Adventure/Martial Arts'		=> 'Action and Adventure, Martial Arts',
+		'Action and Adventure/Military and War'		=> 'Action and Adventure, Military and War',
+		'Action and Adventure/Westerns'		=> 'Action and Adventure, Westerns',
+		'Animation and Cartoons'		=> 'Animation and Cartoons',
+		'Animation and Cartoons/Anime'		=> 'Animation and Cartoons, Anime',
+		'Comedy'		=> 'Comedy',
+		'Comedy/Romance'		=> 'Comedy, Romance',
+		'Comedy/Satire'		=> 'Comedy, Satire',
+		'Comedy/Sitcoms'		=> 'Comedy, Sitcoms',
+		'Comedy/Sketch'		=> 'Comedy, Sketch',
+		'Comedy/Stand Up'		=> 'Comedy, Stand Up',
+		'Drama'		=> 'Drama',
+		'Drama/Crime and Courtroom'		=> 'Drama, Crime and Courtroom',
+		'Drama/Medical'		=> 'Drama, Medical',
+		'Drama/Soap Operas'		=> 'Drama, Soap Operas',
+		'Family'		=> 'Family',
+		'Food and Leisure'		=> 'Food and Leisure',
+		'Food and Leisure/Entertaining'		=> 'Food and Leisure, Entertaining',
+		'Food and Leisure/Fashion and Beauty'		=> 'Food and Leisure, Fashion and Beauty',
+		'Food and Leisure/Food and Beverage'		=> 'Food and Leisure, Food and Beverage',
+		'Food and Leisure/Health and Fitness'		=> 'Food and Leisure, Health and Fitness',
+		'Food and Leisure/Recipes'		=> 'Food and Leisure, Recipes',
+		'Food and Leisure/Travel'		=> 'Food and Leisure, Travel',
+		'Home and Garden'		=> 'Home and Garden',
+		'Home and Garden/Decorating'		=> 'Home and Garden, Decorating',
+		'Home and Garden/Do it Yourself'		=> 'Home and Garden, Do it Yourself',
+		'Home and Garden/Home Improvement'		=> 'Home and Garden, Home Improvement',
+		'Home and Garden/Real Estate'		=> 'Home and Garden, Real Estate',
+		'Horror and Suspense'		=> 'Horror and Suspense',
+		'Horror and Suspense/Mystery'		=> 'Horror and Suspense, Mystery',
+		'Horror and Suspense/Paranormal'		=> 'Horror and Suspense, Paranormal',
+		'Music'		=> 'Music',
+		'News and Information'		=> 'News and Information',
+		'News and Information/Celebrity and Gossip'		=> 'News and Information, Celebrity and Gossip',
+		'News and Information/Current News'		=> 'News and Information, Current News',
+		'News and Information/Documentary and Biography'		=> 'News and Information, Documentary and Biography',
+		'News and Information/Live Events and Specials'		=> 'News and Information, Live Events and Specials',
+		'News and Information/Politics'		=> 'News and Information, Politics',
+		'News and Information/Science and Technology'		=> 'News and Information, Science and Technology',
+		'Other'		=> 'Other',
+		'Reality and Game Shows'		=> 'Reality and Game Shows',
+		'Science Fiction'		=> 'Science Fiction',
+		'Sports'		=> 'Sports',
+		'Sports/College Football'		=> 'Sports, College Football',
+		'Sports/Extreme Sports'		=> 'Sports, Extreme Sports',
+		'Sports/Fighting and Martial Arts'		=> 'Sports, Fighting and Martial Arts',
+		'Sports/Gaming'		=> 'Sports, Gaming',
+		'Sports/NBA'		=> 'Sports, NBA',
+		'Sports/NHL'		=> 'Sports, NHL',
+		'Sports/WWE'		=> 'Sports, WWE',
+		'Talk and Interview'		=> 'Talk and Interview',
+		'Talk and Interview/Celebrity and Gossip'		=> 'Talk and Interview, Celebrity and Gossip',
+		'Talk and Interview/Late Night'		=> 'Talk and Interview, Late Night',
+		'Videogames'		=> 'Videogames',
+		'Videogames/Previews'		=> 'Videogames, Previews',
+		'Videogames/Reviews'		=> 'Videogames, Reviews',
+		'Web'		=> 'Web',
+		'Web/Web Originals'		=> 'Web, Web Originals',
+	};
+}
+
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
+		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity,release,rating"],
+		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
+		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
+	};
+}
+
+
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	my $prog = shift;
+	return ", $prog->{channel}";
+}
+
+
+
+# Returns the modes to try for this prog type
+sub modelist {
+	my $prog = shift;
+	my $modelist;
+	
+	# Deal with Hulu fallback modes
+	# Valid modes are flashhigh,flashnormal,flashlow
+	# flashhigh doesn't seem to be supported yet by rtmpdump due to requiring RTMPE (encrypted streaming)
+	# 'rtmp' or 'flash' => 'flashnormal,flashlow'
+	my @modes = split /,/, $opt->{vmode};
+	for (@modes) {
+		$_ = 'flashnormal,flashlow' if $_ eq 'rtmp' || $_ eq 'flash';
+	}
+	$opt->{vmode} = join ',', @modes;
+	# Defaults
+	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
+		$modelist = 'flashnormal,flashlow';
+	} else {
+		$modelist = $opt->{vmode};
+	}
+	return $modelist;
+}
+
+
+
+# Cleans up a pid and removes url parts that might be specified
+sub clean_pid {
+	my $prog = shift;
+
+	# strip out any prefix leaving just numbers
+	$prog->{pid} =~ s/[^\d]//g;
+	# rewrite pid to be in correct form
+	$prog->{pid} = 'hulu-'.$prog->{pid};
+}
+
+
+
+# get full episode metadata given pid and ua.
+sub get_metadata {
+	my $prog = shift;
+	my $ua = shift;
+	my $metadata;
+	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+
+	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
+
+	my $url = $prog->get_metadata_url( $ua );
+
+	#    <switch>
+	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"                                                                                                                                                 
+	#      system-bitrate="516701" width="384" height="288"
+	#      profile="4x3 24fps Medium" />
+	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEc1dkbdalc7c9cabbd1chagdzdMb2drbU-bjI2E9-8-ZqFCuCo0Jzn&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g"
+	#      system-bitrate="750859" width="480" height="360"
+	#      profile="4x3 24fps High" />
+	#      <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv?auth=daEbBb8a7aqdEbMdRcbdXcDd7cNdmbMdAaz-bjI2E9-4q-3oFBACt1Ayu&amp;aifp=sll02152008&amp;slist=hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv;.international=false"
+	#      system-bitrate="998383" width="640" height="480"
+	#      profile="4x3 24fps H264 Medium" />
+	#      <ref src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
+	#      title="What Makes Doogie Run"
+	#      abstract="Vinnie convinces Doogie to enroll in an acting class. Enlightened by the experience, Doogie decides he has been on the fast tract too long, and decides to resign from Eastman and travel abroad."
+	#      copyright="(c) 1992-1993 Twentieth Century Fox Film Corporation"
+	#      dur="1380087ms" width="384" height="288"
+	#      keywords="doogie,howser,comedy,neil,patrick,harris,vinnie,delphino,classics,fox,doctor,genius,david,kelley,steven,bochco,Best,Friend,Child,Prodigy,Dramedy,California,Operating,Room,Computer,Family,Medical,Sitcom,Boy,Genius,Doctor,Genius,Hospital,Journal"
+	#      tp:Ad_Model="longform" tp:Aspect_Ratio="4x3"
+	#      tp:CP_Promotional_Link="http://www.amazon.com/dp/B000EBGF6I?tag=hulu-20"
+	#      tp:CP_Promotional_Text="Buy this season today"
+	#      tp:CPIdentifier="Twentieth Century Fox Television"
+	#      tp:Channel="Fox Television Classics" tp:Daypart="Prime Time"
+	#      tp:Episode_Number="22" tp:Frame_Rate="24"
+	#      tp:Primary_Category="Comedy"
+	#      tp:Programming_Type="Full Episode"
+	#      tp:Promotional_Type="non-promo" tp:Season_Number="4"
+	#      tp:Segments="00:04:19;18,00:11:18;02,00:22:04;02"
+	#      tp:Series_Title="Doogie Howser, M.D."
+	#      tp:TMS_Program_ID="EP000171090113"
+	#      tp:TMS_Series_ID="SH000171090000"
+	#      tp:endCreditsTime="00:22:07;00" tp:hasBug="false"
+	#      tp:isEmbeddable="True" tp:requiresEncryption="no"
+	#      tp:seriesIdentifier="doogie-howser-md"
+	#      tp:siteChannels="Drama|Comedy~Sitcoms" />
+	#    </switch>
+	my $xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme stream data for $prog->{name} from site\n");
+	# flatten xml
+	$xml =~ s/[\n\r]//g;
+
+	decode_entities($xml);
+	main::logger "DEBUG: $url:\n$xml\n\n" if $opt->{debug};
+	# Flatten
+	$xml =~ s|[\r\n]||g;
+	
+	# Extract categories
+	$categories = $1 if $xml =~ m{tp:siteChannels="(.+?)"};
+	$categories =~ s/\|/,/g;
+
+	$name = $1 if $xml =~ m{tp:Series_Title="(.+?)"};
+
+	$channel = $1 if $xml =~ m{tp:Channel="(.+?)"};
+
+	( $episode, $longdesc ) = ( $1, $2 ) if $xml =~ m{title="([^"]+?)"\s+abstract="(.+?)"};
+
+	$duration = $1 if $xml =~ m{dur="(.+?)\d\d\dms"};
+
+	# Fill in from cache if not got from metadata
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode};
+	$prog->{type}		= $prog_type || $prog->{type};
+	$prog->{duration}	= $duration || $prog->{duration};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{available}	= $available || $prog->{available};
+	$prog->{expiry}		= $expiry || $prog->{expiry};
+	$prog->{versions}	= $versions || $prog->{versions};
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{desc}		= $longdesc || $prog->{desc};
+	$prog->{player}		= $player;
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	# just use the default modelist
+	$prog->{modes}		= 'default: '.$prog->modelist();
+	return 0;
+}
+
+
+
+# Usage: Programme::hulu->get_links( \%prog, 'hulu' );
+# Uses: %{ channels() }, \%prog
+sub get_links {
+	shift; # ignore obj ref
+	my $progref = shift;
+	my $prog_type = shift;
+	my %channels = %{ channels() };
+	
+	# What to sort the pages by: popularity, release, rating
+	my $hulu_channel_page_sort = $opt->{hulusort} || 'popularity,release,rating';
+
+	# What hulu prog types to get: episodes, feature_film, tv, clips, film_trailers, film_clips, movies
+	# The two useful ones are episodes (9000+ full length TV episodes) and feature_film (200+ full-length movies)
+	my @htypes;
+	if ( $opt->{hulutypes} ) {
+		@htypes = split /,/, $opt->{hulutypes};
+	} else {
+		@htypes = qw(feature_film episodes);
+	}
+
+	main::logger "INFO: Getting hulu Index Feeds\n";
+	# Setup User agent
+	my $ua = main::create_ua();
+
+	# Extract channels names from http://www.hulu.com/browse/network/episodes
+
+	# Search URLs:
+	#http://www.hulu.com/videos/search?sort_by=relevance&company=history&query=* (query must be at end)
+	# Search for all full TV episodes on Fox => 1829 results: 
+	# channels: 15+gigs fox sci-fi 
+	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=episode
+	# Limit by show name, insert: ?showname=doogie+howser%2C+m.d.&
+
+	# Search for all full feature films on <channel>
+	# http://www.hulu.com/search/<channel>/<page>?sort_by=pub_date&type=feature_film
+
+	# Sorted and categorised Feed
+	# http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}
+
+	# For full-movie pages http://www.hulu.com/browse/alphabetical/feature_film
+	# just search for 
+	# add_to_playlist?video_id=(\d+?)'
+
+	for my $channel ( keys %channels ) {
+
+		# Get incremental pages until no matches
+		# http://www.hulu.com/channels/<channel>?kind=videos&page=<page>&sort=popularity&type=<type>
+
+		# loop through both hulu prog types
+		for my $htype ( @htypes ) {
+			main::logger "DEBUG: Channel: $channel/$htype\n" if $opt->{verbose};
+
+			# loop through each pageno until no episodes found (or max 10 pages per channel)
+			my $page = 0;
+			my $episode_count;
+			for my $page_sort ( split /,/, $hulu_channel_page_sort ) {
+				$page++;
+				$episode_count = 0;
+
+				# Build Hulu URL
+				my $hulu_prog_page_url = "http://www.hulu.com/feed/channel/${channel}?kind=videos&sort=${page_sort}&type=${htype}";
+				# Get page
+				my $html = main::request_url_retry($ua, $hulu_prog_page_url, 3, '.', "WARNING: Failed to get episode page for channel ${channel}, page ${page}, type ${htype}\n");
+				# flatten html
+				$html =~ s/[\n\r]//g;
+
+				# Feed format:
+				#   <item>                                                                                                                                
+				#      <title>Burn Notice: Lesser Evil (s2 | e16)</title>
+				#      <guid isPermaLink="true">http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</guid>
+				#      <link>http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity</link>
+				#      <description>
+				#        <![CDATA[
+				#		<a href="http://www.hulu.com/watch/60952/burn-notice-lesser-evil?c=Action-and-Adventure/Espionage#http%3A%2F%2Fwww.hulu.com%2Ffeed%2Fchannel%2FAction-and-Adventure%2FEspionage%3Fkind%3Depisodes%26sort%3Dpopularity">
+				#		<img src="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg"
+				#		 align="right" hspace="10" vspace="10" width="145" height="80" border="0" /></a>
+				#		<p>In the explosive season finale, Michael learns some surprising facts about Victor's past, and is forced to take on Carla in a final showdown.</p>
+				#		<p>Added: March 05, 2009<br/>Air date: March 05, 2009<br/>Duration: 43:23<br/>Rating: 4.8 / 5.0<br/></p>
+				#	 ]]>
+				#      </description>
+				#      <pubDate>Thu, 05 Mar 2009 20:35:25 -0000</pubDate>
+				#      <media:thumbnail url="http://thumbnails.hulu.com/14/997/71722_145x80_generated__HB9BromX8EWYmmcm7wDS0g.jpg" width="145" height="80"/>
+				#      <media:credit>USA</media:credit>
+				#    </item>
+
+				#loop through each episode section
+				for my $entry ( split /<item>/, $html ) { 
+
+					# Extract episode data
+					$entry =~ s/\&nbsp;/ /g;
+					decode_entities($entry);
+
+					my ($title, $guidance, $name, $pid, $episode, $web, $thumbnail, $duration, $description );
+
+					main::logger "DEBUG: Match Line: $entry\n" if $opt->{debug};
+
+					# Extract pid
+					$pid = $1 if $entry =~ m{<link>\s*http://www.hulu.com/watch/(\d+)/};
+					# Construct web url
+					$web = 'http://www.hulu.com/watch/'.$pid;
+
+					# Prepend 'hulu-' to pid to keep as a GUID
+					$pid = 'hulu-'.$pid;
+
+					# Name : Episode
+					$title = $1 if $entry =~ m{<title>\s*(.+?)\s*</title>}i;
+					( $name, $episode ) = (split /:/, $title)[0,1];
+					$name =~ s/(^\s*|\s*$)//g;
+					$episode =~ s/(^\s*|\s*$)//g;
+
+					# Remove any '|'s
+					$episode =~ s/\|/_/g;
+
+					# Films don't have episode names
+					$episode = 'Film' if !$episode;
+
+					# Description
+					( $description , $duration )= ( $1, $2 ) if $entry =~ m{CDATA\[.+?<p>\s*(.+?)\s*</p>.+?Duration:\s+([\d:]+)<.+?\]}i;
+
+					# Extract thumbnail
+					$thumbnail = $1 if $entry =~ m{<media:thumbnail\s+url="(http.+?)"}i;
+
+					# Guidance (subtitles)
+					$guidance = $1 if $entry =~ m{>(Rating:\s*[\d\.]\s*/\s*[\d\.]+)<}i;
+
+					# skip if no data
+					next if ! ($pid && $episode && $name);
+					main::logger "DEBUG: PID: '$pid', Name: '$name', Episode: '$episode'\n" if $opt->{debug};
+					$episode_count++;
+
+					# Skip if this pid is a duplicate
+					if ( defined $progref->{$pid} ) {
+						main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}' in Channel: '$progref->{$pid}->{channel}' already exists (this name-episode = '$name - $episode' pid= $pid, channel = $channel)\n" if $opt->{verbose};
+						# append categories here if we have a dup and category is not there already
+						$progref->{$pid}->{categories} .= ",$channel" if $progref->{$pid}->{categories} !~ /$channel/;
+						next;
+					}
+
+					# build data structure
+					$progref->{$pid} = Programme::hulu->new(
+						'pid'		=> $pid,
+						'name'		=> $name,
+						'versions'	=> 'default',
+						'episode'	=> $episode,
+						'channel'	=> $channel,
+						'guidance'	=> $guidance,
+						'categories'	=> $channel,
+						'desc'		=> $description,
+						'duration'	=> $duration,
+						'type'		=> $prog_type,
+						'web'		=> $web,
+						'thumbnail'	=> $thumbnail,
+					);
+
+
+				} # end of episode loop
+				main::logger "INFO: Got $episode_count programmes\n" if $opt->{verbose};
+
+			} # end of page loop
+
+		} # end of htype loop
+
+	} # end of channel loop
+
+
+	main::logger "\n";
+	return 0;
+}
+
+
+
+# Usage: download (<prog>, <ua>)
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my %streamdata;
+	
+	# if rtmpdump does not exist
+	if ( ! main::exists_in_path('rtmpdump') ) {
+		main::logger "WARNING: Required program rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+		return 'next';
+	}
+	# Force raw mode if ffmpeg is not installed
+	if ( ! main::exists_in_path('ffmpeg') ) {
+		main::logger "\nWARNING: ffmpeg does not exist - not converting flv file\n";
+		$opt->{raw} = 1;
+	}
+
+	# Get streams into this hash from prog object
+	%streamdata = %{ $prog->{streams}->{$version}->{$mode} } if defined $prog->{streams}->{$version}->{$mode};
+
+	# Set filename extension
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	$prog->{ext} = 'flv' if $opt->{raw};
+
+	# Determine the correct filenames for this download
+	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> $mode" ) ) {
+		# Create symlink if required
+		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
+		return 'skip';
+	}
+	
+	# Skip from here if we are only testing downloads
+	return 'skip' if $opt->{test};
+
+	# Get subtitles if they exist and are required 
+	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
+	my $subfile_done;
+	my $subfile;
+	if ( $opt->{subtitles} ) {
+		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
+		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
+		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
+		$prog->download_subtitles( $ua, $subfile, $prog->{streams}->{$version}->{subtitles}->{streamurl} );
+		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+	}
+
+	my $return = 0;
+	if ( ! $opt->{subsonly} ) {
+		# Instantiate new streamer from streamdata
+		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+		my $stream = $class->new;
+
+		# Do download
+		$return = $stream->get( $ua, undef, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
+	}
+
+	# Rename the subtitle file accordingly
+	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
+
+	return $return;
+}
+
+
+
+# get Hulu subtitles stream then convert to srt
+sub download_subtitles {
+	my $prog = shift;
+	my ( $ua, $file, $suburl ) = @_;
+	my $subs;
+
+	# Return if we have no url
+	if (! $suburl) {
+		main::logger "\nINFO: Subtitles not available\n";
+		return 2;
+	}
+
+	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
+
+
+	# Download subs
+	$subs = main::request_url_retry($ua, $suburl, 2);
+	if (! $subs ) {
+		main::logger "\nERROR: Subtitle Download failed\n";
+		return 1;
+	} else {
+		# Dump raw subs into a file if required
+		if ( $opt->{subsraw} ) {
+			main::logger "\nINFO: Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.smi\n";
+			my $fhraw = main::open_file_append("$prog->{dir}/$prog->{fileprefix}.smi");
+			print $fhraw $subs;
+			close $fhraw;
+		}
+		main::logger "\nINFO: Downloading Subtitles\n";
+	}
+
+	# Convert smil the format to srt
+	# SRT:
+	#1
+	#00:01:22,490 --> 00:01:26,494
+	#Next round!
+	#
+	#2
+	#00:01:33,710 --> 00:01:37,714
+	#Now that we've moved to paradise, there's nothing to eat.
+	#
+	# SMIL:
+	# timestamps are in milliseconds
+	#   <Sync Start="18664">
+	#      <P Class="ENCC">I got a call from an old friend,
+	#      <br />heard Scylla was</P>
+	#    </Sync>
+	#    <Sync Start="20864">
+	#      <P Class="ENCC">in play and he wants to know</P>
+	#    </Sync>
+	#    <Sync Start="21864">
+	#      <P Class="ENCC">if he can get in on it.
+	#      <br />I've set up a safe house</P>
+	#    </Sync>
+	#    <Sync Start="23598">
+	#      <P Class="ENCC">where you can hear him out.</P>
+	#    </Sync>
+	#    <Sync Start="25031">
+	#      <P Class="ENCC">Do you have a pen?
+	#      <br />Just a minute.</P>
+	#    </Sync>
+	#    <Sync Start="26431">
+	#      <P Class="ENCC">1917 Piermont.</P>
+	#    </Sync>
+	
+	# TT:
+	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
+	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
+	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
+
+	my $count = 1;
+	# flatten
+	$subs =~ s/[\r\n]//g;
+	# $subdata{<count>}{start|end|text} = 'value';
+	my %subdata; 
+	my @lines = split /<Sync\s/i, $subs;
+	for ( @lines ) {
+		my ( $begin, $sub );
+		# Remove span elements
+		s|<\/?span.*?>| |g;
+		# Remove <br /> elements
+		s|<br.*?>| |g;
+		# Start="2284698"><P Class="ENCC">I won't have to drink it<br />in this crappy warehouse.</P></Sync>
+		( $begin, $sub ) = ( $1, $2 ) if m{.*Start="(.+?)".+<P.+?>(.+?)<\/p>.*?<\/Sync>}i;
+		decode_entities($sub);
+		if ($begin && $sub ) { ### !~ /^.amp.nbsp.$/ ) {
+			# Convert milliseconds into HH:MM:ss,mmm format
+			my $seconds = int( $begin / 1000.0 );
+			my $ms = $begin - ( $seconds * 1000.0 );
+			$begin = sprintf("%02d:%02d:%02d,%03d", (gmtime($seconds))[2,1,0], $ms );
+			decode_entities($sub);
+			# Remove any simple html elements
+			$sub =~ s|<\/?(\w)+>| |g;
+			# strip multispaces
+			$sub =~ s/\s+/ /g;
+			# Write to file
+			$subdata{$count}{start} = $begin;
+			$subdata{$count}{text} = $sub;
+			# set the end of the previous sub line
+			$subdata{$count-1}{end} = $begin;
+			$count++;
+		}
+	}	
+	$subdata{$count-1}{end} = $subdata{$count-1}{start};
+
+	# Open subs file
+	unlink($file);
+	my $fh = main::open_file_append($file);
+
+	# write each sub to file
+	for my $count ( sort {$a <=> $b} keys %subdata ) {
+		if ( $subdata{$count}{start} && $subdata{$count}{text} && $subdata{$count}{end} ) {
+			#main::logger "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
+			print $fh "$count\n$subdata{$count}{start} --> $subdata{$count}{end}\n$subdata{$count}{text}\n\n";
+		}
+	}
+
+	close $fh;
+
+	return 0;
+}
+
+
+
+# retrieves the metadata URL for hulu and sets $prog->{metadata_url} - also returns it
+sub get_metadata_url {
+	my $prog = shift;
+	my $ua = shift;
+
+	return $prog->{metadata_url} if $prog->{metadata_url};
+
+	# Don't rely on {web} being set (espcially if were called using --pid) - use {pid}
+	$prog->{web} = $prog->{pid};
+	# strip out any prefix leaving just numbers
+	$prog->{web} =~ s/[^\d]//g;
+	# rewrite pid to be in correct form
+	$prog->{pid} = 'hulu-'.$prog->{web};
+	# Add in the web page prefix
+	$prog->{web} = 'http://www.hulu.com/watch/'.$prog->{web};
+
+	# download/stream method.....
+	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
+	# GET http://r.hulu.com/videos?content_id=$cid
+	# $pid = decrypt( ^^^->{video}->{pid} )
+	# $xml = GET http://releasegeo.hulu.com/content.select?pid=$pid&mbr=true&format=smil
+
+	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
+	my $html = main::request_url_retry($ua, $prog->{web}, 3, '.', "WARNING: Failed to get programme page for $prog->{name} from site\n");
+	my $cid = $1 if $html =~ m{UserHistory.add_watched_history\((\d+)\)};
+	main::logger "INFO: CID=$cid\n" if $opt->{verbose};
+
+	# GET http://r.hulu.com/videos?content_id=$cid
+	my $html = main::request_url_retry($ua, "http://r.hulu.com/videos?content_id=$cid", 3, '.', "WARNING: Failed to get programme metadata for $prog->{name} from site\n");
+	main::logger "DEBUG: http://r.hulu.com/videos?content_id=$cid :\n\n$html\n\n" if $opt->{debug};
+	my $hpid = $1 if $html=~ m{<pid>(.+?)<\/pid>};
+	main::logger "INFO: HPID=$hpid\n" if $opt->{verbose};
+
+	# Workaround to get new hulu decrypted pid and auth string using a programme defined in --hulu-decrypt-pid
+	my $auth;
+	if ( $opt->{huludecpid} ) {
+		my $cmd = "$opt->{huludecpid} $hpid";
+		main::logger "INFO: Running command '$cmd'\n" if $opt->{verbose};
+		( $hpid, $auth ) = (split /\s/, `$cmd`)[0,1];
+		main::logger "ERROR: '$cmd' returned a non-zero exit code $?\n" if $?;
+		chomp( $hpid );
+		chomp( $auth );
+		main::logger "INFO: PID=$hpid AUTH=$auth\n" if $opt->{verbose};
+	}
+
+	$prog->{subtitle_url} = "http://www.hulu.com/transcripts/$hpid.smi";
+	$prog->{metadata_url} = "http://releasegeo.hulu.com/select.ashx?pid=$hpid&auth=$auth";
+	return $prog->{metadata_url};
+}
+
+
+
+# Gets media streams data for this version pid
+# $media = flashhigh|flashnormal|flashlow|undef
+sub get_stream_data {
+	my ( $prog, $verpid, $media ) = @_;
+	my %data;
+
+	# Setup user agent with redirection enabled
+	my $ua = main::create_ua();
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+
+	my $url = $prog->get_metadata_url( $ua );
+
+	#<smil xmlns="http://www.w3.org/2001/SMIL20/Language"
+	#xmlns:tp="http://xml.theplatform.com/mps/metadata/content/custom">
+	#  <head>                                                          
+	#	#    <meta base="http://p.hulu.com/Default.aspx/" />               
+	#  </head>                                                         
+	#  <body>                                                          
+	#    <switch>                                                      
+	#      <ref src="getPlaylist?nwid=55212&amp;content=9250783&amp;adType=&amp;adsRatingOverride=&amp;level=Comedy:SH000171090000&amp;attr=[Daypart,Prime+Time][ContentProvider,Twentieth+Century+Fox+Television][Series,SH000171090000][Network,Fox+Television+Classics][ContentID,9250783][rating,Not+Rated][AdModel,longform][pid,dT23irk_fUOTvyHuPYQ9kwFy5V_TgovF]"                                                                                                                    
+	#      title="Lightningcast Ads - PreMidPost"                                                                                                                 
+	#      copyright="(c) NS DP Newsite" no-skip="true"                                                                                                           
+	#      tags="pre,mid,post" />                                                                                                                                 
+	#    </switch>                                                                                                                                                
+	#    <switch>                                                                                                                                                 
+	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"                                                                                                                                                 
+	#      system-bitrate="516701" width="384" height="288"                                                                                                       
+	#      profile="4x3 24fps Medium" />
+	#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEc1dkbdalc7c9cabbd1chagdzdMb2drbU-bjI2E9-8-ZqFCuCo0Jzn&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_700K_4x3_23_98__inQKbph8fEGc2PD1zT-X3g"
+	#      system-bitrate="750859" width="480" height="360"
+	#      profile="4x3 24fps High" />
+	#      <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv?auth=daEbBb8a7aqdEbMdRcbdXcDd7cNdmbMdAaz-bjI2E9-4q-3oFBACt1Ayu&amp;aifp=sll02152008&amp;slist=hulufms3/47311/9/842/HuluTranscode_31469_H_264_1Mbps_4x3_23_98__GpXVaGDdGU++XzofmLqcJQ.flv;.international=false"
+	#      system-bitrate="998383" width="640" height="480"
+	#      profile="4x3 24fps H264 Medium" />
+	#      <ref src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&amp;slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ&lt;break&gt;content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
+	#      title="What Makes Doogie Run"
+	#      abstract="Vinnie convinces Doogie to enroll in an acting class. Enlightened by the experience, Doogie decides he has been on the fast tract too long, and decides to resign from Eastman and travel abroad."
+	#      copyright="(c) 1992-1993 Twentieth Century Fox Film Corporation"
+	#      dur="1380087ms" width="384" height="288"
+	#      keywords="doogie,howser,comedy,neil,patrick,harris,vinnie,delphino,classics,fox,doctor,genius,david,kelley,steven,bochco,Best,Friend,Child,Prodigy,Dramedy,California,Operating,Room,Computer,Family,Medical,Sitcom,Boy,Genius,Doctor,Genius,Hospital,Journal"
+	#      tp:Ad_Model="longform" tp:Aspect_Ratio="4x3"
+	#      tp:CP_Promotional_Link="http://www.amazon.com/dp/B000EBGF6I?tag=hulu-20"
+	#      tp:CP_Promotional_Text="Buy this season today"
+	#      tp:CPIdentifier="Twentieth Century Fox Television"
+	#      tp:Channel="Fox Television Classics" tp:Daypart="Prime Time"
+	#      tp:Episode_Number="22" tp:Frame_Rate="24"
+	#      tp:Primary_Category="Comedy"
+	#      tp:Programming_Type="Full Episode"
+	#      tp:Promotional_Type="non-promo" tp:Season_Number="4"
+	#      tp:Segments="00:04:19;18,00:11:18;02,00:22:04;02"
+	#      tp:Series_Title="Doogie Howser, M.D."
+	#      tp:TMS_Program_ID="EP000171090113"
+	#      tp:TMS_Series_ID="SH000171090000"
+	#      tp:endCreditsTime="00:22:07;00" tp:hasBug="false"
+	#      tp:isEmbeddable="True" tp:requiresEncryption="no"
+	#      tp:seriesIdentifier="doogie-howser-md"
+	#      tp:siteChannels="Drama|Comedy~Sitcoms" />
+	#    </switch>
+	#  </body>
+	#</smil>
+	my $xml1 = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme stream data for $prog->{name} from site\n");
+	# flatten xml1
+	$xml1 =~ s/[\n\r]//g;
+
+	# Each prog has up to 3 different qualities/bitrates available. They start with '<video src='
+	# This loop names them respectively
+	for my $xml ( split /<video/, $xml1 ) {
+		$xml = "<video".$xml;
+		my $prog_type;
+
+		#      <video src="rtmp://cp39465.hulu.com/ondemand/?auth=daEbhaAdLakaVbsb8aLarb6cZbQcXcTaCc6-bjI2E9-8-3nLEyCnYHyu&amp;aifp=NS20070910&\
+		#	slist=content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ<break>\
+		#	content/39814/9/842/HuluTranscode_31469_FLASH_480K_4x3_23_98__EilrFmip5kSuC5UQXYh6sQ"
+		#      system-bitrate="516701" width="384" height="288"
+		#      profile="4x3 24fps Medium" />
+		#
+		#     <video src="rtmp://cp47346.edgefcs.net/ondemand/mp4:hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_\
+		#	 97__Dd7ie-YcyEq2-8Jf18VTKg.flv?auth=daEbxdldwabdJbBdmb1dzcvd4cebIbRaxcg-bjJb0J-4q-ZqGEtCo1Fyt&aifp=sll02152008&slist=\
+		#	 hulufms3/47311/11/841/HuluTranscode_45826_28030_H_264_1Mbps_4x3_29_97__Dd7ie-YcyEq2-8Jf18VTKg.flv;.international=false" 
+		#	system-bitrate="998123" width="640" height="480" 
+		#	profile="4x3 30fps H264 Medium"/>
+		#
+		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=NS20070910&slist=${playpath}"
+		# flashver: "WIN 10,0,1.2,36"
+		# swfurl: "http://www.hulu.com/player.swf"
+		# tcurl: "rtmp://${serverip}:1935/${app}"
+		# pageurl: "http://www.hulu.com/watch/2711/family-guy-padre-de-familia"
+		# application: "ondemand?_fcs_vhost=${server_hostname}&auth=${auth}&aifp=sll02152008&slist=${playpath};.international=false"
+		#
+		decode_entities($xml);
+		# Get RTMPURL, bitrate, width, height, profilename
+		if ( $xml =~ m{<video\s+src="(rtmp.+?)".+?system-bitrate="(\d+?)"\s*width="(\d+?)"\s*height="(\d+?)"\s*profile="(.+?)"}i ) {
+			# initially set the key to be the 'bitrate|profile' so we can sort/rename keys afterwards
+			my ( $streamurl, $bitrate, $width, $height, $profile ) = ($1, $2, $3, $4, $5);
+			# Skip prifiles mentioning H264 - they are rtmpe streams 
+			next if $profile =~ /H264/;
+			$prog_type = "$bitrate|$profile";
+			main::logger "DEBUG: stream XML: $xml\nDEBUG: StreamUrl = '$1', bitrate = '$2', profile = '$5'\n\n" if $opt->{debug};
+			main::logger "DEBUG: Processing $profile (bitrate = $bitrate) stream\n" if $opt->{debug};
+			$data{$prog_type}{ext} = 'avi';
+			$data{$prog_type}{streamer} = 'rtmp';
+			$data{$prog_type}{streamurl} = $streamurl;
+			$data{$prog_type}{type} = "Flash RTMP $profile stream";
+			$data{$prog_type}{bitrate} = $bitrate;
+			$data{$prog_type}{width} = $width;
+			$data{$prog_type}{height} = $height;
+
+			# if <break> is in streamurl then strip from there
+			$data{$prog_type}{streamurl} =~ s|<break>.*$||g;
+			my ( $parameters, $playpath );
+			( $data{$prog_type}{server}, $parameters ) = ( $1, $2 ) if $data{$prog_type}{streamurl} =~ m{rtmp://(.+?)/.*ondemand.*(auth.+)$};
+
+			# get playpath if necessary
+			$playpath = $1 if $data{$prog_type}{streamurl} =~ m{rtmp://.+?ondemand/(.+?)\?};
+			if( $playpath ) {
+				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&slist=$playpath";
+			} else {
+				$data{$prog_type}{streamurl} = "rtmp://$data{$prog_type}{server}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
+			}
+			# strip out .international from streamurl
+			$data{$prog_type}{streamurl} =~ s/\;\.international.*$//;
+
+			$data{$prog_type}{application} = "ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
+			$data{$prog_type}{tcurl}   = "rtmp://${data{$prog_type}{server}}:1935/ondemand?_fcs_vhost=$data{$prog_type}{server}&$parameters";
+			( $data{$prog_type}{playpath}, $data{$prog_type}{auth} ) = ( $3, $1 ) if $parameters =~ m{auth=(.+?)&aifp=(.+?)&slist=(.+?);};
+			$data{$prog_type}{swfurl} = "http://www.hulu.com/player.swf";
+			$data{$prog_type}{flashver} = "WIN 10,0,1.2,36";
+		}
+	}
+
+	# Sort and rename %data keys to flash(high|normal|low) based on bitrate
+	#my @modename = qw( flashhigh flashnormal flashlow flashverylow );
+	#my $count = 1;
+	#for my $old ( reverse sort {$a <=> $b} keys %data ) {
+	#	# Get the next modename
+	#	my $vmode = shift @modename;
+	#	# Create new key
+	#	main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{debug};
+	#	$data{$vmode} = $data{$old};
+	#	# Remove old key
+	#	delete $data{$old};
+	#}
+	# Now do this on bitrate range mapping - works better if there is no 1Mbps version
+	for my $old ( reverse sort {$a <=> $b} keys %data ) {
+		my $vmode;
+		# Get the next modename
+		if ( $data{$old}{bitrate} > 800000 ) {
+			$vmode = 'flashhigh';
+		} elsif ( $data{$old}{bitrate} > 600000 ) {
+			$vmode = 'flashnormal';
+		} elsif ( $data{$old}{bitrate} > 400000 ) {
+			$vmode = 'flashlow';
+		} elsif ( $data{$old}{bitrate} > 200000 ) {
+			$vmode = 'flashverylow';
+		} else {
+			main::logger "INFO: unmatched mode '$old'\n";
+			next;
+		}
+		main::logger "DEBUG: Renaming mode '$old' to '$vmode'\n" if $opt->{verbose};
+		$data{$vmode} = $data{$old};
+		delete $data{$old};
+	}
+
+	# Check if subtitles are available (broken with --pid) then creates the URL for the smil file
+	if ( $prog->{subtitle_url} ) { # && $prog->{guidance} =~ /captions|subtitles/i ) {
+		$data{subtitles}{type} = 'Subtitles stream';
+		$data{subtitles}{ext} = 'srt';
+		$data{subtitles}{streamer} = 'http';
+		$data{subtitles}{streamurl} = $prog->{subtitle_url};
+	}
+
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return %data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data{$media}{exists} = 0 if not defined $data{$media};
+		return $data{$media};
+	}
+}
+
+1;
