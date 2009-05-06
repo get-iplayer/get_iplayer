@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #
-# get_iplayer - Lists and downloads BBC iPlayer TV and Radio programmes, BBC Podcasts, and ITV player Programmes
+# get_iplayer - Lists and Records BBC iPlayer TV and Radio programmes + other Programmes via 3rd-party plugins
 #
 #    Copyright (C) 2009 Phil Lewis
 #
@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.82;
+my $version = 1.83;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -37,11 +37,10 @@ my $version = 1.82;
 #
 # Todo:
 # * Fix non-uk detection - iphone auth?
-# * Index/Download live radio streams w/schedule feeds to assist timing
+# * Index/Record live radio streams w/schedule feeds to assist timing
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # * Stdout mode with rtmp
-# * Do subtitle downloading after programme download so that rtmp auth doesn't timeout
-# * Playlist creation for multipart itv downloads
+# * Do subtitle downloading after programme recording so that rtmp auth doesn't timeout
 # ** BBC Learning zone progs?
 # ** all global vars into a class???
 # ** all global URLs into a hash/class???
@@ -50,14 +49,12 @@ my $version = 1.82;
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * Create template parsers for each BBC iPlayer CDN as the parsing does appear to be similar
-# * Add Channel4 subtitles stream type into metadata
 #
 # Known Issues:
-# * In ActivePerl/windows downloaded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
+# * In ActivePerl/windows recorded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
 # * rtmpdump (v1.2) of flashaudio fails at end of stream => non-zero exit code
-# * Some rtmpdump downloads always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
-# * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on download
-# * Channel4 downloads require rtmpdump-v1.5
+# * Some rtmpdump attempts always give a non-zero exit code regardless of success (using a min-filesize workaround for now)
+# * rtmpdump-v1.3 doesn't work correctly for flashhigh mode - keeps hanging on streaming
 
 use Env qw[@PATH];
 use Fcntl;
@@ -89,7 +86,6 @@ my %plugin_files;
 my %prog_types = (
 	tv	=> 'Programme::tv',
 	radio	=> 'Programme::radio',
-	podcast	=> 'Programme::podcast',
 );
 
 # User Agents
@@ -114,12 +110,12 @@ my %user_agent = (
 #	'categories'	=> <Comma separated list of categories>
 # 	'type'		=> <prog_type>
 #	'timeadded'	=> <timestamp when programme was added to cache>
-#	'longname'	=> <Long name (only parsed in stage 1 download)>,
-#	'version'	=> <selected version e.g default, signed, etc - only set before d/load>
-#	'filename'	=> <Path and Filename of saved file - set only while downloading>
-#	'dir'		=> <Filename Directory of saved file - set only while downloading>
-#	'fileprefix'	=> <Filename Prefix of saved file - set only while downloading>
-#	'ext'		=> <Filename Extension of saved file - set only while downloading>
+#	'longname'	=> <Long name (only parsed in stage 1)>,
+#	'version'	=> <selected version e.g default, signed, etc - only set before recording>
+#	'filename'	=> <Path and Filename of saved file - set only while recording>
+#	'dir'		=> <Filename Directory of saved file - set only while recording>
+#	'fileprefix'	=> <Filename Prefix of saved file - set only while recording>
+#	'ext'		=> <Filename Extension of saved file - set only while recording>
 #);
 
 
@@ -207,10 +203,10 @@ for my $plugin_dir ( ("$profile_dir/plugins", '/usr/share/get_iplayer/plugins') 
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
 my %opt_format = (
-	amode 		=> [ 1, "amode=s", 'Download', '--amode <mode>,<mode>,...', "Audio Download mode(s): Radio: iphone,flashaac,flashaudio,realaudio (default: iphone,flashaac,flashaudio,realaudio)"],
+	amode 		=> [ 1, "amode=s", 'Recording', '--amode <mode>,<mode>,...', "Audio Recording mode(s): Radio: iphone,flashaac,flashaudio,realaudio (default: iphone,flashaac,flashaudio,realaudio)"],
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
-	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful download using args such as <pid>, <name> etc"],
+	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	conditions	=> [ 1, "conditions", 'Misc', '--conditions', 'Shows GPL conditions'],
 	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
@@ -220,57 +216,58 @@ my %opt_format = (
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	flush		=> [ 0, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
-	forcedownload	=> [ 1, "force-download", 'Download', '--force-download', "Ignore download history (unsets --hide option also)"],
+	force		=> [ 1, "force|force-download", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
-	get		=> [ 0, "get|g", 'Download', '--get, -g', "Download matching programmes"],
-	hash		=> [ 1, "hash", 'Download', '--hash', "Show download progress as hashes"],
+	get		=> [ 0, "get|g", 'Recording', '--get, -g', "Start recording matching programmes"],
+	hash		=> [ 1, "hash", 'Recording', '--hash', "Show recording progress as hashes"],
 	help		=> [ 0, "help|h", 'Config', '--help, -h', "This help text"],
 	helplong	=> [ 0, "help-long|advanced|long-help|longhelp|lh|hl|helplong", 'Config', '--helplong', "Advanced options help text"],
-	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously downloaded programmes"],
+	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously recorded programmes"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
 	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata and availability of modes and subtitles (max 50 matches)"],
 	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
+	listplugins	=> [ 1, "listplugins", 'Display', '--listplugins', "Display a list of currently available plugins or programme types"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
 	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio amode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nocopyright	=> [ 1, "nocopyright", 'Misc', '--nocopyright', "Don't display copyright header"],
-	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes downloaded over 30 days ago"],	
+	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
-	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Download output directory for all downloads"],
-	overwrite	=> [ 1, "overwrite|over-write", 'Download', '--overwrite', "Overwrite downloaded files if they already exist"],
-	partialproxy	=> [ 1, "partial-proxy", 'Download', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
-	pid		=> [ 0, "pid=s", 'Download', '--pid <pid>|<type>:<pid>|<pidurl>', "Download an arbitrary pid that does not necessarily appear in the index"],
-	proxy		=> [ 0, "proxy|p=s", 'Download', '--proxy, -p <url>', "Web proxy URL spec"],
+	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Recording output directory"],
+	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
+	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
+	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>', "Record an arbitrary pid that does not necessarily appear in the index"],
+	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
-	raw		=> [ 0, "raw", 'Download', '--raw', "Don't transcode or change the downloaded stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
+	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	save 		=> [ 0, "save", 'Config', '--save', "Save specified options as default"],
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
-	stdout		=> [ 1, "stdout|x", 'Download', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
+	stdout		=> [ 1, "stdout|x", 'Recording', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
-	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Downloaded files into Programme name subdirectory"],
-	suboffset	=> [ 1, "suboffset=n", 'Download', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> [ 0, "subtitles", 'Download', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
+	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
+	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
+	subtitles	=> [ 0, "subtitles", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
 	subsonly	=> [ 1, "subtitlessonly|subsonly", 'Download', '--subtitles-only', "Only download the subtitles, not the programme"],
-	subsraw		=> [ 1, "subsraw", 'Download', '--subsraw', "Additionally save the raw subtitles file"],
-	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the download"],
-	test		=> [ 1, "test|t", 'Download', '--test, -t', "Test only - no download (will show programme type)"],
+	subsraw		=> [ 1, "subsraw", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
+	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
+	test		=> [ 1, "test|t", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
-	thumb		=> [ 1, "thumb", 'Download', '--thumb', "Download Thumbnail image if available"],
-	thumbext	=> [ 1, "thumbext=s", 'Download', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
+	thumb		=> [ 1, "thumb", 'Recording', '--thumb', "Download Thumbnail image if available"],
+	thumbext	=> [ 1, "thumbext=s", 'Recording', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
-	versionlist	=> [ 1, "versionlist|version-list=s", 'Download', '--version-list <versions>', "Override the version of programme to download (e.g. '--version-list signed,default')"],
+	versionlist	=> [ 1, "versionlist|version-list=s", 'Recording', '--version-list <versions>', "Override the version of programme to record (e.g. '--version-list signed,default')"],
 	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
-	vmode		=> [ 1, "vmode=s", 'Download', '--vmode <mode>,<mode>,...', "Video Download mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+	vmode		=> [ 1, "vmode=s", 'Recording', '--vmode <mode>,<mode>,...', "Video Recoding mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 1, "warranty", 'Misc', '--warranty', 'Displays warranty section of GPL'],
 	webrequest	=> [ 1, "webrequest=s", 'Misc', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
@@ -324,6 +321,12 @@ $opt->copy_set_options_from( $opt_cmdline );
 # Save opts to file if specified
 $opt->save( $opt_cmdline, $optfile ) if $save;
 
+# List all valid programme type plugins (and built-ins)
+if ( $opt->{listplugins} ) {
+	main::logger join(',', keys %prog_types)."\n";
+	exit 0;
+}
+
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
 
@@ -357,7 +360,7 @@ if ( ! -d "$profile_dir/plugins" ) {
 	if ( ! -d "$profile_dir/plugins" ) {
 		logger "ERROR: Cannot create '$profile_dir/plugins' - no plugins will be downloaded.\n";
 	} else {
-		$opt->{forcedownload} = 1;
+		$opt->{force} = 1;
 		update_script();
 		exit 0;
 	}
@@ -463,7 +466,7 @@ if ( $opt->{pvradd} ) {
 	lockfile( 43200 ) if ! $opt->{test};
 	$pvr->run( $opt_file );
 
-# Download prog specified by --pid option
+# Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
 	my %pids_history = main::load_download_history() if $opt->{hide};
 	find_matches( \%pids_history );
@@ -481,7 +484,7 @@ exit 0;
 # Use the specified options to process the matches in specified array
 # Usage: find_matches( \%pids_history, @search_args )
 # Returns: array of objects to be downloaded
-#      or: number of failed/remaining programmes to download using the match (excluding previously downloaded progs) if --pid is specified
+#      or: number of failed/remaining programmes to record using the match (excluding previously recorded progs) if --pid is specified
 sub find_matches {
 	my $pids_history_ref = shift;
 	my @search_args = @_;
@@ -535,7 +538,7 @@ sub find_matches {
 
 	# Sanity check some conflicting options
 	if ($opt->{nowrite} && (!$opt->{stdout})) {
-		logger "ERROR: Cannot download to nowhere\n";
+		logger "ERROR: Cannot record to nowhere\n";
 		exit 1;
 	}
 	# Sanity check valid --type specified
@@ -573,7 +576,7 @@ sub find_matches {
 		if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && progclass(lc($1)) ) {
 			my $prog_type;
 			( $prog_type, $pid )= ( lc($1), $2 );
-			# Only try to download using this prog type
+			# Only try to recording using this prog type
 			@try_types = ($prog_type);
 			
 		# $opt->{pid} is in the form of '<pid>'
@@ -584,7 +587,7 @@ sub find_matches {
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
 		return 0 if check_download_history( $pid ) && ! $opt->{subsonly};
 		
-		# Maybe we don't want to populate caches - this slows down --pid downloads ...
+		# Maybe we don't want to populate caches - this slows down --pid recordings ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
 		# only get links and possibly refresh caches if > 1 type is specified
 		# else only load cached data from file if it exists.
@@ -597,7 +600,7 @@ sub find_matches {
 		# Try to get pid using each speficied prog type
 		my $retcode;
 		for my $prog_type ( @try_types ) {
-			logger "INFO Trying to download pid using type $prog_type\n";
+			logger "INFO Trying to stream pid using type $prog_type\n";
 			# Force prog type and create new prog instance if it doesn't exist
 			my $this;
 			if ( not $prog{$pid}->{pid} ) {
@@ -711,7 +714,7 @@ sub find_matches {
 	my @unique = grep { ! $seen{ $_ }++ } @match_list;
 	@match_list = @unique;
 
-	# Prune out pids already downloaded if opt{hide} is specified
+	# Prune out pids already recorded if opt{hide} is specified
 	if ( $opt->{hide} ) {
 		my @pruned;
 		for my $this (@match_list) {
@@ -725,7 +728,7 @@ sub find_matches {
 		@match_list = @pruned;
 	}
 		
-	# Display list for download
+	# Display list for recording
 	list_progs( \%type, @match_list );
 
 	# Write HTML and XML files if required (with search options applied)
@@ -741,7 +744,7 @@ sub find_matches {
 sub download_matches {
 	my @match_list = @_;
 
-	# Do the downloads based on list of index numbers if required
+	# Do the recordings based on list of index numbers if required
 	my $failcount;
 	if ( $opt->{get} || $opt->{stdout} ) {
 		for my $this (@match_list) {
@@ -903,19 +906,7 @@ sub progclass {
 }
 
 
-
-# Feed info:
-#	# Also see http://derivadow.com/2008/07/18/interesting-bbc-data-to-hack-with/
-#	# All podcasts menu (iphone)
-#	http://www.bbc.co.uk/radio/podcasts/ip/
-#	# All radio1 podcasts
-#	http://www.bbc.co.uk/radio/podcasts/ip/lists/radio1.sssi
-#	# All radio1 -> moyles podcasts
-#	http://www.bbc.co.uk/radio/podcasts/moyles/assets/iphone_keepnet.sssi
-#	# RSS Feed (indexed from?)
-#	http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml
-#	# aod by channel see http://docs.google.com/View?docid=d9sxx7p_38cfsmxfcq
-#	# http://www.bbc.co.uk/radio/aod/availability/<channel>.xml
+# Feed Info:
 #	# aod index
 #	http://www.bbc.co.uk/radio/aod/index_noframes.shtml
 # 	# schedule feeds
@@ -1113,7 +1104,7 @@ sub download_block {
 	
 	# If this is an 'append to file' mode call
 	if ( defined $file && $fh && (!$opt->{nowrite}) ) {
-		# Stage 3b: Download File
+		# Stage 3b: Record File
 		$orig_length = tell $fh;
 		logger "INFO: Appending to $file\n" if $opt->{verbose};
 	}
@@ -1393,7 +1384,7 @@ sub update_script {
 	# Force update if no plugins dir
 	if ( ! -d "$profile_dir/plugins" ) {
 		mkpath "$profile_dir/plugins";
-		$opt->{forcedownload} = 1;
+		$opt->{force} = 1;
 	}
 
 	# Get version URL
@@ -1405,7 +1396,7 @@ sub update_script {
 	chomp( my $latest_ver = $res->content );
 	if ( $res->is_success ) {
 		# Compare version numbers
-		if ( $latest_ver > $version || $opt->{forcedownload} ) {
+		if ( $latest_ver > $version || $opt->{force} ) {
 			# reformat version number
 			$latest_ver = sprintf('%.2f', $latest_ver);
 			logger "INFO: New version $latest_ver available, downloading files\n";
@@ -1689,7 +1680,7 @@ sub create_html {
 		for my $this (@_) {
 			# Skip if pid isn't in index
 			my $pid = $this->{pid} || next;
-			# Skip if already downloaded and --hide option is specified
+			# Skip if already recorded and --hide option is specified
 			if (! defined $name_channel{ "$this->{name}|$this->{channel}" }) {
 				print HTML $this->list_entry_html();
 			} else {
@@ -1759,7 +1750,7 @@ sub exists_in_path {
 
 
 # Generic
-# Adds prog to history file (with a timestamp) so that it is not redownloaded after deletion
+# Adds prog to history file (with a timestamp) so that it is not rerecorded after deletion
 sub add_to_download_history {
 	my $prog = shift;
 	# Only add if a pid is specified
@@ -1784,8 +1775,8 @@ sub add_to_download_history {
 sub load_download_history {
 	my %pids_downloaded;
 
-	# Return if force-download option specified or stdout streaming only
-	return %pids_downloaded if $opt->{forcedownload} || $opt->{stdout} || $opt->{nowrite};
+	# Return if force option specified or stdout streaming only
+	return %pids_downloaded if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
 
 	logger "INFO: Loading download history\n" if $opt->{verbose};
 	if ( ! open(HIST, "< $historyfile") ) {
@@ -1808,8 +1799,8 @@ sub check_download_history {
 	my ($matchedpid, $name, $episode);
 	return 0 if ! $pid;
 		
-	# Return if force-download option specified or stdout streaming only
-	return 0 if $opt->{forcedownload} || $opt->{stdout} || $opt->{nowrite};
+	# Return if force option specified or stdout streaming only
+	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
 	
 	if ( ! open(HIST, "< $historyfile") ) {
 		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
@@ -1857,7 +1848,7 @@ sub purge_downloaded_files {
 			my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 			my @t = gmtime( time() - $time );
-			push @proglist, "$name - $episode, Downloaded: $t[7] days $t[2] hours ago";
+			push @proglist, "$name - $episode, Recorded: $t[7] days $t[2] hours ago";
 			push @delete, $filename;
 		}
 	}
@@ -2079,7 +2070,7 @@ sub usage {
 	my @man;
 	push @man, 
 		'.TH GET_IPLAYER "1" "April 2009" "Jonathan Wiltshire" "get_iplayer Manual"',
-		'.SH NAME', 'get_iplayer - Download tool and PVR for BBC iPlayer, Podcasts and ITV Player',
+		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer, Podcasts and more',
 		'.SH SYNOPSIS',
 		'\fBget_iplayer\fR [<search options>] [<regex|index> ...]',
 		'.PP',
@@ -2091,25 +2082,25 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--update\fR',
 		'.SH DESCRIPTION',
-		'\fBget_iplayer\fR lists, searches and downloads BBC iPlayer TV/Radio, BBC Podcast and ITVplayer TV programmes.',
+		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV/Radio, BBC Podcast programmes. Other 3rd-Party plugins may be available.',
 		'.PP',
-		'\fBget_iplayer\fR has three modes: downloading a complete programme for later playback, streaming a programme',
+		'\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme',
 		'directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to',
-		'search terms and downloading programmes automatically.',
+		'search terms and recording programmes automatically.',
 		'.PP',
-		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available BBC iPlayer, podcast and ITV programmes.',
+		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.',
 		'Each available programme has a numerical identifier, \fBpid\fR.',
-		'\fBget_iplayer\fR downloads BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for download.',
-		'It can also utilise the \fBrtmpdump\fR tool to download programmes from RTMP flash streams at various qualities.',
+		'\fBget_iplayer\fR records BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for recording.',
+		'It can also utilise the \fBrtmpdump\fR tool to record programmes from RTMP flash streams at various qualities.',
 		'.PP',
-		'In PVR mode, \fBget_iplayer\fR can be called from cron to download programmes to a schedule.',
+		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
 		'.SH "OPTIONS"' if $manpage;
 	push @usage, "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):";
 	push @usage, " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]";
-	push @usage, " Download Programmes:           get_iplayer --get [<search options>] <regex|index> ...";
+	push @usage, " Record Programmes:             get_iplayer --get [<search options>] <regex|index> ...";
 	push @usage, "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
-	push @usage, " Stream Downloads:              get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
-	push @usage, " Update get_iplayer:            get_iplayer --update";
+	push @usage, " Stream Programme to Console:   get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
+	push @usage, " Update get_iplayer:            get_iplayer --update [--force]";
 	push @usage, " Advanced Options:              get_iplayer --long-help" if ! $helplong;
 
 	for my $name (keys %{$opt_format_ref} ) {
@@ -2124,11 +2115,11 @@ sub usage {
 
 	# Build the help usage text
 	# Each section
-	for my $section ( 'Search', 'Display', 'Download', 'Output', 'PVR', 'Config', 'External Program' ) {
+	for my $section ( 'Search', 'Display', 'Recording', 'Output', 'PVR', 'Config', 'External Program' ) {
 	#for my $section ( keys %section_name ) {
 		my @lines;
 		my @manlines;
-		#Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)
+		#Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)
 		push @man, ".SS \"$section Options:\"" if $manpage;
 		push @usage, '', "$section Options:";
 		# Each name in this section array
@@ -2143,7 +2134,7 @@ sub usage {
 	if ( $manpage ) {
 		push @man,
 			'.SH AUTHOR',
-			'get_iplayer is written and maintained by Phil Lewis <iplayer (at sign) linuxcentre.net>.',
+			'get_iplayer is written and maintained by Phil Lewis <iplayer2 (at sign) linuxcentre.net>.',
 			'.PP',
 			'This manual page was originally written by Jonathan Wiltshire <debian@jwiltshire.org.uk> for the Debian project (but may be used by others).',
 			'.SH COPYRIGHT NOTICE';
@@ -2388,7 +2379,7 @@ sub download_subtitles {
 
 
 
-# Retry the download of a programme
+# Retry the recording of a programme
 # Usage: download_retry_loop ( $prog )
 sub download_retry_loop {
 	my $prog = shift;
@@ -2414,13 +2405,13 @@ sub download_retry_loop {
 	# Look up version pids for this prog
 	my %version_pids = $prog->get_version_pids( $ua );
 
-	# if %version_pids is empty then skip this programme download attempt
+	# if %version_pids is empty then skip this programme recording attempt
 	if ( (keys %version_pids) == 0 ) {
 		main::logger "INFO: No versions exist for this programme\n";
 		return 1;
 	}
 
-	# Get all possible (or user overridden) modes for this prog download
+	# Get all possible (or user overridden) modes for this prog recording
 	my $modelist = $prog->modelist;
 
 	######## version loop #######
@@ -2447,7 +2438,7 @@ sub download_retry_loop {
 			}
 
 			########## mode loop ########
-			# download depending on the prog type
+			# record prog depending on the prog type
 
 			# only use modes that exist
 			my @modes;
@@ -2465,10 +2456,10 @@ sub download_retry_loop {
 			# Expand the modes into a loop
 			for my $mode ( @modes ) {
 				chomp( $mode );
-				main::logger "INFO: Trying $mode mode to download $prog->{type}: $prog->{name} - $prog->{episode}\n";
+				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 				$prog->{mode} = $mode;
 
-				# try the download for this mode
+				# try the recording for this mode
 				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $version_pids{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
@@ -2479,12 +2470,12 @@ sub download_retry_loop {
 				last if $opt->{subsonly};
 			}
 		}
-		# Break out of loop if we have a successful download for this version and mode
+		# Break out of loop if we have a successful recording for this version and mode
 		return 0 if not $retcode;
 	}
 
 	if (! $opt->{test}) {
-		main::logger "ERROR: Failed to download '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+		main::logger "ERROR: Failed to record '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 	}
 	return 1;
 }
@@ -2506,7 +2497,7 @@ sub mode_ver_download_retry_loop {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
 
 		$retcode = $prog->download( $ua, $mode, $version, $version_pid );
-		main::logger "DEBUG: Download using $mode mode return code: '$retcode'\n" if $opt->{verbose};
+		main::logger "DEBUG: Record using $mode mode return code: '$retcode'\n" if $opt->{verbose};
 
 		# Exit
 		if ( $retcode eq 'abort' ) {
@@ -2527,7 +2518,7 @@ sub mode_ver_download_retry_loop {
 		# Success
 		} elsif ( $retcode eq '0' ) {
 			if ( ! $opt->{subsonly} ) {
-				# Add to history, tag file, and run post download command
+				# Add to history, tag file, and run post-record command
 				main::add_to_download_history( $prog );
 				$prog->tag_file;
 				$prog->download_thumbnail if $opt->{thumb};
@@ -2538,7 +2529,7 @@ sub mode_ver_download_retry_loop {
 
 		# Retry this mode
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
-			main::logger "WARNING: Retrying download for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+			main::logger "WARNING: Retry recording for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
 			my %streamdata = $prog->get_stream_data( $version_pid );
 			$prog->{streams}->{$version} = \%streamdata;
@@ -2617,7 +2608,7 @@ sub substitute {
 
 	
 	
-# Determine the correct filenames for a download
+# Determine the correct filenames for a recording
 # Sets the various filenames and creates appropriate directories
 # Gets more programme metadata if the prog name does not exist
 #
@@ -2659,7 +2650,7 @@ sub generate_filenames {
 	# Change the date in the filename to ISO8601 format if required
 	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
 
-	# Don't create subdir if we are only testing downloads
+	# Don't create subdir if we are only testing recordings
 	# Create a subdir for programme sorting option
 	if ( $opt->{subdir} ) {
 		my $subdir = $prog->substitute( '<longname>' );
@@ -2714,8 +2705,8 @@ sub generate_filenames {
 
 
 # Run a user specified command
-# e.g. --command 'echo "<pid> <longname> downloaded"'
-# run_user_command($pid, 'echo "<pid> <longname> downloaded"');
+# e.g. --command 'echo "<pid> <longname> recorded"'
+# run_user_command($pid, 'echo "<pid> <longname> recorded"');
 sub run_user_command {
 	my $prog = shift;
 	my $command = shift;
@@ -3890,8 +3881,9 @@ sub channels {
 sub opt_format {
 	return {
 		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 vmode"],
-		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Download output directory for tv"],
+		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
+		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 	};
 }
 
@@ -4186,18 +4178,18 @@ sub download {
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^(flash|rtmp)/;
 
 
-	# Determine the correct filenames for this download
+	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
 	}
 	
-	# Skip from here if we are only testing downloads
+	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
 	# Get subtitles if they exist and are required 
-	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
+	# best to do this before streaming file so that the subtitles can be enjoyed while recording progresses
 	my $subfile_done;
 	my $subfile;
 	if ( $opt->{subtitles} ) {
@@ -4220,7 +4212,7 @@ sub download {
 		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 		my $stream = $class->new;
 
-		# Do download
+		# Do recording
 		$return = $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 
 		# Re-enable proxy here if required
@@ -4414,11 +4406,12 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		bandwidth 	=> [ 1, "bandwidth=n", 'Download', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
+		bandwidth 	=> [ 1, "bandwidth=n", 'Recording', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
-		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Download output directory for radio"],
+		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
 		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio amode"],
-		wav		=> [ 1, "wav", 'Download', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
+		wav		=> [ 1, "wav", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
+		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 	};
 }
 
@@ -4487,313 +4480,6 @@ sub get_links {
 sub download {
 	# Delegate to Programme::tv (same function is used)
 	return Programme::tv::download(@_);
-}
-
-
-
-################### Podcast class #################
-package Programme::podcast;
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-# Inherit from Programme class
-use base 'Programme';
-
-# Class vars
-sub index_min { return 20001 }
-sub index_max { return 29999 }
-sub channels { return {}; }
-
-
-# Class cmdline Options
-sub opt_format {
-	return {
-		outputpodcast	=> [ 1, "outputpodcast=s", 'Output', '--outputpodcast <dir>', "Download output directory for podcasts"],
-	};
-}
-
-
-# Method to return optional list_entry format
-sub optional_list_entry_format {
-	my $prog = shift;
-	return ", $prog->{available}, $prog->{channel}, $prog->{categories}";
-}
-
-
-# Returns the modes to try for this prog type
-sub modelist {
-	return 'podcast';
-}
-
-
-# Usage: Programme::podcast->get_links( \%prog, 'podcast' );
-# Uses: %{ channels() }, \%prog
-sub get_links {
-	shift; # ignore obj ref
-	my $progref = shift;
-	my $prog_type = shift;
-	my %channels = %{ channels() };
-	my $podcast_index_feed_url = 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
-
-	my $xml;
-	my $res;
-	main::logger "INFO: Getting podcast Index Feeds\n";
-	# Setup User agent
-	my $ua = main::create_ua('get_iplayer');
-	
-	# Method
-	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
-	# http://downloads.bbc.co.uk/podcasts/$channel/$name/rss.xml =>
-	
-	# Download index feed
-	my $xmlindex = main::request_url_retry($ua, $podcast_index_feed_url, 3, '.', "WARNING: Failed to get prodcast index from site\n");
-	$xmlindex =~ s/\n/ /g;
-
-	# Every RSS feed has an extry like below (all in a text block - not formatted like below)
-	#  <program xmlns="" language="en-gb" typicalDuration="P30M" active="true" public="true" bbcFlavour="Programme Highlights" region="all" wwpid="0">
-	#    <title>Best of Chris Moyles</title>
-	#    <shortTitle>moyles</shortTitle>
-	#    <description>Weekly highlights from the award-winning Chris Moyles breakfast show, as broadcast by Chris and team every morning from 6.30am to 10am.</description>
-	#    <network id="radio1" name="BBC Radio 1" />
-	#    <image use="itunes" url="http://www.bbc.co.uk/radio/podcasts/moyles/assets/_300x300.jpg" />
-	#    <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
-	#    <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
-	#    <link target="currentItem" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/moyles_20080926-0630a.mp3">
-	#      <title>Moyles: Guestfest. 26 Sep 08</title>
-	#      <description>Rihanna, Ross Kemp, Jack Osbourne, John
-	#      Barrowman, Cheggars, the legend that is Roy Walker and more,
-	#      all join the team in a celeb laden bundle of mirth and
-	#      merriment. It&#226;&#8364;&#8482;s all the best bits of the
-	#      week from The Chris Moyles Show on BBC Radio 1.</description>
-	#      <publishDate>2008-09-26T06:30:00+01:00</publishDate>
-	#    </link>
-	#    <bbcGenre id="entertainment" name="Entertainment" />
-	#    <systemRef systemId="podcast" key="42" />
-	#    <systemRef systemId="pid.brand" key="b006wkqb" />
-	#    <feed mimeType="audio/mpeg" content="audio" audioCodec="mp3" audioProfile="cbr" />
-	#  </program>
-	for ( split /<program/, $xmlindex ) {
-		# Extract channel name, rss feed data
-		my ($channel, $url, $web);
-
-		# <network id="radio1" name="BBC Radio 1" />
-		$channel = $1 if m{<network\s+id=".*?"\s+name="(.*?)"\s*\/>};
-
-		# <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
-		$url = $1 if m{<link\s+target="feed"\s+url="(.*?)"\s*\/>};
-
-		# <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
-		$web = $1 if m{<link\s+target="homepage"\s+url="(.*?)"\s*\/>};
-
-		# Skip if there is no feed data for channel
-		next if ! ($channel || $url);
-
-		my ( $name, $episode, $desc, $pid, $available, $duration, $thumbnail );
-
-		# Get RSS feeds for each podcast programme
-		main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', '') if ! $opt->{verbose};
-		# skip if no data
-		next if ! $xml;
-
-		main::logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt->{verbose};
-		decode_entities($xml);
-	
-		# First entry is channel data
-		# <?xml version="1.0" encoding="utf-8"?>
-		#<rss xmlns:media="http://search.yahoo.com/mrss/"
-		#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-		#version="2.0">
-		#  <channel>
-		#    <title>Stuart Maconie's Freak Zone</title>
-		#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-		#    <description>Weekly highlights from Stuart Maconie's
-		#    ...podcast is only available in the UK.</description>
-		#    <itunes:summary>Weekly highlights from Stuart Maconie's
-		#    ...podcast is only available in the UK.</itunes:summary>
-		#    <itunes:author>BBC 6 Music</itunes:author>
-		#    <itunes:owner>
-		#      <itunes:name>BBC</itunes:name>
-		#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
-		#    </itunes:owner>
-		#    <language>en</language>
-		#    <ttl>720</ttl>
-		#    <image>
-		#      <url>
-		#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
-		#      <title>Stuart Maconie's Freak Zone</title>
-		#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-		#    </image>
-		#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-		#    <copyright>(C) BBC 2008</copyright>
-		#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
-		#    <itunes:category text="Music" />
-		#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
-		#    freakzone, macoonie</itunes:keywords>
-		#    <media:keywords>Stewart Maconie, Macconie, freekzone,
-		#    freakzone, macoonie</media:keywords>
-		#   <itunes:explicit>no</itunes:explicit>
-		#    <media:rating scheme="urn:simple">nonadult</media:rating>
-
-		# Parse XML
-
-		# get list of entries within <entry> </entry> tags
-		my @entries = split /<item>/, $xml;
-		# first element == <channel> header
-		my $header = shift @entries;
-
-		# Get podcast name
-		$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
-	
-		# Parse the categories into hash
-		# <itunes:category text="Music" />
-		my @category;
-		for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
-			push @category, $1 if $line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
-		}
-	
-		# Get thumbnail from header
-		# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-		$thumbnail = $1 if $header =~ m{<itunes:image href="\s*(.+?)\s*"};
-
-		# Followed by items:
-		#    <item>
-		#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
-		#      pop francais?</title>
-		#      <description>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's module.</description>
-		#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's
-		#      module....</itunes:subtitle>
-		#      <itunes:summary>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's module.</itunes:summary>
-		#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-		#      <itunes:duration>14:23</itunes:duration>
-		#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-		#      length="13891916" type="audio/mpeg" />
-		#      <guid isPermaLink="false">
-		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
-		#      <link>
-		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-		#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-		#      fileSize="13891916" type="audio/mpeg" medium="audio"
-		#      expression="full" duration="863" />
-		#      <itunes:author>BBC 6 Music</itunes:author>
-		#    </item>
-	
-		foreach my $entry (@entries) {
-
-			my $entry_flat = $entry;
-			$entry_flat =~ s/\n/ /g;
-	
-			# Use the link as a guid
-			# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-			$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
-	
-			# Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
-				next;
-			}
-	
-			# parse episode
-			# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
-			$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
-	
-			# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-			$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
-	
-			# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
-			$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
-	
-			# Duration
-			$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
-	
-			# build data structure
-			$progref->{$pid} = Programme::podcast->new(
-				'pid'		=> $pid,
-				'name'		=> $name,
-				'versions'	=> 'default',
-				'episode'	=> $episode,
-				'desc'		=> $desc,
-				'available'	=> $available,
-				'duration'	=> $duration,
-				'thumbnail'	=> $thumbnail,
-				'channel'	=> $channel,
-				'categories'	=> join(',', @category),
-				'type'		=> $prog_type,
-				'web'		=> $web,
-			);
-		}
-	}
-	main::logger "\n";
-	return 0;
-}
-
-
-
-# Gets media streams data for this version pid
-# $media = http|undef
-sub get_stream_data {
-	my ( $prog, $verpid, $media ) = @_;
-	my %data;
-
-	$opt->{quiet} = 0 if $opt->{streaminfo};
-
-	$data{podcast}{ext} = $prog->{pid};
-	$data{podcast}{ext} =~ s|^.*\.(\w+)$|$1|g;
-	$data{podcast}{streamer} = 'http';
-	$data{podcast}{streamurl} = $prog->{pid};
-	$data{podcast}{type} = 'Podcast stream';
-
-	# Return a hash with media => url if '' is specified - otherwise just the specified url
-	if ( ! $media ) {
-		return %data;
-	} else {
-		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
-	}
-}
-
-
-
-sub download {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-
-	# if subsonly required then skip
-	return 'skip' if $opt->{subsonly};
-
-	# Determine the correct filename and extension for this download
-	my $filename_orig = $prog->{pid};
-	$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-
-	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
-
-	# Skip from here if we are only testing downloads
-	return 1 if $opt->{test};
-	# Instantiate new streamer based on streamdata
-	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
-	my $stream = $class->new;
-	return $stream->get( $ua, $prog->{pid}, $prog );
 }
 
 
@@ -4876,10 +4562,10 @@ sub get_url {
 	# http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4
 	my $iphone_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?r='.(sprintf "%012.0f", 999999999999*rand(0) );
-	main::logger "INFO: media stream download URL = $url_1\n" if $opt->{verbose};
+	main::logger "INFO: media stream URL = $url_1\n" if $opt->{verbose};
 		
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-	#main::logger "\rGetting iplayer download URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
+	#main::logger "\rGetting iplayer URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -4898,10 +4584,10 @@ sub get_url {
 	$url =~ s/^Location: (.*)$/$1/g;
 	# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 	if ( $url =~ /statuscode=404/ ) {
-		main::logger "\rERROR: Programme is not yet ready for download\n" if $opt->{verbose};
+		main::logger "\rERROR: Programme is not yet ready for recording\n" if $opt->{verbose};
 		return '';
 	} elsif ( $url =~ /statuscode=403/ ) {
-		main::logger "\rERROR: Programme is not permitted for download\n" if $opt->{verbose};
+		main::logger "\rERROR: Programme is not permitted for recording\n" if $opt->{verbose};
 		return '';
 	}
 
@@ -4970,19 +4656,19 @@ sub get {
 		$moov_start = $mdat_start + $mdat_length;
 	}
 
-	# If we have partial content and wish to stream, resume the download & spawn off STDOUT from existing file start 
-	# Sanity check - we cannot support downloading of partial content if we're streaming also. 
+	# If we have partial content and wish to stream, resume the recording & spawn off STDOUT from existing file start 
+	# Sanity check - we cannot support resuming of partial content if we're streaming also. 
 	if ( $opt->{stdout} && (! $opt->{nowrite}) && -f $prog->{filepart} ) {
-		main::logger "WARNING: Partially downloaded file exists, streaming will start from the beginning of the programme\n";
+		main::logger "WARNING: Partially recorded file exists, streaming will start from the beginning of the programme\n";
 		# Don't do usual streaming code - also force all messages to go to stderr
 		delete $opt->{stdout};
 		$opt->{stderr} = 1;
 		$childpid = fork();
 		if (! $childpid) {
 			# Child starts here
-			main::logger "INFO: Streaming directly for partially downloaded file $prog->{filepart}\n";
+			main::logger "INFO: Streaming directly for partially recorded file $prog->{filepart}\n";
 			if ( ! open( STREAMIN, "< $prog->{filepart}" ) ) {
-				main::logger "INFO: Cannot Read partially downloaded file to stream\n";
+				main::logger "INFO: Cannot Read partially recorded file to stream\n";
 				exit 4;
 			}
 			my $outbuf;
@@ -5009,12 +4695,12 @@ sub get {
 
 	if ($rearrange) {
 		# if cookie fails then trigger a retry after deleting cookiejar
-		# Determine orginal moov atom length so we can work out if the partially downloaded file has the moov atom in it already
+		# Determine orginal moov atom length so we can work out if the partially recorded file has the moov atom in it already
 		$moov_length = bytestring_to_int( main::download_block( undef, $url_2, $ua, $moov_start, $moov_start+3 ) );
 		main::logger "INFO: original moov atom length = $moov_length                          \n" if $opt->{verbose};
 		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
 		if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
-			main::logger "WARNING: Bad file download, deleting cookie                 \n";
+			main::logger "WARNING: Bad file recording, deleting cookie                 \n";
 			$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
 			unlink $cookiejar;
 			unlink $prog->{filepart};
@@ -5036,7 +4722,7 @@ sub get {
 				create_qt_atom( chr(0xa9).'aut', $prog->{channel}, 'string' ).
 				create_qt_atom( chr(0xa9).'ART', $prog->{channel}, 'string' ).
 				create_qt_atom( chr(0xa9).'des', $prog->{desc}, 'string' ).
-				create_qt_atom( chr(0xa9).'cmt', 'Downloaded with get_iplayer', 'string' ).
+				create_qt_atom( chr(0xa9).'cmt', 'Recorded using get_iplayer', 'string' ).
 				create_qt_atom( chr(0xa9).'req', 'QuickTime 6.0 or greater', 'string' ).
 				create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' )
 			);
@@ -5062,29 +4748,29 @@ sub get {
 		# Get accurate moov_length from file (unless stdout or nowrite options are specified)
 		# Assume header+moov+mdat atom layout
 		if ( (! $opt->{stdout}) && (! $opt->{nowrite}) && stat($prog->{filepart})->size > ($moov_length+$mdat_start) ) {
-				main::logger "INFO: Getting moov atom length from partially downloaded file $prog->{filepart}\n" if $opt->{verbose};
+				main::logger "INFO: Getting moov atom length from partially recorded file $prog->{filepart}\n" if $opt->{verbose};
 				if ( ! open( MOOVDATA, "< $prog->{filepart}" ) ) {
-					main::logger "ERROR: Cannot Read partially downloaded file\n";
+					main::logger "ERROR: Cannot Read partially recorded file\n";
 					return 4;
 				}
 				my $data;
 				seek(MOOVDATA, $mdat_start, 0);
 				if ( read(MOOVDATA, $data, 4, 0) != 4 ) {
-					main::logger "ERROR: Cannot Read moov atom length from partially downloaded file\n";
+					main::logger "ERROR: Cannot Read moov atom length from partially recorded file\n";
 					return 4;
 				}
 				close MOOVDATA;
 				# Get moov atom size from file
 				$moov_length = bytestring_to_int( substr($data, 0, 4) );
-				main::logger "INFO: moov atom length (from partially downloaded file) = $moov_length                          \n" if $opt->{verbose};
+				main::logger "INFO: moov atom length (from partially recorded file) = $moov_length                          \n" if $opt->{verbose};
 		}
 	}
 
-	# If we have a too-small-sized file (greater than moov_length+mdat_start) and not stdout and not no-write then this is a partial download
+	# If we have a too-small-sized file (greater than moov_length+mdat_start) and not stdout and not no-write then this is a partial recording
 	if (-f $prog->{filepart} && (! $opt->{stdout}) && (! $opt->{nowrite}) && stat($prog->{filepart})->size > ($moov_length+$mdat_start) ) {
 		# Calculate new start offset (considering that we've put moov first in file)
 		$restart_offset = stat($prog->{filepart})->size - $moov_length;
-		main::logger "INFO: Resuming download from $restart_offset                        \n";
+		main::logger "INFO: Resuming recording from $restart_offset                        \n";
 	}
 
 	# Not sure if this is already done in download method???
@@ -5116,8 +4802,8 @@ sub get {
 	# end marker
 	my $end_time = time() + 0.0001;
 
-	# Calculate average speed, duration and total bytes downloaded
-	main::logger sprintf("\rINFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+	# Calculate average speed, duration and total bytes recorded
+	main::logger sprintf("\rINFO: Recorded %.2fMB in %s at %5.0fkbps to %s\n", 
 		($moov_start - 1 - $restart_offset) / (1024.0 * 1024.0),
 		sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
 		( $moov_start - 1 - $restart_offset ) / ($end_time - $start_time) / 1024.0 * 8.0, 
@@ -5289,15 +4975,15 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
-		rtmpport	=> [ 1, "rtmpport=n", 'Download', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
+		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
-		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream downloaded OK"],
+		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
 
 
 # %prog (only for {ext} and {mode})
-# Actually do the RTMP stream downloading
+# Actually do the RTMP streaming
 sub get {
 	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
 
@@ -5322,11 +5008,16 @@ sub get {
 		$file_tmp = $prog->{filepart}.'.flv'
 	}
 
-	# Remove failed file download (below a certain size) - hack to get around rtmpdump not returning correct exit code
+	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 		
+	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
+	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
+		$extraopts .= ' '.$opt->{'rtmp'.$prog->{type}.'opts'};
+	}
+
 	# rtmpdump version detection e.g. 'RTMPDump v1.5'
 	my $rtmpver;
 	chomp( $rtmpver = (grep /^RTMPDump/, `$bin->{rtmpdump} 2>&1`)[0] );
@@ -5341,7 +5032,7 @@ sub get {
 	# Different invocation dependant on version
 	# For ver < 1.4
 	if ( $rtmpver < 1.4 ) {
-		$cmd = "$bin->{rtmpdump} --resume --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
+		$cmd = "$bin->{rtmpdump} --resume $extraopts --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
 	# For ver 1.4+
 	} elsif ( $playpath ) {
 		$cmd = "$bin->{rtmpdump} --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
@@ -5354,13 +5045,13 @@ sub get {
 	$return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
-	# if we fail during the rtmp download, try to resume (this gets new streamdata again so that it isn't stale)
+	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
 	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
-	# Hack to get around rtmpdump prentending to fail on successful flash downloads or pretending to succeed where it failed
+	# Hack to get around rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
-		main::logger "WARNING: Failed to download file $file_tmp via RTMP\n";
+		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
 		unlink $file_tmp;
 		return 'next';
 	}
@@ -5408,7 +5099,7 @@ sub get {
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
-	main::logger "INFO: Downloaded $prog->{filename}\n";
+	main::logger "INFO: Recorded $prog->{filename}\n";
 	return 0;
 }
 
@@ -5438,7 +5129,7 @@ use URI;
 
 
 # %prog (only for lame id3 tagging and {mode})
-# Actually do the rtsp downloading
+# Actually do the rtsp streaming
 sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 	my $childpid;
@@ -5469,7 +5160,7 @@ sub get {
 	$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
 	$binopts->{lame} .= " --ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
 
-	# Use post-download transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
+	# Use post-streaming transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
 	if ( (! -p $namedpipe) && ! ( $opt->{raw} || $opt->{wav} ) ) {
 		my $cmd;
@@ -5477,7 +5168,7 @@ sub get {
 		$prog->{filepart} =~ s/\.mp3$//gi;
 		# Remove named pipe
 		unlink $namedpipe;
-		main::logger "INFO: Downloading wav format (followed by transcoding)\n";
+		main::logger "INFO: Recording wav format (followed by transcoding)\n";
 		$cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
@@ -5614,7 +5305,7 @@ sub get {
 		# Wait for child processes to prevent zombies
 		wait;
 	}
-	main::logger "INFO: Downloaded $prog->{filename}\n";
+	main::logger "INFO: Recorded $prog->{filename}\n";
 
 	# Re-symlink if required
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
@@ -5702,7 +5393,7 @@ sub get_url {
 
 
 # %prog (only used for {mode} and generating multi-part file prefixes)
-# Actually do the MMS video stream downloading
+# Actually do the MMS video streaming
 sub get {
 	my ( $stream, $ua, $urls, $prog ) = @_;
 	my $file_tmp;
@@ -5716,7 +5407,7 @@ sub get {
 
 	# Start marker
 	my $start_time = time();
-	# Download each mms url (multi-threaded to download in parallel)
+	# Download each mms url (multi-threaded to stream in parallel)
 	my $file_part_prefix = "$prog->{dir}/$prog->{fileprefix}_part";
 	for ( my $count = 0; $count <= $#url_list; $count++ ) {
 
@@ -5730,7 +5421,7 @@ sub get {
 			$url_list[$count] = $url;
 		}
 
-		# Create temp download filename
+		# Create temp recording filename
 		$file_tmp = sprintf( "%s%02d.".$prog->{ext}, $file_part_prefix, $count+1);
 		$file_tmp_list[$count] = $file_tmp;
 		#my $null;
@@ -5741,12 +5432,12 @@ sub get {
 		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
-		# fork download threads
+		# fork streaming threads
 		if ( not $opt->{itvnothread} ) {
 			my $childpid = fork();
 			if (! $childpid) {
 				# Child starts here
-				main::logger "INFO: Downloading file $file_tmp\n";
+				main::logger "INFO: Streaming to file $file_tmp\n";
 				# Remove old file
 				unlink $file_tmp;
 				# Retry loop
@@ -5757,25 +5448,25 @@ sub get {
 					main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
 					if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
 						# Failed, retry
-						main::logger "WARNING: Failed, retrying to download $file_tmp, exit code: $exitcode\n";
+						main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
 						$retry--;
 					} else {
-						# Successfully downloaded
-						main::logger "INFO: Download thread has completed for file $file_tmp\n";
+						# Successfully streamed
+						main::logger "INFO: Streaming thread has completed for file $file_tmp\n";
 						exit 0;
 					}
 				}
-				main::logger "ERROR: Download thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
+				main::logger "ERROR: Record thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
 				move $file_tmp, "${file_tmp}.failed";
 				exit 1;
 			}
 			# Create a hash of process_id => 'count'
 			$threadpid{$childpid} = $count;
 
-		# else download each part in turn
+		# else stream each part in turn
 		} else {
 			# Child starts here
-			main::logger "INFO: Downloading file $file_tmp\n";
+			main::logger "INFO: Recording file $file_tmp\n";
 			# Remove old file
 			unlink $file_tmp;
 			# Retry loop
@@ -5787,24 +5478,24 @@ sub get {
 				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
 				if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
 					# Failed, retry
-					main::logger "WARNING: Failed, retrying to download $file_tmp, exit code: $exitcode\n";
+					main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
 					$retry--;
 				} else {
 					# Successfully downloaded
-					main::logger "INFO: Download has completed for file $file_tmp\n";
+					main::logger "INFO: Streaming has completed to file $file_tmp\n";
 					$done = 1;
 				}
 			} 
-			# if the download part failed after a few retries...
+			# if the programme part failed after a few retries...
 			if (not $done) {
-				main::logger "ERROR: Download failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
+				main::logger "ERROR: Recording failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
 				move $file_tmp, "${file_tmp}.failed";
 				return 1;
 			}
 		} 
 	}
 
-	# If doing a threaded download, monitor the progress and thread completion
+	# If doing a threaded streaming, monitor the progress and thread completion
 	if ( not $opt->{itvnothread} ) {
 		# Wait for all threads to complete
 		$| = 1;
@@ -5845,7 +5536,7 @@ sub get {
 					# end marker
 					my $end_time = time() + 0.0001;
 					# Calculate average speed, duration and total bytes downloaded
-					main::logger sprintf("INFO: Thread #%d Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+					main::logger sprintf("INFO: Thread #%d Recorded %.2fMB in %s at %5.0fkbps to %s\n", 
 						($threadpid{$procid}+1),
 						$size / (1024.0 * 1024.0),
 						sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
@@ -5855,18 +5546,18 @@ sub get {
 					delete $threadpid{$procid};
 				}
 			}
-			$format .= " downloaded (%.0fkbps)        \r";
+			$format .= " recorded (%.0fkbps)        \r";
 			main::logger sprintf $format, @sizes, ($total_size_new - $total_size) / (time() - $start_time) / 1024.0 * 8.0;
 		}
-		main::logger "INFO: All download threads completed\n";	
+		main::logger "INFO: All streaming threads completed\n";	
 		# Unset autoreap
 		delete $SIG{CHLD};
 	}
-	# If not all files > min_size then assume download failed
+	# If not all files > min_size then assume streaming failed
 	for (@file_tmp_list) {
 		# If file doesnt exist or too small then skip
 		if ( (! -f $_) || ( -f $_ && stat($_)->size < $min_download_size ) ) {
-			main::logger "ERROR: Download of programme failed, skipping\n" if $opt->{verbose};
+			main::logger "ERROR: Recording of programme failed, skipping\n" if $opt->{verbose};
 			return 1;
 		}
 	}
@@ -5927,7 +5618,7 @@ use URI;
 
 
 # Generic
-# Actually do the 3gp / N95 h.264 downloading
+# Actually do the 3gp / N95 h.264 streaming
 sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 
@@ -5940,7 +5631,7 @@ sub get {
 	
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 	if ( ! $opt->{stdout} ) {
-		main::logger "INFO: Downloading Low Quality H.264 stream\n";
+		main::logger "INFO: Recording Low Quality H.264 stream\n";
 		my $cmd = "$bin->{vlc} $binopts->{vlc} --sout file/ts:$prog->{filepart} $url vlc://quit 1>&2";
 		if ( system($cmd) ) {
 			return 'next';
@@ -5954,7 +5645,7 @@ sub get {
 			return 'next';
 		}	
 	}
-	main::logger "INFO: Downloaded $prog->{filename}\n";
+	main::logger "INFO: Recorded $prog->{filename}\n";
 	# Moving file into place as complete (if not stdout)
 	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
 
@@ -5988,7 +5679,7 @@ use Time::Local;
 use URI;
 
 # Generic
-# Actually do the http downloading
+# Actually do the http streaming
 sub get {
 	my ( $stream, $ua, $url, $prog ) = @_;
 	my $start_time = time();
@@ -5998,17 +5689,17 @@ sub get {
 
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 
-	# Resume partial download?
+	# Resume partial recording?
 	my $start = 0;
 	if ( -f $prog->{filepart} ) {
 		$start = stat($prog->{filepart})->size;
-		main::logger "INFO: Resuming download from $start\n";
+		main::logger "INFO: Resuming recording from $start\n";
 	}
 
 	my $fh = main::open_file_append($prog->{filepart});
 
 	if ( main::download_block($prog->{filepart}, $url, $ua, $start, undef, undef, $fh) != 0 ) {
-		main::logger "\rERROR: Download failed\n";
+		main::logger "\rERROR: Recording failed\n";
 		return 'next';
 	} else {
 		# end marker
@@ -6016,7 +5707,7 @@ sub get {
 		# Final file size
 		my $size = stat($prog->{filepart})->size;
 		# Calculate average speed, duration and total bytes downloaded
-		main::logger sprintf("\rINFO: Downloaded %.2fMB in %s at %5.0fkbps to %s\n", 
+		main::logger sprintf("\rINFO: Recorded %.2fMB in %s at %5.0fkbps to %s\n", 
 			($size - $start) / (1024.0 * 1024.0),
 			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
 			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0, 
@@ -6057,13 +5748,13 @@ my $opt_cmdline;
 # Class cmdline Options
 sub opt_format {
 	return {
-		pvr		=> [ 0, "pvr|pvrrun|pvr-run", 'PVR', '--pvr', "Runs the PVR download using all saved PVR searches (intended to be run every hour from cron etc)"],
+		pvr		=> [ 0, "pvr|pvrrun|pvr-run", 'PVR', '--pvr', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
 		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
 		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
-		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off downloading using the --pvr option"],
+		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off recording using the --pvr option"],
 		comment		=> [ 1, "comment=s", 'Misc', '--comment <string>', "Adds a comment to a PVR search"],
 	};
 }
@@ -6133,7 +5824,7 @@ sub run {
 	my $lockfile_ref = shift;
 	my @search_args = shift;
 
-	# Don't attempt to download pids in download history
+	# Don't attempt to record programmes with pids in history
 	my %pids_history = main::load_download_history();
 
 	# Load all PVR searches
@@ -6156,13 +5847,13 @@ sub run {
 		$opt->{hide} = 1;
 		# Dont allow --flush with --pvr
 		$opt->{flush} = '';
-		# Do the downloads (force --get option)
+		# Do the recording (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
-		# If this is a one-off queue pid entry then delete the PVR entry upon successful download(s)
+		# If this is a one-off queue pid entry then delete the PVR entry upon successful recoding(s)
 		if ( $pvr->{$name}->{pid} ) {
 			my $failcount = main::find_matches( \%pids_history );
 			$pvr->del( $name ) if not $failcount;
-		# Just download matching progs
+		# Just make recordings of matching progs
 		} else {
 			main::download_matches( main::find_matches( \%pids_history, @search_args ) );
 		}
