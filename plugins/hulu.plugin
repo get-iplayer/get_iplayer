@@ -114,10 +114,10 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Download output directory for hulu"],
+		outputhulu		=> [ 1, "outputhulu=s", 'Output', '--outputhulu <dir>', "Output directory for hulu recordings"],
 		hulusort		=> [ 1, "hulusort|hulu-sort=s", 'Config', '--hulu-sort <method>', "How to sort programmes to index from Hulu: popularity,release,rating. Default: popularity,release,rating"],
 		hulutypes		=> [ 1, "hulutypes|hulu-types=s", 'Config', '--hulu-types <types>', "Which types of programmes to index from Hulu: episodes,feature_film,tv,clips,film_trailers,film_clips,movies. Default: episodes,feature_film"],
-		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Download', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
+		huludecpid		=> [ 1, "huludecpid|hulu-decrypt-pid=s", 'Recording', '--hulu-decrypt-pid <path>', "Specify the exernal program to return '<decrypted hulu pid> <auth string>' given the encrypted pid as the first argument"],
 	};
 }
 
@@ -449,18 +449,18 @@ sub download {
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 	$prog->{ext} = 'flv' if $opt->{raw};
 
-	# Determine the correct filenames for this download
+	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> $mode" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
 	}
 	
-	# Skip from here if we are only testing downloads
+	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
 	# Get subtitles if they exist and are required 
-	# best to do this before d/l of file so that the subtitles can be enjoyed while download progresses
+	# best to do this before d/l of file so that the subtitles can be enjoyed while recording progresses
 	my $subfile_done;
 	my $subfile;
 	if ( $opt->{subtitles} ) {
@@ -477,7 +477,7 @@ sub download {
 		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 		my $stream = $class->new;
 
-		# Do download
+		# Do recording
 		$return = $stream->get( $ua, undef, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 	}
 
@@ -629,7 +629,7 @@ sub get_metadata_url {
 	# Add in the web page prefix
 	$prog->{web} = 'http://www.hulu.com/watch/'.$prog->{web};
 
-	# download/stream method.....
+	# stream method.....
 	# GET $web -> $cid = grep UserHistory.add_watched_history(\d+)
 	# GET http://r.hulu.com/videos?content_id=$cid
 	# $pid = decrypt( ^^^->{video}->{pid} )

@@ -1,3 +1,16 @@
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 ################### five class #################
 package Programme::five;
 
@@ -54,7 +67,8 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		outputfive	=> [ 1, "outputfive=s", 'Output', '--outputfive <dir>', "Download output directory for five"],
+		outputfive	=> [ 1, "outputfive=s", 'Output', '--outputfive <dir>', "Output directory for five recordings"],
+		rtmpfiveopts	=> [ 1, "rtmp-five-opts|rtmpfiveopts=s", 'Recording', '--rtmp-five-opts <options>', "Add custom options to rtmpdump for five"],
 	};
 }
 
@@ -426,17 +440,17 @@ sub download {
 		return 'skip';
 	}
 	
-	# Determine the correct filenames for this download
+	# Determine the correct filenames for this recording
 	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>" );
 
-	# Skip from here if we are only testing downloads
+	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
 	# Instantiate new streamer from streamdata
 	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 	my $stream = $class->new;
 
-	# Do the download
+	# Do the recording
 	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 }
 
@@ -484,7 +498,6 @@ sub get_stream_data {
 	$data{$mode}{type} = 'Flash RTMPE h264 stream';
 	$data{$mode}{streamurl} = $stremuri;
 	$data{$mode}{protocol} = 3;
-	$data{$mode}{extraopts} = '--swfsize 848259 --swfhash 75a4a2a2dc7e7c198478161bb1c8826721034f4f36bed7d23c6bf42910a500a1';
 	main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url

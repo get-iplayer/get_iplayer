@@ -1,3 +1,16 @@
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 ################### ITV class #################
 package Programme::itv;
 
@@ -62,8 +75,8 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		outputitv	=> [ 1, "outputitv=s", 'Output', '--outputitv <dir>', "Download output directory for itv"],
-		itvnothread	=> [ 1, "itvnothread", 'Download', '--itvnothread', "Disable parallel threaded downloads for itv"],
+		outputitv	=> [ 1, "outputitv=s", 'Output', '--outputitv <dir>', "Output directory for itv recordings"],
+		itvnothread	=> [ 1, "itvnothread", 'Recording', '--itvnothread', "Disable parallel threaded recording for itv"],
 	};
 }
 
@@ -526,17 +539,17 @@ sub download {
 		return 'skip';
 	}
 	
-	# Determine the correct filenames for this download
+	# Determine the correct filenames for this recording
 	return 'skip' if $prog->generate_filenames( $ua, "<name> <episode> <pid>", $#url_list );
 
-	# Skip from here if we are only testing downloads
+	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
 	# Instantiate new streamer from streamdata
 	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
 	my $stream = $class->new;
 
-	# Do the download
+	# Do the recording
 	return $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog );
 }
 
