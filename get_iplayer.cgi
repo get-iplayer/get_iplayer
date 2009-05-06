@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.18';
+my $VERSION = '0.19';
 
 # Features:
 # * Search for progs
@@ -25,20 +25,20 @@ my $VERSION = '0.18';
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
 #
-# Direct Streaming/Download from embedded web server
-# * Use these URLs directly to stream or download the mov file
+# Direct Streaming from embedded web server
+# * Use these URLs directly to stream the mov file
 # * Stream: http://localhost:1935/stream?SEARCH=tv:<PID>
-# * Download: http://localhost:1935/download?SEARCH=tv:<PID>&FILENAME=<filename>
+# * Record Stream: http://localhost:1935/record?SEARCH=tv:<PID>&FILENAME=<filename>
 #
 # Setup crontab
-# * Add a line in /etc/crontab to do the pvr downloads: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
+# * Add a line in /etc/crontab to run the pvr: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 #
 # Caveats:
 # * Sometimes takes a while to load page while refreshing caches
 # * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
 # * If a boolean param is in the cookies then it overrides the unchecked status on the form regardless
 # * rtmpdump has way too much debug output to STDOUT so 'Run PVR' locks up browser after a while.
-# * When using the stream or download links directly, cookies are not sent and the settings are not applied such as SCRIPTPATH
+# * When using the stream or record links directly, cookies are not sent and the settings are not applied such as SCRIPTPATH
 #
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
@@ -113,8 +113,38 @@ my %prog_types = (
 	itv	=> 'ITV',
 	ch4	=> 'Channel4',
 	five	=> 'Demand Five',
-#	hulu	=> 'Hulu TV',
+	hulu	=> 'Hulu TV',
 );
+my %prog_types_order = (
+	1	=> 'tv',
+	2	=> 'radio',
+	3	=> 'podcast',
+	4	=> 'itv',
+	5	=> 'ch4',
+	6	=> 'five',
+	7	=> 'hulu',
+);
+# Get list of currently valid and prune %prog types and add new entry
+chomp( my @plugins = split /,/, `$get_iplayer --listplugins` );
+for my $type (keys %prog_types) {
+	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
+		# delete from %prog_types hash
+		delete $prog_types{$type};
+		# Delete from %prog_types_order hash
+		for ( keys %prog_types_order ) {
+			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type; 
+		}
+	}
+}
+for my $type ( @plugins ) {
+	if ( not $prog_types{$type} ) {
+		$prog_types{$type} = $type;
+		# Add to %prog_types_order hash
+		my $max = scalar( keys %prog_types_order ) + 1;
+		$prog_types_order{$max} = $type;
+	}
+}
+#print "DEBUG: prog_types_order: $_ => $prog_types_order{$_}\n" for sort keys %prog_types_order;
 
 my $icons_base_url = './icons/';
 
@@ -124,7 +154,7 @@ my $nextpage;
 # Page routing based on NEXTPAGE CGI parameter
 my %nextpages = (
 	'search_progs'			=> \&search_progs,	# Main Programme Listings
-	'pvr_queue'			=> \&pvr_queue,		# Queue Download of Selected Progs
+	'pvr_queue'			=> \&pvr_queue,		# Queue Recording of Selected Progs
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'			=> \&pvr_add,
@@ -197,12 +227,12 @@ my @nosearch_params = qw/ /;
 		label	=> \%prog_types, # labels
 		default => 'tv',
 		#status	=> \%type, # default status
-		value	=> { 1=>'tv', 2=>'radio', 3=>'podcast', 4=>'itv', 5=>'ch4', 6=>'five' }, # order of values
+		value	=> \%prog_types_order, # order of values
 		save	=> 1,
 	};
 
 	$opt->{VMODE} = {
-		title	=> 'Video Download Modes', # Title
+		title	=> 'Video Recording Modes', # Title
 		webvar	=> 'VMODE', # webvar
 		optkey	=> 'vmode', # option
 		type	=> 'text', # type
@@ -212,7 +242,7 @@ my @nosearch_params = qw/ /;
 	};
 	
 	$opt->{OUTPUT} = {
-		title	=> 'Override Download Folder', # Title
+		title	=> 'Override Recordings Folder', # Title
 		webvar	=> 'OUTPUT', # webvar
 		optkey	=> 'output', # option
 		type	=> 'text', # type
@@ -250,7 +280,7 @@ my @nosearch_params = qw/ /;
 	};
 	
 	$opt->{AMODE} = {
-		title	=> 'Audio Download Modes', # Title
+		title	=> 'Audio Recording Modes', # Title
 		webvar	=> 'AMODE', # webvar
 		optkey	=> 'amode', # option
 		type	=> 'text', # type
@@ -310,7 +340,7 @@ my @nosearch_params = qw/ /;
 	};
 
 	$opt->{HIDE} = {
-		title	=> 'Hide Downloaded', # Title
+		title	=> 'Hide Recorded', # Title
 		webvar	=> 'HIDE', # webvar
 		optkey	=> 'hide', # option
 		type	=> 'radioboolean', # type
@@ -469,7 +499,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|download|runpvr|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|runpvr|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -576,8 +606,8 @@ sub run_cgi {
 
 		stream_mov( $opt->{SEARCH}->{current} );
 
-	# Download file
-	} elsif ( $request_url =~ /^\/?download/i ) {
+	# Record file
+	} elsif ( $request_url =~ /^\/?record/i ) {
 		# Output headers
 		# To save file
 		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $opt->{SEARCH}->{current}.'.mov' );
@@ -828,11 +858,11 @@ sub get_sorted {
 
 
 sub pvr_del {
-	my @download = ( $cgi->param( 'PVRSELECT' ) );
+	my @record = ( $cgi->param( 'PVRSELECT' ) );
 	my $out;
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
-	for my $name (@download) {
+	for my $name (@record) {
 		chomp();
 		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel '$name'";
 		print $fh p("Command: $cmd");
@@ -873,11 +903,11 @@ sub show_info {
 
 
 sub pvr_queue {
-	my @download = ( $cgi->param( 'PROGSELECT' ) );
+	my @record = ( $cgi->param( 'PROGSELECT' ) );
 	my $out;
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
-	for (@download) {
+	for (@record) {
 		chomp();
 		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
 		my $comment = "$name - $episode";
@@ -1118,7 +1148,7 @@ sub search_progs {
 	my @html;
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
-	# Pad empty column for D/S
+	# Pad empty column for R/S
 	push @html, th( { -class => 'search' }, 'D/S' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
@@ -1177,9 +1207,9 @@ sub search_progs {
 				-override	=> 1,
 			)
 		);
-		# Download and stream links
+		# Record and stream links
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>'Download', -href=>'/download?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'D' )
+			a( { -class=>'search', -title=>'Record', -href=>'/record?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
 			.'/'.
 			a( { -class=>'search', -title=>'Stream', -href=>'/stream?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid") }, 'S' )
 		);
@@ -1274,7 +1304,7 @@ sub search_progs {
 					'Search'
 				),
 				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()", },
-					'Queue Selected for Download'
+					'Queue Selected for Recording'
 				),
 				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()", },
 					'Add Current Search to PVR'
