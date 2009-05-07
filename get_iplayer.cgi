@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.19';
+my $VERSION = '0.20';
 
 # Features:
 # * Search for progs
@@ -885,7 +885,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$get_iplayer_cmd --nocopyright --info --type=$type pid:$pid";
+	my $cmd = "$get_iplayer_cmd --nocopyright --info --nopurge --type=$type pid:$pid";
 	print $fh p("Command: $cmd");
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -1111,7 +1111,7 @@ sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = "$get_iplayer_cmd --nocopyright --flush --type $typelist --search='no search just flush'";
+	my $cmd  = "$get_iplayer_cmd --nopurge --nocopyright --flush --type $typelist --search='no search just flush'";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	system $cmd;
@@ -1149,7 +1149,7 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'D/S' );
+	push @html, th( { -class => 'search' }, 'R/S' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 

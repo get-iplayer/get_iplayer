@@ -48,8 +48,6 @@ sub new {
 	for (keys %params) {
 		$self->{$_} = $params{$_};
 	}
-	## Ensure that all instances reference the same class global $optref var
-	# $self->{optref} = $Programme::optref;
 	# Ensure the subclass $opt var is pointing to the Superclass global optref
 	$opt = $Programme::optref;
 	bless $self, $type;
@@ -555,6 +553,59 @@ sub download {
 
 
 
+# get ITV prog info
+sub get_url {
+	my ( undef, $ua, $pid ) = ( @_ );
+
+	my ( $response, $url_1, $url_2, $url_3, $url_4 );
+	my $part;
+	my $duration;
+	my $filename;
+	my @url_list;
+
+	# construct stage 1 request url
+	$url_1 = 'http://www.itv.com/_app/video/GetMediaItem.ashx?vodcrid=crid://itv.com/'.$pid.'&bitrate=384&adparams=SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO%20HTTP/1.1';
+
+	# Extract '<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>'
+	main::logger "INFO: ITV Video Stage 1 URL: $url_1\n" if $opt->{verbose};
+	$response = main::request_url_retry($ua, $url_1, 2, '', '');
+	main::logger "DEBUG: Response data: $response\n" if $opt->{debug};
+	$url_2 = $1 if $response =~ m{<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>};
+	# replace '&amp;' with '&' and append '%20HTTP/1.1'
+	$url_2 =~ s/&amp;/&/g;
+	$url_2 .= '%20HTTP/1.1';
+	return '' if $url_2 !~ m{http\:\/\/}i;
+	main::logger "INFO: ITV Video Stage 2 URL: $url_2\n" if $opt->{verbose};
+	$response = main::request_url_retry($ua, $url_2, 2, '', '');
+	main::logger "DEBUG: Response data: $response\n" if $opt->{debug};
+
+	# Extract hrefs and names. There are multiple entries for parts of prog (due to ads):
+	# e.g. <asx><Title>Doctor Zhivago</Title><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO HTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=1/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" /><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEOHTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=LAST/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" />
+	#$prog->{name} = $1 if $response =~ m{<Title>(.+?)<\/Title>};
+	for my $entry (split /<Entry><ref\s+href=/, $response) {
+		main::logger "DEBUG: Entry data: $entry\n" if $opt->{debug};
+		$entry .= '<Entry><ref href='.$entry;
+
+		( $url_3, $part, $filename, $duration ) = ( $1, $2, $3, $4 ) if $entry =~ m{<Entry><ref\s+href="(.+?)"\s+\/><param\s+value="true"\s+name="Prebuffer"\s+\/>\s*<PARAM\s+NAME="PrgPartNumber"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="FileName"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="PrgLength"\s+VALUE="(.+?)"\s*\/>};
+		next if not $url_3;
+		# Replace '&amp;' with '&' in url
+		$url_3 =~ s/&amp;/&/g;
+		main::logger "INFO: ITV Video Name: $part\n";
+
+		main::logger "INFO: ITV Video Stage 3 URL: $url_3\n" if $opt->{verbose};
+		$entry = main::request_url_retry($ua, $url_3, 2, '', '');
+		main::logger "DEBUG: Response data: $entry\n" if $opt->{debug};
+
+		# Extract mms (replace 'http' with 'mms') url: e.g.: Ref1=http://itvbrdbnd.wmod.llnwd.net/a1379/o21/ucontent/2007/6/22/1549_384_1_2.wmv?MSWMExt=.asf
+		chomp( $url_4 = 'mms'.$1 ) if $entry =~ m{Ref1=http(.+?)[\r\n]+};
+		main::logger "INFO: ITV Video URL: $url_4\n" if $opt->{verbose};
+		push @url_list, $url_4;
+	}
+	return @url_list;
+}
+
+
+
 # Generic
 # Gets media streams data for this version pid
 # $media = undef|itv
@@ -574,7 +625,7 @@ sub get_stream_data {
 	$data{$prog_type}{ext} = 'asf';
 	$data{$prog_type}{streamer} = 'mms';
 	$opt->{quiet} = 1 if $opt->{streaminfo};
-	$data{$prog_type}{streamurl} = join('|', Streamer::mms->get_url( $ua, $prog->{pid} ) );
+	$data{$prog_type}{streamurl} = join('|', $prog->get_url( $ua, $prog->{pid} ) );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url

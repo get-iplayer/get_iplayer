@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.83;
+my $version = 1.84;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -39,11 +39,9 @@ my $version = 1.83;
 # * Fix non-uk detection - iphone auth?
 # * Index/Record live radio streams w/schedule feeds to assist timing
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
-# * Stdout mode with rtmp
 # * Do subtitle downloading after programme recording so that rtmp auth doesn't timeout
 # ** BBC Learning zone progs?
 # ** all global vars into a class???
-# ** all global URLs into a hash/class???
 # ** Cut down 'use' clauses in each class 
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 # * rtmpdump now reports correct exitcode - fix code to recognise this
@@ -1392,9 +1390,8 @@ sub update_script {
 	my $ua = create_ua('update');
 	logger "INFO: Current version is $version\n";
 	logger "INFO: Checking for latest version from linuxcentre.net\n";
-	my $res = $ua->request( HTTP::Request->new( GET => $version_url ) );
-	chomp( my $latest_ver = $res->content );
-	if ( $res->is_success ) {
+	if ( my $latest_ver = request_url_retry($ua, $version_url, 3 ) ) {
+		chomp($latest_ver);
 		# Compare version numbers
 		if ( $latest_ver > $version || $opt->{force} ) {
 			# reformat version number
@@ -1403,18 +1400,17 @@ sub update_script {
 			
 			# Get the manifest of files to be updated
 			my $base_url = "${update_url}-${latest_ver}";
-			my $req = HTTP::Request->new ('GET', "$base_url/MANIFEST.txt" );
-			my $res = $ua->request( $req );
-			if (! $res->is_success ) {
+			my $res;
+			if ( not $res = request_url_retry($ua, "$base_url/MANIFEST.txt", 3 ) ) {
 				logger "ERROR: Failed to obtain update file manifest - Update aborted\n";
 				exit 3;
 			}
 
 			# update each file
-			for ( split /\n/, $res->content ) {
+			for ( split /\n/, $res ) {
 				chomp();
 				my ( $type, $url) = split /\s/;
-				main::logger "INFO: Getting $type file from $url\n" if $opt->{verbose};
+				main::logger "INFO: Downloading $url\n";
 				if ( $type eq 'bin' ) {
 					update_file( $ua, $url, $script_file );
 				} elsif ( $type eq 'plugins' ) {
@@ -1429,6 +1425,7 @@ sub update_script {
 					}
 				}
 			}
+			logger "INFO: Please see: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
 
 		} else {
 			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
@@ -1437,7 +1434,6 @@ sub update_script {
 		logger "ERROR: Failed to connect to update site - Update aborted\n";
 		exit 2;
 	}
-	logger "INFO: Please see: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
 	exit 0;
 }
 
@@ -1449,30 +1445,31 @@ sub update_file {
 	my $ua = shift;
 	my $url = shift;
 	my $dest_file = shift;
-	# Check if we are writable
-	if ( -f $dest_file && ! -w $dest_file ) {
+	my $res;
+	# Download the file
+	if ( not $res = request_url_retry($ua, $url, 3) ) {
+		logger "ERROR: Could not download update for ${dest_file} - Update aborted\n";
+		exit 1;
+	}
+	# If the download was successful then copy over this file and make executable after making a backup of this script
+	if ( -f $dest_file ) {
+		if ( ! copy($dest_file, $dest_file.'.old') ) {
+			logger "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
+			exit 1;
+		}
+	}
+	# Check if file is writable
+	if ( not open( FILE, "> $dest_file" ) ) {
 		logger "ERROR: $dest_file is not writable by the current user - Update aborted\n";
 		exit 1;
 	}
-	my $req = HTTP::Request->new ('GET', $url);
-	# Save content into a $script_file
-	my $res = $ua->request($req, $dest_file.'.tmp');
-	if ( ! -f $dest_file.'.tmp' ) {
-		logger "ERROR: Could not download update to ${dest_file}.tmp - Update aborted\n";
-		exit 1;
-	}
-	# If the download was successful then copy over this script and make executable after making a backup of this script
-	if ( $res->is_success ) {
-		if ( -f $dest_file ) {
-			if ( ! copy($dest_file, $dest_file.'.old') ) {
-				logger "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
-				exit 1;
-			}
-		}
-		move($dest_file.'.tmp', $dest_file);
-		chmod 0755, $dest_file;
-		logger "INFO: Copied new version into place (any previous version is now called '${dest_file}.old')\n";
-	}
+	# Windows needs this
+	binmode FILE;
+	# Write contents to file
+	print FILE $res;
+	close FILE;
+	chmod 0755, $dest_file;
+	logger "INFO: Downloaded $dest_file\n";
 }
 
 
@@ -4523,6 +4520,7 @@ sub opt {
 }
 
 
+
 ################### Streamer::iphone class #################
 package Streamer::iphone;
 
@@ -5028,20 +5026,41 @@ sub get {
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
+	# Deal with stdout streaming
+	my $common_args;
+	if ( $opt->{stdout} && not $opt->{nowrite} ) {
+		main::logger "ERROR: Cannot stream RTMP to STDOUT and file simultaneously\n";
+		exit 4;
+	}
+	if ( $opt->{stdout} && $opt->{nowrite} ) {
+		if ($rtmpver >= 1.5 ) {
+			$common_args = "--resume $extraopts -o -";
+		} else {
+			main::logger "ERROR: rtmpdump >= v1.5 is required for streaming to STDOUT\n";
+			exit 4;
+		}
+	} else {
+		$common_args = "--resume $extraopts -o \"$file_tmp\" 1>&2";
+	}
+	
 	my $return;
-	# Different invocation dependant on version
+	# Different invocation depending on version
 	# For ver < 1.4
 	if ( $rtmpver < 1.4 ) {
-		$cmd = "$bin->{rtmpdump} --resume $extraopts --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
-	# For ver 1.4+
-	} elsif ( $playpath ) {
-		$cmd = "$bin->{rtmpdump} --resume --port $port $extraopts --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" -o \"$file_tmp\" 1>&2";
-	# Using just streamurl (i.e. no playpath defined)
+		$cmd = "$bin->{rtmpdump} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+	# For ver 1.4+ if playpath is defined
+	} elsif ( $rtmpver >= 1.4 && $playpath ) {
+		$cmd = "$bin->{rtmpdump} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+	# Using just streamurl (i.e. no playpath defined) - requires rtmpdump >= 1.5
+	} elsif ($rtmpver >= 1.5 ) {
+		$cmd = "$bin->{rtmpdump} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
+	# Fail
 	} else {
-		$cmd = "$bin->{rtmpdump} --resume --port $port --rtmp \"$streamdata{streamurl}\" $extraopts --protocol \"$protocol\" -o \"$file_tmp\" 1>&2";
+		main::logger "ERROR: rtmpdump >= v1.5 is required\n";
+		return 'next';
 	}
 	main::logger "\n\nINFO: Command: $cmd\n";
-	
+
 	$return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
@@ -5337,58 +5356,6 @@ use POSIX qw(mkfifo);
 use strict;
 use Time::Local;
 use URI;
-
-
-# get ITV prog info
-sub get_url {
-	my ( undef, $ua, $pid ) = ( @_ );
-
-	my ( $response, $url_1, $url_2, $url_3, $url_4 );
-	my $part;
-	my $duration;
-	my $filename;
-	my @url_list;
-
-	# construct stage 1 request url
-	$url_1 = 'http://www.itv.com/_app/video/GetMediaItem.ashx?vodcrid=crid://itv.com/'.$pid.'&bitrate=384&adparams=SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO%20HTTP/1.1';
-
-	# Extract '<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>'
-	main::logger "INFO: ITV Video Stage 1 URL: $url_1\n" if $opt->{verbose};
-	$response = main::request_url_retry($ua, $url_1, 2, '', '');
-	main::logger "DEBUG: Response data: $response\n" if $opt->{debug};
-	$url_2 = $1 if $response =~ m{<LicencePlaylist>(.+?) HTTP/1.1</LicencePlaylist>};
-	# replace '&amp;' with '&' and append '%20HTTP/1.1'
-	$url_2 =~ s/&amp;/&/g;
-	$url_2 .= '%20HTTP/1.1';
-	return '' if $url_2 !~ m{http\:\/\/}i;
-	main::logger "INFO: ITV Video Stage 2 URL: $url_2\n" if $opt->{verbose};
-	$response = main::request_url_retry($ua, $url_2, 2, '', '');
-	main::logger "DEBUG: Response data: $response\n" if $opt->{debug};
-
-	# Extract hrefs and names. There are multiple entries for parts of prog (due to ads):
-	# e.g. <asx><Title>Doctor Zhivago</Title><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEO HTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=1/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" /><EntryRef href="HTTP://SAM.ITV.COM/XTSERVER/ACC_RANDOM=1231194223/SITE=ITV/AREA=CATCHUP.VIDEO/SEG=CATCHUP.VIDEOHTTP/1.1/SOURCE=CATCH.UP/GENRE=DRAMA/PROGNAME=DOCTOR.ZHIVAGO/PROGID=33105/SERIES=DOCTOR.ZHIVAGO/EPNUM=/EPTITLE=/BREAKNUM=0/ADPOS=LAST/PAGEID=01231194223/DENTON=0/CUSTOMRATING=/TOTDUR=90/PREDUR=0/POSDUR=905/GENERIC=6e0536bf-7883-4aaa-9230-94ecc4aea403/AAMSZ=VIDEO" />
-	#$prog->{name} = $1 if $response =~ m{<Title>(.+?)<\/Title>};
-	for my $entry (split /<Entry><ref\s+href=/, $response) {
-		main::logger "DEBUG: Entry data: $entry\n" if $opt->{debug};
-		$entry .= '<Entry><ref href='.$entry;
-
-		( $url_3, $part, $filename, $duration ) = ( $1, $2, $3, $4 ) if $entry =~ m{<Entry><ref\s+href="(.+?)"\s+\/><param\s+value="true"\s+name="Prebuffer"\s+\/>\s*<PARAM\s+NAME="PrgPartNumber"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="FileName"\s+VALUE="(.+?)"\s*\/><PARAM\s+NAME="PrgLength"\s+VALUE="(.+?)"\s*\/>};
-		next if not $url_3;
-		# Replace '&amp;' with '&' in url
-		$url_3 =~ s/&amp;/&/g;
-		main::logger "INFO: ITV Video Name: $part\n";
-
-		main::logger "INFO: ITV Video Stage 3 URL: $url_3\n" if $opt->{verbose};
-		$entry = main::request_url_retry($ua, $url_3, 2, '', '');
-		main::logger "DEBUG: Response data: $entry\n" if $opt->{debug};
-
-		# Extract mms (replace 'http' with 'mms') url: e.g.: Ref1=http://itvbrdbnd.wmod.llnwd.net/a1379/o21/ucontent/2007/6/22/1549_384_1_2.wmv?MSWMExt=.asf
-		chomp( $url_4 = 'mms'.$1 ) if $entry =~ m{Ref1=http(.+?)[\r\n]+};
-		main::logger "INFO: ITV Video URL: $url_4\n" if $opt->{verbose};
-		push @url_list, $url_4;
-	}
-	return @url_list;
-}
 
 
 
