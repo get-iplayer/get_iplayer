@@ -1320,6 +1320,8 @@ sub search_progs {
 	print $fh table( {-class=>'search' }, @html );
 	print $fh @pagetrail;
 
+	print $fh div( {id=>'status'} );
+
 	my @columnselect;
 	for my $heading (@headings) {
 		next if grep(/$heading/i, @displaycols);

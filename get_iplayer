@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.84;
+my $version = 1.85;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -88,7 +88,7 @@ my %prog_types = (
 
 # User Agents
 my %user_agent = (
-  	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
+	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
 	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
 	update		=> "get_iplayer updater (v${version} - $^O - $^V)",
 	get_iplayer	=> "get_iplayer/$version $^O/$^V",
@@ -118,7 +118,6 @@ my %user_agent = (
 
 
 # Final options instance
-
 my $opt = Options->new();
 # Command line options instance
 my $opt_cmdline = Options->new();
@@ -388,6 +387,7 @@ my $cookiejar		= "${profile_dir}/cookies";
 my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
+my $proxy_save;
 
 # Option dependant var definitions
 my $cache_secs;
@@ -1082,6 +1082,25 @@ sub display_stream_info {
 
 
 
+sub proxy_disable {
+	my $ua = shift;
+	$ua->proxy( ['http'] => undef );
+	$proxy_save = $opt->{proxy};
+	delete $opt->{proxy};
+	main::logger "INFO: Disabled proxy: $proxy_save\n" if $opt->{verbose};
+}
+
+
+
+sub proxy_enable {
+	my $ua = shift;
+	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
+	$opt->{proxy} = $proxy_save;
+	main::logger "INFO: Restored proxy to $opt->{proxy}\n" if $opt->{verbose};
+}
+
+
+
 # Generic
 # Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
 #  ensure filehandle $fh is open in append mode
@@ -1113,6 +1132,12 @@ sub download_block {
 		'Accept'	=> '*/*',
 		'Range'        => "bytes=${start}-${end}",
 	);
+
+	# Use url prepend if required
+	if ( $opt->{proxy} =~ /^prepend:/ ) {
+		$url = $opt->{proxy}.$url;
+		$url =~ s/^prepend://g;
+	}
 
 	my $req = HTTP::Request->new ('GET', $url, $h);
 
@@ -1293,7 +1318,7 @@ sub create_ua {
 	my $nocookiejar = $_[1] || 0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
-	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy};
+	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$ua->agent( $agent );
 	main::logger "DEBUG: Using user-agent '$agent'\n" if $opt->{debug};
 	$ua->conn_cache(LWP::ConnCache->new());
@@ -1705,6 +1730,12 @@ sub request_url_retry {
 	
 	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
 	my $res;
+
+	# Use url prepend if required
+	if ( $opt->{proxy} =~ /^prepend:/ ) {
+		$url = $opt->{proxy}.$url;
+		$url =~ s/^prepend://g;
+	}
 
 	# Malformed URL check
 	if ( $url !~ m{^\s*http\:\/\/}i ) {
@@ -2900,12 +2931,11 @@ sub get_version_pids {
 	#main::logger "INFO: Getting version pids for programme $prog->{pid}        \n" if ! $opt->{verbose};
 
 	# send request
-	my $res = $ua->request( HTTP::Request->new( GET => $url ) );
-	if ( ! $res->is_success ) {
+	my $xml = main::request_url_retry( $ua, $url, 3 );
+	if ( ! $xml ) {
 		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
 		return %version_pids;
 	}
-
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
 	#<?xml version="1.0" encoding="UTF-8"?>                                   
 	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">       
@@ -2948,7 +2978,6 @@ sub get_version_pids {
 	#
 	#                <relatedLink>
 	                
-	my $xml = $res->content;	
 	# flatten
 	$xml =~ s/\n/ /g;
 
@@ -3242,7 +3271,7 @@ sub get_stream_data {
 
 	# BBC streams
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
-	my $xml = main::request_url_retry($ua, $media_stream_data_prefix.$verpid, 3, '', '');
+	my $xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3 );
 	main::logger "\n$xml\n" if $opt->{debug};
 	my @medias = parse_metadata( $xml );
 
@@ -4192,10 +4221,11 @@ sub download {
 	if ( $opt->{subtitles} ) {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
+		main::proxy_disable($ua) if $opt->{partialproxy};
 		$prog->download_subtitles( $ua, $subfile );
-		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
+
 
 	my $return = 0;
 	if ( ! $opt->{subsonly} ) {
@@ -4203,7 +4233,7 @@ sub download {
 		$prog->{mode} = $mode;
 
 		# Disable proxy here if required
-		$ua->proxy( ['http'] => undef ) if $opt->{partialproxy};
+		main::proxy_disable($ua) if $opt->{partialproxy};
 
 		# Instantiate new streamer based on streamdata
 		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
@@ -4213,7 +4243,7 @@ sub download {
 		$return = $stream->get( $ua, $prog->{streams}->{$version}->{$mode}->{streamurl}, $prog, %{ $prog->{streams}->{$version}->{$mode} } );
 
 		# Re-enable proxy here if required
-		$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{partialproxy};
+		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
 	
 	# Rename the subtitle file accordingly
@@ -4561,7 +4591,14 @@ sub get_url {
 	my $iphone_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?r='.(sprintf "%012.0f", 999999999999*rand(0) );
 	main::logger "INFO: media stream URL = $url_1\n" if $opt->{verbose};
-		
+
+	# This doesn't work through url-prepend proxies
+	## Use url prepend if required
+	#if ( $opt->{proxy} =~ /^prepend:/ ) {
+	#	$url_1 = $opt->{proxy}.$url_1;
+	#	$url_1 =~ s/^prepend://g;
+	#}
+
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 	#main::logger "\rGetting iplayer URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
 	my $h = new HTTP::Headers(
@@ -4610,6 +4647,12 @@ sub get {
 	$rearrange = 1 if $prog->{type} eq 'tv' && not $opt->{raw};
 	print "DEBUG: Rearrang mov file mode = $rearrange (type: $prog->{type}, raw: $opt->{raw})\n" if $opt->{debug};
 		
+	# Use url prepend if required
+	if ( $opt->{proxy} =~ /^prepend:/ ) {
+		$url_2 = $opt->{proxy}.$url_2;
+		$url_2 =~ s/^prepend://g;
+	}
+
 	# Setup request header
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
