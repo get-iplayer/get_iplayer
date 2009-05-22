@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.86;
+my $version = 1.87;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2210,7 +2210,7 @@ sub usage {
 		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.',
 		'Each available programme has a numerical identifier, \fBpid\fR.',
 		'\fBget_iplayer\fR records BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for recording.',
-		'It can also utilise the \fBrtmpdump\fR tool to record programmes from RTMP flash streams at various qualities.',
+		'It can also utilise the \fBrtmpdump\fR or \fBflvstreamer\fR tools to record programmes from RTMP flash streams at various qualities.',
 		'.PP',
 		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
 		'.SH "OPTIONS"' if $manpage;
@@ -4000,7 +4000,7 @@ sub opt_format {
 		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 vmode"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
-		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
+		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer/rtmpdump for tv"],
 	};
 }
 
@@ -4021,7 +4021,7 @@ sub modelist {
 	# Defaults
 	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$opt->{vmode} = 'iphone';	
 		} else {
 			$opt->{vmode} = 'iphone,flashhigh,flashnormal';
@@ -4273,7 +4273,7 @@ sub download {
 	}
 	# if rtmpdump does not exist
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
-		main::logger "WARNING: Required program rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+		main::logger "WARNING: Required program flvstreamer/rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
@@ -4529,7 +4529,7 @@ sub opt_format {
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
 		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio amode"],
 		wav		=> [ 1, "wav", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
-		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
+		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer/rtmpdump for radio"],
 	};
 }
 
@@ -4550,7 +4550,7 @@ sub modelist {
 	# Defaults
 	if ( $opt->{amode} eq 'auto' || ! $opt->{amode} ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$opt->{amode} = 'iphone,realaudio';
 		} else {
 			$opt->{amode} = 'iphone,flashaudio,flashaac,realaudio';
@@ -5108,8 +5108,8 @@ sub opt_format {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
-		rtmpdump	=> [ 0, "rtmpdump=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary"],
-		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the rtmpdump exit code to decide whether the stream completed OK"],
+		rtmpdump	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
+		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
 
@@ -5140,21 +5140,21 @@ sub get {
 		$file_tmp = $prog->{filepart}.'.flv'
 	}
 
-	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
+	# Remove failed file recording (below a certain size) - hack to get around flvstreamer/rtmpdump not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 		
-	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
+	# Add custom options to flvstreamer/rtmpdump for this type if specified with --rtmp-<type>-opts
 	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
 		$extraopts .= ' '.$opt->{'rtmp'.$prog->{type}.'opts'};
 	}
 
-	# rtmpdump version detection e.g. 'RTMPDump v1.5'
+	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5' or 'FLVStreamer v1.7'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^RTMPDump/, `$bin->{rtmpdump} 2>&1`)[0] );
-	$rtmpver =~ s/^RTMPDump\s+v([\.\d]+).*$/$1/g;
-	main::logger "INFO: rtmpdump version $rtmpver\n" if $opt->{verbose};
+	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `$bin->{rtmpdump} 2>&1`)[0] );
+	$rtmpver =~ s/^\w+\s+v([\.\d]+).*$/$1/g;
+	main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Create symlink if required
@@ -5201,7 +5201,7 @@ sub get {
 	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
 	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
-	# Hack to get around rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
+	# Hack to get around flvstreamer/rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
