@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.87;
+my $version = 1.89;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1048,7 +1048,7 @@ sub subtitle_offset {
 	$sec = int( $ts/1000 );
 	$ts -= $sec*1000;
 	$ms = $ts;
-	return "$hr:$min:$sec,$ms";
+	return sprintf( '%02d:%02d:%02d,%03d', $hr, $min, $sec, $ms );
 }
 
 
@@ -4410,8 +4410,11 @@ sub download_subtitles {
 		s|\s{2,}| |g;
 		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
 		if ($begin && $end && $sub ) {
-			$begin =~ s/\./,/g;
-			$end =~ s/\./,/g;
+			#$begin =~ s/\./,/g;
+			#$end =~ s/\./,/g;
+			# Format numerical field widths
+			$begin = sprintf( '%02d:%02d:%02d,%02d0', split /[:\.,]/, $begin );
+			$end = sprintf( '%02d:%02d:%02d,%02d0', split /[:\.,]/, $end );
 			if ($opt->{suboffset}) {
 				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
 				$end = main::subtitle_offset( $end, $opt->{suboffset} );
@@ -5167,8 +5170,10 @@ sub get {
 		exit 4;
 	}
 	if ( $opt->{stdout} && $opt->{nowrite} ) {
-		if ($rtmpver >= 1.5 ) {
-			$common_args = "--resume $extraopts -o -";
+		if ( $rtmpver >= 1.7) {
+			$common_args = "$extraopts";
+		} elsif ( $rtmpver >= 1.5 ) {
+			$common_args = "$extraopts -o -";
 		} else {
 			main::logger "ERROR: rtmpdump >= v1.5 is required for streaming to STDOUT\n";
 			exit 4;
@@ -5579,6 +5584,7 @@ sub get {
 				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
 				if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
 					# Failed, retry
+					main::logger "DEBUG: Trace of failed command:\n####################\n${cmdoutput}\n####################\n" if $opt->{debug};
 					main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
 					$retry--;
 				} else {
