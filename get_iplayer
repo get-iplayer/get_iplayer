@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.89;
+my $version = 1.90;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4410,11 +4410,12 @@ sub download_subtitles {
 		s|\s{2,}| |g;
 		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
 		if ($begin && $end && $sub ) {
-			#$begin =~ s/\./,/g;
-			#$end =~ s/\./,/g;
 			# Format numerical field widths
-			$begin = sprintf( '%02d:%02d:%02d,%02d0', split /[:\.,]/, $begin );
-			$end = sprintf( '%02d:%02d:%02d,%02d0', split /[:\.,]/, $end );
+			$begin = sprintf( '%02d:%02d:%02d,%02d', split /[:\.,]/, $begin );
+			$end = sprintf( '%02d:%02d:%02d,%02d', split /[:\.,]/, $end );
+			# Add trailing zero if ttxt format only uses hundreths of a second
+			$begin .= '0' if $begin =~ m{,\d\d$};
+			$end .= '0' if $end =~ m{,\d\d$};
 			if ($opt->{suboffset}) {
 				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
 				$end = main::subtitle_offset( $end, $opt->{suboffset} );
