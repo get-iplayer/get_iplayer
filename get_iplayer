@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.90;
+my $version = 1.91;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -416,17 +416,27 @@ if ( $opt->{webrequest} ) {
 		}
 		# if the option is valid then add it
 		if ( defined $opt_format{$optname} ) {
-			$opt->{$optname} = $value;
+			$opt_cmdline->{$optname} = $value;
 			logger "INFO: webrequest OPT: $optname=$value\n" if $opt->{verbose};
 		# Ignore invalid opts
 		} else {
 			logger "ERROR: Invalid webrequest OPT: $optname=$value\n" if $opt->{verbose};
 		}
 	}
+	# Copy to $opt from opt_cmdline those options which are actually set - allows pvr-add to work which only looks at cmdline args
+	$opt->copy_set_options_from( $opt_cmdline );
+	# Remove this option now we've processed it
+	delete $opt->{webrequest};
+	delete $opt_cmdline->{webrequest};
 }
 
 # Add --search option to @search_args if specified
-push @search_args, $opt->{search} if defined $opt->{search};
+if ( defined $opt->{search} ) {
+	push @search_args, $opt->{search};
+	# Remove this option now we've processed it
+	delete $opt->{search};
+	delete $opt_cmdline->{search};
+}
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0];
 
@@ -6017,7 +6027,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(vlc|test|subsonly|stdout|get|update|save|helplong|help|expiry|nowrite|tree|terse|streaminfo|listformat|list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|vlc|test|subsonly|stdout|get|update|save|helplong|help|expiry|nowrite|tree|terse|streaminfo|listformat|list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
