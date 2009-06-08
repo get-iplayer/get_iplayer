@@ -2943,15 +2943,54 @@ sub create_symlink {
 
 
 
-# Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and current time
-sub get_available_time_string {
-	my $datestring = shift;
-	# extract $year $mon $mday $hour $min $sec
-	$datestring =~ m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)Z};
-	my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+# Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and specified epoch time
+# Or, Get time in epoch from '2008-06-22T05:01:49Z' or '2008-06-22T05:01:49[+-]NN:NN' if no specified epoch time
+sub get_time_string {
+	my $_ = shift;
+	my $diff = shift;
+
+	# extract $year $mon $mday $hour $min $sec $tzhour $tzmin
+	my ($year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin);
+	($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6) if m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)};
+
+	# positive TZ offset
+	($tzhour, $tzmin) = ($1, $2) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\d\+(\d\d):(\d\d)};
+	# negative TZ offset
+	($tzhour, $tzmin) = ($1*-1, $2*-1) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\d\-(\d\d):(\d\d)};
+	# ending in 'Z'
+	($tzhour, $tzmin) = (0, 0) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\dZ};
+
+	main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
+
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-	my @time = gmtime( time() - timelocal($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) );
-	return "$time[7] days $time[2] hours ago";
+	my $epoch = timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60;
+	my $rtn;
+	if ( $diff ) {
+		# Return time ago
+		if ( $epoch < $diff ) {
+			my @time = gmtime( $diff - ( timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60 ) );
+			# The time() func gives secs since 1970, gmtime is since 1900
+			my $years = $time[5] - 70;
+			$rtn = "$years years " if $years;
+			$rtn .= "$time[7] days $time[2] hours ago";
+			return $rtn;
+		# Return time to go
+		} elsif ( $epoch > $diff ) {
+			my @time = gmtime( ( timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60 ) - $diff );
+			my $years = $time[5] - 70;
+			$rtn = 'in ';
+			$rtn .= "$years years " if $years;
+			$rtn .= "$time[7] days $time[2] hours";
+			return $rtn;
+		# Return 'Now'
+		} else {
+			return "now";
+		}
+	# Return time in epoch
+	} else {
+		# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
+		return timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60;
+	}
 }
 
 
@@ -3115,7 +3154,7 @@ sub get_version_pids {
 
 	# Add to prog hash
 	$prog->{versions} = join ',', keys %version_pids;
-	$prog->{longname} = $title;
+	$prog->{longname} = decode_entities($title);
 	return %version_pids;
 }
 
@@ -3210,7 +3249,10 @@ sub get_metadata {
 	#  </entry>
 	#</feed>
 		
-	$expiry = $1 if $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);};
+	if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
+		$expiry = $1;
+		$expiry .= ' ('.Programme::get_time_string( $expiry, time() ).')';
+	}
 	$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
 	$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
 	$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
@@ -3235,6 +3277,9 @@ sub get_metadata {
 	my %version_pids = $prog->get_version_pids( $ua );
 	$versions = join ',', sort keys %version_pids;
 	my $modes;
+	my $mode_sizes;
+	my $first_broadcast;
+	my $last_broadcast;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %version_pids ) {
 		# Try to get stream data for this version if it isn't already populated
@@ -3244,6 +3289,52 @@ sub get_metadata {
 			$prog->{streams}->{$version} = \%all_stream_data;
 		}
 		$modes .= $version.": ".(join ',', sort keys %{ $prog->{streams}->{$version} } )."  ";
+		# Estimate the file sizes for each mode
+		$mode_sizes .= $version.": ";
+		my @sizes;
+		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
+			next if ( ! $duration ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
+			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $duration / 8.0 / 1024.0 );
+		}
+		$mode_sizes .= join ',', @sizes;
+		
+		# get the last/first broadcast dates from the RDF for this verpid
+		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
+		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
+		my $rdf_url = 'http://www.bbc.co.uk/programmes/'.$version_pids{$version}.'.rdf';
+		my $rdf = main::request_url_retry($ua, $rdf_url, 3, '', '');
+		decode_entities($rdf);
+		main::logger "DEBUG: $rdf_url:\n$rdf\n\n" if $opt->{debug};
+		# Flatten
+		$rdf =~ s|\n| |g;
+		# Get min/max bcast dates from rdf
+		my ( $first, $last, $first_string, $last_string ) = ( 9999999999, 0, 'Never', 'Never' );
+
+		# <po:(First|Repeat)Broadcast>
+		#  <po:schedule_date rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2009-06-06</po:schedule_date>
+		#    <event:time>
+		#        <timeline:Interval>
+		#              <timeline:start rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2009-06-06T21:30:00+01:00</timeline:start>
+		for ( split /<po:(First|Repeat)Broadcast>/, $rdf ) {
+			my $timestring;
+			my $epoch;
+			$timestring = $1 if m{<timeline:start\s+rdf:datatype=".+?">(20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d([+-]\d\d:\d\d|Z))<};
+			next if ! $timestring;
+			$epoch = Programme::get_time_string( $timestring );
+			main::logger "DEBUG: $version: $timestring -> $epoch\n" if $opt->{debug};
+			if ( $epoch < $first ) {
+				$first = $epoch;
+				$first_string = $timestring;
+			}
+			if ( $epoch > $last ) {
+				$last = $epoch;
+				$last_string = $timestring;
+			}
+		}
+		#main::logger "DEBUG: First Broadcast = $first\n";
+		#main::logger "DEBUG:  Last Broadcast = $last\n";
+		$prog->{firstbroadcast} .= "$version: $first_string (".Programme::get_time_string( $first_string, time() ).") ";
+		$prog->{lastbroadcast} .= "$version: $last_string (".Programme::get_time_string( $last_string, time() ).") ";
 	}
 
 	# Fill in from cache if not got from metadata
@@ -3260,6 +3351,7 @@ sub get_metadata {
 	$prog->{player}		= $player;
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
+	$prog->{modesizes}	= $mode_sizes;
 	return 0;
 }
 
@@ -3396,6 +3488,7 @@ sub get_stream_data {
 					$data{$mode}{streamer} = 'rtmp';
 					$mattribs->{width} = 1280 if ! $mattribs->{width};
 					$mattribs->{height} = 720 if ! $mattribs->{height};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3430,6 +3523,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3445,6 +3539,7 @@ sub get_stream_data {
 					$mode = 'flashvhigh2';
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3463,6 +3558,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3480,6 +3576,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3513,6 +3610,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3529,6 +3627,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3545,6 +3644,7 @@ sub get_stream_data {
 					$mode = 'flashhigh3';
 					$data{$mode}{ext} = 'mp4';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3578,6 +3678,7 @@ sub get_stream_data {
 					$mode = 'flashnormal';
 					$data{$mode}{ext} = 'avi';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3609,6 +3710,7 @@ sub get_stream_data {
 					$mode = 'flashlow1';
 					$data{$mode}{ext} = 'avi';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3625,6 +3727,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'avi';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3658,6 +3761,9 @@ sub get_stream_data {
 					$mode = 'iphone';
 					$data{$mode}{ext} = 'mov';
 					$data{$mode}{streamer} = 'iphone';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
+					# override bitrate for radio as reported one is just wrong!
+					$data{$mode}{bitrate} = 128 if $prog->{type} eq 'radio';
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3685,6 +3791,7 @@ sub get_stream_data {
 					$data{$mode}{streamer} = '3gp';
 					$mattribs->{width} = 320 if ! $mattribs->{width};
 					$mattribs->{height} = 176 if ! $mattribs->{height};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3712,6 +3819,7 @@ sub get_stream_data {
 					$data{$mode}{streamer} = '3gp';
 					$mattribs->{width} = 176 if ! $mattribs->{width};
 					$mattribs->{height} = 96 if ! $mattribs->{height};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3738,6 +3846,7 @@ sub get_stream_data {
 					$data{$mode}{streamer} = 'http';
 					$mattribs->{width} = 320 if ! $mattribs->{width};
 					$mattribs->{height} = 176 if ! $mattribs->{height};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3749,6 +3858,7 @@ sub get_stream_data {
 					$data{$mode}{streamer} = 'http';
 					$mattribs->{width} = 672;
 					$mattribs->{height} = 544;
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{identifier} =~ s/_mobile//g;
@@ -3785,6 +3895,7 @@ sub get_stream_data {
 					$mode = 'flashaac2';
 					$data{$mode}{ext} = 'aac';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3803,6 +3914,7 @@ sub get_stream_data {
 					$data{$mode}{ext} = 'aac';
 					$data{$mode}{streamer} = 'rtmp';
 					$data{$mode}{application} = $cattribs->{application};
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3833,6 +3945,7 @@ sub get_stream_data {
 					$mode = 'flashaudio';
 					$data{$mode}{ext} = 'mp3';
 					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{authstring} = $cattribs->{authString};
@@ -3864,6 +3977,7 @@ sub get_stream_data {
 					$mode = 'realaudio';
 					$data{$mode}{ext} = 'mp3';
 					$data{$mode}{streamer} = 'rtsp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3888,6 +4002,7 @@ sub get_stream_data {
 					$mode = 'wma';
 					$data{$mode}{ext} = 'wma';
 					$data{$mode}{streamer} = 'mms';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -3913,6 +4028,7 @@ sub get_stream_data {
 					$mode = 'subtitles';
 					$data{$mode}{ext} = 'srt';
 					$data{$mode}{streamer} = 'http';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
 					$data{$mode}{server} = $cattribs->{server};
 					$data{$mode}{identifier} = $cattribs->{identifier};
 					$data{$mode}{streamurl} = $cattribs->{href};
@@ -4183,7 +4299,7 @@ sub get_links {
 
 			# This is not the availability!
 			# <updated>2008-06-22T05:01:49Z</updated>
-			#$available = Programme::get_available_time_string( $1 ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+			#$available = Programme::get_time_string( $1, time() ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
