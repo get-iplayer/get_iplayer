@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.93;
+my $version = 1.95;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -240,7 +240,7 @@ my %opt_format = (
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Recording output directory"],
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
-	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>', "Record an arbitrary pid that does not necessarily appear in the index"],
+	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>|<type>:<live URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
 	packagemanager	=> [ 0, "packagemanager=s", '', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
@@ -2209,13 +2209,15 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--stdout\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
+		'\fBget_iplayer\fR \fB--stdout\fR \fB--nowrite\fR [<options>] --pid <type>:<Live URL> | mplayer \fB-cache\fR 128 -',
+		'.PP',
 		'\fBget_iplayer\fR \fB--update\fR',
 		'.SH DESCRIPTION',
 		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV/Radio, BBC Podcast programmes. Other 3rd-Party plugins may be available.',
 		'.PP',
 		'\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme',
 		'directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to',
-		'search terms and recording programmes automatically.',
+		'search terms and recording programmes automatically. It can also stream or record live BBC iPlayer output',
 		'.PP',
 		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.',
 		'Each available programme has a numerical identifier, \fBpid\fR.',
@@ -2229,6 +2231,7 @@ sub usage {
 	push @usage, " Record Programmes:             get_iplayer --get [<search options>] <regex|index> ...";
 	push @usage, "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
 	push @usage, " Stream Programme to Console:   get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
+	push @usage, " Stream Live iPlayer Programme  get_iplayer --stdout --nowrite --pid <type>:<Live URL> | mplayer -cache 128 -";
 	push @usage, " Update get_iplayer:            get_iplayer --update [--force]";
 	push @usage, " Advanced Options:              get_iplayer --long-help" if ! $helplong;
 
@@ -2946,7 +2949,7 @@ sub create_symlink {
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and specified epoch time
 # Or, Get time in epoch from '2008-06-22T05:01:49Z' or '2008-06-22T05:01:49[+-]NN:NN' if no specified epoch time
 sub get_time_string {
-	my $_ = shift;
+	$_ = shift;
 	my $diff = shift;
 
 	# extract $year $mon $mday $hour $min $sec $tzhour $tzmin
@@ -2961,6 +2964,8 @@ sub get_time_string {
 	($tzhour, $tzmin) = (0, 0) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\dZ};
 
 	main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
+	# Sanity check date data
+	return '' if $year < 1970 || $mon < 1 || $mon > 12 || $mday < 1 || $mday > 31 || $hour < 0 || $hour > 24 || $min < 0 || $min > 59 || $sec < 0 || $sec > 59 || $tzhour < -13 || $tzhour > 13 || $tzmin < -59 || $tzmin > 59;
 	# Year cannot be > 2032 so limit accordingly :-/
 	$year = 2038 if $year > 2038;
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
@@ -3078,28 +3083,28 @@ sub get_version_pids {
 		return %version_pids;
 	}
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
-	#<?xml version="1.0" encoding="UTF-8"?>                                   
-	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">       
-	#  <id>tag:bbc.co.uk,2008:pips:b00dlrc8:playlist</id>                     
+	#<?xml version="1.0" encoding="UTF-8"?>
+	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
+	#  <id>tag:bbc.co.uk,2008:pips:b00dlrc8:playlist</id>
 	#  <link rel="self" href="http://www.bbc.co.uk/iplayer/playlist/b00dlrc8"/>
 	#  <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00dlrc8"/>
 	#  <link rel="holding" href="http://www.bbc.co.uk/iplayer/images/episode/b00dlrc8_640_360.jpg" height="360" width="640" type="image/jpeg" />
-	#  <title>Amazon with Bruce Parry: Episode 1</title>                                                                                        
+	#  <title>Amazon with Bruce Parry: Episode 1</title>
 	#  <summary>Bruce Parry begins an epic adventure in the Amazon following the river from source to sea, beginning  in the High Andes and visiting the Ashaninka tribe.</summary>                                                                                                        
-	#  <updated>2008-09-18T14:03:35Z</updated>                                                                                                  
-	#  <item kind="ident">                                                                                                                      
-	#    <id>tag:bbc.co.uk,2008:pips:bbc_two</id>                                                                                               
-	#    <mediator identifier="bbc_two" name="pips"/>                                                                                           
-	#  </item>                                                                                                                                  
-	#  <item kind="programme" duration="3600" identifier="b00dlr9p" group="b00dlrc8" publisher="pips">                                          
-	#    <tempav>1</tempav>                                                                                                                     
-	#    <id>tag:bbc.co.uk,2008:pips:b00dlr9p</id>                                                                                              
-	#    <service id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</service>                                                    
-	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>                                            
+	#  <updated>2008-09-18T14:03:35Z</updated>
+	#  <item kind="ident">
+	#    <id>tag:bbc.co.uk,2008:pips:bbc_two</id>
+	#    <mediator identifier="bbc_two" name="pips"/>
+	#  </item>
+	#  <item kind="programme" duration="3600" identifier="b00dlr9p" group="b00dlrc8" publisher="pips">
+	#    <tempav>1</tempav>
+	#    <id>tag:bbc.co.uk,2008:pips:b00dlr9p</id>
+	#    <service id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</service>
+	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>
 	#
 	#    <alternate id="default" />
 	#    <guidance>Contains some strong language.</guidance>
-	#    <mediator identifier="b00dlr9p" name="pips"/>      
+	#    <mediator identifier="b00dlr9p" name="pips"/>
 	#  </item>
 	#  <item kind="programme" duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
 	#    <tempav>1</tempav>
@@ -3144,10 +3149,40 @@ sub get_version_pids {
 	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
 		main::logger "DEBUG: Block: $_\n" if $opt->{debug};
 		my ($verpid, $version);
-		#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
-		$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
-		# <alternate id="default" />
-		$version = lc($1) if m{<alternate\s+id="(.+?)"};
+		# Treat live streams accordingly
+		# Live TV
+		if ( m{\s+simulcast="true"}) {
+			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
+			$version = 'default';
+			# Now we lookup the http://www.bbc.co.uk/emp/simulcast/<verpid>.xml to get the correct verpid params
+			# If we use the params in the playlist then they are sometimes wrong
+			# send request
+			my $xml = main::request_url_retry( $ua, "http://www.bbc.co.uk/emp/simulcast/${verpid}.xml", 3 );
+			if ( ! $xml ) {
+				main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
+				return %version_pids;
+			}
+			# Flatten
+			$xml =~ s/\n/ /g;
+			# <connection kind="akamai" application="live" identifier="bbc1_simcast@s3173" server="cp56493.live.edgefcs.net" tokenIssuer="akamaiUk" />
+			# <connection kind="akamai" application="live" identifier="news_channel_1@s2677" server="cp52113.live.edgefcs.net" tokenIssuer="akamaiUk" />
+			# verpid = ?server=cp56493.live.edgefcs.net&identifier=bbc1_simcast@s3173&kind=akamai&application=live
+			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
+		# Live radio
+		} elsif ( m{\s+live="true"\s} ) {
+			# Try to get live stream version and verpid
+			### <item kind="radioProgramme" live="true" identifier="bbc_radio_one" group="bbc_radio_one">
+			###$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
+			$verpid = $prog->{pid};
+			$version = 'default';
+		# Not Live
+		} else {
+			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
+			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
+			# <alternate id="default" />
+			$version = lc($1) if m{<alternate\s+id="(.+?)"};
+		}
+		
 		next if ! ($verpid && $version);
 		$version_pids{$version} = $verpid;
 		main::logger "INFO: Version: $version, VersionPid: $verpid\n" if $opt->{verbose};  
@@ -3337,10 +3372,11 @@ sub get_metadata {
 				$last_string = $timestring;
 			}
 		}
-		#main::logger "DEBUG: First Broadcast = $first\n";
-		#main::logger "DEBUG:  Last Broadcast = $last\n";
-		$prog->{firstbroadcast} .= "$version: $first_string (".Programme::get_time_string( $first_string, time() ).") ";
-		$prog->{lastbroadcast} .= "$version: $last_string (".Programme::get_time_string( $last_string, time() ).") ";
+		# Only set these attribs if required
+		if ( $first < 9999999999 && $last > 0 ) {
+			$prog->{firstbroadcast} .= "$version: $first_string (".Programme::get_time_string( $first_string, time() ).") ";
+			$prog->{lastbroadcast} .= "$version: $last_string (".Programme::get_time_string( $last_string, time() ).") ";
+		}
 	}
 
 	# Fill in from cache if not got from metadata
@@ -3463,16 +3499,47 @@ sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my %data;
 	my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
+	my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 
 	# Setup user agent with redirection enabled
 	my $ua = main::create_ua();
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# BBC streams
+	my $xml;
+	my @medias;
+	# If this is a Live TV stream
+	if ( $verpid =~ /^\?/ ) {
+		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3 );
+		main::logger "\n$xml\n" if $opt->{debug};
+		# Parse XML
+		#<server>cp56493.live.edgefcs.net</server>
+		#<identifier>bbc1_simcast@s3173</identifier>
+		#<token>dbEb_c0abaHbWcxaYbRcHcQbfcMczaocvaB-bklOc_-c0-d0i_-EpnDBnzoNDqEnxF</token>
+		#<kind>akamai</kind>
+		#<application>live</application>
+		#@medias = parse_metadata( $xml );
+		my $mattribs;
+		my $cattribs;
+		#width="512" height="288" type="video/x-flv" encoding="vp6"
+		$mattribs->{kind} = 'video';
+		$mattribs->{type} = 'video/x-flv';
+		$mattribs->{encoding} = 'vp6';
+		$mattribs->{width} = 512;
+		$mattribs->{height} = 288;
+		$cattribs->{server} = $1 if $xml =~ m{<server>(.+?)</server>};
+		$cattribs->{kind} = $1 if $xml =~ m{<kind>(.+?)</kind>};
+		$cattribs->{identifier} = $1 if $xml =~ m{<identifier>(.+?)</identifier>};
+		$cattribs->{token} = $1 if $xml =~ m{<token>(.+?)</token>};
+		$cattribs->{application} = $1 if $xml =~ m{<application>(.+?)</application>};
+		push @{ $mattribs->{connections} }, $cattribs;
+		push @medias, $mattribs;
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
-	my $xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3 );
-	main::logger "\n$xml\n" if $opt->{debug};
-	my @medias = parse_metadata( $xml );
+	} else {
+		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3 );
+		main::logger "\n$xml\n" if $opt->{debug};
+		@medias = parse_metadata( $xml );
+	}
 
 	# Parse and dump structure
 	my $mode;
@@ -3702,6 +3769,39 @@ sub get_stream_data {
 
 
 
+		# flashnormal live modes
+		} elsif (	$mattribs->{kind} eq 'video' &&
+				$mattribs->{type} eq 'video/x-flv' &&
+				$mattribs->{encoding} eq 'vp6' &&
+				$mattribs->{width} =~ /[5]\d\d/
+		) {
+			# Connections within mode
+			for my $cattribs ( @{ $mattribs->{connections} } ) {
+
+				# Match to submode
+				if ( $cattribs->{kind} eq 'akamai' ) {
+					$mode = 'flashnormal';
+					$data{$mode}{ext} = 'avi';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = 480; # ??
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{token};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
+					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{extraopts} = '--live';
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				} else {
+					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
+				}
+			}
+
+
+
 		# flashlow modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
@@ -3897,7 +3997,24 @@ sub get_stream_data {
 			for my $cattribs ( @{ $mattribs->{connections} } ) {
 
 				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
+				if ( $cattribs->{kind} eq 'akamai' && $cattribs->{application} eq 'live' ) {
+					$mode = 'flashaac1';
+					$data{$mode}{ext} = 'aac';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = $mattribs->{bitrate};
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{authString};
+					$data{$mode}{type} = "Flash RTMP Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
+					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{extraopts} = "--live";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+
+				} elsif ( $cattribs->{kind} eq 'akamai' ) {
 					$mode = 'flashaac2';
 					$data{$mode}{ext} = 'aac';
 					$data{$mode}{streamer} = 'rtmp';
@@ -4202,7 +4319,9 @@ sub modelist {
 sub clean_pid {
 	my $prog = shift;
 	# extract b??????? format
-	$prog->{pid} = $1 if $prog->{pid} =~ m{(b\w{7})};
+	$prog->{pid} = $1 if $prog->{pid} =~ m{(b[a-z0-9]{7})};
+	# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
+	$prog->{pid} =~ s/^.+\/(.+?)\/?$/$1/g;
 }
 
 
@@ -4719,6 +4838,8 @@ sub clean_pid {
 	my $prog = shift;
 	# extract [bpw]??????? format - remove surrounding url
 	$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
+	# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_one'
+	$prog->{pid} =~ s/^.+\/(.+?)$/$1/g;
 }
 
 
