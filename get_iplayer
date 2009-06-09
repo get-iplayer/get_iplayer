@@ -2961,7 +2961,8 @@ sub get_time_string {
 	($tzhour, $tzmin) = (0, 0) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\dZ};
 
 	main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
-
+	# Year cannot be > 2032 so limit accordingly :-/
+	$year = 2038 if $year > 2038;
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 	my $epoch = timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60;
 	my $rtn;
@@ -3132,6 +3133,9 @@ sub get_version_pids {
 	my ( $title, $prog_type );
 	$title = $1 if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
 
+	# Get duration - sometimes this isn't set in other metadata
+	$prog->{duration} = $1 if $xml =~ m{duration="(\d+?)"};
+
 	# Get type
 	$prog_type = 'tv' if grep /kind="programme"/, $xml;
 	$prog_type = 'radio' if grep /kind="radioProgramme"/, $xml;
@@ -3251,7 +3255,7 @@ sub get_metadata {
 		
 	if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
 		$expiry = $1;
-		$expiry .= ' ('.Programme::get_time_string( $expiry, time() ).')';
+		$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
 	}
 	$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
 	$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
@@ -3276,6 +3280,8 @@ sub get_metadata {
 	# populate version pid metadata
 	my %version_pids = $prog->get_version_pids( $ua );
 	$versions = join ',', sort keys %version_pids;
+	# Get duration from verpid lookup xml if not already set
+	$duration = $prog->{duration} if ! $duration;
 	my $modes;
 	my $mode_sizes;
 	my $first_broadcast;
@@ -3296,7 +3302,7 @@ sub get_metadata {
 			next if ( ! $duration ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
 			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $duration / 8.0 / 1024.0 );
 		}
-		$mode_sizes .= join ',', @sizes;
+		$mode_sizes .= join( ',', @sizes ).' ';
 		
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
