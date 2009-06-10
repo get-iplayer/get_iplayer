@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.96;
+my $version = 1.97;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -40,7 +40,6 @@ my $version = 1.96;
 # * Index/Record live radio streams w/schedule feeds to assist timing
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # * Do subtitle downloading after programme recording so that rtmp auth doesn't timeout
-# ** BBC Learning zone progs?
 # ** all global vars into a class???
 # ** Cut down 'use' clauses in each class 
 # ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
@@ -2204,7 +2203,7 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--get\fR [<search options>] <regex|index> ...',
 		'.br',
-		'\fBget_iplayer\fR \fB--pid\fR <type>:<pid> [<options>]',
+		'\fBget_iplayer\fR \fB--pid\fR <type>:<pid|url> [<options>]',
 		'.PP',
 		'\fBget_iplayer\fR \fB--stdout\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
@@ -2228,7 +2227,7 @@ sub usage {
 	push @usage, "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):";
 	push @usage, " Search Programmes:             get_iplayer [<search options>] [<regex|index> ...]";
 	push @usage, " Record Programmes:             get_iplayer --get [<search options>] <regex|index> ...";
-	push @usage, "                                get_iplayer --pid <type>:<pid> [<options>]\n" if $helplong;
+	push @usage, "                                get_iplayer --pid <type>:<pid|url> [<options>]\n" if $helplong;
 	push @usage, " Stream Programme to Console:   get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
 	push @usage, " Stream Live iPlayer Programme  get_iplayer --stdout --nowrite --pid <type>:<Live URL> | mplayer -cache 128 -";
 	push @usage, " Update get_iplayer:            get_iplayer --update [--force]";
@@ -2781,6 +2780,9 @@ sub generate_filenames {
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
+
+	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
+	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, 240 );
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	# Spaces
@@ -3091,8 +3093,15 @@ sub get_version_pids {
 		}
 		# flatten
 		$xml =~ s/\n/ /g;
-		# Find playlist URL
-		$url = $1 if $xml =~ m{<param\s+name="playlist"\s+value="(.+?)"};
+		# Find playlist URL in various guises
+		if ( $xml =~ m{<param\s+name="playlist"\s+value="(http.+?)"}i ) {
+			$url = $1;
+		# emp.setPlaylist("http://www.bbc.co.uk/learningzone/clips/clips/p_chin/bb/p_chin_ch_05303_16x9_bb.xml")
+		} elsif ( $xml =~ m{\s+emp.setPlaylist\("(http.+?)"\)}i ) {
+			$url = $1;
+		}
+		# URL decode url
+		$url =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
 	# iPlayer LiveTV or PID
 	} else {
 		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};	
@@ -3193,12 +3202,18 @@ sub get_version_pids {
 			# <connection kind="akamai" application="live" identifier="news_channel_1@s2677" server="cp52113.live.edgefcs.net" tokenIssuer="akamaiUk" />
 			# verpid = ?server=cp56493.live.edgefcs.net&identifier=bbc1_simcast@s3173&kind=akamai&application=live
 			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
-		# Live EMP tv
+		# Live/Non-live EMP tv
 		} elsif ( $prog->{pid} =~ /^http/i ) {
 			$version = 'default';
+			# <connection kind="akamai" identifier="intl/abercrombie" server="cp57856.edgefcs.net" />
 			# <connection kind="akamai" application="live" identifier="sport2a@s2405" server="cp52115.live.edgefcs.net" tokenIssuer="akamaiUk" />
+			# <connection kind="akamai" identifier="secure/p_chin/p_chin_ch_05303_16x9_bb" server="cp54782.edgefcs.net" tokenIssuer="akamaiUk"/>
 			# verpid = ?server=cp52115.live.edgefcs.net&identifier=sport2a@s2405&kind=akamai&application=live
 			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
+			# Or try this if application is not defined (i.e. like in learning zone)
+			if ( ! $verpid ) {
+				$verpid = "?server=$3&identifier=$2&kind=$1&application=ondemand" if $xml =~ m{<connection\s+kind="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
+			}
 		# Live radio
 		} elsif ( m{\s+live="true"\s} ) {
 			# Try to get live stream version and verpid
@@ -3603,7 +3618,7 @@ sub get_stream_data {
 					$data{$mode}{identifier} =~ s/^mp4://;
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -3635,7 +3650,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = $data{$mode}{identifier};
 					$data{$mode}{application} = $data{$mode}{application}.'?'.$data{$mode}{authstring};
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
@@ -3654,7 +3669,7 @@ sub get_stream_data {
 					$data{$mode}{identifier} =~ s/^mp4://;
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 				} elsif ( $cattribs->{kind} eq 'iplayertok' ) {
@@ -3672,7 +3687,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} =~ s/^mp4://g;
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 				} elsif ( $cattribs->{kind} eq 'limelight' ) {
@@ -3690,7 +3705,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} =~ s/^mp4://g;
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -3722,7 +3737,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = $data{$mode}{identifier};
 					$data{$mode}{application} = $data{$mode}{application}.'?'.$data{$mode}{authstring};
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
@@ -3741,7 +3756,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} =~ s/^mp4://g;
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 				} elsif ( $cattribs->{kind} eq 'akamai' ) {
@@ -3759,7 +3774,7 @@ sub get_stream_data {
 					$data{$mode}{identifier} =~ s/^mp4://;
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -3790,7 +3805,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = $data{$mode}{identifier};
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
@@ -3840,7 +3855,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
 					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					# Only add this flag if it really is a live simulcast
 					$data{$mode}{extraopts} = '--live' if $data{$mode}{application} =~ /^live/;
@@ -3874,7 +3889,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = $data{$mode}{identifier};
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
@@ -3893,7 +3908,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} =~ s/^mp4://g;
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 				} else {
@@ -4060,7 +4075,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
 					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					$data{$mode}{extraopts} = "--live";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
@@ -4079,7 +4094,7 @@ sub get_stream_data {
 					$data{$mode}{identifier} =~ s/^mp4://;
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 
 				} elsif ( $cattribs->{kind} eq 'limelight' ) {
@@ -4096,7 +4111,7 @@ sub get_stream_data {
 					$data{$mode}{playpath} = $data{$mode}{identifier};
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -4129,7 +4144,7 @@ sub get_stream_data {
 					$data{$mode}{identifier} =~ s/^mp3://;
 					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
+					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=9644_10144";
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -4218,16 +4233,18 @@ sub get_stream_data {
 		}	
 	}
 
-	# Do iphone redirect check regardless of an xml entry for iphone - sometimes the iphone streams exist regardless
-	if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
-		my $mode = 'iphone';
-		$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
-		# Get iphone redirect
-		$data{$mode}{streamurl} = $streamurl;
-		$data{$mode}{streamer} = 'iphone';
-		$data{$mode}{ext} = 'mov';
-	} else {
-		main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
+	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
+	if ( $prog->{pid} !~ /^http/i ) {
+		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
+			my $mode = 'iphone';
+			$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
+			# Get iphone redirect
+			$data{$mode}{streamurl} = $streamurl;
+			$data{$mode}{streamer} = 'iphone';
+			$data{$mode}{ext} = 'mov';
+		} else {
+			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
+		}
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
@@ -4369,13 +4386,18 @@ sub modelist {
 sub clean_pid {
 	my $prog = shift;
 
-	# If this is an iPlayer programme URL
-	if ( $prog->{pid} =~ m{(b[a-z0-9]{7})} ) {
+	# If this is an iPlayer pid
+	if ( $prog->{pid} =~ m{^(b0[a-z0-9]{6})$} ) {
+		# extract b??????? format from any URL containing it
+		$prog->{pid} = $1;
+
+	# If this is an iPlayer programme pid URL
+	} elsif ( $prog->{pid} =~ m{^http.+\/(b0[a-z0-9]{6})\/?.*$} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
 	# If this is a BBC *iPlayer* Live channel 	
-	} elsif ( $prog->{pid} =~ m{bbc\.co\.uk/iplayer}i ) {
+	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
 		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
 		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
 
