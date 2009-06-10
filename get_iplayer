@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.95;
+my $version = 1.96;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -307,7 +307,7 @@ if ( not $opt_cmdline->parse( \%opt_format ) ) {
 
 
 # deal with --save as $save and not as $opt_cmdline->{save}
-if ( $opt_cmdline->{save} == 1 ) {
+if ( defined $opt_cmdline->{save} && $opt_cmdline->{save} == 1 ) {
 	$save = 1;
 	delete $opt_cmdline->{save};
 	delete $opt_cmdline->{help};
@@ -370,7 +370,7 @@ update_script() if $opt->{update} || $opt->{pluginsupdate};
 my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
 
 # Ranges of numbers used in the indicies for each programme type
-my $max_index;
+my $max_index = 0;
 for ( progclass() ) {
 	# Set maximum index number
 	$max_index = progclass($_)->index_max if progclass($_)->index_max > $max_index;
@@ -1317,9 +1317,8 @@ sub random_ua {
 #		1: no cookies
 #		2: retain cookies but discard if site requires it
 sub create_ua {
-
 	# Use either the key from the function arg if it exists or a random ua string
-	my $agent = $user_agent{ $_[0] } || random_ua();
+	my $agent = $user_agent{ "$_[0]" } || random_ua();
 	my $nocookiejar = $_[1] || 0;
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout([$lwp_request_timeout]);
@@ -2019,7 +2018,7 @@ sub list_unique_element_counts {
 		if ($element_name eq 'categories') {
 			@element = split /,/, $progref->{$pid}->{$element_name};
 		} else {
-			@element[0] = $progref->{$pid}->{$element_name};
+			$element[0] = $progref->{$pid}->{$element_name};
 		}
 		for my $element (@element) {
 			$elements{ $element }++;
@@ -2486,7 +2485,15 @@ sub display_metadata {
 	@keys = keys %data if $#_ < 0;
 	main::logger "\n";
 	for (@keys) {
-		main::logger sprintf "%-15s %s\n", ucfirst($_).':', $data{$_} if $data{$_};
+		# Format timeadded field nicely
+		if ( /^timeadded$/ ) {
+			if ( $data{$_} ) {
+				my @t = gmtime( time() - $data{$_} );
+				main::logger sprintf "%-15s %s\n", ucfirst($_).':', "$t[7] days $t[2] hours ago ($data{$_})";
+			}
+		} else {
+			main::logger sprintf "%-15s %s\n", ucfirst($_).':', $data{$_} if $data{$_};		
+		}
 	}
 	main::logger "\n";
 	return 0;
@@ -3070,9 +3077,27 @@ use base 'Programme';
 sub get_version_pids {
 	my ( $prog, $ua ) = @_;
 	my %version_pids;
-	my $prog_iplayer_metadata = 'http://www.bbc.co.uk/iplayer/playlist/'; # $pid
-	my $url = $prog_iplayer_metadata.$prog->{pid};
-
+	my $url;
+	
+	# Determine if the is a standard pid, Live TV or EMP TV URL
+	# EMP URL
+	if ( $prog->{pid} =~ /^http/i ) {
+		$url = $prog->{pid};
+		# Scrape the EMP web page and get playlist URL
+		my $xml = main::request_url_retry( $ua, $url, 3 );
+		if ( ! $xml ) {
+			main::logger "\rERROR: Failed to get EMP page from BBC site\n\n";
+			return %version_pids;
+		}
+		# flatten
+		$xml =~ s/\n/ /g;
+		# Find playlist URL
+		$url = $1 if $xml =~ m{<param\s+name="playlist"\s+value="(.+?)"};
+	# iPlayer LiveTV or PID
+	} else {
+		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};	
+	}
+	
 	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
 	#main::logger "INFO: Getting version pids for programme $prog->{pid}        \n" if ! $opt->{verbose};
 
@@ -3151,7 +3176,7 @@ sub get_version_pids {
 		my ($verpid, $version);
 		# Treat live streams accordingly
 		# Live TV
-		if ( m{\s+simulcast="true"}) {
+		if ( m{\s+simulcast="true"} ) {
 			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
 			$version = 'default';
 			# Now we lookup the http://www.bbc.co.uk/emp/simulcast/<verpid>.xml to get the correct verpid params
@@ -3168,6 +3193,12 @@ sub get_version_pids {
 			# <connection kind="akamai" application="live" identifier="news_channel_1@s2677" server="cp52113.live.edgefcs.net" tokenIssuer="akamaiUk" />
 			# verpid = ?server=cp56493.live.edgefcs.net&identifier=bbc1_simcast@s3173&kind=akamai&application=live
 			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
+		# Live EMP tv
+		} elsif ( $prog->{pid} =~ /^http/i ) {
+			$version = 'default';
+			# <connection kind="akamai" application="live" identifier="sport2a@s2405" server="cp52115.live.edgefcs.net" tokenIssuer="akamaiUk" />
+			# verpid = ?server=cp52115.live.edgefcs.net&identifier=sport2a@s2405&kind=akamai&application=live
+			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
 		# Live radio
 		} elsif ( m{\s+live="true"\s} ) {
 			# Try to get live stream version and verpid
@@ -3175,7 +3206,7 @@ sub get_version_pids {
 			###$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
 			$verpid = $prog->{pid};
 			$version = 'default';
-		# Not Live
+		# Not Live standard TV and Radio
 		} else {
 			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
 			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
@@ -3508,7 +3539,7 @@ sub get_stream_data {
 	# BBC streams
 	my $xml;
 	my @medias;
-	# If this is a Live TV stream
+	# If this is a Live TV or EMP stream verpid
 	if ( $verpid =~ /^\?/ ) {
 		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3 );
 		main::logger "\n$xml\n" if $opt->{debug};
@@ -3518,7 +3549,6 @@ sub get_stream_data {
 		#<token>dbEb_c0abaHbWcxaYbRcHcQbfcMczaocvaB-bklOc_-c0-d0i_-EpnDBnzoNDqEnxF</token>
 		#<kind>akamai</kind>
 		#<application>live</application>
-		#@medias = parse_metadata( $xml );
 		my $mattribs;
 		my $cattribs;
 		#width="512" height="288" type="video/x-flv" encoding="vp6"
@@ -3532,6 +3562,7 @@ sub get_stream_data {
 		$cattribs->{identifier} = $1 if $xml =~ m{<identifier>(.+?)</identifier>};
 		$cattribs->{token} = $1 if $xml =~ m{<token>(.+?)</token>};
 		$cattribs->{application} = $1 if $xml =~ m{<application>(.+?)</application>};
+		# Push into media data structure
 		push @{ $mattribs->{connections} }, $cattribs;
 		push @medias, $mattribs;
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
@@ -3769,7 +3800,7 @@ sub get_stream_data {
 
 
 
-		# flashnormal live modes
+		# flashnormal live and EMP modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
 				$mattribs->{encoding} eq 'vp6' &&
@@ -3779,7 +3810,25 @@ sub get_stream_data {
 			for my $cattribs ( @{ $mattribs->{connections} } ) {
 
 				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
+				# Public Non-Live EMP Video without auth
+				if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
+					$mode = 'flashnormal';
+					$data{$mode}{ext} = 'avi';
+					$data{$mode}{streamer} = 'rtmp';
+					$data{$mode}{bitrate} = 480; # ??
+					$data{$mode}{server} = $cattribs->{server};
+					$data{$mode}{identifier} = $cattribs->{identifier};
+					$data{$mode}{authstring} = $cattribs->{token};
+					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
+					$data{$mode}{playpath} = "$data{$mode}{identifier}";
+					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&undefined";
+					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
+					$data{$mode}{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
+					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&undefined";
+					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
+				# Match to submode
+				# Live TV, Live EMP Video or Non-public EMP video
+				} elsif ( $cattribs->{kind} eq 'akamai' ) {
 					$mode = 'flashnormal';
 					$data{$mode}{ext} = 'avi';
 					$data{$mode}{streamer} = 'rtmp';
@@ -3793,7 +3842,8 @@ sub get_stream_data {
 					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
 					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=8812_8903";
 					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{extraopts} = '--live';
+					# Only add this flag if it really is a live simulcast
+					$data{$mode}{extraopts} = '--live' if $data{$mode}{application} =~ /^live/;
 					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
 				} else {
 					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -4318,10 +4368,21 @@ sub modelist {
 # Cleans up a pid and removes url parts that might be specified
 sub clean_pid {
 	my $prog = shift;
-	# extract b??????? format
-	$prog->{pid} = $1 if $prog->{pid} =~ m{(b[a-z0-9]{7})};
-	# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
-	$prog->{pid} =~ s/^.+\/(.+?)\/?$/$1/g;
+
+	# If this is an iPlayer programme URL
+	if ( $prog->{pid} =~ m{(b[a-z0-9]{7})} ) {
+		# extract b??????? format from any URL containing it
+		$prog->{pid} = $1;
+
+	# If this is a BBC *iPlayer* Live channel 	
+	} elsif ( $prog->{pid} =~ m{bbc\.co\.uk/iplayer}i ) {
+		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
+		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
+
+	# Else this is an embedded media player URL (live or otherwise)
+	} elsif ($prog->{pid} =~ m{^http}i ) {
+		# Just leave the URL as the pid
+	}
 }
 
 
