@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.97;
+my $version = 1.98;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2696,7 +2696,7 @@ sub tag_file {
 		return if ! -f $prog->{filename};
 		# Create ID3 tagging options for external tagger program (escape " for shell)
 		my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
-		$id3_name =~ s|"|\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
+		s|"|\\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
 		# Only tag if the required tool exists
 		if ( main::exists_in_path('id3v2') ) {
 			main::logger "INFO: id3 tagging $prog->{ext} file\n";
@@ -2727,6 +2727,7 @@ sub substitute {
 			
 	# Tokenize and substitute $format
 	for my $key ( keys %{$self} ) {
+		main::logger "DEBUG: Substitute $key = $self->{$key}\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
 		if ($sanitize_mode == 0) {
 			$replace = StringUtils::sanitize_path( $self->{$key} );
@@ -3104,7 +3105,7 @@ sub get_version_pids {
 		$url =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
 	# iPlayer LiveTV or PID
 	} else {
-		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};	
+		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
 	}
 	
 	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
@@ -3269,7 +3270,8 @@ sub get_metadata {
 
 	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
 
-	$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
+	# Don't get metadata from this URL if the pid contains a full url (problem: this still tries for BBC iPlayer live channels)
+	$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '') if $prog->{pid} !~ m{^http}i;
 	decode_entities($entry);
 	main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
 	# Flatten
@@ -3388,8 +3390,10 @@ sub get_metadata {
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
 		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
+		# Don't get this feed if the verpid starts with '?'
 		my $rdf_url = 'http://www.bbc.co.uk/programmes/'.$version_pids{$version}.'.rdf';
-		my $rdf = main::request_url_retry($ua, $rdf_url, 3, '', '');
+		my $rdf;
+		$rdf = main::request_url_retry($ua, $rdf_url, 3, '', '') if $version_pids{$version} !~ m{^\?};
 		decode_entities($rdf);
 		main::logger "DEBUG: $rdf_url:\n$rdf\n\n" if $opt->{debug};
 		# Flatten
@@ -4051,7 +4055,20 @@ sub get_stream_data {
 				}
 			}
 
-
+		# google: site:www.bbc.co.uk/radio/aod/availability  filetype:xml
+		# http://www.bbc.co.uk/radio/aod/availability/bbc7.xml
+		#####pid b0080sjp
+		#bitrate => 32
+		#kind => 
+		#type => audio/mp4
+		#encoding => aac
+		#expires => 2009-06-12T14:47:00+01:00
+		#CONNECTION-ELEMENT:
+		#priority => 10
+		#identifier => bbc7/secure_auth/international/b0080sj9/iplayer_uk_stream_aac_3gp_concrete
+		#kind => sis
+		#href => http://www.bbc.co.uk/mediaselector/4/sdp/bbc7/secure_auth/international/b0080sj9/iplayer_uk_stream_aac_3gp_concrete
+		#server => http://www.bbc.co.uk/mediaselector/4/sdp/
 
 		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
@@ -4234,7 +4251,7 @@ sub get_stream_data {
 	}
 
 	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
-	if ( $prog->{pid} !~ /^http/i ) {
+	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ ) {
 		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
 			my $mode = 'iphone';
 			$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
@@ -4396,11 +4413,11 @@ sub clean_pid {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
-	# If this is a BBC *iPlayer* Live channel 	
+	# If this is a BBC *iPlayer* Live channel
+	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
 	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
 		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
 		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
-
 	# Else this is an embedded media player URL (live or otherwise)
 	} elsif ($prog->{pid} =~ m{^http}i ) {
 		# Just leave the URL as the pid
@@ -4916,13 +4933,34 @@ sub modelist {
 
 
 
-# Cleans up a pid and removes url parts that might be specified
 sub clean_pid {
 	my $prog = shift;
-	# extract [bpw]??????? format - remove surrounding url
-	$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
-	# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_one'
-	$prog->{pid} =~ s/^.+\/(.+?)$/$1/g;
+
+	## extract [bpw]??????? format - remove surrounding url
+	#$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
+	## Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_one'
+	#$prog->{pid} =~ s/^.+\/(.+?)\/?$/$1/g;
+
+	# If this is an iPlayer pid
+	if ( $prog->{pid} =~ m{^([bpw]0[a-z0-9]{6})$} ) {
+		# extract b??????? format from any URL containing it
+		$prog->{pid} = $1;
+
+	# If this is an iPlayer programme pid URL
+	} elsif ( $prog->{pid} =~ m{^http.+\/([bpw]0[a-z0-9]{6})\/?.*$} ) {
+		# extract b??????? format from any URL containing it
+		$prog->{pid} = $1;
+
+	# If this is a BBC *iPlayer* Live channel
+	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
+	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
+		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_radio_one/'
+		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
+
+	# Else this is an embedded media player URL (live or otherwise)
+	} elsif ($prog->{pid} =~ m{^http}i ) {
+		# Just leave the URL as the pid
+	}
 }
 
 
@@ -5518,6 +5556,9 @@ sub get {
 	} else {
 		$common_args = "--resume $extraopts -o \"$file_tmp\" 1>&2";
 	}
+
+	# Add 20 sec timeout for newer versions
+	$common_args .= ' --timeout 20' if $rtmpver >= 1.5;
 	
 	my $return;
 	# Different invocation depending on version
