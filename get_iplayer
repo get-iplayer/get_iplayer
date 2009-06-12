@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.98;
+my $version = 1.99;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -230,6 +230,7 @@ my %opt_format = (
 	listplugins	=> [ 1, "listplugins", 'Display', '--listplugins', "Display a list of currently available plugins or programme types"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
+	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after download. Valid types are: xbmc, generic"],
 	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio amode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
@@ -264,8 +265,7 @@ my %opt_format = (
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
-	versionlist	=> [ 1, "versionlist|version-list=s", 'Recording', '--version-list <versions>', "Override the version of programme to record (e.g. '--version-list signed,default')"],
-	versions	=> [ 1, "versions=s", 'Search', '--versions <regex>', "Narrow search to matched programme version(s)"],
+	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,default')"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
 	vmode		=> [ 1, "vmode=s", 'Recording', '--vmode <mode>,<mode>,...', "Video Recoding mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 1, "warranty", 'Misc', '--warranty', 'Displays warranty section of GPL'],
@@ -787,7 +787,7 @@ sub list_progs {
 		if ( $opt->{info} ) {
 			$this->get_metadata( $ua );
 			# display all attribs except 'streams'
-			$this->display_metadata( grep !/^streams$/, sort keys %{ $this } );
+			$this->display_metadata( sort keys %{ $this } );
 		}
 	}
 	logger "\n";
@@ -804,14 +804,46 @@ sub get_regex_matches {
 	my $download_regex = shift;
 
 	my %download_hash;
-	my $channel_regex = $opt->{channel} || '.*';
-	my $category_regex = $opt->{category} || '.*';
-	my $versions_regex = $opt->{versions} || '.*';
+	my ( $channel_regex, $category_regex, $versions_regex, $channel_exclude_regex, $category_exclude_regex );
+
+	if ( $opt->{channel} ) {
+		$channel_regex = '('.(join '|', ( split /,/, $opt->{channel} ) ).')';
+	} else {
+		$channel_regex = '.*';
+	}
+	if ( $opt->{category} ) {
+		$category_regex = '('.(join '|', ( split /,/, $opt->{category} ) ).')';
+	} else {
+		$category_regex = '.*';
+	}
+	if ( $opt->{versionlist} ) {
+		$versions_regex = '('.(join '|', ( split /,/, $opt->{versionlist} ) ).')';
+	} else {
+		$versions_regex = '.*';
+	}
+	if ( $opt->{excludechannel} ) {
+		$channel_exclude_regex = '('.(join '|', ( split /,/, $opt->{excludechannel} ) ).')';
+	} else {
+		$channel_exclude_regex = '^ROGUE$';
+	}
+	if ( $opt->{excludecategory} ) {
+		$category_exclude_regex = '('.(join '|', ( split /,/, $opt->{excludecategory} ) ).')';
+	} else {
+		$category_exclude_regex = '^ROGUE$';
+	}
 	my $exclude_regex = $opt->{exclude} || '^ROGUE$';
-	my $channel_exclude_regex = $opt->{excludechannel} || '^ROGUE$';
-	my $category_exclude_regex = $opt->{excludecategory} || '^ROGUE$';
 	my $since = $opt->{since} || 99999;
 	my $now = time();
+
+	if ( $opt->{verbose} ) {
+		main::logger "DEBUG: Search download_regex = $download_regex\n";
+		main::logger "DEBUG: Search channel_regex = $channel_regex\n";
+		main::logger "DEBUG: Search category_regex = $category_regex\n";
+		main::logger "DEBUG: Search versions_regex = $versions_regex\n";
+		main::logger "DEBUG: Search exclude_regex = $exclude_regex\n";
+		main::logger "DEBUG: Search channel_exclude_regex = $channel_exclude_regex\n";
+		main::logger "DEBUG: Search category_exclude_regex = $category_exclude_regex\n";
+	}
 	
 	# Determine search for fields
 	my @searchfields;
@@ -1324,6 +1356,8 @@ sub create_ua {
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$ua->agent( $agent );
 	main::logger "DEBUG: Using user-agent '$agent'\n" if $opt->{debug};
+	# Using this slows down stco parsing!!
+	#$ua->default_header( 'Accept-Encoding', 'gzip,deflate' );
 	$ua->conn_cache(LWP::ConnCache->new());
 	#$ua->conn_cache->total_capacity(50);
 	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) ) if not $nocookiejar;
@@ -1855,7 +1889,11 @@ sub request_url_retry {
 	}
 	# Return empty string if we failed
 	return '' if $i == $retries;
-	# otherwise return content
+
+	# Only return decoded content if gzip is used - otherwise this severely slows down stco scanning! Perl bug?
+	main::logger "DEBUG: ".($res->header('Content-Encoding') || 'No')." Encoding used on $url\n" if $opt->{debug};
+	return $res->decoded_content if $res->header('Content-Encoding') eq 'gzip';
+
 	return $res->content;
 }
 
@@ -2488,10 +2526,26 @@ sub display_metadata {
 		if ( /^timeadded$/ ) {
 			if ( $data{$_} ) {
 				my @t = gmtime( time() - $data{$_} );
-				main::logger sprintf "%-15s %s\n", ucfirst($_).':', "$t[7] days $t[2] hours ago ($data{$_})";
+				main::logger sprintf "%-15s %s\n", $_.':', "$t[7] days $t[2] hours ago ($data{$_})";
 			}
+		# Streams data
+		} elsif ( /^streams$/ ) {
+			# skip these
+		# If hash then list keys
+		} elsif ( ref$data{$_} eq 'HASH' ) {
+			main::logger sprintf "%-15s ", $_.':';
+			for my $key ( sort keys %{$data{$_}} ) {
+				if ( ref$data{$_}->{$key} ne 'HASH' ) {
+					main::logger "$key: $data{$_}->{$key} ";
+				# This is the same as 'modes' list
+				#} else {
+				#	main::logger "$key: ".(join ',', sort keys %{ $data{$_}->{$key} } )." ";
+				}
+			}
+			main::logger "\n";
+		# else just print out key value pair
 		} else {
-			main::logger sprintf "%-15s %s\n", ucfirst($_).':', $data{$_} if $data{$_};		
+			main::logger sprintf "%-15s %s\n", $_.':', $data{$_} if $data{$_};		
 		}
 	}
 	main::logger "\n";
@@ -2501,10 +2555,10 @@ sub display_metadata {
 
 
 # Return hash of version => verpid given a pid
-sub get_version_pids {
-	my %version_pids;
-	$version_pids{'default'} = 1;
-	return %version_pids;
+# Also put verpids in $prog->{verpids}->{<version>} = <verpid>
+sub get_verpids {
+	my $prog = shift;
+	$prog->{verpids}->{'default'} = 1;
 }
 
 
@@ -2533,21 +2587,40 @@ sub download_retry_loop {
 	# Setup user-agent
 	my $ua = main::create_ua();
 
-	# Order with which to search for programme versions (can be overridden by --versionlist option)
-	# maybe we need this array per prog type??
-	my @version_search_list	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
-	@version_search_list = split /,/, $opt->{versionlist} if $opt->{versionlist};
+	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
+	$prog->get_metadata( $ua ) if $opt->{metadata} || $opt->{command};
 
-	# check here for no matching verpids for specified version search list???
+	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
+	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
 
-	# Look up version pids for this prog
-	my %version_pids = $prog->get_version_pids( $ua );
-
-	# if %version_pids is empty then skip this programme recording attempt
-	if ( (keys %version_pids) == 0 ) {
+	# if %{ $prog->{verpids} } is empty then skip this programme recording attempt
+	if ( (keys %{ $prog->{verpids} }) == 0 ) {
 		main::logger "INFO: No versions exist for this programme\n";
 		return 1;
 	}
+
+	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
+	my @version_search_list	= qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+	@version_search_list = keys %{ $prog->{verpids} } if defined $opt->{versionlist};
+	my @new_version_search_list;
+	for my $version ( split /,/, $opt->{versionlist} ) {
+		push @new_version_search_list, grep /^$version/i, @version_search_list;
+		main::logger "DEBUG: version search added ".(join ',', grep /^$version/i, @version_search_list)." to version_search_list\n" if $opt->{debug};
+	}
+	@version_search_list = @new_version_search_list if $opt->{versionlist};
+	main::logger "INFO: Will look for versions: ".(join ',', @version_search_list)."\n" if $opt->{verbose};
+
+	# check here for no matching verpids for specified version search list???
+	my $got = 0;
+	for my $version ( @version_search_list ) {
+		$got++ if defined $prog->{verpids}->{$version};
+	}
+	if ( $got == 0 ) {
+		main::logger "INFO: No versions of this programme were selected for download\n";
+		return 1;
+	}
+	
+	#main::logger "INFO: Versions available: ".(join ',', sort keys %{ $prog->{verpids} })."\n";
 
 	# Get all possible (or user overridden) modes for this prog recording
 	my $modelist = $prog->modelist;
@@ -2557,20 +2630,20 @@ sub download_retry_loop {
 	for my $version ( @version_search_list ) {
 		my $retcode = 1;
 		main::logger "DEBUG: Trying version '$version'\n" if $opt->{debug};
-		if ( $version_pids{$version} ) {
+		if ( $prog->{verpids}->{$version} ) {
 			main::logger "INFO: Checking existence of $version version\n";
 			$prog->{version} = $version;
 			main::logger "INFO: Version = $prog->{version}\n" if $opt->{verbose};
 
 			# Try to get stream data for this version if not already populated
 			if ( not defined $prog->{streams}->{$version} ) {
-				my %streamdata = $prog->get_stream_data( $version_pids{$version} );
+				my %streamdata = $prog->get_stream_data( $prog->{verpids}->{$version} );
 				$prog->{streams}->{$version} = \%streamdata;
 			}
 
 			# Display media stream data if required
 			if ( $opt->{streaminfo} ) {
-				main::display_stream_info( $prog, $version_pids{$version}, $version );
+				main::display_stream_info( $prog, $prog->{verpids}->{$version}, $version );
 				$opt->{quiet} = 0;
 				next;
 			}
@@ -2598,7 +2671,7 @@ sub download_retry_loop {
 				$prog->{mode} = $mode;
 
 				# try the recording for this mode
-				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $version_pids{$version} );
+				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
 				# quit if successful
@@ -2660,6 +2733,7 @@ sub mode_ver_download_retry_loop {
 				main::add_to_download_history( $prog );
 				$prog->tag_file;
 				$prog->download_thumbnail if $opt->{thumb};
+				$prog->create_metadata_file if $opt->{metadata};
 				$prog->run_user_command( $opt->{command} ) if $opt->{command};
 				$prog->report() if $opt->{pvr};
 			}
@@ -2714,31 +2788,97 @@ sub tag_file {
 
 
 
-# Usage: print $prog{$pid}->substitute('<name>-<pid>-<episode>');
+# Create a metadata file if required
+sub create_metadata_file {
+	my $prog = shift;
+	my $template;
+	my $filename;
+
+	# XML templaye for XBMC movies
+	$filename->{xbmc_movie} = "$prog->{dir}/$prog->{fileprefix}.nfo";
+	$template->{xbmc_movie} = '
+	<movie>
+		<title>[name] - [episode]</title>
+		<outline>[desc]</outline>
+		<tagline></tagline>
+		<runtime>[duration]</runtime>
+		<thumb>[thumbnail]</thumb>
+		<id>[pid]</id>
+		<filenameandpath>[dir]/[fileprefix]/[ext]</filenameandpath>
+		<trailer></trailer>
+		<genre>[categories]</genre>
+        </movie>
+	';
+
+	# XML templaye for XBMC
+	$filename->{xbmc} = "$prog->{dir}/$prog->{fileprefix}.nfo";
+	$template->{xbmc} = '
+	<episodedetails>
+		<title>[name] - [episode]</title>
+		<rating>10.00</rating>
+		<season></season>
+		<episode></episode>
+		<plot>[desc]</plot>
+		<credits>[channel]</credits>
+		<aired>[available]</aired>
+	</episodedetails>
+	';
+
+	# Generic XML template for all info
+	$filename->{generic} = "$prog->{dir}/$prog->{fileprefix}.xml";
+	$template->{generic}  = '<?xml version="1.0" encoding="UTF-8" ?>'."\n";
+	$template->{generic} .= '<program_meta_data xmlns="http://linuxcentre.net/xmlstuff/get_iplayer" revision="1">'."\n";
+	$template->{generic} .= "\t<$_>[$_]</$_>\n" for ( sort keys %{$prog} );
+	$template->{generic} .= "</program_meta_data>\n";
+
+	return if ! -f $prog->{filename};
+	if ( not defined $template->{ $opt->{metadata} } ) {
+		main::logger "WARNING: metadata type '$opt->{metadata}' is not valid - must be one of ".(join ',', keys %{$template} )."\n";
+		return;
+	}
+
+	main::logger "INFO: Writing $opt->{metadata} metadata to file '$filename->{ $opt->{metadata} }'\n";
+
+	if ( open(XML, "> $filename->{ $opt->{metadata} }") ) {
+		print XML $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
+		close XML;
+	} else {
+		main::logger "WARNING: Couldn't write to metadata file '$filename->{ $opt->{metadata} }'\n";
+	}
+}
+
+
+
+# Usage: print $prog{$pid}->substitute('<name>-<pid>-<episode>', [mode], [begin regex tag], [end regex tag]);
 # Return a string with formatting fields substituted for a given pid
 # sanitize_mode == 0 then sanitize final string but dont sanitize '/' in field values
 # sanitize_mode == 1 then sanitize final string and also sanitize '/' in field values
 # sanitize_mode == 2 then just substitute only
+# sanitize_mode == 3 then substitute then use encode entities for fields only
 sub substitute {
-	my $self = shift;
-	my $string = shift;
-	my $sanitize_mode = shift || 0;
+	my ( $self, $string, $sanitize_mode, $tag_begin, $tag_end ) = ( @_ );
+	$sanitize_mode = 0 if not defined $sanitize_mode;
+	$tag_begin = '\<' if not defined $tag_begin;
+	$tag_end = '\>' if not defined $tag_end;
 	my $replace;
-			
+
 	# Tokenize and substitute $format
 	for my $key ( keys %{$self} ) {
 		main::logger "DEBUG: Substitute $key = $self->{$key}\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
 		if ($sanitize_mode == 0) {
 			$replace = StringUtils::sanitize_path( $self->{$key} );
+		} elsif ($sanitize_mode == 3) {
+			$replace = encode_entities( $self->{$key} );
 		} else {
 			$replace = $self->{$key};
 		}
-		$string =~ s|\<$key\>|$replace|gi;
+		$key = $tag_begin.$key.$tag_end;
+		$string =~ s|$key|$replace|gi;
 	}
-	$string =~ s|<pid>|$replace|gi;
+
 	# Remove/replace all non-nice-filename chars if required except for fwd slashes
-	if ($sanitize_mode != 2) {
+	if ( $sanitize_mode == 0 || $sanitize_mode == 1 ) {
 		return StringUtils::sanitize_path( $string, 1 );
 	} else {
 		return $string;
@@ -3077,9 +3217,8 @@ use base 'Programme';
 
 
 # Return hash of version => verpid given a pid
-sub get_version_pids {
+sub get_verpids {
 	my ( $prog, $ua ) = @_;
-	my %version_pids;
 	my $url;
 	
 	# Determine if the is a standard pid, Live TV or EMP TV URL
@@ -3090,7 +3229,7 @@ sub get_version_pids {
 		my $xml = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $xml ) {
 			main::logger "\rERROR: Failed to get EMP page from BBC site\n\n";
-			return %version_pids;
+			return;
 		}
 		# flatten
 		$xml =~ s/\n/ /g;
@@ -3115,7 +3254,7 @@ sub get_version_pids {
 	my $xml = main::request_url_retry( $ua, $url, 3 );
 	if ( ! $xml ) {
 		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-		return %version_pids;
+		return 0;
 	}
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
 	#<?xml version="1.0" encoding="UTF-8"?>
@@ -3165,7 +3304,7 @@ sub get_version_pids {
 	# Detect noItems or no programmes
 	if ( $xml =~ m{<noItems\s+reason="noMedia"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
 		main::logger "\rWARNING: No programmes are available for this pid\n\n";
-		return %version_pids;
+		return 0;
 	}
 
 	# Get title
@@ -3195,7 +3334,7 @@ sub get_version_pids {
 			my $xml = main::request_url_retry( $ua, "http://www.bbc.co.uk/emp/simulcast/${verpid}.xml", 3 );
 			if ( ! $xml ) {
 				main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-				return %version_pids;
+				return 0;
 			}
 			# Flatten
 			$xml =~ s/\n/ /g;
@@ -3231,7 +3370,7 @@ sub get_version_pids {
 		}
 		
 		next if ! ($verpid && $version);
-		$version_pids{$version} = $verpid;
+		$prog->{verpids}->{$version} = $verpid;
 		main::logger "INFO: Version: $version, VersionPid: $verpid\n" if $opt->{verbose};  
 	}
 
@@ -3239,9 +3378,9 @@ sub get_version_pids {
 	$title =~ s/^(.+):.*?$/$1/g;
 
 	# Add to prog hash
-	$prog->{versions} = join ',', keys %version_pids;
+	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
 	$prog->{longname} = decode_entities($title);
-	return %version_pids;
+	return 0;
 }
 
 
@@ -3360,9 +3499,9 @@ sub get_metadata {
 	$categories = join ',', @cats;
 
 	# Get list of available modes for each version available
-	# populate version pid metadata
-	my %version_pids = $prog->get_version_pids( $ua );
-	$versions = join ',', sort keys %version_pids;
+	# populate version pid metadata if we don't have it already
+	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
+	$versions = join ',', sort keys %{ $prog->{verpids} };
 	# Get duration from verpid lookup xml if not already set
 	$duration = $prog->{duration} if ! $duration;
 	my $modes;
@@ -3370,10 +3509,10 @@ sub get_metadata {
 	my $first_broadcast;
 	my $last_broadcast;
 	# Do this for each version tried in this order (if they appeared in the content)
-	for my $version ( sort keys %version_pids ) {
+	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		# Try to get stream data for this version if it isn't already populated
 		if ( not defined $prog->{streams}->{$version} ) {
-			my %all_stream_data = get_stream_data($prog, $version_pids{$version} );
+			my %all_stream_data = get_stream_data($prog, $prog->{verpids}->{$version} );
 			# Add streamdata to object
 			$prog->{streams}->{$version} = \%all_stream_data;
 		}
@@ -3391,9 +3530,9 @@ sub get_metadata {
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
 		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
 		# Don't get this feed if the verpid starts with '?'
-		my $rdf_url = 'http://www.bbc.co.uk/programmes/'.$version_pids{$version}.'.rdf';
+		my $rdf_url = 'http://www.bbc.co.uk/programmes/'.$prog->{verpids}->{$version}.'.rdf';
 		my $rdf;
-		$rdf = main::request_url_retry($ua, $rdf_url, 3, '', '') if $version_pids{$version} !~ m{^\?};
+		$rdf = main::request_url_retry($ua, $rdf_url, 3, '', '') if $prog->{verpids}->{$version} !~ m{^\?};
 		decode_entities($rdf);
 		main::logger "DEBUG: $rdf_url:\n$rdf\n\n" if $opt->{debug};
 		# Flatten
@@ -3424,8 +3563,10 @@ sub get_metadata {
 		}
 		# Only set these attribs if required
 		if ( $first < 9999999999 && $last > 0 ) {
-			$prog->{firstbroadcast} .= "$version: $first_string (".Programme::get_time_string( $first_string, time() ).") ";
-			$prog->{lastbroadcast} .= "$version: $last_string (".Programme::get_time_string( $last_string, time() ).") ";
+			$prog->{firstbcast} .= "$version: $first_string ";
+			$prog->{lastbrcast} .= "$version: $last_string ";
+			$prog->{firstbcastrel} .= "$version: ".Programme::get_time_string( $first_string, time() )." ";
+			$prog->{lastbcastrel} .= "$version: ".Programme::get_time_string( $last_string, time() )." ";
 		}
 	}
 
@@ -4647,7 +4788,7 @@ sub download {
 
 
 	# Determine the correct filenames for this recording
-	if ( $prog->generate_filenames( $ua, "<longname> - <episode> <pid> <version>" ) ) {
+	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> <version>" ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
@@ -5108,7 +5249,7 @@ sub get {
 	my $childpid;
 	my $rearrange = 0;
 	my $iphone_block_size	= 0x2000000; # 32MB
-	
+
 	# Stage 3a: Download 1st byte to get exact file length
 	main::logger "INFO: Stage 3 URL = $url_2\n" if $opt->{verbose};
 
@@ -5309,6 +5450,9 @@ sub get {
 		}
 	}
 
+	# Close fh
+	close $fh;
+
 	# end marker
 	my $end_time = time() + 0.0001;
 
@@ -5351,7 +5495,6 @@ sub relocate_moov_chunk_offsets {
 			# write back bytes into $moovdata
 			write_msb_value_at_offset( $moovdata, $j, $chunk_offset );
 		}
-
 		# skip over this whole atom now it is processed
 		$i += $stco_len;
 	}
@@ -6185,8 +6328,10 @@ sub get {
 
 	if ( main::download_block($prog->{filepart}, $url, $ua, $start, undef, undef, $fh) != 0 ) {
 		main::logger "\rERROR: Recording failed\n";
+		close $fh;
 		return 'next';
 	} else {
+		close $fh;
 		# end marker
 		my $end_time = time() + 0.0001;
 		# Final file size
