@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 1.99;
+my $version = 2.00;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -785,6 +785,7 @@ sub list_progs {
 		}
 		$names{ $this->{name} } = 1;
 		if ( $opt->{info} ) {
+			$this->get_metadata_general();
 			$this->get_metadata( $ua );
 			# display all attribs except 'streams'
 			$this->display_metadata( sort keys %{ $this } );
@@ -2509,7 +2510,17 @@ sub clean_pid {
 # Return metadata of the prog
 sub get_metadata {
 	my $prog = shift;
-	$prog->{modes} = 'default: '.$prog->modelist();
+	$prog->{modes}->{default} = $prog->modelist();
+}
+
+
+# Return metadata which is generic such as time and date
+sub get_metadata_general {
+	my $prog = shift;
+	my @t = localtime();
+	#($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
+	$prog->{date} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
+	$prog->{time} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];
 }
 
 
@@ -2533,16 +2544,16 @@ sub display_metadata {
 			# skip these
 		# If hash then list keys
 		} elsif ( ref$data{$_} eq 'HASH' ) {
-			main::logger sprintf "%-15s ", $_.':';
 			for my $key ( sort keys %{$data{$_}} ) {
+				main::logger sprintf "%-15s ", $_.':';
 				if ( ref$data{$_}->{$key} ne 'HASH' ) {
-					main::logger "$key: $data{$_}->{$key} ";
+					main::logger "$key: $data{$_}->{$key}";
 				# This is the same as 'modes' list
 				#} else {
-				#	main::logger "$key: ".(join ',', sort keys %{ $data{$_}->{$key} } )." ";
+				#	main::logger "$key: ".(join ',', sort keys %{ $data{$_}->{$key} } );
 				}
+				main::logger "\n";
 			}
-			main::logger "\n";
 		# else just print out key value pair
 		} else {
 			main::logger sprintf "%-15s %s\n", $_.':', $data{$_} if $data{$_};		
@@ -2588,7 +2599,10 @@ sub download_retry_loop {
 	my $ua = main::create_ua();
 
 	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
-	$prog->get_metadata( $ua ) if $opt->{metadata} || $opt->{command};
+	if ( $opt->{metadata} || $opt->{command} ) {
+		$prog->get_metadata( $ua );
+		$prog->get_metadata_general();
+	}
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
 	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
@@ -2855,23 +2869,44 @@ sub create_metadata_file {
 # sanitize_mode == 1 then sanitize final string and also sanitize '/' in field values
 # sanitize_mode == 2 then just substitute only
 # sanitize_mode == 3 then substitute then use encode entities for fields only
+#
+# Also if it find a HASH type then the $prog->{<version>} element is searched and used
+# Likewise, if a ARRAY type is found, elements are joined with commas
 sub substitute {
 	my ( $self, $string, $sanitize_mode, $tag_begin, $tag_end ) = ( @_ );
 	$sanitize_mode = 0 if not defined $sanitize_mode;
 	$tag_begin = '\<' if not defined $tag_begin;
 	$tag_end = '\>' if not defined $tag_end;
+	my $version = $self->{version} || 'unknown';
 	my $replace;
 
 	# Tokenize and substitute $format
 	for my $key ( keys %{$self} ) {
-		main::logger "DEBUG: Substitute $key = $self->{$key}\n" if $opt->{debug};
+
+		my $value = $self->{$key};
+
+		# Get version specific value if this key is a hash
+		if ( ref$value eq 'HASH' ) {
+			if ( ref$value->{$version} ne 'HASH' ) {
+				$value = $value->{$version};
+			} else {
+				$value = 'unprintable';
+			}
+		}
+		
+		# Join array elements if value is ARRAY type
+		if ( ref$value eq 'ARRAY' ) {
+			$value = join ',', @{ $value };
+		}
+
+		main::logger "DEBUG: Substitute ($version): '$key' => '$value'\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
 		if ($sanitize_mode == 0) {
-			$replace = StringUtils::sanitize_path( $self->{$key} );
+			$replace = StringUtils::sanitize_path( $value );
 		} elsif ($sanitize_mode == 3) {
-			$replace = encode_entities( $self->{$key} );
+			$replace = encode_entities( $value );
 		} else {
-			$replace = $self->{$key};
+			$replace = $value;
 		}
 		$key = $tag_begin.$key.$tag_end;
 		$string =~ s|$key|$replace|gi;
@@ -2886,7 +2921,7 @@ sub substitute {
 }
 
 	
-	
+
 # Determine the correct filenames for a recording
 # Sets the various filenames and creates appropriate directories
 # Gets more programme metadata if the prog name does not exist
@@ -2909,8 +2944,11 @@ sub generate_filenames {
 	my ($prog, $ua, $format, $multipart) = (@_);
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
-	$prog->get_metadata($ua) if ! $prog->{name};
-
+	if ( ! $prog->{name} ) {
+		$prog->get_metadata($ua);
+		$prog->get_metadata_general();
+	}
+	
 	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
 
 	$prog->{fileprefix} = $opt->{fileprefix} || $format;
@@ -3516,15 +3554,14 @@ sub get_metadata {
 			# Add streamdata to object
 			$prog->{streams}->{$version} = \%all_stream_data;
 		}
-		$modes .= $version.": ".(join ',', sort keys %{ $prog->{streams}->{$version} } )."  ";
+		$modes->{$version} = join ',', sort keys %{ $prog->{streams}->{$version} };
 		# Estimate the file sizes for each mode
-		$mode_sizes .= $version.": ";
 		my @sizes;
 		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
 			next if ( ! $duration ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
 			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $duration / 8.0 / 1024.0 );
 		}
-		$mode_sizes .= join( ',', @sizes ).' ';
+		$mode_sizes->{$version} = join ',', @sizes;
 		
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
@@ -3563,10 +3600,10 @@ sub get_metadata {
 		}
 		# Only set these attribs if required
 		if ( $first < 9999999999 && $last > 0 ) {
-			$prog->{firstbcast} .= "$version: $first_string ";
-			$prog->{lastbrcast} .= "$version: $last_string ";
-			$prog->{firstbcastrel} .= "$version: ".Programme::get_time_string( $first_string, time() )." ";
-			$prog->{lastbcastrel} .= "$version: ".Programme::get_time_string( $last_string, time() )." ";
+			$prog->{firstbcast}->{$version} = $first_string;
+			$prog->{lastbcast}->{$version} = $last_string;
+			$prog->{firstbcastrel}->{$version} = Programme::get_time_string( $first_string, time() );
+			$prog->{lastbcastrel}->{$version} = Programme::get_time_string( $last_string, time() );
 		}
 	}
 
