@@ -2519,8 +2519,8 @@ sub get_metadata_general {
 	my $prog = shift;
 	my @t = localtime();
 	#($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
-	$prog->{date} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
-	$prog->{time} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];
+	$prog->{dldate} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
+	$prog->{dltime} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];
 }
 
 
@@ -2845,7 +2845,7 @@ sub create_metadata_file {
 	$template->{generic} .= "\t<$_>[$_]</$_>\n" for ( sort keys %{$prog} );
 	$template->{generic} .= "</program_meta_data>\n";
 
-	return if ! -f $prog->{filename};
+	return if ! -d $prog->{dir};
 	if ( not defined $template->{ $opt->{metadata} } ) {
 		main::logger "WARNING: metadata type '$opt->{metadata}' is not valid - must be one of ".(join ',', keys %{$template} )."\n";
 		return;
