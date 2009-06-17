@@ -116,88 +116,6 @@ my %user_agent = (
 #);
 
 
-# Final options instance
-my $opt = Options->new();
-# Command line options instance
-my $opt_cmdline = Options->new();
-# Options file instance
-my $opt_file = Options->new();
-
-# Set Programme/Pvr/Streamer class global var refs to the Options instance
-Programme->add_opt_object($opt);
-Pvr->add_opt_object($opt);
-Pvr->add_opt_file_object($opt_file);
-Pvr->add_opt_cmdline_object($opt_cmdline);
-Streamer->add_opt_object($opt);
-# Kludge: Create dummy Streamer and Programme instances (without a single instance, none of the bound options work)
-Programme->new();
-Streamer->new();
-
-# Print to STDERR/STDOUT if not quiet unless verbose or debug
-sub logger(@) {
-	my $msg = shift;
-	# Make sure quiet can be overridden by verbose and debug options
-	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
-		# Only send messages to STDERR if pvr or stdout options are being used.
-		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} ) {
-			print STDERR $msg;
-		} else {
-			print STDOUT $msg;
-		}
-	}
-}
-
-my $save;
-# This is where all profile data/caches/cookies etc goes
-my $profile_dir;
-# This is where system-wide default options are specified
-my $optfile_system;
-
-# Options directories specified by env vars
-if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
-	$profile_dir = $ENV{GETIPLAYERUSERPREFS};
-	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
-
-# Options on unix-like systems
-} elsif ( defined $ENV{HOME} ) {
-	$profile_dir = $ENV{HOME}.'/.get_iplayer';
-	$optfile_system = '/etc/get_iplayer/options';
-
-# Otherwise look for windows style file locations
-} elsif ( defined $ENV{USERPROFILE} ) {
-	$profile_dir = $ENV{USERPROFILE}.'/.get_iplayer';
-	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
-}
-# Make profile dir if it doesnt exist
-mkpath $profile_dir if ! -d $profile_dir;
-
-
-# get list of additional user plugins and load plugin
-my $plugin_dir_system = '/usr/share/get_iplayer/plugins';
-my $plugin_dir_user = "$profile_dir/plugins";
-for my $plugin_dir ( ( $plugin_dir_user, $plugin_dir_system ) ) {
-	if ( opendir( DIR, $plugin_dir ) ) {
-		#logger "INFO: Checking for plugins in $plugin_dir\n";
-		my @plugin_file_list = grep /^.+\.plugin$/, readdir DIR;
-		closedir DIR;
-		for ( @plugin_file_list ) {
-			#logger "INFO: Got $_\n";
-			chomp();
-			$_ = "$plugin_dir/$_";
-			m{^.*\/(.+?).plugin$};
-			# keep in a hash for update
-			$plugin_files{$_} = $1.'.plugin';
-			# Skip if we have this plugin already
-			next if (! $1) || $prog_types{$1};
-			# Register the plugin
-			$prog_types{$1} = "Programme::$1";
-			#logger "INFO: Loading $_\n";
-			require $_;
-		}
-	}
-}
-
-
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
 my %opt_format = (
@@ -243,10 +161,17 @@ my %opt_format = (
 	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>|<type>:<live URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
 	packagemanager	=> [ 0, "packagemanager=s", '', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
+	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
+	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
+	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
+	prefsshow	=> [ 0, "showprefs|show-prefs|prefsshow|prefs-show", 'Config', '--prefs-show', "Show saved user or preset options"],
+	preset		=> [ 1, "preset|z=s", 'Config', '--preset, -z <name>', "Use specified user options preset"],
+	presetlist	=> [ 1, "listpresets|list-presets|presetlist|preset-list", 'Config', '--preset-list', "Show all valid presets"],
+	profiledir	=> [ 1, "profiledir|profile-dir=s", 'Config', '--profile-dir <dir>', "Override the user profile directory/folder"],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
-	save 		=> [ 0, "save", 'Config', '--save', "Save specified options as default"],
+	save 		=> [ 0, "save", '', '--save', "Save specified options as default"],
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
@@ -277,49 +202,169 @@ my %opt_format = (
 );
 
 
-# Personal options go here
-my $optfile = "${profile_dir}/options";
-# Parse options if we're not saving options (system-wide options are overridden by personal options)
-if ( ! grep /\-\-save/, @ARGV ) {
-	$opt->{debug} = 1 if grep /\-\-debug/, @ARGV;
-	# Load options from files into $opt_file
-	# system options
-	$opt_file->load( $opt, $optfile_system );
-	# User options
-	$opt_file->load( $opt, $optfile );
-	# Use .get_iplayer/options if it exists in current working dir
-	$opt_file->load( $opt, './.get_iplayer/options' ) if -f './.get_iplayer/options';
-	# Copy these loaded options into $opt
-	$opt->copy_set_options_from( $opt_file );
+# Pre-processed options instance
+my $opt_pre = Options->new();
+# Final options instance
+my $opt = Options->new();
+# Command line options instance
+my $opt_cmdline = Options->new();
+# Options file instance
+my $opt_file = Options->new();
+
+# Set Programme/Pvr/Streamer class global var refs to the Options instance
+Programme->add_opt_object($opt);
+Pvr->add_opt_object($opt);
+Pvr->add_opt_file_object($opt_file);
+Pvr->add_opt_cmdline_object($opt_cmdline);
+Streamer->add_opt_object($opt);
+# Kludge: Create dummy Streamer and Programme instances (without a single instance, none of the bound options work)
+Programme->new();
+Streamer->new();
+
+
+# Print to STDERR/STDOUT if not quiet unless verbose or debug
+sub logger(@) {
+	my $msg = shift;
+	# Make sure quiet can be overridden by verbose and debug options
+	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
+		# Only send messages to STDERR if pvr or stdout options are being used.
+		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} ) {
+			print STDERR $msg;
+		} else {
+			print STDOUT $msg;
+		}
+	}
 }
 
-# Parse cmdline opts from each Programme class/subclass
+
+# Pre-Parse the cmdline using the opt_format hash so that we know some of the options before we properly parse them later
+# Parse options with passthru mode (i.e. ignore unknown options at this stage) 
+# need to save and restore @ARGV to allow later processing)
+my @argv_save = @ARGV;
+$opt_pre->parse( \%opt_format, 1 );
+@ARGV = @argv_save;
+# Copy a few options over to opt so that logger works
+$opt->{debug} = 1 if $opt_pre->{debug};
+$opt->{verbose} = 1 if $opt_pre->{verbose};
+$opt->{quiet} = 1 if $opt_pre->{quiet};
+$opt->{pvr} = 1 if $opt_pre->{pvr};
+$opt->{stdout} = 1 if $opt_pre->{stdout};
+
+
+# Deal with legacy --save option
+if ( $opt_pre->{save} ) {
+	main::logger "ERROR: Please use --prefs-add, --prefs-del, --prefs-list to add, delete and list saved user options. --save is now deprecated. Also see new --preset option";
+	exit 1;
+}
+
+
+# This is where all profile data/caches/cookies etc goes
+my $profile_dir;
+# This is where system-wide default options are specified
+my $optfile_system;
+
+# Options directories specified by env vars
+if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
+	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYERUSERPREFS};
+	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
+
+# Options on unix-like systems
+} elsif ( defined $ENV{HOME} ) {
+	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
+	$optfile_system = '/etc/get_iplayer/options';
+
+# Otherwise look for windows style file locations
+} elsif ( defined $ENV{USERPROFILE} ) {
+	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
+	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+}
+# Make profile dir if it doesnt exist
+mkpath $profile_dir if ! -d $profile_dir;
+
+
+# get list of additional user plugins and load plugin
+my $plugin_dir_system = '/usr/share/get_iplayer/plugins';
+my $plugin_dir_user = "$profile_dir/plugins";
+for my $plugin_dir ( ( $plugin_dir_user, $plugin_dir_system ) ) {
+	if ( opendir( DIR, $plugin_dir ) ) {
+		#logger "INFO: Checking for plugins in $plugin_dir\n";
+		my @plugin_file_list = grep /^.+\.plugin$/, readdir DIR;
+		closedir DIR;
+		for ( @plugin_file_list ) {
+			#logger "INFO: Got $_\n";
+			chomp();
+			$_ = "$plugin_dir/$_";
+			m{^.*\/(.+?).plugin$};
+			# keep in a hash for update
+			$plugin_files{$_} = $1.'.plugin';
+			# Skip if we have this plugin already
+			next if (! $1) || $prog_types{$1};
+			# Register the plugin
+			$prog_types{$1} = "Programme::$1";
+			#logger "INFO: Loading $_\n";
+			require $_;
+		}
+	}
+}
+
+
+# Set the personal options according to the specified preset
+my $optfile_default = "${profile_dir}/options";
+my $optfile_preset;
+if ( $opt_pre->{preset} ) {
+	# create dir if it does not exist
+	mkpath "${profile_dir}/presets/" if ! -d "${profile_dir}/presets/";
+        # Sanitize preset file name
+	my $presetname = StringUtils::sanitize_path( $opt_pre->{preset} );
+	$optfile_preset = "${profile_dir}/presets/${presetname}";
+	logger "INFO: Using user options preset '${presetname}'\n";
+}
+logger "DEBUG: User Preset Options File: $optfile_preset\n" if $opt->{debug};
+
+
+# Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_, \%opt_format ) for qw( Streamer Programme Pvr );
 Options->get_class_options( progclass($_), \%opt_format ) for progclass();
 Options->get_class_options( "Streamer::$_", \%opt_format ) for qw( mms rtmp rtsp iphone mms 3gp http );
+
 
 # Parse the cmdline using the opt_format hash
 if ( not $opt_cmdline->parse( \%opt_format ) ) {
 	logger Options->usage( \%opt_format, 0 );
 	exit 1;
 }
-
-
-# deal with --save as $save and not as $opt_cmdline->{save}
-if ( defined $opt_cmdline->{save} && $opt_cmdline->{save} == 1 ) {
-	$save = 1;
-	delete $opt_cmdline->{save};
-	delete $opt_cmdline->{help};
-	delete $opt_cmdline->{helplong};
-	delete $opt_cmdline->{warranty};
-	delete $opt_cmdline->{conditions};
-}
-
 # Copy to $opt from opt_cmdline those options which are actually set 
 $opt->copy_set_options_from( $opt_cmdline );
 
-# Save opts to file if specified
-$opt->save( $opt_cmdline, $optfile ) if $save;
+
+# Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
+if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
+	# Load options from files into $opt_file
+	# system, Default, './.get_iplayer/options' and Preset options in that order should they exist
+	$opt_file->load( $opt, $optfile_system, $optfile_default, './.get_iplayer/options', $optfile_preset );
+	# Copy these loaded options into $opt
+	$opt->copy_set_options_from( $opt_file );
+}
+
+
+# Update or show user opts file (or preset if defined) if required
+if ( $opt_cmdline->{presetlist} ) {
+	$opt->preset_list( "${profile_dir}/presets/" );
+	exit 0;
+} elsif ( $opt_cmdline->{prefsadd} ) {
+	$opt->add( $opt_cmdline, $optfile_preset || $optfile_default );
+	exit 0;
+} elsif ( $opt_cmdline->{prefsdel} ) {
+	$opt->del( $opt_cmdline, $optfile_preset || $optfile_default );
+	exit 0;
+} elsif ( $opt_cmdline->{prefsshow} ) {
+	$opt->show( $optfile_preset || $optfile_default );
+	exit 0;
+} elsif ( $opt_cmdline->{prefsclear} ) {
+	$opt->clear( $optfile_preset || $optfile_default );
+	exit 0;
+}
+
 
 # List all valid programme type plugins (and built-ins)
 if ( $opt->{listplugins} ) {
@@ -441,7 +486,7 @@ push @search_args, '.*' if ! $search_args[0];
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
 my $lockfile;
-$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr};
+$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle};
 
 # Create new PVR instance
 # $pvr->{searchname}->{<option>} = <value>;
@@ -471,7 +516,12 @@ if ( $opt->{pvradd} ) {
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	$pvr->run( $opt_file );
+	$pvr->run();
+
+} elsif ( $opt->{pvrsingle} ) {
+	# PVR Lockfile detection (with 12 hrs stale lockfile check)
+	lockfile( 43200 ) if ! $opt->{test};
+	$pvr->run( $opt->{pvrsingle} );
 
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
@@ -2186,10 +2236,12 @@ sub new {
 
 
 # Parse cmdline opts using supplied hash
-# Usage: $opt_cmdline->parse( \%opt_format );
+# If passthru flag is set then no error will result if there are unrecognised options etc
+# Usage: $opt_cmdline->parse( \%opt_format [, passthru] );
 sub parse {
 	my $this = shift;
 	my $opt_format_ref = shift;
+	my $pass_thru = shift;
 	# Build hash for passing to GetOptions module
 	my %get_opts;
 
@@ -2200,7 +2252,12 @@ sub parse {
 
 	# Allow bundling of single char options
 	Getopt::Long::Configure("bundling");
-
+	if ( $pass_thru ) {
+		Getopt::Long::Configure("pass_through");
+	} else {
+		Getopt::Long::Configure("no_pass_through");
+	}
+	
 	# cmdline opts take precedence
 	# get options
 	return GetOptions(%get_opts);
@@ -2353,43 +2410,165 @@ sub copy_set_options_from {
 }
 
 
-# $opt->save( $opt_cmdline, $optfilename )
-# Save cmdline-only options to file
-sub save {
-	my $this = shift;
-	my $this_cmdline = shift;
-	my $optfile = shift;
-	unlink $optfile;
-	main::logger "DEBUG: Saving options to $optfile:\n" if $this->{debug};
-	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
-	# Save all opts except for these
-	for ( grep !/(help|test|debug|get)/, keys %{$this_cmdline} ) {
-		print OPT "$_ $this_cmdline->{$_}\n"  if defined $this_cmdline->{$_};
-		main::logger "DEBUG: Setting cmdline option $_ = $this_cmdline->{$_}\n" if $this->{debug} && defined $this_cmdline->{$_};
-	}
-	close OPT;
-	main::logger "INFO: Command Line Options saved as default in $optfile\n";
-	exit 0;
+
+# specify regex of options that cannot be saved
+sub excludeopts {
+	return '^(help|debug|get|pvr|prefs|preset|warranty|conditions)';
 }
 
 
-# $opt_file->load( $opt, $optfilename )
-# Load default options from file into instance
-sub load {
-	my $this_file = shift;
-	my $this = shift;
+# List all available presets in the specified dir
+sub preset_list {
+	my $opt = shift;
+	my $dir = shift;
+	main::logger "INFO: Valid presets: ";
+	if ( opendir( DIR, "${profile_dir}/presets/" ) ) {
+		my @preset_list = grep !/(^\.|~$)/, readdir DIR;
+		closedir DIR;
+		main::logger join ',', @preset_list;
+	}
+	main::logger "\n";
+}
+
+
+# Clears all option entries for a particular preset (i.e. deletes the file)
+sub clear {
+	my $opt = shift;
+	my $prefsfile = shift;
+	$opt->show( $prefsfile );
+	unlink $prefsfile;
+	main::logger "INFO: Removed all above options from $prefsfile\n";
+}
+
+
+# $opt->add( $opt_cmdline, $optfile )
+# Add/change cmdline-only options to file
+sub add {
+	my $opt = shift;
+	my $this_cmdline = shift;
+	my $optfile = shift;
+
+	# Load opts file
+	my $entry = get( $opt, $optfile );
+
+	# Merge all cmdline opts into $entry except for these
+	my $regex = $opt->excludeopts;
+	for ( grep !/$regex/, keys %{ $this_cmdline } ) {
+		main::logger "INFO: Changed option '$_' from '$entry->{$_}' to '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && defined $entry->{$_} && $this_cmdline->{$_} ne $entry->{$_};
+		main::logger "INFO: Added option '$_' = '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && not defined $entry->{$_};
+		$entry->{$_} = $this_cmdline->{$_} if defined $this_cmdline->{$_};
+	}
+
+	# Save opts file
+	put( $opt, $entry, $optfile );
+}
+
+
+
+# $opt->add( $opt_cmdline, $optfile )
+# Add/change cmdline-only options to file
+sub del {
+	my $opt = shift;
+	my $this_cmdline = shift;
 	my $optfile = shift;
 	return 0 if ! -f $optfile;
-	main::logger "DEBUG: Parsing options from $optfile:\n" if $this->{debug};
+
+	# Load opts file
+	my $entry = get( $opt, $optfile );
+
+	# Merge all cmdline opts into $entry except for these
+	my $regex = $opt->excludeopts;
+	for ( grep !/$regex/, keys %{ $this_cmdline } ) {
+		main::logger "INFO: Deleted option '$_' = '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && defined $entry->{$_};
+		delete $entry->{$_} if defined $this_cmdline->{$_};
+	}
+
+	# Save opts file
+	put( $opt, $entry, $optfile );
+}
+
+
+
+# $opt->show( $optfile )
+# show options from file
+sub show {
+	my $opt = shift;
+	my $optfile = shift;
+	return 0 if ! -f $optfile;
+
+	# Load opts file
+	my $entry = get( $opt, $optfile );
+
+	# Merge all cmdline opts into $entry except for these
+	main::logger "Options in '$optfile'\n";
+	my $regex = $opt->excludeopts;
+	for ( keys %{ $entry } ) {
+		main::logger "\t$_ = $entry->{$_}\n";
+	}
+}
+
+
+
+# $opt->save( $opt_cmdline, $optfile )
+# Save cmdline-only options to file
+sub put {
+	my $opt = shift;
+	my $entry = shift;
+	my $optfile = shift;
+
+	unlink $optfile;
+	main::logger "DEBUG: adding/changing options to $optfile:\n" if $opt->{debug};
+	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
+	for ( keys %{ $entry } ) {
+		print OPT "$_ $entry->{$_}\n" if defined $entry->{$_};
+		main::logger "DEBUG: Saving option $_ = $entry->{$_}\n" if $opt->{debug} && defined $entry->{$_};
+	}
+	close OPT;
+
+	main::logger "INFO: Options file $optfile updated\n";
+	return;
+}
+
+
+
+# $entry = get( $opt, $optfile )
+# get all options from file into $entry ($opt is used just to get access to general options like debug)
+sub get {
+	my $opt = shift;
+	my $optfile = shift;
+	my $entry;
+	return $entry if ! -f $optfile;
+
+	# Load opts
+	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
-		#chomp( $this->{$1} = $2 );
-		# keep track of which options came from files
-		chomp( $this_file->{$1} = $2 );
-		main::logger "DEBUG: Setting option $1 = $2\n" if $this->{debug};
+		chomp( $entry->{$1} = $2 );
+		main::logger "DEBUG: Loaded option $1 = $2\n" if $opt->{debug};
 	}
 	close OPT;
+	return $entry;
+}
+
+
+
+# $opt_file->load( $opt, $optfile )
+# Load default options from file(s) into instance
+sub load {
+	my $this_file = shift;
+	my $opt = shift;
+	my @optfiles = ( @_ );
+
+	# If multiple files are specified, load them in order listed
+	for my $optfile ( @optfiles ) {
+		# Load opts
+		my $entry = get( $opt, $optfile );
+		# Copy to $this_file instance
+		$this_file->copy_set_options_from( $entry );
+	}
+
+	return;
 }
 
 
@@ -2400,8 +2579,9 @@ sub display {
 	my $this = shift;
 	my $title = shift || 'Options';
 	my $excluderegex = shift || 'ROGUEVALUE';
+	my $regex = $this->excludeopts;
 	main::logger "$title:\n";
-	for ( grep !/(help|debug|get|^pvr)/i, sort keys %{$this} ) {
+	for ( grep !/$regex/i, sort keys %{$this} ) {
 		main::logger "\t$_ = $this->{$_}\n" if defined $this->{$_} && $this->{$_};
 	}
 	main::logger "\n";
@@ -3014,7 +3194,9 @@ sub generate_filenames {
 		}
 	}
 
-	print "DEBUG: File ext $prog->{ext}\n" if $opt->{debug};
+	print "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
+	print "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
+	print "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
 	print "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
 	print "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
 	print "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
@@ -6091,6 +6273,7 @@ sub get {
 		#my $null;
 		#$null = '-really-quiet' if ! $opt->{quiet};
 		# Can also use 'mencoder mms://url/ -oac copy -ovc copy -o out.asf' - still gives zero exit code on failed stream...
+		# Can also use $bin->{vlc} --sout file/asf:\"$file_tmp\" \"$url_list[$count]\" vlc://quit
 		# $cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
 		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
 		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
@@ -6416,6 +6599,7 @@ my $opt_cmdline;
 sub opt_format {
 	return {
 		pvr		=> [ 0, "pvr|pvrrun|pvr-run", 'PVR', '--pvr', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)"],
+		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
 		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
@@ -6484,12 +6668,10 @@ sub opt {
 
 
 # Load all PVR searches and run one-by-one
-# Usage: $pvr->run( $opt_file, \$lockfile, @search_args )
+# Usage: $pvr->run( [pvr search name] )
 sub run {
 	my $pvr = shift;
-	my $opt_file = shift;
-	my $lockfile_ref = shift;
-	my @search_args = shift;
+	my $single = shift;
 
 	# Don't attempt to record programmes with pids in history
 	my %pids_history = main::load_download_history();
@@ -6497,11 +6679,9 @@ sub run {
 	# Load all PVR searches
 	$pvr->load_list();
 
-	# Display default options from options files only
-	$opt_file->display('Default Options', '(help|debug|get|^pvr)');
-
-	# For each PVR search
-	for my $name ( sort {lc $a cmp lc $b} keys %{$pvr} ) {
+	# For each PVR search (or single one if specified)
+	my @names = ( $single ) || ( sort {lc $a cmp lc $b} keys %{$pvr} );
+	for my $name ( @names ) {
 		# Ignore if this search is disabled
 		if ( $pvr->{$name}->{disable} ) {
 			main::logger "\nSkipping disabled PVR Search '$name'\n" if $opt->{verbose};
@@ -6510,16 +6690,22 @@ sub run {
 		main::logger "\nRunning PVR Search '$name'\n";
 		# Clear then Load options for specified pvr search name
 		my @search_args = $pvr->load_options($name);
+
+		## Display all options used for this pvr search
+		#$opt->display('Default Options', '(help|debug|get|^pvr)');
+
 		# Switch on --hide option
 		$opt->{hide} = 1;
 		# Dont allow --flush with --pvr
 		$opt->{flush} = '';
 		# Do the recording (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
+
 		# If this is a one-off queue pid entry then delete the PVR entry upon successful recoding(s)
 		if ( $pvr->{$name}->{pid} ) {
 			my $failcount = main::find_matches( \%pids_history );
 			$pvr->del( $name ) if not $failcount;
+
 		# Just make recordings of matching progs
 		} else {
 			main::download_matches( main::find_matches( \%pids_history, @search_args ) );
@@ -6576,7 +6762,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(webrequest|vlc|test|subsonly|stdout|get|update|save|helplong|help|expiry|nowrite|tree|terse|streaminfo|listformat|list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|^test|subsonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
@@ -6709,17 +6895,30 @@ sub save {
 }
 
 
+# Uses globals: $profile_dir, $optfile_system, $optfile_default
 # Uses class globals: %opt, %opt_file, %opt_cmdline
 # Returns @search_args
 # Clear all exisiting global args and opts then load the options specified in the default options and specified PVR search
 sub load_options {
 	my $pvr = shift;
 	my $name = shift;
-	# Clear out existing options hash
+
+	my $optfile_preset;
+	# Clear out existing options and file options hashes
 	%{$opt} = ();
-	# Re-read options from the options files - these will act as defaults
+
+	# If the preset option is used in the PVR search then use it.
+	if ( $pvr->{$name}->{preset} ) {
+		$optfile_preset = ${profile_dir}."/presets/".$pvr->{$name}->{preset};
+		main::logger "DEBUG: Using preset file: $optfile_preset\n" if $opt_cmdline->{debug};
+	}
+
+	# Re-copy options read from files at start of whole run
 	$opt->copy_set_options_from( $opt_file );
 
+	# Load options from $optfile_preset into $opt (uses $opt_cmdline as readonly options for debug/verbose etc)
+	$opt->load( $opt_cmdline, $optfile_preset );
+	
 	# Clear search args
 	@search_args = ();
 	# Set each option from the search
@@ -6734,8 +6933,9 @@ sub load_options {
 			$opt->{$_} = $pvr->{$name}->{$_};
 		}
 	}
+
 	# Allow cmdline args to override those in the PVR search
-	# Re-read options from the cmdline
+	# Re-copy options from the cmdline
 	$opt->copy_set_options_from( $opt_cmdline );
 	return @search_args;
 }
