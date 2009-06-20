@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.02;
+my $version = 2.03;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -579,6 +579,9 @@ sub find_matches {
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
 	$bin->{tee}		= 'tee';
 	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
+	$binopts->{rtmpdump}	= ' --quiet' if $opt->{quiet};
+	$binopts->{rtmpdump}	= ' --verbose' if $opt->{verbose};
+	$binopts->{rtmpdump}	= ' --debug' if $opt->{debug};
 	# Set quiet, test and get options if we're asked for streaminfo
 	if ( $opt->{streaminfo} ) {
 		$opt->{test} 	= 1;
@@ -5957,19 +5960,19 @@ sub get {
 	# Different invocation depending on version
 	# For ver < 1.4
 	if ( $rtmpver < 1.4 ) {
-		$cmd = "$bin->{rtmpdump} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
 	# For ver 1.4+ if playpath is defined
 	} elsif ( $rtmpver >= 1.4 && $playpath ) {
-		$cmd = "$bin->{rtmpdump} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
 	# Using just streamurl (i.e. no playpath defined) - requires rtmpdump >= 1.5
 	} elsif ($rtmpver >= 1.5 ) {
-		$cmd = "$bin->{rtmpdump} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
+		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
 	# Fail
 	} else {
 		main::logger "ERROR: rtmpdump >= v1.5 is required\n";
 		return 'next';
 	}
-	main::logger "\n\nINFO: Command: $cmd\n";
+	main::logger "\n\nINFO: Command: $cmd\n" if $opt->{verbose};
 
 	$return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
