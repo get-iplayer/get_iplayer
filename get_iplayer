@@ -46,6 +46,7 @@ my $version = 2.04;
 # * rtmpdump now reports correct exitcode - fix code to recognise this
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * Create template parsers for each BBC iPlayer CDN as the parsing does appear to be similar
+# * Add --to="mplayer -" to invoke and stream to player? (implicit --live ?)
 #
 # Known Issues:
 # * In ActivePerl/windows recorded iPhone video files do not get renamed and remain with .partial.mov (broken 'move' sub?)
@@ -81,8 +82,10 @@ my %plugin_files;
 # Hash of all prog types => Programme class
 # Add an entry here if another Programme class is added
 my %prog_types = (
-	tv	=> 'Programme::tv',
-	radio	=> 'Programme::radio',
+	tv		=> 'Programme::tv',
+	radio		=> 'Programme::radio',
+	liveradio	=> 'Programme::liveradio',
+	livetv		=> 'Programme::livetv',
 );
 
 # User Agents
@@ -160,6 +163,7 @@ my %opt_format = (
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>|<type>:<live URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
 	packagemanager	=> [ 0, "packagemanager=s", '', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
+	player		=> [ 1, "player=s", 'Output', "--player \'<command> <options>\'", "Use this command to directly play the stream"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
@@ -171,11 +175,13 @@ my %opt_format = (
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
+	retries		=> [ 1, "retries=n", 'Recording', '--retries <attempts>', "Number of times to retry or try to resume a failed connection"],
 	save 		=> [ 0, "save", '', '--save', "Save specified options as default"],
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	stdout		=> [ 1, "stdout|x", 'Recording', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
+	stream		=> [ 1, "stream", 'Recording', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
@@ -248,7 +254,7 @@ $opt->{debug} = 1 if $opt_pre->{debug};
 $opt->{verbose} = 1 if $opt_pre->{verbose};
 $opt->{quiet} = 1 if $opt_pre->{quiet};
 $opt->{pvr} = 1 if $opt_pre->{pvr};
-$opt->{stdout} = 1 if $opt_pre->{stdout};
+$opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
 
 
 # Deal with legacy --save option
@@ -354,10 +360,10 @@ if ( $opt_cmdline->{presetlist} ) {
 	$opt->preset_list( "${profile_dir}/presets/" );
 	exit 0;
 } elsif ( $opt_cmdline->{prefsadd} ) {
-	$opt->add( $opt_cmdline, $optfile_preset || $optfile_default );
+	$opt->add( $opt_cmdline, $optfile_preset || $optfile_default, @ARGV );
 	exit 0;
 } elsif ( $opt_cmdline->{prefsdel} ) {
-	$opt->del( $opt_cmdline, $optfile_preset || $optfile_default );
+	$opt->del( $opt_cmdline, $optfile_preset || $optfile_default, @ARGV );
 	exit 0;
 } elsif ( $opt_cmdline->{prefsshow} ) {
 	$opt->show( $optfile_preset || $optfile_default );
@@ -562,6 +568,16 @@ sub find_matches {
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} 		= join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 	$type{$_} = 1 for split /,/, $opt->{type};
+	# Redirect STDOUT to player command if one is specified
+	if ( $opt->{player} && $opt->{stream} ) {
+		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
+	}
+	# --stream is the same as --stdout --nowrite
+	if ( $opt->{stream} ) {
+		$opt->{nowrite} = 1;
+		$opt->{stdout} = 1;
+		delete $opt->{stream};
+	}
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
 	$cache_secs 		= $opt->{expiry} || 14400;
@@ -2446,15 +2462,19 @@ sub clear {
 }
 
 
-# $opt->add( $opt_cmdline, $optfile )
+# $opt->add( $opt_cmdline, $optfile, @search_args )
 # Add/change cmdline-only options to file
 sub add {
 	my $opt = shift;
 	my $this_cmdline = shift;
 	my $optfile = shift;
+	my @search_args = @_;
 
 	# Load opts file
 	my $entry = get( $opt, $optfile );
+
+	# Add search args to opts
+	$this_cmdline->{search} = '('.(join '|', @search_args).')' if @search_args;
 
 	# Merge all cmdline opts into $entry except for these
 	my $regex = $opt->excludeopts;
@@ -2476,10 +2496,14 @@ sub del {
 	my $opt = shift;
 	my $this_cmdline = shift;
 	my $optfile = shift;
+	my @search_args = @_;
 	return 0 if ! -f $optfile;
 
 	# Load opts file
 	my $entry = get( $opt, $optfile );
+
+	# Add search args to opts
+	$this_cmdline->{search} = '('.(join '|', @search_args).')' if @search_args;
 
 	# Merge all cmdline opts into $entry except for these
 	my $regex = $opt->excludeopts;
@@ -2623,6 +2647,8 @@ use URI;
 # Global options
 my $optref;
 my $opt;
+# File format
+sub file_prefix_format { return '<name> - <episode> <pid> <version>' };
 # index min/max
 sub index_min { return 0 }
 sub index_max { return 9999999 };
@@ -2689,6 +2715,11 @@ sub opt {
 
 # Cleans up a pid and removes url parts that might be specified
 sub clean_pid {
+}
+
+
+# This gets run before the download retry loop if this class type is selected
+sub init {
 }
 
 
@@ -2788,6 +2819,9 @@ sub download_retry_loop {
 		$prog->get_metadata( $ua );
 		$prog->get_metadata_general();
 	}
+
+	# Run the type init
+	$prog->init();
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
 	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
@@ -2895,12 +2929,12 @@ sub download_retry_loop {
 # returns 1 on fail, 0 on success
 sub mode_ver_download_retry_loop {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	my $retries = 3;
+	my $retries = $opt->{retries} || 3;
 	my $count = 0;
 	my $retcode;
 
 	# Use different number of retries for flash modes
-	$retries = 20 if $mode =~ /^flash/;
+	$retries = $opt->{retries} || 20 if $mode =~ /^flash/;
 
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
@@ -3417,7 +3451,7 @@ sub download_thumbnail {
 
 
 
-################### TV class #################
+################### iPlayer Parent class #################
 package Programme::bbciplayer;
 
 use Env qw[@PATH];
@@ -3467,6 +3501,10 @@ sub get_verpids {
 		# playlist = "http://www.bbc.co.uk/worldservice/meta/tx/flash/live/eneuk.xml";
 		} elsif ( $xml =~ m{\splaylist\s+=\s+"(http.+?)";}i ) {
 			$url = $1;
+		## playlist: "http://www.bbc.co.uk/iplayer/playlist/bbc_radio_one",
+		#} elsif ( $xml =~ m{playlist: "http.+?playlist\/(\w+?)"}i ) {
+		#	$prog->{pid} = $1;
+		#	$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
 		}
 		# URL decode url
 		$url =~ s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
@@ -3935,7 +3973,7 @@ sub get_stream_data {
 		my $mattribs;
 		my $cattribs;
 		# TV
-		if ( $prog->{type} eq 'tv' ) {
+		if ( $prog->{type} eq 'tv' || $prog->{type} eq 'livetv' ) {
 			# Parse XML
 			#<server>cp56493.live.edgefcs.net</server>
 			#<identifier>bbc1_simcast@s3173</identifier>
@@ -3949,7 +3987,7 @@ sub get_stream_data {
 			$mattribs->{width} = 512;
 			$mattribs->{height} = 288;
 		# AAC Live Radio
-		} elsif ( $prog->{type} eq 'radio' ) {
+		} elsif ( $prog->{type} eq 'radio' || $prog->{type} eq 'liveradio' ) {
 			$mattribs->{kind} = 'audio';
 			$mattribs->{type} = 'audio/mp4';
 			$mattribs->{encoding} = 'aac';
@@ -5029,7 +5067,7 @@ sub download {
 
 
 	# Determine the correct filenames for this recording
-	if ( $prog->generate_filenames( $ua, "<name> - <episode> <pid> <version>" ) ) {
+	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
@@ -5334,6 +5372,9 @@ sub clean_pid {
 		$prog->{pid} = $1;
 
 	# If this is a BBC *iPlayer* Live channel
+	#} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer/console/}i ) {
+	#	# Just leave the URL as the pid
+
 	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
 	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
 		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_radio_one/'
@@ -5358,6 +5399,338 @@ sub get_links {
 sub download {
 	# Delegate to Programme::tv (same function is used)
 	return Programme::tv::download(@_);
+}
+
+
+
+################### BBC Live Parent class #################
+package Programme::bbclive;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme::bbciplayer';
+
+# Class vars
+sub file_prefix_format { '<name> <episode> <dldate> <dltime>' }
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
+	};
+}
+
+
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	return '';
+}
+
+
+
+sub clean_pid {
+	my $prog = shift;
+
+	# If this is a BBC *iPlayer* Live channel
+	#if ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer/console/}i ) {
+	#	# Just leave the URL as the pid
+	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
+	if ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
+		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_radio_one/'
+		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
+
+	# Else this is an embedded media player URL (live or otherwise)
+	} elsif ($prog->{pid} =~ m{^http}i ) {
+		# Just leave the URL as the pid
+	}
+}
+
+
+
+# get full episode metadata given pid and ua. Uses two different urls to get data
+sub get_metadata {
+	return 0;
+}
+
+
+# Usage: Programme::liveradio->get_links( \%prog, 'liveradio' );
+# Uses: %{ channels() }, \%prog
+sub get_links {
+	shift; # ignore obj ref
+	my $progref = shift;
+	my $prog_type = shift;
+	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
+	my %channels = %{ main::progclass($prog_type)->channels() };
+	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
+
+	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
+	for ( sort keys %channels ) {
+
+			# Extract channel
+			my $channel = $channels{$_};
+			my $pid = $_;
+			my $name = $channels{$_};
+			my $episode = 'live';
+
+			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
+
+			# build data structure
+			$progref->{$pid} = main::progclass($prog_type)->new(
+				'pid'		=> $pid,
+				'name'		=> $name,
+				'versions'	=> 'default',
+				'episode'	=> $episode,
+				'desc'		=> "Live stream of $name",
+				'guidance'	=> '',
+				#'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
+				'channel'	=> $channel,
+				#'categories'	=> join(',', @category),
+				'type'		=> $prog_type,
+				#'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
+			);
+	}
+	main::logger "\n";
+	return 0;
+}
+
+
+
+sub download {
+	# Delegate to Programme::tv (same function is used)
+	return Programme::tv::download(@_);
+}
+
+
+
+################### Live TV class #################
+package Programme::livetv;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme::bbclive';
+
+# Class vars
+sub index_min { return 80000 }
+sub index_max { return 80099 }
+sub channels {
+	return {
+		'bbc_one'			=> 'BBC One',
+		'bbc_two'			=> 'BBC Two',
+		'bbc_three'			=> 'BBC Three',
+		'bbc_four'			=> 'BBC Four',
+		'cbbc'				=> 'CBBC',
+		'cbeebies'			=> 'CBeebies',
+		'bbc_news24'			=> 'BBC News 24',
+		'bbc_parliament'		=> 'BBC Parliament',
+	};
+}
+
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings"],
+	};
+}
+
+
+
+# This gets run before the download retry loop if this class type is selected
+sub init {
+	# Force certain options for Live 
+	# Force only one try if live and recording to file
+	$opt->{retries} = 1 if ( ! $opt->{retries} ) && ( ! $opt->{nowrite} );
+}
+
+
+
+# Returns the modes to try for this prog type
+sub modelist {
+	my $prog = shift;
+	
+	# Defaults
+	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
+		if ( ! main::exists_in_path('rtmpdump') ) {
+			main::logger "ERROR: Required flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
+			exit 1;	
+		} else {
+			$opt->{vmode} = 'flashnormal';
+		}
+	}
+
+	return $opt->{vmode};
+}
+
+
+
+################### Live Radio class #################
+package Programme::liveradio;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+
+# Inherit from Programme class
+use base 'Programme::bbclive';
+
+# Class vars
+sub index_min { return 80100 }
+sub index_max { return 80199 }
+sub channels {
+	return {
+		'bbc_1xtra'				=> 'BBC 1Xtra',
+		'bbc_radio_one'				=> 'BBC Radio 1',
+		'bbc_radio_two'				=> 'BBC Radio 2',
+		'bbc_radio_three'			=> 'BBC Radio 3',
+		'bbc_radio_four'			=> 'BBC Radio 4',
+		'bbc_radio_five_live'			=> 'BBC Radio 5 live',
+		'bbc_radio_five_live_sports_extra'	=> 'BBC 5 live Sports Extra',
+		'bbc_6music'				=> 'BBC 6 Music',
+		'bbc_7'					=> 'BBC 7',
+		'bbc_asian_network'			=> 'BBC Asian Network',
+		'bbc_radio_foyle'			=> 'BBC Radio Foyle',
+		'bbc_radio_scotland'			=> 'BBC Radio Scotland',
+		'bbc_radio_nan_gaidheal'		=> 'BBC Radio Nan Gaidheal',
+		'bbc_radio_ulster'			=> 'BBC Radio Ulster',
+		'bbc_radio_wales'			=> 'BBC Radio Wales',
+		'bbc_radio_cymru'			=> 'BBC Radio Cymru',
+		'http://www.bbc.co.uk/worldservice/includes/1024/screen/audio_console.shtml?stream=live' => 'BBC World Service',
+		'bbc_radio_cumbria'			=> 'BBC Cumbria',
+		'bbc_radio_newcastle'			=> 'BBC Newcastle',
+		'bbc_tees'				=> 'BBC Tees',
+		'bbc_radio_lancashire'			=> 'BBC Lancashire',
+		'bbc_radio_merseyside'			=> 'BBC Merseyside',
+		'bbc_radio_manchester'			=> 'BBC Manchester',
+		'bbc_radio_leeds'			=> 'BBC Leeds',
+		'bbc_radio_sheffield'			=> 'BBC Sheffield',
+		'bbc_radio_york'			=> 'BBC York',
+		'bbc_radio_humberside'			=> 'BBC Humberside',
+		'bbc_radio_lincolnshire'		=> 'BBC Lincolnshire',
+		'bbc_radio_nottingham'			=> 'BBC Nottingham',
+		'bbc_radio_leicester'			=> 'BBC Leicester',
+		'bbc_radio_derby'			=> 'BBC Derby',
+		'bbc_radio_stoke'			=> 'BBC Stoke',
+		'bbc_radio_shropshire'			=> 'BBC Shropshire',
+		'bbc_wm'				=> 'BBC WM',
+		'bbc_radio_coventry_warwickshire'	=> 'BBC Coventry & Warwickshire',
+		'bbc_radio_hereford_worcester'		=> 'BBC Hereford & Worcester',
+		'bbc_radio_northampton'			=> 'BBC Northampton',
+		'bbc_three_counties_radio'		=> 'BBC Three Counties',
+		'bbc_radio_cambridge'			=> 'BBC Cambridgeshire',
+		'bbc_radio_norfolk'			=> 'BBC Norfolk',
+		'bbc_radio_suffolk'			=> 'BBC Suffolk',
+		'bbc_radio_essex'			=> 'BBC Essex',
+		'bbc_london'				=> 'BBC London',
+		'bbc_radio_kent'			=> 'BBC Kent',
+		'bbc_southern_counties_radio'		=> 'BBC Southern Counties',
+		'bbc_radio_oxford'			=> 'BBC Oxford',
+		'bbc_radio_berkshire'			=> 'BBC Berkshire',
+		'bbc_radio_solent'			=> 'BBC Solent',
+		'bbc_radio_gloucestershire'		=> 'BBC Gloucestershire',
+		'bbc_radio_swindon'			=> 'BBC Swindon',
+		'bbc_radio_wiltshire'			=> 'BBC Wiltshire',
+		'bbc_radio_bristol'			=> 'BBC Bristol',
+		'bbc_radio_somerset_sound'		=> 'BBC Somerset',
+		'bbc_radio_devon'			=> 'BBC Devon',
+		'bbc_radio_cornwall'			=> 'BBC Cornwall',
+		'bbc_radio_guernsey'			=> 'BBC Guernsey',
+		'bbc_radio_jersey'			=> 'BBC Jersey',
+	};
+}
+
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
+	};
+}
+
+
+
+# This gets run before the download retry loop if this class type is selected
+sub init {
+	# Force certain options for Live 
+	# Force --raw otherwise realaudio stdout streaming fails
+	# (this would normally be a bad thing but since its a live stream we 
+	# won't be downloading other types of progs afterwards)
+	$opt->{raw} = 1 if $opt->{stdout} && $opt->{nowrite};
+	# Force only one try if live and recording to file
+	$opt->{retries} = 1 if ( ! $opt->{retries} ) && ( ! $opt->{nowrite} );
+}
+
+
+
+# Returns the modes to try for this prog type
+sub modelist {
+	my $prog = shift;
+	
+	# Defaults
+	if ( $opt->{amode} eq 'auto' || ! $opt->{amode} ) {
+		if ( ! main::exists_in_path('rtmpdump') ) {
+			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
+			$opt->{amode} = 'flashaac,realaudio,wma';
+		} else {
+			$opt->{amode} = 'realaudio,wma';
+		}
+	}
+
+	# Deal with BBC Live Radio fallback modes and expansions
+	# Valid modes are flashaac,realaudio,wmv
+	# flashaac => flashaac1,flashaac2
+	my @modes = split /,/, $opt->{amode};
+	for (@modes) {
+		$_ = 'flashaac1,flashaac2' if $_ eq 'flashaac';
+	}
+	$opt->{amode} = join ',', @modes;
+
+	return $opt->{amode};
 }
 
 
@@ -6283,7 +6656,7 @@ sub get {
 	my @url_list = split /\|/, $urls;
 	my @file_tmp_list;
 	my %threadpid;
-	my $retries = 3;
+	my $retries = $opt->{retries} || 3;
 
 	main::logger "INFO: MMS_URLs: ".(join ', ', @url_list).", file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
