@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.03;
+my $version = 2.04;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -140,7 +140,7 @@ my %opt_format = (
 	helplong	=> [ 0, "help-long|advanced|long-help|longhelp|lh|hl|helplong", 'Config', '--helplong', "Advanced options help text"],
 	hide		=> [ 1, "hide", 'Display', '--hide', "Hide previously recorded programmes"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
-	id3v2		=> [ 0, "id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 binary"],
+	id3v2		=> [ 0, "id3tag|id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
 	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata and availability of modes and subtitles (max 50 matches)"],
 	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
@@ -1408,7 +1408,7 @@ sub create_ua {
 	my $agent = $user_agent{ "$_[0]" } || random_ua();
 	my $nocookiejar = $_[1] || 0;
 	my $ua = LWP::UserAgent->new;
-	$ua->timeout([$lwp_request_timeout]);
+	$ua->timeout( $lwp_request_timeout );
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$ua->agent( $agent );
 	main::logger "DEBUG: Using user-agent '$agent'\n" if $opt->{debug};
@@ -5871,7 +5871,7 @@ sub opt_format {
 		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
-		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'External Program', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
+		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'Deprecated', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
 
@@ -5981,7 +5981,7 @@ sub get {
 	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
 	# Hack to get around flvstreamer/rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || ( -f $file_tmp && $opt->{usertmpdumpexit} && $return ) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || $return ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
 		unlink $file_tmp;
@@ -6080,7 +6080,7 @@ sub get {
 	
 	# Create named pipe
 	if ( $^O !~ /^MSWin32$/ ) {
-		mkfifo($namedpipe, 0700) if (! $opt->{wav}) && (! $opt->{raw});
+		mkfifo($namedpipe, 0700);
 	} else {
 		main::logger "WARNING: fifos/named pipes are not supported\n" if $opt->{verbose};
 	}
@@ -6094,34 +6094,36 @@ sub get {
 
 	# Use post-streaming transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
-	if ( (! -p $namedpipe) && ! ( $opt->{raw} || $opt->{wav} ) ) {
-		my $cmd;
-		# Remove filename extension
-		$prog->{filepart} =~ s/\.mp3$//gi;
-		# Remove named pipe
-		unlink $namedpipe;
-		main::logger "INFO: Recording wav format (followed by transcoding)\n";
-		$cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
-		if ( system($cmd) ) {
-			unlink $prog->{symlink};
-			return 'next';
+	if ( ! -p $namedpipe ) {
+		if ( ! ( $opt->{raw} || $opt->{wav} ) ) {
+			my $cmd;
+			# Remove filename extension
+			$prog->{filepart} =~ s/\.mp3$//gi;
+			# Remove named pipe
+			unlink $namedpipe;
+			main::logger "INFO: Recording wav format (followed by transcoding)\n";
+			$cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
+			# Create symlink if required
+			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
+			if ( system($cmd) ) {
+				unlink $prog->{symlink};
+				return 'next';
+			}
+			# Transcode
+			main::logger "INFO: Transcoding $prog->{filepart}.wav\n";
+			$cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
+			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
+			# Create symlink if required
+			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
+			if ( system($cmd) || (-f "$prog->{filepart}.wav" && stat("$prog->{filepart}.wav")->size < $min_download_size) ) {
+				unlink $prog->{symlink};
+				return 'next';
+			}
+			unlink "$prog->{filepart}.wav";
+			move "$prog->{filepart}.mp3", $prog->{filename};
+			$prog->{ext} = 'mp3';
 		}
-		# Transcode
-		main::logger "INFO: Transcoding $prog->{filepart}.wav\n";
-		$cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
-		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
-		if ( system($cmd) || (-f "$prog->{filepart}.wav" && stat("$prog->{filepart}.wav")->size < $min_download_size) ) {
-			unlink $prog->{symlink};
-			return 'next';
-		}
-		unlink "$prog->{filepart}.wav";
-		move "$prog->{filepart}.mp3", $prog->{filename};
-		$prog->{ext} = 'mp3';
-
+		
 	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
 	# else do direct mplayer write to wav file if:
 	#  1) we don't have a named pipe available (e.g. in activeperl)
@@ -6173,7 +6175,7 @@ sub get {
 					sleep 5;
 					# Create symlink if required
 					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-					tee($namedpipe, $prog->{filepart});
+					main::tee($namedpipe, $prog->{filepart});
 					#system( "cat $namedpipe 2>/dev/null| $bin->{tee} $prog->{filepart}");
 				} else {
 					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null| $bin->{tee} \"$prog->{filepart}\"";
@@ -6187,7 +6189,7 @@ sub get {
 			} elsif ( $opt->{stdout} && $opt->{nowrite} ) {
 				if ( $opt->{wav} || $opt->{raw} ) {
 					sleep 5;
-					tee($namedpipe);
+					main::tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
 					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null";
@@ -6224,7 +6226,7 @@ sub get {
 				unlink $prog->{symlink};
 				return 'next';
 			}
-		# WAV / mp3 mode
+		# WAV / mp3 mode - seems to fail....
 		} else {
 			my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$url\" 1>&2";
 			if ( system($cmd) ) {
@@ -6237,8 +6239,8 @@ sub get {
 		# Wait for child processes to prevent zombies
 		wait;
 	}
+	unlink $namedpipe;
 	main::logger "INFO: Recorded $prog->{filename}\n";
-
 	# Re-symlink if required
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
@@ -6308,8 +6310,16 @@ sub get {
 		#$null = '-really-quiet' if ! $opt->{quiet};
 		# Can also use 'mencoder mms://url/ -oac copy -ovc copy -o out.asf' - still gives zero exit code on failed stream...
 		# Can also use $bin->{vlc} --sout file/asf:\"$file_tmp\" \"$url_list[$count]\" vlc://quit
+		# The vlc cmd does not quit of there is an error - it just hangs
 		# $cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
 		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
+		# problem is that the following output is given by mplayer at the end of liong streams:
+		#read error:: Operation now in progress                                                                           
+		#pre-header read failed                                                                                           
+		#Core dumped ;)                                                                                                   
+		#vo: x11 uninit called but X11 not initialized..                                                                  
+		#
+		#Exiting... (End of file)
 		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
@@ -6327,7 +6337,8 @@ sub get {
 					my $cmdoutput = `$cmd`;
 					my $exitcode = $?;
 					main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
-					if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
+					# Assume file is fully downloaded if > 10MB and we get an error reported !!!
+					if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $min_download_size*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
 						# Failed, retry
 						main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
 						$retry--;
@@ -6357,7 +6368,9 @@ sub get {
 				my $cmdoutput = `$cmd`;
 				my $exitcode = $?;
 				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
-				if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
+				# Assume file is fully downloaded if > 10MB and we get an error reported !!!
+				if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $min_download_size*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
+				#if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
 					# Failed, retry
 					main::logger "DEBUG: Trace of failed command:\n####################\n${cmdoutput}\n####################\n" if $opt->{debug};
 					main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
