@@ -122,7 +122,6 @@ my %user_agent = (
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
 my %opt_format = (
-	amode 		=> [ 1, "amode=s", 'Recording', '--amode <mode>,<mode>,...', "Audio Recording mode(s): Radio: iphone,flashaac,flashaudio,realaudio (default: iphone,flashaac,flashaudio,realaudio)"],
 	category 	=> [ 0, "category=s", 'Search', '--category <regex>', "Narrow search to matched categories"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <regex>', "Narrow search to matched channel(s)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
@@ -152,7 +151,8 @@ my %opt_format = (
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after download. Valid types are: xbmc, generic"],
-	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio amode"],
+	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi,flashaac,flashaudio,realaudio,wma"],
+	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio radiomode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nocopyright	=> [ 1, "nocopyright", 'Misc', '--nocopyright', "Don't display copyright header"],
@@ -163,7 +163,7 @@ my %opt_format = (
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid=s", 'Recording', '--pid <pid>|<type>:<pid>|<pidurl>|<type>:<live URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
 	packagemanager	=> [ 0, "packagemanager=s", '', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
-	player		=> [ 1, "player=s", 'Output', "--player \'<command> <options>\'", "Use this command to directly play the stream"],
+	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
@@ -175,13 +175,13 @@ my %opt_format = (
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
-	retries		=> [ 1, "retries=n", 'Recording', '--retries <attempts>', "Number of times to retry or try to resume a failed connection"],
+	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
 	save 		=> [ 0, "save", '', '--save', "Save specified options as default"],
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
-	stdout		=> [ 1, "stdout|x", 'Recording', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
-	stream		=> [ 1, "stream", 'Recording', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
+	stdout		=> [ 1, "stdout|x", 'Output', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
+	stream		=> [ 0, "stream", 'Output', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
@@ -198,7 +198,6 @@ my %opt_format = (
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,default')"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
-	vmode		=> [ 1, "vmode=s", 'Recording', '--vmode <mode>,<mode>,...', "Video Recoding mode(s): iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
 	warranty	=> [ 1, "warranty", 'Misc', '--warranty', 'Displays warranty section of GPL'],
 	webrequest	=> [ 1, "webrequest=s", 'Misc', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
@@ -628,10 +627,10 @@ sub find_matches {
 	}
 	
 	# Backward compatability options - to be removed eventually
-	$opt->{vmode} = 'rtmp' if $opt->{rtmp};
-	$opt->{vmode} = 'n95_wifi' if $opt->{n95};
-	$opt->{amode} = 'realaudio' if $opt->{realaudio};
-	$opt->{amode} = 'iphone' if $opt->{mp3audio};
+	$opt->{tvmode} = 'rtmp' if $opt->{rtmp};
+	$opt->{tvmode} = 'n95_wifi' if $opt->{n95};
+	$opt->{radiomode} = 'realaudio' if $opt->{realaudio};
+	$opt->{radiomode} = 'iphone' if $opt->{mp3audio};
 
 	# Set --subtitles if --subsonly is used
 	$opt->{subtitles} = 1 if $opt->{subsonly};
@@ -2227,6 +2226,17 @@ sub lockfile {
 
 
 
+sub expand_list {
+	my $list = shift;
+	my $search = shift;
+	my $replace = shift;
+	my @elements = split /,/, $list;
+	for (@elements) {
+		$_ = $replace if $_ eq $search;
+	}
+	return join ',', @elements;	
+}
+
 
 
 ############## OO ################
@@ -2324,7 +2334,9 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--stdout\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
-		'\fBget_iplayer\fR \fB--stdout\fR \fB--nowrite\fR [<options>] --pid <type>:<Live URL> | mplayer \fB-cache\fR 128 -',
+		'\fBget_iplayer\fR \fB--stream\fR [<options>] --pid <type>:<pid|url> | mplayer \fB-cache\fR 3072 -',
+		'.PP',
+		'\fBget_iplayer\fR \fB--stream\fR [<options>] <regex|index> \fB--type\fR livetv,liveradio \fB--player\fR "mplayer -cache 128 -"',
 		'.PP',
 		'\fBget_iplayer\fR \fB--update\fR',
 		'.SH DESCRIPTION',
@@ -2346,7 +2358,8 @@ sub usage {
 	push @usage, " Record Programmes:             get_iplayer --get [<search options>] <regex|index> ...";
 	push @usage, "                                get_iplayer --pid <type>:<pid|url> [<options>]\n" if $helplong;
 	push @usage, " Stream Programme to Console:   get_iplayer --stdout [<options>] <regex|index> | mplayer -cache 3072 -" if $helplong;
-	push @usage, " Stream Live iPlayer Programme  get_iplayer --stdout --nowrite --pid <type>:<Live URL> | mplayer -cache 128 -";
+	push @usage, " Stream BBC Embedded Media      get_iplayer --stream --pid <type>:<URL> | mplayer -cache 128 -";
+	push @usage, " Stream Live iPlayer Programme  get_iplayer <regex|index> --stream --type livetv,liveradio --player 'mplayer -cache 128 -'";
 	push @usage, " Update get_iplayer:            get_iplayer --update [--force]";
 	push @usage, " Advanced Options:              get_iplayer --long-help" if ! $helplong;
 
@@ -2616,6 +2629,7 @@ sub display {
 	main::logger "\n";
 	return 0;
 }
+
 
 
 
@@ -2929,12 +2943,12 @@ sub download_retry_loop {
 # returns 1 on fail, 0 on success
 sub mode_ver_download_retry_loop {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	my $retries = $opt->{retries} || 3;
+	my $retries = $opt->{attempts} || 3;
 	my $count = 0;
 	my $retcode;
 
 	# Use different number of retries for flash modes
-	$retries = $opt->{retries} || 20 if $mode =~ /^flash/;
+	$retries = $opt->{attempts} || 20 if $mode =~ /^flash/;
 
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
@@ -3625,9 +3639,9 @@ sub get_verpids {
 		# Live radio
 		} elsif ( m{\s+live="true"\s} ) {
 			# Try to get live stream version and verpid
-			### <item kind="radioProgramme" live="true" identifier="bbc_radio_one" group="bbc_radio_one">
-			###$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
-			$verpid = $prog->{pid};
+			# <item kind="radioProgramme" live="true" identifier="bbc_radio_one" group="bbc_radio_one">
+			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
+			#$verpid = $prog->{pid};
 			$version = 'default';
 		# Not Live standard TV and Radio
 		} else {
@@ -4750,7 +4764,8 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 vmode"],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 tvmode"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer/rtmpdump for tv"],
@@ -4770,17 +4785,17 @@ sub optional_list_entry_format {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $mlist = $opt->{tvmode} || $opt->{modes};
 	
 	# Defaults
-	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
+	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
-			$opt->{vmode} = 'iphone';	
+			$mlist = 'iphone';
 		} else {
-			$opt->{vmode} = 'iphone,flashhigh,flashnormal';
+			$mlist = 'iphone,flashhigh,flashnormal';
 		}
 	}
-
 	# Deal with BBC TV fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
@@ -4788,33 +4803,15 @@ sub modelist {
 	# flashhigh => flashhigh1,flashhigh2,flashhigh3
 	# flashvhigh => flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4
 	# flashhd => flashhd1
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashhigh,flashnormal' if $_ eq 'rtmp' || $_ eq 'flash';
-	}
-	$opt->{vmode} = join ',', @modes;
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashhigh1,flashhigh2,flashhigh3' if $_ eq 'flashhigh';
-	}
-	$opt->{vmode} = join ',', @modes;
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashlow1,flashlow2' if $_ eq 'flashlow';
-	}
-	$opt->{vmode} = join ',', @modes;
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4' if $_ eq 'flashvhigh';
-	}
-	$opt->{vmode} = join ',', @modes;
-	my @modes = split /,/, $opt->{vmode};
-	for (@modes) {
-		$_ = 'flashhd1' if $_ eq 'flashhd';
-	}
-	$opt->{vmode} = join ',', @modes;
+	$mlist = main::expand_list($mlist, 'best', 'flashhd,flashvhigh,flashhigh,iphone,flashlow,flashnormal');
+	$mlist = main::expand_list($mlist, 'flash', 'flashhigh,flashnormal');
+	$mlist = main::expand_list($mlist, 'rtmp', 'flashhigh,flashnormal');
+	$mlist = main::expand_list($mlist, 'flashhigh', 'flashhigh1,flashhigh2,flashhigh3');
+	$mlist = main::expand_list($mlist, 'flashlow', 'flashlow1,flashlow2');
+	$mlist = main::expand_list($mlist, 'flashvhigh', 'flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4');
+	$mlist = main::expand_list($mlist, 'flashhd', 'flashhd1');
 
-	return $opt->{vmode};
+	return $mlist;
 }
 
 
@@ -5299,10 +5296,11 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio Recording mode(s): iphone,flashaac,flashaudio,realaudio,wma (default: iphone,flashaac,flashaudio,realaudio)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Recording', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
-		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio amode"],
+		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio radiomode"],
 		wav		=> [ 1, "wav", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer/rtmpdump for radio"],
 	};
@@ -5321,34 +5319,27 @@ sub optional_list_entry_format {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $mlist = $opt->{radiomode} || $opt->{modes};
 	
 	# Defaults
-	if ( $opt->{amode} eq 'auto' || ! $opt->{amode} ) {
+	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
-			$opt->{amode} = 'iphone,realaudio';
+			$mlist = 'iphone,realaudio';
 		} else {
-			$opt->{amode} = 'iphone,flashaudio,flashaac,realaudio';
+			$mlist = 'iphone,flashaudio,flashaac,realaudio';
 		}
 	}
-
 	# Deal with BBC Radio fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
 	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
 	# flashaac => flashaac1,flashaac2
-	my @modes = split /,/, $opt->{amode};
-	for (@modes) {
-		$_ = 'flashaudio,flashaac' if $_ eq 'rtmp' || $_ eq 'flash';
-	}
-	$opt->{amode} = join ',', @modes;
+	$mlist = main::expand_list($mlist, 'best', 'flashaac,iphone,flashaudio,realaudio,wma');
+	$mlist = main::expand_list($mlist, 'flash', 'flashaudio,flashaac');
+	$mlist = main::expand_list($mlist, 'rtmp', 'flashaudio,flashaac');
+	$mlist = main::expand_list($mlist, 'flashaac', 'flashaac1,flashaac2');
 
-	my @modes = split /,/, $opt->{amode};
-	for (@modes) {
-		$_ = 'flashaac1,flashaac2' if $_ eq 'flashaac';
-	}
-	$opt->{amode} = join ',', @modes;
-
-	return $opt->{amode};
+	return $mlist;
 }
 
 
@@ -5431,9 +5422,7 @@ sub file_prefix_format { '<name> <episode> <dldate> <dltime>' }
 
 # Class cmdline Options
 sub opt_format {
-	return {
-		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
-	};
+	return {};
 }
 
 
@@ -5572,26 +5561,14 @@ sub opt_format {
 sub init {
 	# Force certain options for Live 
 	# Force only one try if live and recording to file
-	$opt->{retries} = 1 if ( ! $opt->{retries} ) && ( ! $opt->{nowrite} );
+	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
 }
 
 
 
 # Returns the modes to try for this prog type
 sub modelist {
-	my $prog = shift;
-	
-	# Defaults
-	if ( $opt->{vmode} eq 'auto' || ! $opt->{vmode} ) {
-		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "ERROR: Required flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
-			exit 1;	
-		} else {
-			$opt->{vmode} = 'flashnormal';
-		}
-	}
-
-	return $opt->{vmode};
+	return 'flashnormal';
 }
 
 
@@ -5628,7 +5605,7 @@ sub channels {
 		'bbc_radio_one'				=> 'BBC Radio 1',
 		'bbc_radio_two'				=> 'BBC Radio 2',
 		'bbc_radio_three'			=> 'BBC Radio 3',
-		'bbc_radio_four'			=> 'BBC Radio 4',
+		'bbc_radio_fourfm'			=> 'BBC Radio 4',
 		'bbc_radio_five_live'			=> 'BBC Radio 5 live',
 		'bbc_radio_five_live_sports_extra'	=> 'BBC 5 live Sports Extra',
 		'bbc_6music'				=> 'BBC 6 Music',
@@ -5688,6 +5665,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
+		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,...', "Live Radio Recording modes: flashaac,realaudio,wma"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
 	};
 }
@@ -5702,7 +5680,7 @@ sub init {
 	# won't be downloading other types of progs afterwards)
 	$opt->{raw} = 1 if $opt->{stdout} && $opt->{nowrite};
 	# Force only one try if live and recording to file
-	$opt->{retries} = 1 if ( ! $opt->{retries} ) && ( ! $opt->{nowrite} );
+	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
 }
 
 
@@ -5710,28 +5688,29 @@ sub init {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $mlist = $opt->{liveradiomode} || $opt->{modes};
 	
 	# Defaults
-	if ( $opt->{amode} eq 'auto' || ! $opt->{amode} ) {
+	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
-			$opt->{amode} = 'flashaac,realaudio,wma';
+			$mlist = 'flashaac,realaudio,wma';
 		} else {
-			$opt->{amode} = 'realaudio,wma';
+			$mlist = 'realaudio,wma';
 		}
 	}
-
-	# Deal with BBC Live Radio fallback modes and expansions
-	# Valid modes are flashaac,realaudio,wmv
+	# Deal with BBC Radio fallback modes and expansions
+	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
+	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
 	# flashaac => flashaac1,flashaac2
-	my @modes = split /,/, $opt->{amode};
-	for (@modes) {
-		$_ = 'flashaac1,flashaac2' if $_ eq 'flashaac';
-	}
-	$opt->{amode} = join ',', @modes;
+	$mlist = main::expand_list($mlist, 'best', 'flashaac,realaudio,wma');
+	$mlist = main::expand_list($mlist, 'flash', 'flashaac');
+	$mlist = main::expand_list($mlist, 'rtmp', 'flashaac');
+	$mlist = main::expand_list($mlist, 'flashaac', 'flashaac1,flashaac2');
 
-	return $opt->{amode};
+	return $mlist;
 }
+
 
 
 
@@ -6241,7 +6220,7 @@ use URI;
 sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
-		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash vmodes"],
+		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash tv and radio modes"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
 		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'Deprecated', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
@@ -6656,7 +6635,7 @@ sub get {
 	my @url_list = split /\|/, $urls;
 	my @file_tmp_list;
 	my %threadpid;
-	my $retries = $opt->{retries} || 3;
+	my $retries = $opt->{attempts} || 3;
 
 	main::logger "INFO: MMS_URLs: ".(join ', ', @url_list).", file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
