@@ -588,6 +588,10 @@ sub find_matches {
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
 	$bin->{tee}		= 'tee';
 	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
+	# quote binaries which allows for spaces in the path
+	for ( $bin->{mplayer}, $bin->{ffmpeg}, $bin->{lame}, $bin->{vlc}, $bin->{id3v2}, $bin->{tee}, $bin->{rtmpdump} ) {
+		s!^(.+)$!"$1"!g;
+	}
 	$binopts->{rtmpdump}	= ' --quiet' if $opt->{quiet};
 	$binopts->{rtmpdump}	= ' --verbose' if $opt->{verbose};
 	$binopts->{rtmpdump}	= ' --debug' if $opt->{debug};
@@ -1975,11 +1979,14 @@ sub request_url_retry {
 # Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
 	my $name = shift;
+	my $bin = $bin->{$name};
+	# Strip quotes around binary if any just for checking
+	$bin =~ s/^"(.+)"$/$1/g;
 	# If this has a path specified, does file exist
-	return 1 if $bin->{$name} =~ /[\/\\]/ && (-x $bin->{$name} || -x "$bin->{$name}.exe");
+	return 1 if $bin =~ /[\/\\]/ && (-x ${bin} || -x "${bin}.exe");
 	# Search PATH
 	for (@PATH) {
-		return 1 if -x "${_}/$bin->{$name}" || -x "${_}/$bin->{$name}.exe";
+		return 1 if -x "${_}/${bin}" || -x "${_}/${bin}.exe";
 	}
 	return 0;
 }
@@ -3533,6 +3540,11 @@ sub get_verpids {
 		# playlist = "http://www.bbc.co.uk/worldservice/meta/tx/flash/live/eneuk.xml";
 		} elsif ( $xml =~ m{\splaylist\s+=\s+"(http.+?)";}i ) {
 			$url = $1;
+		# iplayer Programmes page format (also rewrite the pid)
+		# href="http://www.bbc.co.uk/iplayer/episode/b00ldhj2"
+		} elsif ( $xml =~ m{href="http://www.bbc.co.uk/iplayer/episode/(b0[a-z0-9]{6})"} ) {
+			$prog->{pid} = $1;
+			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
 		} elsif ( $url =~ m{^http.+.xml$} ) {
 			# Just keep the url as it is probably already an xml playlist
 		## playlist: "http://www.bbc.co.uk/iplayer/playlist/bbc_radio_one",
@@ -4841,13 +4853,13 @@ sub modelist {
 sub clean_pid {
 	my $prog = shift;
 
-	# If this is an iPlayer pid
+	# If this is an iPlayer pid (not a pid page on BBC programmes site)
 	if ( $prog->{pid} =~ m{^(b0[a-z0-9]{6})$} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
-	# If this is an iPlayer programme pid URL
-	} elsif ( $prog->{pid} =~ m{^http.+\/(b0[a-z0-9]{6})\/?.*$} ) {
+	# If this is an iPlayer programme pid URL (not a pid page on BBC programmes site)
+	} elsif ( $prog->{pid} =~ m{^http.+\/(b0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
@@ -5389,8 +5401,8 @@ sub clean_pid {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
-	# If this is an iPlayer programme pid URL
-	} elsif ( $prog->{pid} =~ m{^http.+\/([bpw]0[a-z0-9]{6})\/?.*$} ) {
+	# If this is an iPlayer programme pid URL (and not on BBC programmes site)
+	} elsif ( $prog->{pid} =~ m{^http.+\/([bpw]0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
