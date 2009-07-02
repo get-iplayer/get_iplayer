@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.05;
+my $version = 2.06;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -118,7 +118,7 @@ my %user_agent = (
 
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
-my %opt_format = (
+my $opt_format = {
 	category 	=> [ 0, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
@@ -160,7 +160,7 @@ my %opt_format = (
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
-	packagemanager	=> [ 0, "packagemanager=s", '', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
+	packagemanager	=> [ 0, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
@@ -202,7 +202,7 @@ my %opt_format = (
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
-);
+};
 
 
 # Pre-processed options instance
@@ -213,17 +213,18 @@ my $opt = Options->new();
 my $opt_cmdline = Options->new();
 # Options file instance
 my $opt_file = Options->new();
+# Bind opt_format to Options class
+Options->add_opt_format_object( $opt_format );
 
 # Set Programme/Pvr/Streamer class global var refs to the Options instance
-Programme->add_opt_object($opt);
-Pvr->add_opt_object($opt);
-Pvr->add_opt_file_object($opt_file);
-Pvr->add_opt_cmdline_object($opt_cmdline);
-Streamer->add_opt_object($opt);
+Programme->add_opt_object( $opt );
+Pvr->add_opt_object( $opt );
+Pvr->add_opt_file_object( $opt_file );
+Pvr->add_opt_cmdline_object( $opt_cmdline );
+Streamer->add_opt_object( $opt );
 # Kludge: Create dummy Streamer and Programme instances (without a single instance, none of the bound options work)
 Programme->new();
 Streamer->new();
-
 
 # Print to STDERR/STDOUT if not quiet unless verbose or debug
 sub logger(@) {
@@ -244,7 +245,7 @@ sub logger(@) {
 # Parse options with passthru mode (i.e. ignore unknown options at this stage) 
 # need to save and restore @ARGV to allow later processing)
 my @argv_save = @ARGV;
-$opt_pre->parse( \%opt_format, 1 );
+$opt_pre->parse( 1 );
 @ARGV = @argv_save;
 # Copy a few options over to opt so that logger works
 $opt->{debug} = 1 if $opt_pre->{debug};
@@ -256,7 +257,7 @@ $opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
 
 # Deal with legacy --save option
 if ( $opt_pre->{save} ) {
-	main::logger "ERROR: Please use --prefs-add, --prefs-del, --prefs-list to add, delete and list saved user options. --save is now deprecated. Also see --preset option";
+	main::logger "ERROR: Please use --prefs-add, --prefs-del, --prefs-list to add, delete and list saved user options. --save is now deprecated. Also see --preset option\n";
 	exit 1;
 }
 
@@ -325,13 +326,13 @@ logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_
 
 
 # Parse cmdline opts definitions from each Programme class/subclass
-Options->get_class_options( $_, \%opt_format ) for qw( Streamer Programme Pvr );
-Options->get_class_options( progclass($_), \%opt_format ) for progclass();
-Options->get_class_options( "Streamer::$_", \%opt_format ) for qw( mms rtmp rtsp iphone mms 3gp http );
+Options->get_class_options( $_ ) for qw( Streamer Programme Pvr );
+Options->get_class_options( progclass($_) ) for progclass();
+Options->get_class_options( "Streamer::$_" ) for qw( mms rtmp rtsp iphone mms 3gp http );
 
 
 # Parse the cmdline using the opt_format hash
-Options->usage( \%opt_format, 0 ) if not $opt_cmdline->parse( \%opt_format );
+Options->usage( 0 ) if not $opt_cmdline->parse();
 
 
 # Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
@@ -381,13 +382,13 @@ main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
 main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
 
 # Display Usage
-Options->usage( \%opt_format, $opt_cmdline->{helplong} ) if $opt_cmdline->{help} || $opt_cmdline->{helplong};
+Options->usage( $opt_cmdline->{helplong} ) if $opt_cmdline->{help} || $opt_cmdline->{helplong};
 
 # Dump all option keys and descriptions if required
-Options->usage( \%opt_format, 0, 0, 1 ) if $opt_pre->{dumpoptions};
+Options->usage( 1, 0, 1 ) if $opt_pre->{dumpoptions};
 
 # Generate man page
-Options->usage( \%opt_format, 1, $opt_cmdline->{manpage} ) if $opt_cmdline->{manpage};
+Options->usage( 1, $opt_cmdline->{manpage} ) if $opt_cmdline->{manpage};
 
 # Display GPL stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
@@ -457,7 +458,7 @@ if ( $opt->{webrequest} ) {
 			( $optname, $value ) = ( $1, 1 );
 		}
 		# if the option is valid then add it
-		if ( defined $opt_format{$optname} ) {
+		if ( defined $opt_format->{$optname} ) {
 			$opt_cmdline->{$optname} = $value;
 			logger "INFO: webrequest OPT: $optname=$value\n" if $opt->{verbose};
 		# Ignore invalid opts
@@ -2260,6 +2261,9 @@ use File::stat;
 use Getopt::Long;
 use strict;
 
+# Class vars
+# Global options
+my $opt_format_ref;
 # Constructor
 # Usage: $opt = Options->new( 'optname' => 'testing 123', 'myopt2' => 'myval2', <and so on> );
 sub new {
@@ -2273,14 +2277,20 @@ sub new {
 }
 
 
+# Use to bind a new options ref to the class global $opt_format_ref var
+sub add_opt_format_object {
+	my $self = shift;
+	$Options::opt_format_ref = shift;
+}
+
 
 # Parse cmdline opts using supplied hash
 # If passthru flag is set then no error will result if there are unrecognised options etc
-# Usage: $opt_cmdline->parse( \%opt_format [, passthru] );
+# Usage: $opt_cmdline->parse( [passthru] );
 sub parse {
 	my $this = shift;
-	my $opt_format_ref = shift;
 	my $pass_thru = shift;
+	my $opt_format_ref = $Options::opt_format_ref;
 	# Build hash for passing to GetOptions module
 	my %get_opts;
 
@@ -2319,13 +2329,13 @@ EOF
 
 
 
-# Usage: $opt_cmdline->usage( \%opt_format, <helplong>, <manpage>, <dump> );
+# Usage: $opt_cmdline->usage( <helplong>, <manpage>, <dump> );
 sub usage {
 	my $this = shift;
-	my $opt_format_ref = shift;
 	my $helplong = shift;
 	my $manpage = shift;
 	my $dumpopts = shift;
+	my $opt_format_ref = $Options::opt_format_ref;
 	my %section_name;
 	my %name_syntax;
 	my %name_desc;
@@ -2438,12 +2448,12 @@ sub usage {
 }
 
 
-# Add all the options into suplied hash from specified class
-# Usage: Options->get_class_options( 'Programme:tv', \%opt_format );
+# Add all the options into supplied hash from specified class
+# Usage: Options->get_class_options( 'Programme:tv' );
 sub get_class_options {
 	shift;
 	my $classname = shift;
-	my $opt_format_ref = shift;
+	my $opt_format_ref = $Options::opt_format_ref;
 	# If the method exists...
 	eval { $classname->opt_format() };
 	if ( ! $@ ) {
@@ -2601,6 +2611,7 @@ sub put {
 sub get {
 	my $opt = shift;
 	my $optfile = shift;
+	my $opt_format_ref = $Options::opt_format_ref;
 	my $entry;
 	return $entry if ( ! defined $optfile ) || ( ! -f $optfile );
 
@@ -2609,8 +2620,17 @@ sub get {
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
+		next if not defined $1;
 		chomp( $entry->{$1} = $2 );
 		main::logger "DEBUG: Loaded option $1 = $2\n" if $opt->{debug};
+		# warn if the option is not valid or deprecated
+		if ( not defined $opt_format_ref->{$1} ) {
+			main::logger "ERROR: Invalid option in $optfile: '$1 = $2'\n";
+			exit 10;
+		}
+		if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
+			main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
+		}
 	}
 	close OPT;
 	return $entry;
@@ -2894,7 +2914,7 @@ sub download_retry_loop {
 
 	# Get all possible (or user overridden) modes for this prog recording
 	my $modelist = $prog->modelist;
-	main::logger "INFO: Mode list: $modelist\n";
+	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
 
 	######## version loop #######
 	# Do this for each version tried in this order (if they appeared in the content)
@@ -2924,13 +2944,15 @@ sub download_retry_loop {
 
 			# only use modes that exist
 			my @modes;
-			for ( split /,/, $modelist ) {
-				push @modes, $_ if defined $prog->{streams}->{$version}->{$_};
+			my @available_modes = sort keys %{ $prog->{streams}->{$version} };
+			for my $modename ( split /,/, $modelist ) {
+				# find all numbered modes starting with this modename
+				push @modes, grep /^$modename\d?$/, @available_modes;
 			}
+
 			# Check for no applicable modes - report which ones are available if none are specified
 			if ($#modes < 0) {
-				my $allmodes = join ',', sort keys %{ $prog->{streams}->{$version} };
-				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version' (try modes: $allmodes)\n";
+				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version' (try modes: ".(join ',', @available_modes).")\n";
 				next;
 			}
 			main::logger "INFO: ".join(',', @modes)." modes will be tried for version $version\n";
@@ -3997,6 +4019,131 @@ sub parse_attributes {
 
 
 
+sub get_stream_data_cdn {
+	my ( $data, $mattribs, $mode, $streamer, $ext ) = ( @_ );
+
+	# Public Non-Live EMP Video without auth
+	#if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
+	#	$data{$mode}{bitrate} = 480; # ??
+	#	$data{$mode}{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
+	# Live TV, Live EMP Video or Non-public EMP video
+	#} elsif ( $cattribs->{kind} eq 'akamai' ) {
+	#	$data{$mode}{bitrate} = 480; # ??
+
+	my $count = 1;
+	for my $cattribs ( @{ $mattribs->{connections} } ) {
+		my $conn;
+		# Common attributes
+		# Default iPlayer swf version
+		$conn->{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
+		$conn->{ext} = $ext;
+		$conn->{streamer} = $streamer;
+		$conn->{bitrate} = $mattribs->{bitrate};
+		$conn->{server} = $cattribs->{server};
+		$conn->{identifier} = $cattribs->{identifier};
+		$conn->{authstring} = $cattribs->{authString};
+		$conn->{priority} = $cattribs->{priority};
+
+		# Akamai CDN
+		if ( $cattribs->{kind} eq 'akamai' ) {
+			# Set the live flag if this is not an ondemand stream
+			$conn->{live} = 1 if $cattribs->{application} =~ /^live/;
+			# Default appication is 'ondemand'
+			$cattribs->{application} = 'ondemand' if ! $cattribs->{application};
+			if ( $cattribs->{authString} ) {
+				### ??? live and Live TV, Live EMP Video or Non-public EMP video:
+				$conn->{playpath} = "$cattribs->{identifier}?auth=$cattribs->{authString}&aifp=v001";
+			} else {
+				$conn->{playpath} = $cattribs->{identifier};
+			}
+			if ( $cattribs->{authString} ) {
+				$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
+			} else {
+				$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
+			}
+			# Remove offending mp3/mp4: at the start of the identifier (don't remove in stream url)
+			$cattribs->{identifier} =~ s/^mp[34]://;
+			if ( $cattribs->{authString} ) {
+				$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
+			} else {
+				$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
+			}
+			# Port 1935? for live?
+			$conn->{tcurl} = "rtmp://$cattribs->{server}:80/$conn->{application}";
+
+		# Limelight CDN
+		} elsif ( $cattribs->{kind} eq 'limelight' ) {
+			decode_entities( $cattribs->{authString} );
+			$conn->{playpath} = "$cattribs->{identifier}?$cattribs->{authString}";
+			# Remove offending mp3/mp4: at the start of the identifier (don't remove in stream url)
+			### Not entirely sure if this is even required for video modes either??? - not reqd for aac and low
+			# $conn->{playpath} =~ s/^mp[34]://g;
+			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
+			$conn->{application} = $cattribs->{application};
+			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
+			
+		# Level3 CDN	
+		} elsif ( $cattribs->{kind} eq 'level3' ) {
+			$conn->{playpath} = $cattribs->{identifier};
+			$conn->{application} = "$cattribs->{application}?$cattribs->{authstring}";
+			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
+			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authstring}&aifp=v001&slist=$cattribs->{identifier}";
+
+		# iplayertok CDN
+		} elsif ( $cattribs->{kind} eq 'iplayertok' ) {
+			$conn->{application} = $cattribs->{application};
+			decode_entities($cattribs->{authstring});
+			$conn->{playpath} = "$cattribs->{identifier}?$cattribs->{authstring}";
+			$conn->{playpath} =~ s/^mp[34]://g;
+			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authstring}&aifp=v001&slist=$cattribs->{identifier}";
+			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
+
+		# sis/edgesuite stream
+		} elsif ( $cattribs->{kind} eq 'sis' || $cattribs->{kind} eq 'edgesuite' ) {
+			$conn->{streamurl} = $cattribs->{href};
+
+		# http stream
+		} elsif ( $cattribs->{kind} eq 'http' ) {
+			$conn->{streamurl} = $cattribs->{href};
+
+		# drm license - ignore
+		} elsif ( $cattribs->{kind} eq 'licence' ) {
+
+		# Unknown CDN
+		} else {
+			new_stream_report($mattribs, $cattribs) if $opt->{verbose};
+		}
+
+		get_stream_set_type( $conn, $mattribs, $cattribs );
+
+		# Add to data structure
+		# Find the next free mode name
+		while ( defined $data->{$mode.$count} ) {
+			$count++;
+		};
+		$data->{$mode.$count} = $conn;
+		$count++;
+	}
+}
+
+
+
+# Builds connection type string
+sub get_stream_set_type {
+		my ( $conn, $mattribs, $cattribs ) = ( @_ );
+		my @type;
+		push @type, "($mattribs->{service})" if $mattribs->{service};
+		push @type, "$conn->{streamer}";
+		push @type, "$mattribs->{encoding}" if $mattribs->{encoding};
+		push @type, "$mattribs->{width}x$mattribs->{height}" if $mattribs->{width} && $mattribs->{height};
+		push @type, "$mattribs->{bitrate}kbps" if $mattribs->{bitrate};
+		push @type, "stream";
+		push @type, "(CDN: $cattribs->{kind}/$cattribs->{priority})" if $cattribs->{kind};
+		$conn->{type} = join ' ', @type;
+}
+
+
+
 # Generic
 # Gets media streams data for this version pid
 # $media = undef|<modename>
@@ -4028,16 +4175,10 @@ sub get_stream_data {
 			#<kind>akamai</kind>
 			#<application>live</application>
 			#width="512" height="288" type="video/x-flv" encoding="vp6"
-			$mattribs->{kind} = 'video';
-			$mattribs->{type} = 'video/x-flv';
-			$mattribs->{encoding} = 'vp6';
-			$mattribs->{width} = 512;
-			$mattribs->{height} = 288;
+			$mattribs = { kind => 'video', type => 'video/x-flv', encoding => 'vp6', width => 512, height => 288 };
 		# AAC Live Radio
 		} elsif ( $prog->{type} eq 'radio' || $prog->{type} eq 'liveradio' ) {
-			$mattribs->{kind} = 'audio';
-			$mattribs->{type} = 'audio/mp4';
-			$mattribs->{encoding} = 'aac';
+			$mattribs = { kind => 'audio', type => 'audio/mp4', encoding => 'aac' };
 		}
 		$cattribs->{server} = $1 if $xml =~ m{<server>(.+?)</server>};
 		$cattribs->{kind} = $1 if $xml =~ m{<kind>(.+?)</kind>};
@@ -4061,655 +4202,114 @@ sub get_stream_data {
 		# flashhd modes
 		if (		$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264' &&
-				$mattribs->{bitrate} =~ /3200/
+				$mattribs->{encoding} eq 'h264'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
+			# flashhd modes
+			get_stream_data_cdn( \%data, $mattribs, 'flashhd', 'rtmp', 'mp4' ) if $mattribs->{bitrate} =~ /3200/;
 
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashhd1';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$mattribs->{width} = 1280 if ! $mattribs->{width};
-					$mattribs->{height} = 720 if ! $mattribs->{height};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp4://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
+			# flashvhigh modes
+			get_stream_data_cdn( \%data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[789]\d\d/;
+
+			# flashhigh modes
+			get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/;
+
+			# iPhone modes
+			if ( $mattribs->{width} =~ /4\d\d/ ) {
+				# Fix/remove some audio stream attribs
+				if ( $prog->{type} eq 'radio' ) {
+					$mattribs->{bitrate} = 128;
+					delete $mattribs->{width};
+					delete $mattribs->{height};
 				}
+				get_stream_data_cdn( \%data, $mattribs, 'iphone', 'iphone', 'mov' );
 			}
 
-
-
-		# flashvhigh modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264' &&
-				$mattribs->{width} =~ /[789]\d\d/
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'level3' ) {
-					$mode = 'flashvhigh1';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{application} = $data{$mode}{application}.'?'.$data{$mode}{authstring};
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashvhigh2';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp4://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'iplayertok' ) {
-					$mode = 'flashvhigh3';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					decode_entities($data{$mode}{authstring});
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
-					$data{$mode}{playpath} =~ s/^mp4://g;
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'limelight' ) {
-					$mode = 'flashvhigh4';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					decode_entities($data{$mode}{authstring});
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
-					$data{$mode}{playpath} =~ s/^mp4://g;
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
-
-		# flashhigh modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264' &&
-				$mattribs->{width} =~ /[6]\d\d/
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'level3' ) {
-					$mode = 'flashhigh1';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{application} = $data{$mode}{application}.'?'.$data{$mode}{authstring};
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'limelight' ) {
-					$mode = 'flashhigh2';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					decode_entities($data{$mode}{authstring});
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
-					$data{$mode}{playpath} =~ s/^mp4://g;
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashhigh3';
-					$data{$mode}{ext} = 'mp4';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					# after sniff - got this:
-					#$data{$mode}{playpath} = "$data{$mode}{identifier}&auth=$data{$mode}{authstring}&aifp=v001";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp4://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}			
-
-
-
-		# flashnormal modes
+		# flashnormal modes (also live and EMP modes)
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
-				$mattribs->{encoding} eq 'vp6' &&
-				$mattribs->{width} =~ /[6]\d\d/
+				$mattribs->{encoding} eq 'vp6'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashnormal';
-					$data{$mode}{ext} = 'avi';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:80/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
-
-		# flashnormal live and EMP modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/x-flv' &&
-				$mattribs->{encoding} eq 'vp6' &&
-				$mattribs->{width} =~ /[5]\d\d/
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				# Public Non-Live EMP Video without auth
-				if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
-					$mode = 'flashnormal';
-					$data{$mode}{ext} = 'avi';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = 480; # ??
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = "$data{$mode}{identifier}";
-					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&undefined";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&undefined";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				# Match to submode
-				# Live TV, Live EMP Video or Non-public EMP video
-				} elsif ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashnormal';
-					$data{$mode}{ext} = 'avi';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = 480; # ??
-					$data{$mode}{server} = $cattribs->{server};
-					#$data{$mode}{serverip} = inet_ntoa( inet_aton( $cattribs->{server} ) );
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
-					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					#$data{$mode}{tcurl} = "rtmp://$data{$mode}{serverip}:1935/$data{$mode}{application}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					# Only add this flag if it really is a live simulcast
-					$data{$mode}{live} = 1 if $data{$mode}{application} =~ /^live/;
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
+			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' ) if $mattribs->{width} =~ /[56]\d\d/;
 
 		# flashlow modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
-				$mattribs->{encoding} eq 'spark' &&
-				$mattribs->{width} =~ /[5]\d\d/
+				$mattribs->{encoding} eq 'spark'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
+			get_stream_data_cdn( \%data, $mattribs, 'flashlow', 'rtmp', 'avi' );
 
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashlow1';
-					$data{$mode}{ext} = 'avi';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'limelight' ) {
-					$mode = 'flashlow2';
-					$data{$mode}{ext} = 'avi';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					decode_entities($data{$mode}{authstring});
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
-					$data{$mode}{playpath} =~ s/^mp4://g;
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
-
-		# iPhone modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264' &&
-				$mattribs->{width} =~ /[4]\d\d/
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'sis' ) {
-					$mode = 'iphone';
-					$data{$mode}{ext} = 'mov';
-					$data{$mode}{streamer} = 'iphone';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					# override bitrate for radio as reported one is just wrong!
-					$data{$mode}{bitrate} = 128 if $prog->{type} eq 'radio';
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "iPhone $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}		
-			}
-
-
-
-		# n95_wifi modes
+		# n95 modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/mpeg' &&
 				$mattribs->{encoding} eq 'h264'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
+			# n95_wifi modes
+			if ( $mattribs->{bitrate} > 140 ) {
+				$mattribs->{width} = $mattribs->{width} || 320;
+				$mattribs->{height} = $mattribs->{height} || 176;
+				get_stream_data_cdn( \%data, $mattribs, 'n95_wifi', '3gp', '3gp' );
 
-				# Match to submode
-				if ( $cattribs->{kind} eq 'sis' ) {
-					$mode = 'n95_wifi';
-					$data{$mode}{ext} = '3gp';
-					$data{$mode}{streamer} = '3gp';
-					$mattribs->{width} = 320 if ! $mattribs->{width};
-					$mattribs->{height} = 176 if ! $mattribs->{height};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "Nokia N95 WiFi $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
+			# n95_3g modes
+			} else {
+				$mattribs->{width} = $mattribs->{width} || 176;
+				$mattribs->{height} = $mattribs->{height} || 96;
+				get_stream_data_cdn( \%data, $mattribs, 'n95_3g', '3gp', '3gp' );
 			}
 
-
-
-		# n95_3g modes
-		} elsif (	$mattribs->{kind} eq '' &&
-				$mattribs->{type} eq 'video/mpeg' &&
-				$mattribs->{encoding} eq 'h264'
-		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'sis' ) {
-					$mode = 'n95_3g';
-					$data{$mode}{ext} = '3gp';
-					$data{$mode}{streamer} = '3gp';
-					$mattribs->{width} = 176 if ! $mattribs->{width};
-					$mattribs->{height} = 96 if ! $mattribs->{height};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "Nokia N95 3G $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-			
-
-
-		# WMV drm modes
+		# WMV drm modes - still used?
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/wmv'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'sis' ) {
-					$mode = 'mobile_wmvdrm';
-					$data{$mode}{ext} = 'wmv';
-					$data{$mode}{streamer} = 'http';
-					$mattribs->{width} = 320 if ! $mattribs->{width};
-					$mattribs->{height} = 176 if ! $mattribs->{height};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "Mobile WMV DRM $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-					# Also DRM (same data - just remove _mobile from href and identfier)
-					$mode = 'wmvdrm';
-					$data{$mode}{ext} = 'wmv';
-					$data{$mode}{streamer} = 'http';
-					$mattribs->{width} = 672;
-					$mattribs->{height} = 544;
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{identifier} =~ s/_mobile//g;
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{streamurl} =~ s/_mobile//g;
-					$data{$mode}{type} = "WMV DRM $mattribs->{encoding} $mattribs->{width}x$mattribs->{height} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				# Dummy entry to catch DRM license
-				} elsif ( $cattribs->{kind} eq 'licence' ) {
-					# priority => 10
-					# identifier => D28E8245-9158-4314-B310-5F5B24AC5F06
-					# kind => licence
-					# href => http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx/D28E8245-9158-4314-B310-5F5B24AC5F06
-					# server => http://iplayldsvip.iplayer.bbc.co.uk/WMLicenceIssuer/LicenceDelivery.asmx
-
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-		# google: site:www.bbc.co.uk/radio/aod/availability  filetype:xml
-		# http://www.bbc.co.uk/radio/aod/availability/bbc7.xml
-		#####pid b0080sjp
-		#bitrate => 32
-		#kind => 
-		#type => audio/mp4
-		#encoding => aac
-		#expires => 2009-06-12T14:47:00+01:00
-		#CONNECTION-ELEMENT:
-		#priority => 10
-		#identifier => bbc7/secure_auth/international/b0080sj9/iplayer_uk_stream_aac_3gp_concrete
-		#kind => sis
-		#href => http://www.bbc.co.uk/mediaselector/4/sdp/bbc7/secure_auth/international/b0080sj9/iplayer_uk_stream_aac_3gp_concrete
-		#server => http://www.bbc.co.uk/mediaselector/4/sdp/
+			$mattribs->{width} = $mattribs->{width} || 320;
+			$mattribs->{height} = $mattribs->{height} || 176;
+			get_stream_data_cdn( \%data, $mattribs, 'mobile_wmvdrm', 'http', 'wmv' );
+			# Also DRM (same data - just remove _mobile from href and identfier)
+			$mattribs->{width} = 672;
+			$mattribs->{height} = 544;
+			get_stream_data_cdn( \%data, $mattribs, 'wmvdrm', 'http', 'wmv' );
+			$data{wmvdrm}{identifier} =~ s/_mobile//g;
+			$data{wmvdrm}{streamurl} =~ s/_mobile//g;
 
 		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
 				$mattribs->{type} eq 'audio/mp4' &&
 				$mattribs->{encoding} eq 'aac'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' && $cattribs->{application} eq 'live' ) {
-					$mode = 'flashaac1';
-					$data{$mode}{ext} = 'aac';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?auth=$data{$mode}{authstring}&aifp=v001";
-					$data{$mode}{application} = "$cattribs->{application}?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					$data{$mode}{live} = 1;
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashaac2';
-					$data{$mode}{ext} = 'aac';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					# Remove offending mp4: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp[34]://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-
-				} elsif ( $cattribs->{kind} eq 'limelight' ) {
-					$mode = 'flashaac1';
-					$data{$mode}{ext} = 'aac';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{application} = $cattribs->{application};
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					decode_entities($data{$mode}{authstring});
-					$data{$mode}{playpath} = "$data{$mode}{identifier}?$data{$mode}{authstring}";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
+			get_stream_data_cdn( \%data, $mattribs, 'flashaac', 'rtmp', 'aac' );
 
 		# flashaudio modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
 				$mattribs->{type} eq 'audio/mpeg' &&
 				$mattribs->{encoding} eq 'mp3'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'akamai' ) {
-					$mode = 'flashaudio';
-					$data{$mode}{ext} = 'mp3';
-					$data{$mode}{streamer} = 'rtmp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{authstring} = $cattribs->{authString};
-					$data{$mode}{type} = "Flash RTMP Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					$data{$mode}{streamurl} = "rtmp://$data{$mode}{server}:1935/ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{playpath} = $data{$mode}{identifier};
-					# Remove offending mp3: at the start of the identifier (don't remove in stream url)
-					$data{$mode}{identifier} =~ s/^mp3://;
-					$data{$mode}{application} = "ondemand?_fcs_vhost=$data{$mode}{server}&auth=$data{$mode}{authstring}&aifp=v001&slist=$data{$mode}{identifier}";
-					$data{$mode}{tcurl} = "rtmp://$data{$mode}{server}:1935/$data{$mode}{application}";
-					$data{$mode}{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
+			get_stream_data_cdn( \%data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
 
 		# RealAudio modes
 		} elsif (	$mattribs->{type} eq 'audio/real' &&
 				$mattribs->{encoding} eq 'real'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} =~ /(sis|edgesuite)/ ) {
-					$mode = 'realaudio';
-					$data{$mode}{ext} = 'mp3';
-					$data{$mode}{streamer} = 'rtsp';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				} 
-			}
-
-
+			get_stream_data_cdn( \%data, $mattribs, 'realaudio', 'rtsp', 'mp3' );
 
 		# wma modes
 		} elsif (	$mattribs->{type} eq 'audio/wma' &&
 				$mattribs->{encoding} eq 'wma'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
+			get_stream_data_cdn( \%data, $mattribs, 'wma', 'mms', 'wma' );
 
-				# Match to submode
-				if ( $cattribs->{kind} =~ /(sis|edgesuite)/ ) {
-					$mode = 'wma';
-					$data{$mode}{ext} = 'wma';
-					$data{$mode}{streamer} = 'mms';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "WMA MMS Audio $mattribs->{encoding} $mattribs->{bitrate}kbps stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
-
-
+		# aac3gp modes
+		} elsif (	$mattribs->{kind} eq '' &&
+				$mattribs->{type} eq 'audio/mp4' &&
+				$mattribs->{encoding} eq 'aac'
+		) {
+			# Not sure how to stream these yet
+			#$mattribs->{kind} = 'sis';
+			#get_stream_data_cdn( \%data, $mattribs, 'aac3gp', 'http', 'aac' );
 
 		# Subtitles modes
 		} elsif (	$mattribs->{kind} eq 'captions' &&
 				$mattribs->{type} eq 'application/ttaf+xml'
 		) {
-			# Connections within mode
-			for my $cattribs ( @{ $mattribs->{connections} } ) {
-
-				# Match to submode
-				if ( $cattribs->{kind} eq 'http' ) {
-					$mode = 'subtitles';
-					$data{$mode}{ext} = 'srt';
-					$data{$mode}{streamer} = 'http';
-					$data{$mode}{bitrate} = $mattribs->{bitrate};
-					$data{$mode}{server} = $cattribs->{server};
-					$data{$mode}{identifier} = $cattribs->{identifier};
-					$data{$mode}{streamurl} = $cattribs->{href};
-					$data{$mode}{type} = "Subtitles stream ($cattribs->{kind})";
-					main::logger "DEBUG: Found $mode: $data{$mode}{type}\n" if $opt->{debug};
-				} else {
-					new_stream_report($mattribs, $cattribs) if $opt->{verbose};
-				}
-			}
+			get_stream_data_cdn( \%data, $mattribs, 'subtitles', 'http', 'srt' );
 
 		# Catch unknown
 		} else {
@@ -4718,17 +4318,23 @@ sub get_stream_data {
 	}
 
 	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
-	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ ) {
+	# Skip check if the modelist selected excludes iphone
+	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && grep /^iphone/, split ',', $prog->modelist() ) {
 		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
-			my $mode = 'iphone';
-			$data{$mode}{type} = 'iPhone stream' if ! $data{$mode}{type};
+			my $mode = 'iphone1';
 			# Get iphone redirect
 			$data{$mode}{streamurl} = $streamurl;
 			$data{$mode}{streamer} = 'iphone';
 			$data{$mode}{ext} = 'mov';
+			get_stream_set_type( $data{$mode} ) if ! $data{$mode}{type};
 		} else {
 			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
 		}
+	}
+
+	# Report modes found
+	if ( $opt->{verbose} || $opt->{debug} ) {
+		main::logger "INFO: Found mode $_: $data{$_}{type}\n" for sort keys %data;
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
@@ -4832,17 +4438,9 @@ sub modelist {
 	# Deal with BBC TV fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
-	# flashlow => flashlow1,flashlow2
-	# flashhigh => flashhigh1,flashhigh2,flashhigh3
-	# flashvhigh => flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4
-	# flashhd => flashhd1
 	$mlist = main::expand_list($mlist, 'best', 'flashhd,flashvhigh,flashhigh,iphone,flashlow,flashnormal');
 	$mlist = main::expand_list($mlist, 'flash', 'flashhigh,flashnormal');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flashhigh,flashnormal');
-	$mlist = main::expand_list($mlist, 'flashhigh', 'flashhigh1,flashhigh2,flashhigh3');
-	$mlist = main::expand_list($mlist, 'flashlow', 'flashlow1,flashlow2');
-	$mlist = main::expand_list($mlist, 'flashvhigh', 'flashvhigh1,flashvhigh2,flashvhigh3,flashvhigh4');
-	$mlist = main::expand_list($mlist, 'flashhd', 'flashhd1');
 
 	return $mlist;
 }
@@ -4854,12 +4452,12 @@ sub clean_pid {
 	my $prog = shift;
 
 	# If this is an iPlayer pid (not a pid page on BBC programmes site)
-	if ( $prog->{pid} =~ m{^(b0[a-z0-9]{6})$} ) {
+	if ( $prog->{pid} =~ m{^([pb]0[a-z0-9]{6})$} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
 	# If this is an iPlayer programme pid URL (not a pid page on BBC programmes site)
-	} elsif ( $prog->{pid} =~ m{^http.+\/(b0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
+	} elsif ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
@@ -5068,17 +4666,17 @@ sub download {
 		$opt->{wav} = 1;
 	}
 	# Check if we have vlc
-	if ( $mode eq 'n95' && (! main::exists_in_path('vlc')) ) {
+	if ( $mode =~ /^n95/ && (! main::exists_in_path('vlc')) ) {
 		main::logger "\nWARNING: Required vlc does not exist\n";
 		return 'next';
 	}
 	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
+	if ( $mode =~ /^flash/ && ! main::exists_in_path('rtmpdump')) {
 		main::logger "WARNING: Required program flvstreamer/rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
-	if ( $mode =~ /^(flash|rtmp)/ && ! main::exists_in_path('ffmpeg')) {
+	if ( $mode =~ /^flash/ && ! main::exists_in_path('ffmpeg')) {
 		main::logger "\nWARNING: ffmpeg does not exist - not converting flv file\n";
 		$opt->{raw} = 1;
 	}
@@ -5088,12 +4686,12 @@ sub download {
 
 	# Nasty hacky filename ext overrides based on non-default fallback modes
 	# Override iphone ext from metadata which is wrong for radio
-	$prog->{ext} = 'mp3' if $mode =~ /^(iphone|mp3)/ && $prog->{type} eq 'radio';
+	$prog->{ext} = 'mp3' if $mode =~ /^iphone/ && $prog->{type} eq 'radio';
 	# Override realaudio ext based on raw / wav
 	$prog->{ext} = 'ra'  if $opt->{raw} &&  $mode =~ /^real/;
 	$prog->{ext} = 'wav' if $opt->{wav} &&  $mode =~ /^real/;
 	# Override flash ext based on raw
-	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^(flash|rtmp)/;
+	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 
 
 	# Determine the correct filenames for this recording
@@ -5155,7 +4753,7 @@ sub download_subtitles {
 	my $suburl;
 	my $subs;
 	
-	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles}->{streamurl};
+	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles1}->{streamurl};
 	# Return if we have no url
 	if (! $suburl) {
 		main::logger "\nINFO: Subtitles not available\n";
@@ -5381,7 +4979,6 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', 'flashaac,iphone,flashaudio,realaudio,wma');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaudio,flashaac');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flashaudio,flashaac');
-	$mlist = main::expand_list($mlist, 'flashaac', 'flashaac1,flashaac2');
 
 	return $mlist;
 }
@@ -5652,7 +5249,8 @@ sub channels {
 		'bbc_radio_one'				=> 'BBC Radio 1',
 		'bbc_radio_two'				=> 'BBC Radio 2',
 		'bbc_radio_three'			=> 'BBC Radio 3',
-		'bbc_radio_fourfm'			=> 'BBC Radio 4',
+		'bbc_radio_fourfm'			=> 'BBC Radio 4 FM',
+		'bbc_radio_fourlw'			=> 'BBC Radio 4 LW',
 		'bbc_radio_five_live'			=> 'BBC Radio 5 live',
 		'bbc_radio_five_live_sports_extra'	=> 'BBC 5 live Sports Extra',
 		'bbc_6music'				=> 'BBC 6 Music',
@@ -5752,11 +5350,9 @@ sub modelist {
 	# Deal with BBC Radio fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
 	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
-	# flashaac => flashaac1,flashaac2
 	$mlist = main::expand_list($mlist, 'best', 'flashaac,realaudio,wma');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaac');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flashaac');
-	$mlist = main::expand_list($mlist, 'flashaac', 'flashaac1,flashaac2');
 
 	return $mlist;
 }
@@ -5843,7 +5439,7 @@ sub get_url {
 	# http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4
 	my $iphone_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
 	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?r='.(sprintf "%012.0f", 999999999999*rand(0) );
-	main::logger "INFO: media stream URL = $url_1\n" if $opt->{verbose};
+	main::logger "INFO: iphone stream URL = $url_1\n" if $opt->{verbose};
 
 	# This doesn't work through url-prepend proxies
 	## Use url prepend if required
@@ -5853,7 +5449,7 @@ sub get_url {
 	#}
 
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-	#main::logger "\rGetting iplayer URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
+	#main::logger "\rGetting iplayer iphone URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
 	my $h = new HTTP::Headers(
 		'User-Agent'	=> $user_agent{coremedia},
 		'Accept'	=> '*/*',
@@ -5865,17 +5461,17 @@ sub get_url {
 	# Get resulting Location header (i.e. redirect URL)
 	my $url = $res->header("location");
 	if ( ! $res->is_redirect ) {
-		main::logger "ERROR: Failed to get redirect from iplayer site\n\n";
+		main::logger "ERROR: Failed to get iphone redirect from iplayer site\n\n";
 		return '';
 	}
 	# Extract redirection Location URL
 	$url =~ s/^Location: (.*)$/$1/g;
 	# If we get a Redirection containing statuscode=404 then this prog is not yet ready
 	if ( $url =~ /statuscode=404/ ) {
-		main::logger "\rERROR: Programme is not yet ready for recording\n" if $opt->{verbose};
+		main::logger "\rERROR: iphone stream is not yet ready\n" if $opt->{verbose};
 		return '';
 	} elsif ( $url =~ /statuscode=403/ ) {
-		main::logger "\rERROR: Programme is not permitted for recording\n" if $opt->{verbose};
+		main::logger "\rERROR: iphone stream is not permitted for recording\n" if $opt->{verbose};
 		return '';
 	}
 
