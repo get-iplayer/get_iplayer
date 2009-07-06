@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.06;
+my $version = 2.07;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2860,6 +2860,9 @@ sub download_subtitles {
 sub download_retry_loop {
 	my $prog = shift;
 
+	# Run the type init
+	$prog->init();
+
 	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} ) && ! $opt->{subsonly};
 
 	# Skip and warn if there is no pid
@@ -2876,9 +2879,6 @@ sub download_retry_loop {
 	if ( $opt->{metadata} || $opt->{command} ) {
 		$prog->get_metadata( $ua );
 	}
-
-	# Run the type init
-	$prog->init();
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
 	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
@@ -4098,8 +4098,8 @@ sub get_stream_data_cdn {
 			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authstring}&aifp=v001&slist=$cattribs->{identifier}";
 			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
 
-		# sis/edgesuite stream
-		} elsif ( $cattribs->{kind} eq 'sis' || $cattribs->{kind} eq 'edgesuite' ) {
+		# sis/edgesuite/sislive streams
+		} elsif ( $cattribs->{kind} eq 'sis' || $cattribs->{kind} eq 'edgesuite' || $cattribs->{kind} eq 'sislive' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
 		# http stream
@@ -6091,7 +6091,7 @@ sub get {
 	if ( $^O !~ /^MSWin32$/ ) {
 		mkfifo($namedpipe, 0700);
 	} else {
-		main::logger "WARNING: fifos/named pipes are not supported\n" if $opt->{verbose};
+		main::logger "WARNING: fifos/named pipes are not supported - only limited output modes will be supported\n";
 	}
 	
 	main::logger "INFO: Stage 3 URL = $url\n" if $opt->{verbose};
@@ -6337,10 +6337,10 @@ sub get {
 		# $cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
 		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
 		# problem is that the following output is given by mplayer at the end of liong streams:
-		#read error:: Operation now in progress                                                                           
-		#pre-header read failed                                                                                           
-		#Core dumped ;)                                                                                                   
-		#vo: x11 uninit called but X11 not initialized..                                                                  
+		#read error:: Operation now in progress
+		#pre-header read failed
+		#Core dumped ;)
+		#vo: x11 uninit called but X11 not initialized..
 		#
 		#Exiting... (End of file)
 		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
