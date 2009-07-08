@@ -588,14 +588,14 @@ sub find_matches {
 	$binopts->{vlc}		= '-vv' if $opt->{verbose} || $opt->{debug};
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
 	$bin->{tee}		= 'tee';
-	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
+	$bin->{flvstreamer}	= $opt->{flvstreamer} || 'flvstreamer';
 	# quote binaries which allows for spaces in the path
-	for ( $bin->{mplayer}, $bin->{ffmpeg}, $bin->{lame}, $bin->{vlc}, $bin->{id3v2}, $bin->{tee}, $bin->{rtmpdump} ) {
+	for ( $bin->{mplayer}, $bin->{ffmpeg}, $bin->{lame}, $bin->{vlc}, $bin->{id3v2}, $bin->{tee}, $bin->{flvstreamer} ) {
 		s!^(.+)$!"$1"!g;
 	}
-	$binopts->{rtmpdump}	= ' --quiet' if $opt->{quiet};
-	$binopts->{rtmpdump}	= ' --verbose' if $opt->{verbose};
-	$binopts->{rtmpdump}	= ' --debug' if $opt->{debug};
+	$binopts->{flvstreamer}	= ' --quiet' if $opt->{quiet};
+	$binopts->{flvstreamer}	= ' --verbose' if $opt->{verbose};
+	$binopts->{flvstreamer}	= ' --debug' if $opt->{debug};
 	# Set quiet, test and get options if we're asked for streaminfo
 	if ( $opt->{streaminfo} ) {
 		$opt->{test} 	= 1;
@@ -2615,21 +2615,42 @@ sub get {
 	my $entry;
 	return $entry if ( ! defined $optfile ) || ( ! -f $optfile );
 
+	# Get a hash or optname -> internal_opt_name
+	my $optname;
+	for my $optint ( keys %{ $opt_format_ref } ) {
+		my $format = @{ $opt_format_ref->{$optint} }[1];
+		#main::logger "INFO: Opt Format '$format'\n";
+		$format =~ s/=.*$//g;
+		# Parse each option format
+		for ( split /\|/, $format ) {
+			next if /^$/;
+			#main::logger "INFO: Opt '$_' -> '$optint'\n";
+			if ( defined $optname->{$_} ) {
+				main::logger "ERROR: Duplicate Option defined '$_' -> '$optint' and '$optname->{$_}'\n";
+				exit 11;
+			}
+			$optname->{$_} = $optint;
+		}
+	}
+
 	# Load opts
 	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
 	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
 		next if not defined $1;
-		chomp( $entry->{$1} = $2 );
-		main::logger "DEBUG: Loaded option $1 = $2\n" if $opt->{debug};
-		# warn if the option is not valid or deprecated
-		if ( not defined $opt_format_ref->{$1} ) {
+		chomp( $entry->{ $optname->{$1} } = $2 );
+		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
+		# Error if the option is not valid
+		if ( not defined $optname->{$1} ) {
 			main::logger "ERROR: Invalid option in $optfile: '$1 = $2'\n";
+			main::logger "INFO: Use --dump-opts to display all valid options\n";
 			exit 10;
 		}
+		# Warn if it is listed as a deprecated internal option name
 		if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
 			main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
+			main::logger "INFO: Use --dump-opts to display all valid options\n";
 		}
 	}
 	close OPT;
@@ -2731,6 +2752,12 @@ sub optional_list_entry_format {
 # Returns the modes to try for this prog type
 sub modelist {
 	return '';
+}
+
+
+# Default minimum expected download size for a programme type
+sub min_download_size {
+	return 1024000;
 }
 
 
@@ -2947,7 +2974,7 @@ sub download_retry_loop {
 			my @available_modes = sort keys %{ $prog->{streams}->{$version} };
 			for my $modename ( split /,/, $modelist ) {
 				# find all numbered modes starting with this modename
-				push @modes, grep /^$modename\d?$/, @available_modes;
+				push @modes, sort { $a <=> $b } grep /^$modename(\d+)?$/, @available_modes;
 			}
 
 			# Check for no applicable modes - report which ones are available if none are specified
@@ -2963,12 +2990,12 @@ sub download_retry_loop {
 				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 				$prog->{mode} = $mode;
 
-				# try the recording for this mode
+				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
-				# quit if successful
-				last if not $retcode;
+				# quit if successful or skip
+				last if $retcode == 0 || $retcode == 2;
 
 				# Only need to try one mode for subs
 				last if $opt->{subsonly};
@@ -3011,7 +3038,7 @@ sub mode_ver_download_retry_loop {
 		# Try Next prog
 		} elsif ( $retcode eq 'skip' ) {
 			main::logger "INFO: skipping this programme\n";
-			return 1;
+			return 2;
 
 		# Try Next mode
 		} elsif ( $retcode eq 'next' ) {
@@ -3021,7 +3048,10 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			if ( ! $opt->{subsonly} ) {
+			# No need to do all these post-tasks if its streaming-only or subs-only
+			if ( $opt->{subsonly} || ( $opt->{stdout} && $opt->{nowrite} ) ) {
+				# Skip
+			} else {
 				# Add to history, tag file, and run post-record command
 				main::add_to_download_history( $prog );
 				$prog->tag_file;
@@ -3283,7 +3313,7 @@ sub generate_filenames {
 	}
 
 	# If the file already exists
-	if ( (! $opt->{subsonly}) && -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
+	if ( (! $opt->{subsonly}) && -f $prog->{filename} && stat($prog->{filename})->size > $prog->min_download_size() ) {
 		if ( $opt->{overwrite} ) {
 			main::logger("INFO: Overwriting file $prog->{filename}\n\n");
 			unlink $prog->{filename};
@@ -4032,17 +4062,18 @@ sub get_stream_data_cdn {
 
 	my $count = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
-		my $conn;
 		# Common attributes
-		# Default iPlayer swf version
-		$conn->{swfurl} = "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753";
-		$conn->{ext} = $ext;
-		$conn->{streamer} = $streamer;
-		$conn->{bitrate} = $mattribs->{bitrate};
-		$conn->{server} = $cattribs->{server};
-		$conn->{identifier} = $cattribs->{identifier};
-		$conn->{authstring} = $cattribs->{authString};
-		$conn->{priority} = $cattribs->{priority};
+		# swfurl = Default iPlayer swf version
+		my $conn = {
+			swfurl		=> "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753",
+			ext		=> $ext,
+			streamer	=> $streamer,
+			bitrate		=> $mattribs->{bitrate},
+			server		=> $cattribs->{server},
+			identifier	=> $cattribs->{identifier},
+			authstring	=> $cattribs->{authString},
+			priority	=> $cattribs->{priority},
+		};
 
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
@@ -4116,12 +4147,22 @@ sub get_stream_data_cdn {
 
 		get_stream_set_type( $conn, $mattribs, $cattribs );
 
-		# Add to data structure
+                # Add to data structure
+                # Find the next free mode name
+                while ( defined $data->{$mode.$count} ) {
+                        $count++;
+                };
+                $data->{$mode.$count} = $conn;
+
+		# Add to data structure - including priority
+		#$count = 1;
+		#$count = $cattribs->{priority} if defined $cattribs->{priority};
 		# Find the next free mode name
-		while ( defined $data->{$mode.$count} ) {
-			$count++;
-		};
-		$data->{$mode.$count} = $conn;
+		#while ( defined $data->{ sprintf('%s%03d', $mode, $count) } ) {
+		#	$count++;
+		#};
+		#$data->{ sprintf('%s%03d', $mode, $count) } = $conn;
+		
 		$count++;
 	}
 }
@@ -4138,7 +4179,8 @@ sub get_stream_set_type {
 		push @type, "$mattribs->{width}x$mattribs->{height}" if $mattribs->{width} && $mattribs->{height};
 		push @type, "$mattribs->{bitrate}kbps" if $mattribs->{bitrate};
 		push @type, "stream";
-		push @type, "(CDN: $cattribs->{kind}/$cattribs->{priority})" if $cattribs->{kind};
+		push @type, "(CDN: $cattribs->{kind}/$cattribs->{priority})" if $cattribs->{kind} && $cattribs->{priority};
+		push @type, "(CDN: $cattribs->{kind})" if $cattribs->{kind} && not defined $cattribs->{priority};
 		$conn->{type} = join ' ', @type;
 }
 
@@ -4428,7 +4470,7 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('rtmpdump') ) {
+		if ( ! main::exists_in_path('flvstreamer') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'iphone';
 		} else {
@@ -4451,12 +4493,35 @@ sub modelist {
 sub clean_pid {
 	my $prog = shift;
 
+	# Extract the appended start timestamp if it exists and set options accordingly e.g. '?t=16m51s'
+	if ( $prog->{pid} =~ m{\?t=(\d+)m(\d+)s$} ) {
+		# calculate the start offset
+		$opt->{rtmpstart} = $1*60.0 + $2;
+	}
+	
+	# Expand Short iplayer URL redirects
+	# e.g. http://bbc.co.uk/i/lnc8s/
+	if ( $prog->{pid} =~ m{bbc\.co\.uk\/i\/[a-z0-9]{5}\/.*$}i ) {
+		# Do a recursive redirect lookup to get the final URL
+		my $ua = main::create_ua();
+		my $res;
+		do {
+			# send request (use simple_request here because that will not allow redirects)
+			$res = $ua->simple_request( HTTP::Request->new( 'GET', $prog->{pid} ) );
+			if ( $res->is_redirect ) {
+				$prog->{pid} = $res->header("location");
+				$prog->{pid} = 'http://bbc.co.uk'.$prog->{pid} if $prog->{pid} !~ /^http/;
+				main::logger "DEBUG: got short url redirect to '$prog->{pid}' from iplayer site\n" if $opt->{debug};
+			}
+		} while ( $res->is_redirect );
+		main::logger "DEBUG: Final expanded short URL is '$prog->{pid}'\n" if $opt->{debug};
+	}
+		
 	# If this is an iPlayer pid (not a pid page on BBC programmes site)
 	if ( $prog->{pid} =~ m{^([pb]0[a-z0-9]{6})$} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
-	# If this is an iPlayer programme pid URL (not a pid page on BBC programmes site)
 	} elsif ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
@@ -4671,7 +4736,7 @@ sub download {
 		return 'next';
 	}
 	# if rtmpdump does not exist
-	if ( $mode =~ /^flash/ && ! main::exists_in_path('rtmpdump')) {
+	if ( $mode =~ /^flash/ && ! main::exists_in_path('flvstreamer')) {
 		main::logger "WARNING: Required program flvstreamer/rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
@@ -4801,8 +4866,6 @@ sub download_subtitles {
 	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
 	for ( @lines ) {
 		my ( $begin, $end, $sub );
-		# Remove span elements
-		s|<\/?span.*?>| |g;
 		# Remove <br /> elements
 		s|<br.*?>| |g;
 		# Remove >1 spaces
@@ -4818,6 +4881,13 @@ sub download_subtitles {
 			if ($opt->{suboffset}) {
 				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
 				$end = main::subtitle_offset( $end, $opt->{suboffset} );
+			}
+			# Separate individual lines based on <span>s
+			$sub =~ s|<span.*?>(.*?)</span>|\n\1\n|g;
+			if ($sub =~ m{\n}) {
+				chomp($sub);
+				$sub =~ s|^\n?|- |;
+				$sub =~ s|\n+|\n- |g;
 			}
 			decode_entities($sub);
 			# Write to file
@@ -4958,6 +5028,13 @@ sub optional_list_entry_format {
 
 
 
+# Default minimum expected download size for a programme type
+sub min_download_size {
+	return 102400;
+}
+
+
+
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
@@ -4965,7 +5042,7 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('rtmpdump') ) {
+		if ( ! main::exists_in_path('flvstreamer') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'iphone,realaudio,wma';
 		} else {
@@ -5342,7 +5419,7 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('rtmpdump') ) {
+		if ( ! main::exists_in_path('flvstreamer') ) {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'realaudio,wma';
 		} else {
@@ -5360,6 +5437,11 @@ sub modelist {
 }
 
 
+
+# Default minimum expected download size for a programme type
+sub min_download_size {
+	return 102400;
+}
 
 
 ################### Streamer class #################
@@ -5870,7 +5952,10 @@ sub opt_format {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash tv and radio modes"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
-		rtmpdump	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
+		flvstreamer	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
+		rtmpdump	=> [ 0, "", 'Deprecated', '', "Location of rtmpdump binary"],
+		rtmpstart	=> [ 1, "rtmpstart=s", 'Recording', '--rtmpstart <secs>', "RTMP start offset"],
+		rtmpstop	=> [ 1, "rtmpstop=s", 'Recording', '--rtmpstop <secs>', "RTMP stop offset (can be used to limit live recording length)"],
 		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'Deprecated', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
@@ -5903,7 +5988,7 @@ sub get {
 	}
 
 	# Remove failed file recording (below a certain size) - hack to get around flvstreamer/rtmpdump not returning correct exit code
-	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
+	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
 		unlink( $file_tmp );
 	}
 		
@@ -5914,9 +5999,9 @@ sub get {
 
 	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5' or 'FLVStreamer v1.7'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `$bin->{rtmpdump} 2>&1`)[0] );
+	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `$bin->{flvstreamer} 2>&1`)[0] );
 	$rtmpver =~ s/^\w+\s+v([\.\d]+).*$/$1/g;
-	main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
+	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Add 20 sec timeout for newer versions
@@ -5931,6 +6016,16 @@ sub get {
 			main::logger "WARNING: Please use flvstreamer v1.8 or later for more reliable live streaming\n";
 		}
 		$extraopts .= ' --live';
+	}
+
+	# Add start stop options if defined
+	if ( $opt->{rtmpstart} || $opt->{rtmpstop} ) {
+		if ( $rtmpver < 1.8 ) {
+			main::logger "WARNING: Please use flvstreamer v1.8c or later for start/stop features\n";
+			exit 4;
+		}
+		$extraopts .= " --start $opt->{rtmpstart}" if $opt->{rtmpstart};
+		$extraopts .= " --stop $opt->{rtmpstop}" if $opt->{rtmpstop};
 	}
 	
 	# Create symlink if required
@@ -5960,13 +6055,13 @@ sub get {
 	# Different invocation depending on version
 	# For ver < 1.4
 	if ( $rtmpver < 1.4 ) {
-		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
 	# For ver 1.4+ if playpath is defined
 	} elsif ( $rtmpver >= 1.4 && $playpath ) {
-		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
+		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
 	# Using just streamurl (i.e. no playpath defined) - requires rtmpdump >= 1.5
 	} elsif ($rtmpver >= 1.5 ) {
-		$cmd = "$bin->{rtmpdump} $binopts->{rtmpdump} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
+		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
 	# Fail
 	} else {
 		main::logger "ERROR: rtmpdump >= v1.5 is required\n";
@@ -5978,10 +6073,16 @@ sub get {
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
 	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
-	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
+	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+
+	# Success after successful live stream
+	if ( $opt->{stdout} && $opt->{nowrite} && $return == 0 ) {
+		main::logger "\nINFO: Streaming completed successfully\n";
+		return 0;
+	}
 
 	# Hack to get around flvstreamer/rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) || $return ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) || $return ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
 		unlink $file_tmp;
@@ -6015,7 +6116,7 @@ sub get {
 	# Run flv conversion and delete source file on success
 	my $return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
+	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
 			unlink( $file_tmp );
 
 	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
@@ -6124,7 +6225,7 @@ sub get {
 			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 			# Create symlink if required
 			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
-			if ( system($cmd) || (-f "$prog->{filepart}.wav" && stat("$prog->{filepart}.wav")->size < $min_download_size) ) {
+			if ( system($cmd) || (-f "$prog->{filepart}.wav" && stat("$prog->{filepart}.wav")->size < $prog->min_download_size()) ) {
 				unlink $prog->{symlink};
 				return 'next';
 			}
@@ -6361,7 +6462,7 @@ sub get {
 					my $exitcode = $?;
 					main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
 					# Assume file is fully downloaded if > 10MB and we get an error reported !!!
-					if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $min_download_size*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
+					if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $prog->min_download_size()*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
 						# Failed, retry
 						main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
 						$retry--;
@@ -6392,7 +6493,7 @@ sub get {
 				my $exitcode = $?;
 				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
 				# Assume file is fully downloaded if > 10MB and we get an error reported !!!
-				if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $min_download_size*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
+				if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $prog->min_download_size()*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
 				#if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
 					# Failed, retry
 					main::logger "DEBUG: Trace of failed command:\n####################\n${cmdoutput}\n####################\n" if $opt->{debug};
@@ -6438,8 +6539,8 @@ sub get {
 					$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
 					push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
 					$total_size_new += $size;
-					# Now create a symlink if this is the first part and size > min_download_size
-					if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $min_download_size ) {
+					# Now create a symlink if this is the first part and size > $prog->min_download_size()
+					if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $prog->min_download_size() ) {
 						# Symlink to file if only one part or to dir if multi-part
 						if ( $#url_list ) {
 							$prog->create_symlink( $prog->{symlink}, $prog->{dir} );
@@ -6474,7 +6575,7 @@ sub get {
 	# If not all files > min_size then assume streaming failed
 	for (@file_tmp_list) {
 		# If file doesnt exist or too small then skip
-		if ( (! -f $_) || ( -f $_ && stat($_)->size < $min_download_size ) ) {
+		if ( (! -f $_) || ( -f $_ && stat($_)->size < $prog->min_download_size() ) ) {
 			main::logger "ERROR: Recording of programme failed, skipping\n" if $opt->{verbose};
 			return 'next';
 		}
