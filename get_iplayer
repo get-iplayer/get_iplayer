@@ -4208,7 +4208,13 @@ sub get_stream_data {
 		main::logger "\n$xml\n" if $opt->{debug};
 		my $mattribs;
 		my $cattribs;
-		# TV
+		# Parse connection attribs
+		$cattribs->{server} = $1 if $xml =~ m{<server>(.+?)</server>};
+		$cattribs->{kind} = $1 if $xml =~ m{<kind>(.+?)</kind>};
+		$cattribs->{identifier} = $1 if $xml =~ m{<identifier>(.+?)</identifier>};
+		$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
+		$cattribs->{application} = $1 if $xml =~ m{<application>(.+?)</application>};
+		# TV / EMP video (flashnormal mode)
 		if ( $prog->{type} eq 'tv' || $prog->{type} eq 'livetv' ) {
 			# Parse XML
 			#<server>cp56493.live.edgefcs.net</server>
@@ -4218,15 +4224,16 @@ sub get_stream_data {
 			#<application>live</application>
 			#width="512" height="288" type="video/x-flv" encoding="vp6"
 			$mattribs = { kind => 'video', type => 'video/x-flv', encoding => 'vp6', width => 512, height => 288 };
-		# AAC Live Radio
+		# AAC Live Radio / EMP Audio
 		} elsif ( $prog->{type} eq 'radio' || $prog->{type} eq 'liveradio' ) {
-			$mattribs = { kind => 'audio', type => 'audio/mp4', encoding => 'aac' };
+			# MP3 (flashaudio mode)
+			if ( $cattribs->{identifier} =~ m{mp3:} ) {
+				$mattribs = { kind => 'audio', type => 'audio/mpeg', encoding => 'mp3' };
+			# AAC (flashaac mode)
+			} else {
+				$mattribs = { kind => 'audio', type => 'audio/mp4', encoding => 'aac' };
+			}
 		}
-		$cattribs->{server} = $1 if $xml =~ m{<server>(.+?)</server>};
-		$cattribs->{kind} = $1 if $xml =~ m{<kind>(.+?)</kind>};
-		$cattribs->{identifier} = $1 if $xml =~ m{<identifier>(.+?)</identifier>};
-		$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
-		$cattribs->{application} = $1 if $xml =~ m{<application>(.+?)</application>};
 		# Push into media data structure
 		push @{ $mattribs->{connections} }, $cattribs;
 		push @medias, $mattribs;
