@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.07;
+my $version = 2.08;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -189,7 +189,7 @@ my $opt_format = {
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
 	test		=> [ 1, "test|t", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
-	thumb		=> [ 1, "thumb", 'Recording', '--thumb', "Download Thumbnail image if available"],
+	thumb		=> [ 1, "thumb|thumbnail", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbext	=> [ 1, "thumbext=s", 'Recording', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
@@ -2525,9 +2525,12 @@ sub add {
 	# Merge all cmdline opts into $entry except for these
 	my $regex = $opt->excludeopts;
 	for ( grep !/$regex/, keys %{ $this_cmdline } ) {
-		main::logger "INFO: Changed option '$_' from '$entry->{$_}' to '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && defined $entry->{$_} && $this_cmdline->{$_} ne $entry->{$_};
-		main::logger "INFO: Added option '$_' = '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && not defined $entry->{$_};
-		$entry->{$_} = $this_cmdline->{$_} if defined $this_cmdline->{$_};
+		# if this option is on the cmdline
+		if ( defined $this_cmdline->{$_} ) {
+			main::logger "INFO: Changed option '$_' from '$entry->{$_}' to '$this_cmdline->{$_}'\n" if defined $entry->{$_} && $this_cmdline->{$_} ne $entry->{$_};
+			main::logger "INFO: Added option '$_' = '$this_cmdline->{$_}'\n" if not defined $entry->{$_};
+			$entry->{$_} = $this_cmdline->{$_};
+		}
 	}
 
 	# Save opts file
@@ -2595,8 +2598,10 @@ sub put {
 	main::logger "DEBUG: adding/changing options to $optfile:\n" if $opt->{debug};
 	open (OPT, "> $optfile") || die ("ERROR: Cannot save options to $optfile\n");
 	for ( keys %{ $entry } ) {
-		print OPT "$_ $entry->{$_}\n" if defined $entry->{$_};
-		main::logger "DEBUG: Saving option $_ = $entry->{$_}\n" if $opt->{debug} && defined $entry->{$_};
+		if ( defined $entry->{$_} ) {
+			print OPT "$_ $entry->{$_}\n";
+			main::logger "DEBUG: Saving option $_ = $entry->{$_}\n" if $opt->{debug};
+		}
 	}
 	close OPT;
 
@@ -2606,14 +2611,9 @@ sub put {
 
 
 
-# $entry = get( $opt, $optfile )
-# get all options from file into $entry ($opt is used just to get access to general options like debug)
-sub get {
-	my $opt = shift;
-	my $optfile = shift;
+# Returns a hashref of 'optname => internal_opt_name' for all options
+sub get_opt_map {
 	my $opt_format_ref = $Options::opt_format_ref;
-	my $entry;
-	return $entry if ( ! defined $optfile ) || ( ! -f $optfile );
 
 	# Get a hash or optname -> internal_opt_name
 	my $optname;
@@ -2632,6 +2632,23 @@ sub get {
 			$optname->{$_} = $optint;
 		}
 	}
+	for my $optint ( keys %{ $opt_format_ref } ) {
+		$optname->{$optint} = $optint;
+	}
+	return $optname;
+}
+
+
+# $entry = get( $opt, $optfile )
+# get all options from file into $entry ($opt is used just to get access to general options like debug)
+sub get {
+	my $opt = shift;
+	my $optfile = shift;
+	my $opt_format_ref = $Options::opt_format_ref;
+	my $entry;
+	return $entry if ( ! defined $optfile ) || ( ! -f $optfile );
+
+	my $optname = get_opt_map();
 
 	# Load opts
 	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
@@ -2639,12 +2656,10 @@ sub get {
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
 		next if not defined $1;
-		chomp( $entry->{ $optname->{$1} } = $2 );
-		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
 		# Error if the option is not valid
 		if ( not defined $optname->{$1} ) {
 			main::logger "ERROR: Invalid option in $optfile: '$1 = $2'\n";
-			main::logger "INFO: Use --dump-opts to display all valid options\n";
+			main::logger "INFO: Please remove and use --dump-options to display all valid options\n";
 			exit 10;
 		}
 		# Warn if it is listed as a deprecated internal option name
@@ -2652,6 +2667,8 @@ sub get {
 			main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
 			main::logger "INFO: Use --dump-opts to display all valid options\n";
 		}
+		chomp( $entry->{ $optname->{$1} } = $2 );
+		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
 	}
 	close OPT;
 	return $entry;
