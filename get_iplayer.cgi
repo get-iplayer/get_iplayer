@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.20';
+my $VERSION = '0.21';
 
 # Features:
 # * Search for progs
@@ -16,6 +16,7 @@ my $VERSION = '0.20';
 # Run with embedded web server (preferred method):
 # * By default this will run as the user you start the script with
 # * Start with: ./get_iplayer.cgi 1935 /path/to/get_iplayer
+# * On Win32 Start with: perl.exe .\get_iplayer.cgi 1935 .\get_iplayer.cmd
 # * Access using: http://localhost:1935/
 #
 # Installation as Apache CGI script (not the preferred method):
@@ -71,7 +72,7 @@ my @pids;
 my @displaycols;
 
 # Field names grabbed from get_iplayer
-my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web);
+my @headings = qw( index thumbnail pid available type name episode versionlist duration desc channel categories timeadded guidance web);
 
 # Default Displayed headings
 my @headings_default = qw( thumbnail type name episode desc channel categories );
@@ -84,7 +85,7 @@ my %fieldname = (
 	type			=> 'Type',
 	name			=> 'Name',
 	episode			=> 'Episode',
-	versions		=> 'Versions',
+	versionlist		=> 'Version List',
 	duration		=> 'Duration',
 	desc			=> 'Description',
 	channel			=> 'Channel',
@@ -111,18 +112,16 @@ my %prog_types = (
 	radio	=> 'BBC Radio',
 	podcast	=> 'BBC Podcast',
 	itv	=> 'ITV',
-	ch4	=> 'Channel4',
-	five	=> 'Demand Five',
-	hulu	=> 'Hulu TV',
+	livetv	=> 'Live BBC TV',
+	liveradio => 'Live BBC Radio',
 );
 my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio',
 	3	=> 'podcast',
 	4	=> 'itv',
-	5	=> 'ch4',
-	6	=> 'five',
-	7	=> 'hulu',
+	5	=> 'livetv',
+	6	=> 'liveradio',
 );
 # Get list of currently valid and prune %prog types and add new entry
 chomp( my @plugins = split /,/, `$get_iplayer --listplugins` );
@@ -170,7 +169,7 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
-my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL OUTPUT VMODE AMODE PROXY HIDE SINCE /;
+my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL OUTPUT MODES PROXY HIDE SINCE /;
 my @order_settings = qw/ SCRIPTPATH HOMEDIR /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
 # Any params that should never get into the get_iplayer pvr-add search
@@ -231,12 +230,12 @@ my @nosearch_params = qw/ /;
 		save	=> 1,
 	};
 
-	$opt->{VMODE} = {
-		title	=> 'Video Recording Modes', # Title
-		webvar	=> 'VMODE', # webvar
-		optkey	=> 'vmode', # option
+	$opt->{MODES} = {
+		title	=> 'Recording Modes', # Title
+		webvar	=> 'MODES', # webvar
+		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'iphone,flashhigh,flashnormal', # default
+		default	=> 'iphone,flashhigh,flashnormal,flashaac,flashaudio', # default
 		value	=> 40, # width values
 		save	=> 1,
 	};
@@ -279,20 +278,10 @@ my @nosearch_params = qw/ /;
 		save	=> 1,
 	};
 	
-	$opt->{AMODE} = {
-		title	=> 'Audio Recording Modes', # Title
-		webvar	=> 'AMODE', # webvar
-		optkey	=> 'amode', # option
-		type	=> 'text', # type
-		default	=> 'iphone,flashaudio,flashaac,realaudio', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{VERSIONS} = {
-		title	=> 'Programme Versions', # Title
-		webvar	=> 'VERSIONS', # webvar
-		optkey	=> 'versions', # option
+	$opt->{VERSIONLIST} = {
+		title	=> 'Programme Versions List', # Title
+		webvar	=> 'VERSIONLIST', # webvar
+		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
 		default	=> 'default', # default
 		value	=> 40, # width values
@@ -675,7 +664,7 @@ sub stream_mov {
 
 	print $se "INFO: Start Streaming $pid to browser\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', '--vmode=iphone', '--amode=iphone', '--stdout', '--nowrite', "--pid=$pid" );
+	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', '--modes=iphone', '--stream', "--pid=$pid" );
 	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
 	system @cmd;
 
@@ -864,7 +853,7 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@record) {
 		chomp();
-		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel '$name'";
+		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel=\"$name\"";
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -885,7 +874,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$get_iplayer_cmd --nocopyright --info --nopurge --type=$type pid:$pid";
+	my $cmd = "$get_iplayer_cmd --nocopyright --info --nopurge --type=$type \"pid:$pid\"";
 	print $fh p("Command: $cmd");
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -913,7 +902,7 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
-		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid '$pid' --pvrqueue --comment '$comment (queued: ".localtime().")'";
+		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid=\"$pid\" --pvrqueue --comment=\"$comment (queued: ".localtime().')"';
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -936,7 +925,7 @@ sub build_cmd_options_urlencoded {
 	}
 
 	# Return option with urlencoded values
-	return "--webrequest '".(join '&', @options)."'";
+	return '--webrequest="'.(join '&', @options).'"';
 	
 }
 
@@ -976,7 +965,7 @@ sub pvr_add {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$get_iplayer_cmd $options --pvradd '$searchname'";
+	my $cmd  = "$get_iplayer_cmd $options --pvradd=\"$searchname\"";
 	print $se "Command: $cmd"; #if $DEBUG;
 	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
@@ -1111,7 +1100,7 @@ sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = "$get_iplayer_cmd --nopurge --nocopyright --flush --type $typelist --search='no search just flush'";
+	my $cmd  = "$get_iplayer_cmd --nopurge --nocopyright --flush --type=$typelist --search=\"no search just flush\"";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	system $cmd;
@@ -1436,7 +1425,7 @@ sub get_progs {
 
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --listformat='ENTRY${fields}'";
+	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --listformat=\"ENTRY${fields}\"";
 	print $se "DEBUG: Command: $cmd\n"; # if $DEBUG;
 	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;

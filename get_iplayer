@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.09;
+my $version = 2.10;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -178,6 +178,8 @@ my $opt_format = {
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
+	start		=> [ 1, "start=s", 'Recording', '--start <secs>', "Recording/streaming start offset (rtmp and realaudio only)"],
+	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
 	stdout		=> [ 1, "stdout|x", 'Output', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	stream		=> [ 0, "stream", 'Output', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
@@ -4520,7 +4522,7 @@ sub clean_pid {
 	# Extract the appended start timestamp if it exists and set options accordingly e.g. '?t=16m51s'
 	if ( $prog->{pid} =~ m{\?t=(\d+)m(\d+)s$} ) {
 		# calculate the start offset
-		$opt->{rtmpstart} = $1*60.0 + $2;
+		$opt->{start} = $1*60.0 + $2;
 	}
 	
 	# Expand Short iplayer URL redirects
@@ -5978,8 +5980,6 @@ sub opt_format {
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		flvstreamer	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
 		rtmpdump	=> [ 0, "", 'Deprecated', '', "Location of rtmpdump binary"],
-		rtmpstart	=> [ 1, "rtmpstart=s", 'Recording', '--rtmpstart <secs>', "RTMP start offset"],
-		rtmpstop	=> [ 1, "rtmpstop=s", 'Recording', '--rtmpstop <secs>', "RTMP stop offset (can be used to limit live recording length)"],
 		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'Deprecated', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
@@ -6043,13 +6043,13 @@ sub get {
 	}
 
 	# Add start stop options if defined
-	if ( $opt->{rtmpstart} || $opt->{rtmpstop} ) {
+	if ( $opt->{start} || $opt->{stop} ) {
 		if ( $rtmpver < 1.8 ) {
 			main::logger "WARNING: Please use flvstreamer v1.8c or later for start/stop features\n";
 			exit 4;
 		}
-		$extraopts .= " --start $opt->{rtmpstart}" if $opt->{rtmpstart};
-		$extraopts .= " --stop $opt->{rtmpstop}" if $opt->{rtmpstop};
+		$extraopts .= " --start $opt->{start}" if $opt->{start};
+		$extraopts .= " --stop $opt->{stop}" if $opt->{stop};
 	}
 	
 	# Create symlink if required
@@ -6210,6 +6210,21 @@ sub get {
 			$url1 =~ s!^.+?(rtsp://.+?)(\s|\s.*|)$!$1!g;
 		}
 		$url = $url1;
+	}
+
+	# Add stop and start if defined
+	# append: ?start=5400&end=7400 or &start=5400&end=7400
+	if ( $opt->{start} || $opt->{stop} ) {
+		# Make sure we add the correct separator for adding to the rtsp url
+		my $prefix_char = '?';
+		$prefix_char = '&' if $url =~ m/\?.+/;
+		if ( $opt->{start} && $opt->{stop} ) {
+			$url .= "${prefix_char}start=$opt->{start}&end=$opt->{stop}";
+		} elsif ( $opt->{start} && not $opt->{stop} ) {
+			$url .= "${prefix_char}start=$opt->{start}";
+		} elsif ( $opt->{stop} && not $opt->{start} ) {
+			$url .= "${prefix_char}end=$opt->{stop}";
+		}
 	}
 	
 	# Create named pipe
