@@ -158,7 +158,7 @@ my $opt_format = {
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 0, "output|o=s", 'Output', '--output, -o <dir>', "Default Recording output directory"],
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
-	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Works around for some broken web proxies (try this extra option if your proxy fails)"],
+	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
 	packagemanager	=> [ 0, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
@@ -1933,15 +1933,16 @@ sub create_html {
 
 # Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
-# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
+# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>], <1=mustproxy> );
 sub request_url_retry {
 
 	my %OPTS = @LWP::Protocol::http::EXTRA_SOCK_OPTS;
 	$OPTS{SendTE} = 0;
 	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
 	
-	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
+	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy) = @_;
 	my $res;
+
 
 	# Use url prepend if required
 	if ( $opt->{proxy} =~ /^prepend:/ ) {
@@ -1955,6 +1956,8 @@ sub request_url_retry {
 		return '';
 	}
 
+	# Disable proxy unless mustproxy is flagged
+	main::proxy_disable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	my $i;
 	logger "INFO: Getting page $url\n" if $opt->{verbose};
 	for ($i = 0; $i < $retries; $i++) {
@@ -1966,6 +1969,8 @@ sub request_url_retry {
 			last;
 		}
 	}
+	# Re-enable proxy unless mustproxy is flagged
+	main::proxy_enable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	# Return empty string if we failed
 	return '' if $i == $retries;
 
@@ -4223,7 +4228,7 @@ sub get_stream_data {
 	my @medias;
 	# If this is a Live TV or EMP stream verpid
 	if ( $verpid =~ /^\?/ ) {
-		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3 );
+		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
 		my $mattribs;
 		my $cattribs;
@@ -4256,9 +4261,12 @@ sub get_stream_data {
 		# Push into media data structure
 		push @{ $mattribs->{connections} }, $cattribs;
 		push @medias, $mattribs;
+	# Don't do this stream lookup if only iphone mode and neither info or subtitles options are specified - it is unneccesary
+	} elsif ( $prog->modelist() eq 'iphone' && (! $opt->{info}) && ! $opt->{subtitles} ) {
+		# skip mediaselector lookup
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
 	} else {
-		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3 );
+		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
 		@medias = parse_metadata( $xml );
 	}
@@ -4530,6 +4538,7 @@ sub clean_pid {
 	if ( $prog->{pid} =~ m{bbc\.co\.uk\/i\/[a-z0-9]{5}\/.*$}i ) {
 		# Do a recursive redirect lookup to get the final URL
 		my $ua = main::create_ua();
+		main::proxy_disable($ua) if $opt->{partialproxy};
 		my $res;
 		do {
 			# send request (use simple_request here because that will not allow redirects)
@@ -4540,6 +4549,7 @@ sub clean_pid {
 				main::logger "DEBUG: got short url redirect to '$prog->{pid}' from iplayer site\n" if $opt->{debug};
 			}
 		} while ( $res->is_redirect );
+		main::proxy_enable($ua) if $opt->{partialproxy};
 		main::logger "DEBUG: Final expanded short URL is '$prog->{pid}'\n" if $opt->{debug};
 	}
 		
@@ -4802,9 +4812,7 @@ sub download {
 	if ( $opt->{subtitles} ) {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-		main::proxy_disable($ua) if $opt->{partialproxy};
 		$prog->download_subtitles( $ua, $subfile );
-		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
 
 
