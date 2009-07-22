@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.21';
+my $VERSION = '0.22';
 
 # Features:
 # * Search for progs
@@ -26,10 +26,21 @@ my $VERSION = '0.21';
 # * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
 # * Access using http://<your web server>/get_iplayer.cgi
 #
-# Direct Streaming from embedded web server
+# Direct Streaming from embedded web server (not win32)
 # * Use these URLs directly to stream the mov file
-# * Stream: http://localhost:1935/stream?SEARCH=tv:<PID>
 # * Record Stream: http://localhost:1935/record?SEARCH=tv:<PID>&FILENAME=<filename>
+# * Stream flash AAC liveradio as 320k mp3 stream: 
+#	mplayer "http://localhost:1935/stream?SEARCH=liveradio:<PID>&BITRATE=320&MODES=flashaac&OUTTYPE=nnn.mp3"
+# * Stream flash livetv as flv stream:
+#	mplayer "http://localhost:1935/stream?SEARCH=livetv:<PID>&MODES=flashnormal&OUTTYPE=nnn.flv"
+# * Stream flash AAC liveradio as raw wav stream:
+#	mplayer "http://localhost:1935/stream?SEARCH=liveradio:<PID>&MODES=flashaac&OUTTYPE=nnn.wav"
+# * Stream tv as http quicktime stream:
+#	mplayer "http://localhost:1935/stream?SEARCH=tv:<PID>&MODES=iphone&OUTTYPE=nnn.mov" -cache 2048
+# * Stream iphone radio as http mp3 stream:
+#	mplayer "http://localhost:1935/stream?SEARCH=radio:<PID>&MODES=iphone&OUTTYPE=nnn.mp3"
+# * Stream flash mp3 radio as http flac stream:
+#	mplayer "http://localhost:1935/stream?SEARCH=radio:<PID>&MODES=flashaudio&OUTTYPE=nnn.flac"
 #
 # Setup crontab
 # * Add a line in /etc/crontab to run the pvr: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
@@ -584,16 +595,43 @@ sub run_cgi {
 
 	# Stream
 	if ( $request_url =~ /^\/?stream/i ) {
+		my $type = $cgi->param( 'OUTTYPE' );
+		# Remove fileprefix
+		$type =~ s/^.*\.//g;
+		# Stream mime types
+		my %mimetypes = (
+			wav 	=> 'audio/x-wav',
+			flac	=> 'audio/x-flac',
+			mp3 	=> 'audio/mpeg',
+			ra	=> 'audio/x-pn-realaudio',
+			aac	=> 'audio/x-aac',
+			m4a	=> 'audio/x-aac',
+			mov 	=> 'video/quicktime',
+			mp4	=> 'video/x-flv',
+			avi	=> 'video/x-flv',
+			asf	=> 'video/x-ms-asf',
+			flv	=> 'video/x-flv',
+		);
+
 		# Output headers
-		# to stream file
+		# to stream 
 		# This will enable seekable -Accept_Ranges=>'bytes',
-		my $headers = $cgi->header( -type => 'video/quicktime', -Connection => 'close' );
+		my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
 
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
 		print $fh $headers;
 
-		stream_mov( $opt->{SEARCH}->{current} );
+		# Default Recipies
+		# Need to determine --type and then set the default --modes and default outtype for conversion if required
+		# No conversion for iphone radio as mp3
+		$type = undef if $opt->{MODES}->{current} eq 'iphone' && $type eq 'mp3';
+		# No conversion for flv
+		$type = undef if $type eq 'flv';
+		# Don't set type and convert if video
+		$type = undef if $mimetypes{$type} =~ /^video/;
+
+		stream_prog( $opt->{SEARCH}->{current}, $opt->{MODES}->{current}, $type, $cgi->param( 'BITRATE' ) );
 
 	# Record file
 	} elsif ( $request_url =~ /^\/?record/i ) {
@@ -667,6 +705,36 @@ sub stream_mov {
 	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', '--modes=iphone', '--stream', "--pid=$pid" );
 	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
 	system @cmd;
+
+	print $se "INFO: Finished Streaming $pid to browser\n";
+
+	return 0;
+}
+
+
+
+sub stream_prog {
+	my $pid = shift;
+	my $modes = shift || 'flash,iphone';
+	my $type = shift;
+	my $bitrate = shift;
+	
+	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output type '$type' and bitrate '$bitrate'\n";
+
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', "--modes=$modes", '--stream', "--pid=$pid" );
+
+	my $command = join(' ', @cmd);
+
+	# If conversion is necessary
+	if ( $type && ! $bitrate ) {
+		$command .= " | /usr/bin/ffmpeg -i - -vn -f $type -";
+	} elsif ($type && $bitrate ) {
+		$command .= " | /usr/bin/ffmpeg -i - -vn -ab ${bitrate}k -f $type -";
+	}
+
+	print $se "DEBUG: running: $command\n";
+	system $command;
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
@@ -1197,10 +1265,18 @@ sub search_progs {
 			)
 		);
 		# Record and stream links
+		# Fix output type and mode per prog type
+		my %streamopts = (
+			radio		=> '&MODES=iphone&OUTTYPE=mp3',
+			tv		=> '&MODES=iphone&OUTTYPE=mov',
+			livetv		=> '&MODES=flashnormal&OUTTYPE=flv',
+			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
+			itv		=> '&OUTTYPE=asf',
+		);
 		push @row, td( {-class=>'search'}, 
 			a( { -class=>'search', -title=>'Record', -href=>'/record?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
 			.'/'.
-			a( { -class=>'search', -title=>'Stream', -href=>'/stream?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid") }, 'S' )
+			a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
 		);
 
 		for ( @displaycols ) {
