@@ -1,17 +1,18 @@
 #!/usr/bin/perl
 #
-# The Worlds most insecure web manager for get_iplayer
+# The Worlds most insecure web-based PVR Manager adn streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
 #
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.22';
+my $VERSION = '0.23';
 
 # Features:
 # * Search for progs
 # * Lists/Adds/Removes PVR entries
-# (get_iplayer should be installed and working from /usr/bin/get_iplayer)
+# * Acts as a proxy to stream any programme over HTTP
+# * Automatically generates playlists for any programme type
 #
 # Run with embedded web server (preferred method):
 # * By default this will run as the user you start the script with
@@ -27,36 +28,72 @@ my $VERSION = '0.22';
 # * Access using http://<your web server>/get_iplayer.cgi
 #
 # Direct Streaming from embedded web server (not win32)
+# -----------------------------------------------------
 # * Use these URLs directly to stream the mov file
-# * Record Stream: http://localhost:1935/record?SEARCH=tv:<PID>&FILENAME=<filename>
+# * Record Stream: http://localhost:1935/record?PID=tv:<PID>&FILENAME=<filename>
 # * Stream flash AAC liveradio as 320k mp3 stream: 
-#	mplayer "http://localhost:1935/stream?SEARCH=liveradio:<PID>&BITRATE=320&MODES=flashaac&OUTTYPE=nnn.mp3"
+#	mplayer -cache 1024 "http://localhost:1935/stream?PID=liveradio:<PID>&BITRATE=320&MODES=flashaac&OUTTYPE=nnn.mp3"
 # * Stream flash livetv as flv stream:
-#	mplayer "http://localhost:1935/stream?SEARCH=livetv:<PID>&MODES=flashnormal&OUTTYPE=nnn.flv"
+#	mplayer -cache 1024 "http://localhost:1935/stream?PID=livetv:<PID>&MODES=flashnormal&OUTTYPE=nnn.flv"
 # * Stream flash AAC liveradio as raw wav stream:
-#	mplayer "http://localhost:1935/stream?SEARCH=liveradio:<PID>&MODES=flashaac&OUTTYPE=nnn.wav"
+#	mplayer -cache 1024 "http://localhost:1935/stream?PID=liveradio:<PID>&MODES=flashaac&OUTTYPE=nnn.wav"
 # * Stream tv as http quicktime stream:
-#	mplayer "http://localhost:1935/stream?SEARCH=tv:<PID>&MODES=iphone&OUTTYPE=nnn.mov" -cache 2048
+#	mplayer -cache 2048 "http://localhost:1935/stream?PID=tv:<PID>&MODES=iphone&OUTTYPE=nnn.mov"
 # * Stream iphone radio as http mp3 stream:
-#	mplayer "http://localhost:1935/stream?SEARCH=radio:<PID>&MODES=iphone&OUTTYPE=nnn.mp3"
+#	mplayer -cache 1024 "http://localhost:1935/stream?PID=radio:<PID>&MODES=iphone&OUTTYPE=nnn.mp3"
 # * Stream flash mp3 radio as http flac stream:
-#	mplayer "http://localhost:1935/stream?SEARCH=radio:<PID>&MODES=flashaudio&OUTTYPE=nnn.flac"
+#	mplayer -cache 1024 "http://localhost:1935/stream?PID=radio:<PID>&MODES=flashaudio&OUTTYPE=nnn.flac"
 #
-# Setup crontab
+# Valid OUTTYPE values are: wav,mp3,rm,flv,mov
+#
+#
+# Automatic Playlists
+# -------------------
+# Notes: - Ensure you open the playlist window in VLC
+#	 - Tested in mplayer, vlc
+#
+# * All radio programmes - all modes (flashaac,flashaudio,iphone,realaudio):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=radio"
+# * All tv programmes - all modes (flashhigh,iphone,flashnormal):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=tv"
+# * All livetv channels:
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=livetv"
+# * All liveradio channels:
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio"
+# More specific examples:
+# * All liveradio channels (e.g. flashaac as flv):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac&OUTTYPE=flv"
+# * All liveradio channels (e.g. flashaac as wav):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac&OUTTYPE=wav"
+# * All liveradio channels (e.g. realaudio):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=realaudio&OUTTYPE=rm"
+# * All liveradio channels (e.g. flashaac,realaudio):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac,realaudio&OUTTYPE=flv"
+# * All radio programmes (e.g. flash):
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=radio&MODES=flash&OUTTYPE=flv"
+# * All liveradio channels with a single digit in their name
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&SEARCH=' \d '"
+# * All tv programmes with the word 'news' in their name:
+#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=tv&SEARCH='news'"
+#
+#
+# Setup crontab for PVR to run
+# ----------------------------
 # * Add a line in /etc/crontab to run the pvr: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
 #
 # Caveats:
+# --------
 # * Sometimes takes a while to load page while refreshing caches
 # * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
 # * If a boolean param is in the cookies then it overrides the unchecked status on the form regardless
-# * rtmpdump has way too much debug output to STDOUT so 'Run PVR' locks up browser after a while.
 # * When using the stream or record links directly, cookies are not sent and the settings are not applied such as SCRIPTPATH
 #
 # Todo:
 # * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
 # * Add loads of options
 # * in general, take presentation data out of the html and into css, take scripting out of the html and into the js
-# * Get rtmpdump to stream to stdout in get_iplayer
+# * Use getopt
+# * Add options to specify location of binaries and port
 
 use strict;
 use CGI ':all';
@@ -72,6 +109,7 @@ my $se = *STDERR;
 
 # Port for embeded web server
 my $port = shift @ARGV || 1935;
+my $ffmpeg = 'ffmpeg';
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
@@ -246,7 +284,7 @@ my @nosearch_params = qw/ /;
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'iphone,flashhigh,flashnormal,flashaac,flashaudio', # default
+		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashnormal,realaudio', # default
 		value	=> 40, # width values
 		save	=> 1,
 	};
@@ -499,7 +537,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|runpvr|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|runpvr|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -512,7 +550,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				# respond OK to browser
 				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
-				run_cgi( $client, $query_string, $request{URL} );
+				run_cgi( $client, $query_string, $request{URL}, $request{host} );
 
 			# Else 404
 			} else {
@@ -570,7 +608,8 @@ sub run_cgi {
 	$fh = shift;
 	my $query_string = shift;
 	my $request_url = shift;
-	
+	my $request_host = shift;
+
 	# Clean globals
 	%prog = ();
 	@pids = ();
@@ -595,7 +634,7 @@ sub run_cgi {
 
 	# Stream
 	if ( $request_url =~ /^\/?stream/i ) {
-		my $type = $cgi->param( 'OUTTYPE' );
+		my $type = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
 		$type =~ s/^.*\.//g;
 		# Stream mime types
@@ -603,47 +642,67 @@ sub run_cgi {
 			wav 	=> 'audio/x-wav',
 			flac	=> 'audio/x-flac',
 			mp3 	=> 'audio/mpeg',
-			ra	=> 'audio/x-pn-realaudio',
-			aac	=> 'audio/x-aac',
-			m4a	=> 'audio/x-aac',
+			rm	=> 'audio/x-pn-realaudio',
 			mov 	=> 'video/quicktime',
 			mp4	=> 'video/x-flv',
 			avi	=> 'video/x-flv',
-			asf	=> 'video/x-ms-asf',
 			flv	=> 'video/x-flv',
+			asf	=> 'video/x-ms-asf',
 		);
 
-		# Output headers
-		# to stream 
-		# This will enable seekable -Accept_Ranges=>'bytes',
-		my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
+		# Default mime type depending on mode
+		$type = 'flv' if $opt->{MODES}->{current} =~ /^flash/ && ! $type;
 
-		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
-		print $fh $headers;
+		# If type is defined
+		if ( $mimetypes{$type} ) {
 
-		# Default Recipies
-		# Need to determine --type and then set the default --modes and default outtype for conversion if required
-		# No conversion for iphone radio as mp3
-		$type = undef if $opt->{MODES}->{current} eq 'iphone' && $type eq 'mp3';
-		# No conversion for flv
-		$type = undef if $type eq 'flv';
-		# Don't set type and convert if video
-		$type = undef if $mimetypes{$type} =~ /^video/;
+			# Output headers
+			# to stream 
+			# This will enable seekable -Accept_Ranges=>'bytes',
+			my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
 
-		stream_prog( $opt->{SEARCH}->{current}, $opt->{MODES}->{current}, $type, $cgi->param( 'BITRATE' ) );
+			# Send the headers to the browser
+			print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+			print $fh $headers;
+
+			# Default Recipies
+			# Need to determine --type and then set the default --modes and default outtype for conversion if required
+			# No conversion for iphone radio as mp3
+			$type = undef if $opt->{MODES}->{current} eq 'iphone' && $type eq 'mp3';
+			# No conversion for realaudio radio as rm
+			$type = undef if $opt->{MODES}->{current} eq 'realaudio' && $type eq 'rm';
+			# No conversion for flv
+			$type = undef if $type eq 'flv';
+			# Don't set type and convert if video
+			$type = undef if $mimetypes{$type} =~ /^video/;
+
+			stream_prog( $cgi->param( 'PID' ), $opt->{MODES}->{current}, $type, $cgi->param( 'BITRATE' ) );
+		} else {
+			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
+		}
 
 	# Record file
 	} elsif ( $request_url =~ /^\/?record/i ) {
 		# Output headers
 		# To save file
-		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $opt->{SEARCH}->{current}.'.mov' );
+		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $cgi->param('PID').'.mov' );
 
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
 		print $fh $headers;
 
-		stream_mov( $opt->{SEARCH}->{current} );
+		stream_mov( $cgi->param('PID') );
+
+	# Get a playlist for a specified 'PROGTYPES'
+	} elsif ( $request_url =~ /^\/?playlist/i ) {
+		# Output headers
+		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
+
+		# Send the headers to the browser
+		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $fh $headers;
+		# ( host, outtype, modes, type, bitrate )
+		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current} );
 
 	# HTML page
 	} elsif ( $request_url =~ /^\/?(iplayer|)$/i ) {
@@ -721,16 +780,19 @@ sub stream_prog {
 	
 	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output type '$type' and bitrate '$bitrate'\n";
 
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
+	open(STDOUT, ">&", $fh ) || die "can't dup client to stdout";
+	# Enable buffering
+	STDOUT->autoflush(0);
+	$fh->autoflush(0);
 	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', "--modes=$modes", '--stream', "--pid=$pid" );
 
 	my $command = join(' ', @cmd);
 
 	# If conversion is necessary
 	if ( $type && ! $bitrate ) {
-		$command .= " | /usr/bin/ffmpeg -i - -vn -f $type -";
+		$command .= " | $ffmpeg -i - -vn -f $type -";
 	} elsif ($type && $bitrate ) {
-		$command .= " | /usr/bin/ffmpeg -i - -vn -ab ${bitrate}k -f $type -";
+		$command .= " | $ffmpeg -i - -vn -ab ${bitrate}k -f $type -";
 	}
 
 	print $se "DEBUG: running: $command\n";
@@ -739,6 +801,34 @@ sub stream_prog {
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
 	return 0;
+}
+
+
+
+sub get_playlist {
+	my ( $request_host, $outtype, $modes, $type, $bitrate, $search ) = ( @_ );
+	my @playlist;
+	$outtype =~ s/^.*\.//g;
+
+	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
+	my @out = `$get_iplayer_cmd --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" $search`;
+
+	push @playlist, "#EXTM3U\n";
+
+	# Extract and rewrite into m3u format
+	for ( grep !/^Added:/ , @out ) {
+		chomp();
+		my ($pid, $name, $episode, $desc) = (split /\|/)[0,1,2,3];
+		next if ! ( $pid && $name );
+		# Format required, e.g.
+		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
+		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
+		#
+		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
+		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
+	}
+
+	return join ("\n", @playlist);
 }
 
 
@@ -1274,9 +1364,9 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>'Record', -href=>'/record?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
+			a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
 			.'/'.
-			a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?SEARCH='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
+			a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?PID='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
 		);
 
 		for ( @displaycols ) {
