@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.10;
+my $version = 2.11;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -721,12 +721,6 @@ sub find_matches {
 			$got_cache{$_} = 1 for keys %type;
 	}
 	
-	# List elements (i.e. 'channel' 'categories') if required and exit
-	if ( $opt->{list} ) {
-		list_unique_element_counts( \%prog, \%type, $opt->{list} );
-		exit 0;
-	}
-
 	# Parse remaining args
 	my @match_list;
 	my @index_search_args;
@@ -759,6 +753,12 @@ sub find_matches {
 		}
 	}
 	
+	# List elements (i.e. 'channel' 'categories') if required and exit
+	if ( $opt->{list} ) {
+		list_unique_element_counts( \%type, $opt->{list}, @match_list );
+		exit 0;
+	}
+
 	# Go get the cached data for other programme types if the index numbers require it
 	for my $index ( @index_search_args ) {
 		# see if this index number falls into a valid range for a prog type
@@ -2128,21 +2128,22 @@ sub purge_downloaded_files {
 
 
 
-# list_unique_element_counts( \%prog, \%type, $element_name );
-# Show channels for currently specified types
+# list_unique_element_counts( \%type, $element_name, @matchlist);
+# Show channels for currently specified types in @matchlist - an array of progrefs
 sub list_unique_element_counts {
-	my $progref = shift;
 	my $typeref = shift;
 	my $element_name = shift;
+	my @match_list = @_;
 	my %elements;
 	logger "INFO: ".(join ',', keys %{ $typeref })." $element_name List:\n" if $opt->{verbose};
-	for my $pid ( keys %{ $progref } ) {
+	# Get list to count from matching progs
+	for my $prog ( @match_list ) {
 		my @element;
 		# Need to separate the categories
 		if ($element_name eq 'categories') {
-			@element = split /,/, $progref->{$pid}->{$element_name};
+			@element = split /,/, $prog->{$element_name};
 		} else {
-			$element[0] = $progref->{$pid}->{$element_name};
+			$element[0] = $prog->{$element_name};
 		}
 		for my $element (@element) {
 			$elements{ $element }++;
