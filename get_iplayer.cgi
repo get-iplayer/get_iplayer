@@ -6,7 +6,7 @@
 # (C) Phil Lewis, 2009
 # License: GPLv3
 #
-my $VERSION = '0.23';
+my $VERSION = '0.24';
 
 # Features:
 # * Search for progs
@@ -77,6 +77,20 @@ my $VERSION = '0.23';
 #	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=tv&SEARCH='news'"
 #
 #
+# Automatic OPML Playlists (works with Squeezebox)
+# ------------------------------------------------
+# See: http://wiki.slimdevices.com/index.php/OPMLSupport for details on syntax
+# Note: Programmes that are realaudio mode only will not work yet - only flashaudio, flashaac and iphone work
+#
+# In Squeezecenter, Add this URL to 'Favourites' and you will be able to navigate the programmes:
+# * BBC iPlayer Listen Again:
+#	http://<SERVER IP>:1935/opml?PROGTYPES=radio&MODES=flash,iphone&LIST=channel
+# * BBC iPlayer Live Flash AAC:
+#	http://<SERVER IP>:1935/opml?PROGTYPES=liveradio&OUTTYPE=wav
+# * BBC iPlayer Live Flash AAC (Numbered Channels only)
+#	http://<SERVER IP>:1935/opml?PROGTYPES=liveradio&MODES=flash&SEARCH=%20\d&OUTTYPE=wav
+#
+#
 # Setup crontab for PVR to run
 # ----------------------------
 # * Add a line in /etc/crontab to run the pvr: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
@@ -99,6 +113,7 @@ use strict;
 use CGI ':all';
 use CGI::Cookie;
 use IO::File;
+use HTML::Entities;
 use URI::Escape;
 use IO::Handle;
 my $DEBUG = 0;
@@ -537,7 +552,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|runpvr|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|opml|runpvr|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -704,6 +719,17 @@ sub run_cgi {
 		# ( host, outtype, modes, type, bitrate )
 		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current} );
 
+	# Get a playlist for a specified 'PROGTYPES'
+	} elsif ( $request_url =~ /^\/?opml/i ) {
+		# Output headers
+		my $headers = $cgi->header( -type => 'text/xml' );
+
+		# Send the headers to the browser
+		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $fh $headers;
+		# ( host, outtype, modes, type, bitrate )
+		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
+
 	# HTML page
 	} elsif ( $request_url =~ /^\/?(iplayer|)$/i ) {
 		# Output headers
@@ -795,7 +821,7 @@ sub stream_prog {
 		$command .= " | $ffmpeg -i - -vn -ab ${bitrate}k -f $type -";
 	}
 
-	print $se "DEBUG: running: $command\n";
+	print $se "DEBUG: Command: $command\n";
 	system $command;
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
@@ -827,6 +853,87 @@ sub get_playlist {
 		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
 		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
 	}
+
+	return join ("\n", @playlist);
+}
+
+
+
+sub get_opml {
+	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $list ) = ( @_ );
+	my @playlist;
+	$outtype =~ s/^.*\.//g;
+
+	#<?xml version="1.0" encoding="UTF-8"?>
+	#<opml version="1.1">
+	#  <head>
+	#    <title>Grateful Dead - 1995-07-09-Chicago, IL</title>
+	#  </head>
+	#  <body>
+	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t01_vbr.mp3" bitrate="200" source="Soundboard" text="Touch Of Grey" type="audio" />
+	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t02_vbr.mp3" bitrate="203" source="Soundboard" text="Little Red Rooster" type="audio" />
+	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t03_vbr.mp3" bitrate="194" source="Soundboard" text="Lazy River Road" type="audio" />
+	#  </body>
+	#</opml>
+
+	print $se "INFO: Getting playlist for type '$type' using modes '$modes', bitrate '$bitrate', search='$search' and list '$list'\n";
+
+	# Header
+	push @playlist, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<opml version=\"1.1\">";
+
+	# Programmes
+	if (! $list) {
+
+		# Header
+		push @playlist, "\t<head>\n\t\t\n\t</head>";
+		push @playlist, "\t<body>";
+
+		# Extract and rewrite into playlist format
+		my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --type=$type --listformat=\"<pid>|<name>|<episode>|<desc>\" --search=\"$search\"";
+		print $se "DEBUG: Command: $cmd\n";
+		for ( grep !/^Added:/, `$cmd` ) {
+			chomp();
+			# Strip unprinatble chars
+			s/(.)/(ord($1) > 127) ? "" : $1/egs;
+			my ($pid, $name, $episode, $desc) = (split /\|/)[0,1,2,3];
+			next if ! ( $pid && $name );
+			# Format required, e.g.
+			#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
+			push @playlist, "\t\t<outline URL=\"".encode_entities("http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}")."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
+		}
+
+	# Channels/Names etc
+	} elsif ($list) {
+	
+		# Header
+		push @playlist, "\t<head>\n\t\t\n\t</head>";
+		push @playlist, "\t<body>";
+
+		# Extract and rewrite into playlist format
+		my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --type=$type --list=$list --channel=\"$search\"";
+		print $se "DEBUG: Command: $cmd\n";
+		for ( grep !/^Added:/, `$cmd` ) {
+			my $suffix;
+			chomp();
+			# Strip unprinatble chars
+			s/(.)/(ord($1) > 127) ? "" : $1/egs;
+			next if ! m{^.+\(\d+\)$};
+			my $item = $_;
+			s/\s*\(\d+\)$//g;
+			my $itemregex = '^'.$_.'$';
+			# URL encode it
+			$itemregex =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+			# Stateful addition of search terms
+			$suffix = '&LIST=name' if $list eq 'channel';
+			# Format required, e.g.
+			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
+			push @playlist, "\t\t<outline URL=\"".encode_entities("http://${request_host}/opml?PROGTYPES=${type}&SEARCH=${itemregex}${suffix}&MODES=${modes}&OUTTYPE=a.wav")."\" text=\"".encode_entities("$item")."\" title=\"".encode_entities("$item")."\" type=\"playlist\" />";
+		}
+
+	}
+
+	# Footer
+	push @playlist, "\t</body>\n</opml>";
 
 	return join ("\n", @playlist);
 }
