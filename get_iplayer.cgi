@@ -1798,7 +1798,7 @@ sub form_header {
 				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()", },
 					'Run PVR'
 				),
-				a( { -class=>'nav', -onClick => "parent.location='http://linuxcentre.net/getiplayer/documentation'", },
+				a( { -class=>'nav', -onClick => "parent.location='http://linuxcentre.net/projects/get_iplayer-pvr-manager/'", },
 					'Help'
 				),
 			]),
