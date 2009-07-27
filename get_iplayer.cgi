@@ -3,111 +3,27 @@
 # The Worlds most insecure web-based PVR Manager adn streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
 #
-# (C) Phil Lewis, 2009
-# License: GPLv3
+#    Copyright (C) 2009 Phil Lewis
 #
-my $VERSION = '0.24';
-
-# Features:
-# * Search for progs
-# * Lists/Adds/Removes PVR entries
-# * Acts as a proxy to stream any programme over HTTP
-# * Automatically generates playlists for any programme type
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
 #
-# Run with embedded web server (preferred method):
-# * By default this will run as the user you start the script with
-# * Start with: ./get_iplayer.cgi 1935 /path/to/get_iplayer
-# * On Win32 Start with: perl.exe .\get_iplayer.cgi 1935 .\get_iplayer.cmd
-# * Access using: http://localhost:1935/
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
 #
-# Installation as Apache CGI script (not the preferred method):
-# * By default this will run as apache user and save all settings files in /var/www/.get_iplayer
-# * Change the $get_iplayer variable to tell this script where get_iplayer can be found (may need to set $HOME also)
-# * Ensure that the output dir is writable by apache user
-# * in apache config, add a line like: ScriptAlias /get_iplayer.cgi "/path/to/get_iplayer.cgi"
-# * Access using http://<your web server>/get_iplayer.cgi
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Direct Streaming from embedded web server (not win32)
-# -----------------------------------------------------
-# * Use these URLs directly to stream the mov file
-# * Record Stream: http://localhost:1935/record?PID=tv:<PID>&FILENAME=<filename>
-# * Stream flash AAC liveradio as 320k mp3 stream: 
-#	mplayer -cache 1024 "http://localhost:1935/stream?PID=liveradio:<PID>&BITRATE=320&MODES=flashaac&OUTTYPE=nnn.mp3"
-# * Stream flash livetv as flv stream:
-#	mplayer -cache 1024 "http://localhost:1935/stream?PID=livetv:<PID>&MODES=flashnormal&OUTTYPE=nnn.flv"
-# * Stream flash AAC liveradio as raw wav stream:
-#	mplayer -cache 1024 "http://localhost:1935/stream?PID=liveradio:<PID>&MODES=flashaac&OUTTYPE=nnn.wav"
-# * Stream tv as http quicktime stream:
-#	mplayer -cache 2048 "http://localhost:1935/stream?PID=tv:<PID>&MODES=iphone&OUTTYPE=nnn.mov"
-# * Stream iphone radio as http mp3 stream:
-#	mplayer -cache 1024 "http://localhost:1935/stream?PID=radio:<PID>&MODES=iphone&OUTTYPE=nnn.mp3"
-# * Stream flash mp3 radio as http flac stream:
-#	mplayer -cache 1024 "http://localhost:1935/stream?PID=radio:<PID>&MODES=flashaudio&OUTTYPE=nnn.flac"
+# Author: Phil Lewis
+# Email: iplayer2 (at sign) linuxcentre.net
+# Web: http://linuxcentre.net/iplayer
+# License: GPLv3 (see LICENSE.txt)
 #
-# Valid OUTTYPE values are: wav,mp3,rm,flv,mov
-#
-#
-# Automatic Playlists
-# -------------------
-# Notes: - Ensure you open the playlist window in VLC
-#	 - Tested in mplayer, vlc
-#
-# * All radio programmes - all modes (flashaac,flashaudio,iphone,realaudio):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=radio"
-# * All tv programmes - all modes (flashhigh,iphone,flashnormal):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=tv"
-# * All livetv channels:
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=livetv"
-# * All liveradio channels:
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio"
-# More specific examples:
-# * All liveradio channels (e.g. flashaac as flv):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac&OUTTYPE=flv"
-# * All liveradio channels (e.g. flashaac as wav):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac&OUTTYPE=wav"
-# * All liveradio channels (e.g. realaudio):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=realaudio&OUTTYPE=rm"
-# * All liveradio channels (e.g. flashaac,realaudio):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&MODES=flashaac,realaudio&OUTTYPE=flv"
-# * All radio programmes (e.g. flash):
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=radio&MODES=flash&OUTTYPE=flv"
-# * All liveradio channels with a single digit in their name
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=liveradio&SEARCH=' \d '"
-# * All tv programmes with the word 'news' in their name:
-#	vlc "http://127.0.0.1:1935/playlist?PROGTYPES=tv&SEARCH='news'"
-#
-#
-# Automatic OPML Playlists (works with Squeezebox)
-# ------------------------------------------------
-# See: http://wiki.slimdevices.com/index.php/OPMLSupport for details on syntax
-# Note: Programmes that are realaudio mode only will not work yet - only flashaudio, flashaac and iphone work
-#
-# In Squeezecenter, Add this URL to 'Favourites' and you will be able to navigate the programmes:
-# * BBC iPlayer Listen Again:
-#	http://<SERVER IP>:1935/opml?PROGTYPES=radio&MODES=flash,iphone&LIST=channel
-# * BBC iPlayer Live Flash AAC:
-#	http://<SERVER IP>:1935/opml?PROGTYPES=liveradio&OUTTYPE=wav
-# * BBC iPlayer Live Flash AAC (Numbered Channels only)
-#	http://<SERVER IP>:1935/opml?PROGTYPES=liveradio&MODES=flash&SEARCH=%20\d&OUTTYPE=wav
-#
-#
-# Setup crontab for PVR to run
-# ----------------------------
-# * Add a line in /etc/crontab to run the pvr: "0 * * * * apache /usr/bin/get_iplayer --pvr 2>/dev/null"
-#
-# Caveats:
-# --------
-# * Sometimes takes a while to load page while refreshing caches
-# * Streaming link seems to fail with a SIGPIPE on firefox/Linux - works OK if you use the link in vlc or 'mplayer -cache 3000'
-# * If a boolean param is in the cookies then it overrides the unchecked status on the form regardless
-# * When using the stream or record links directly, cookies are not sent and the settings are not applied such as SCRIPTPATH
-#
-# Todo:
-# * Manual flush of Indicies (maybe normally set --expiry to 99999999 and warn that indicies are out of date)
-# * Add loads of options
-# * in general, take presentation data out of the html and into css, take scripting out of the html and into the js
-# * Use getopt
-# * Add options to specify location of binaries and port
+my $VERSION = '0.25';
 
 use strict;
 use CGI ':all';
@@ -116,20 +32,61 @@ use IO::File;
 use HTML::Entities;
 use URI::Escape;
 use IO::Handle;
-my $DEBUG = 0;
+use Getopt::Long;
 $| = 1;
 my $fh;
 # Send log messages to this fh
 my $se = *STDERR;
 
-# Port for embeded web server
-my $port = shift @ARGV || 1935;
-my $ffmpeg = 'ffmpeg';
+my $opt_cmdline;
+$opt_cmdline->{debug} = 0;
+# Allow bundling of single char options
+Getopt::Long::Configure ("bundling");
+# cmdline opts take precedence
+GetOptions(
+	"help|h"			=> \$opt_cmdline->{help},
+	"port|listen|p=n"		=> \$opt_cmdline->{port},
+	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
+	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
+	"debug"				=> \$opt_cmdline->{debug},
+) || die usage();
+
+# Display usage if old method of invocation is used or --help
+usage() if $opt_cmdline->{help} || @ARGV;
+
+
+# Usage
+sub usage {
+	my $text = sprintf "get_iplayer PVR Manager v%.2f, ", $VERSION;
+	$text .= <<'EOF';
+Copyright (C) 2009 Phil Lewis
+  This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
+  and you are welcome to redistribute it under certain conditions; 
+  See the GPLv3 for details.
+
+Options:
+ --port,-p         Use the built-in web server and listen on this TCP port
+ --getiplayer,-g   Path to the get_iplayer script
+ --ffmpeg          Path to the ffmpeg binary
+ --debug           Debug mode
+ --help,-h         This help text
+EOF
+	print $text;
+	exit 1;
+}	
+
+
+# Some defaults
+$opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
+# Search for get_iplayer
+if ( ! $opt_cmdline->{getiplayer} ) {
+	for ( './get_iplayer', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
+		$opt_cmdline->{getiplayer} = $_ if -x $_;
+	}
+}
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
-my $get_iplayer = shift @ARGV || '/usr/bin/get_iplayer';
-my $get_iplayer_cmd;
 
 my %prog;
 my @pids;
@@ -188,7 +145,7 @@ my %prog_types_order = (
 	6	=> 'liveradio',
 );
 # Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, `$get_iplayer --listplugins` );
+chomp( my @plugins = split /,/, `$opt_cmdline->{getiplayer} --listplugins` );
 for my $type (keys %prog_types) {
 	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
 		# delete from %prog_types hash
@@ -328,7 +285,7 @@ my @nosearch_params = qw/ /;
 		title	=> 'get_iplayer Script Location', # Title
 		webvar	=> 'SCRIPTPATH', # webvar
 		type	=> 'text', # type
-		default	=> $get_iplayer, # default
+		default	=> $opt_cmdline->{getiplayer}, # default
 		value	=> 40, # width values
 		save	=> 1,
 	};
@@ -471,8 +428,8 @@ my @nosearch_params = qw/ /;
 use Socket;
 use IO::Socket;
 my $IGNOREEXIT = 0;
-# If the specified port number is  > 1024 then run embedded web server
-if ( $port =~ /\d+/ && $port > 1024 ) {
+# If the port number is specified then run embedded web server
+if ( $opt_cmdline->{port} > 0 ) {
 	# Setup signal handlers
 	$SIG{INT} = $SIG{PIPE} = \&cleanup;
 	# Autoreap zombies
@@ -483,12 +440,12 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 		# Setup and create socket
 		my $server = new IO::Socket::INET(
 			Proto => 'tcp',
-			LocalPort => $port,
+			LocalPort => $opt_cmdline->{port},
 			Listen => SOMAXCONN,
 			Reuse => 1
 		);
 		$server or die "Unable to create server socket: $!";
-		print $se "INFO: Listening on port $port\n";
+		print $se "INFO: Listening on port $opt_cmdline->{port}\n";
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
 			my $procid = fork();
@@ -522,7 +479,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 							s/\s+$//;
 						}
 						$request{lc $type} = $val;
-						print "REQUEST HEADER: $type: $val\n" if $DEBUG;
+						print "REQUEST HEADER: $type: $val\n" if $opt_cmdline->{debug};
 					# POST data
 					} elsif (/^$/) {
 						read( $client, $request{CONTENT}, $request{'content-length'} ) if defined $request{'content-length'};
@@ -561,7 +518,7 @@ if ( $port =~ /\d+/ && $port > 1024 ) {
 				$ENV{'QUERY_STRING'} = $query_string;
 				$ENV{'REQUEST_URI'} = $request{URL};
 				$ENV{'COOKIE'} = $request{cookie};
-				$ENV{'SERVER_PORT'} = $port;
+				$ENV{'SERVER_PORT'} = $opt_cmdline->{port};
 				# respond OK to browser
 				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
@@ -645,7 +602,7 @@ sub run_cgi {
 	# Set HOME env var for forked processes
 	$ENV{HOME} = $home;
 	# Set command path
-	$get_iplayer_cmd = $opt->{SCRIPTPATH}->{current};
+	$opt_cmdline->{getiplayer} = $opt->{SCRIPTPATH}->{current};
 
 	# Stream
 	if ( $request_url =~ /^\/?stream/i ) {
@@ -677,7 +634,7 @@ sub run_cgi {
 			my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
 
 			# Send the headers to the browser
-			print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 			print $fh $headers;
 
 			# Default Recipies
@@ -703,7 +660,7 @@ sub run_cgi {
 		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $cgi->param('PID').'.mov' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 
 		stream_mov( $cgi->param('PID') );
@@ -714,7 +671,7 @@ sub run_cgi {
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
 		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current} );
@@ -725,7 +682,7 @@ sub run_cgi {
 		my $headers = $cgi->header( -type => 'text/xml' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $DEBUG;
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
@@ -740,7 +697,7 @@ sub run_cgi {
 
 		# Page Routing
 		form_header();
-		if ( $DEBUG ) {
+		if ( $opt_cmdline->{debug} ) {
 			print $fh $cgi->Dump();
 			#for my $key (sort keys %ENV) {
 			#    print $fh $key, " = ", $ENV{$key}, "\n";
@@ -764,7 +721,7 @@ sub run_cgi {
 
 sub pvr_run {
 	print $se "INFO: Starting Manual PVR Run\n";
-	my $cmd = "$get_iplayer_cmd --nopurge --nocopyright --hash --pvr";
+	my $cmd = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --hash --pvr";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 
@@ -787,7 +744,7 @@ sub stream_mov {
 
 	print $se "INFO: Start Streaming $pid to browser\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', '--modes=iphone', '--stream', "--pid=$pid" );
+	my @cmd = ( $opt_cmdline->{getiplayer}, '--showopts', '--nocopyright', '--nopurge', '--modes=iphone', '--stream', "--pid=$pid" );
 	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
 	system @cmd;
 
@@ -810,15 +767,15 @@ sub stream_prog {
 	# Enable buffering
 	STDOUT->autoflush(0);
 	$fh->autoflush(0);
-	my @cmd = ( $get_iplayer_cmd, '--showopts', '--nocopyright', '--nopurge', "--modes=$modes", '--stream', "--pid=$pid" );
+	my @cmd = ( $opt_cmdline->{getiplayer}, '--showopts', '--nocopyright', '--nopurge', "--modes=$modes", '--stream', "--pid=$pid" );
 
 	my $command = join(' ', @cmd);
 
 	# If conversion is necessary
 	if ( $type && ! $bitrate ) {
-		$command .= " | $ffmpeg -i - -vn -f $type -";
+		$command .= " | $opt_cmdline->{ffmpeg} -i - -vn -f $type -";
 	} elsif ($type && $bitrate ) {
-		$command .= " | $ffmpeg -i - -vn -ab ${bitrate}k -f $type -";
+		$command .= " | $opt_cmdline->{ffmpeg} -i - -vn -ab ${bitrate}k -f $type -";
 	}
 
 	print $se "DEBUG: Command: $command\n";
@@ -837,7 +794,7 @@ sub get_playlist {
 	$outtype =~ s/^.*\.//g;
 
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
-	my @out = `$get_iplayer_cmd --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" $search`;
+	my @out = `$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" $search`;
 
 	push @playlist, "#EXTM3U\n";
 
@@ -889,7 +846,7 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --type=$type --listformat=\"<pid>|<name>|<episode>|<desc>\" --search=\"$search\"";
+		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat=\"<pid>|<name>|<episode>|<desc>\" --search=\"$search\"";
 		print $se "DEBUG: Command: $cmd\n";
 		for ( grep !/^Added:/, `$cmd` ) {
 			chomp();
@@ -910,7 +867,7 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = "$get_iplayer_cmd --nocopyright --nopurge --type=$type --list=$list --channel=\"$search\"";
+		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --list=$list --channel=\"$search\"";
 		print $se "DEBUG: Command: $cmd\n";
 		for ( grep !/^Added:/, `$cmd` ) {
 			my $suffix;
@@ -942,7 +899,7 @@ sub get_opml {
 
 sub get_pvr_list {
 	my $pvrsearch;
-	my $out = `$get_iplayer_cmd --nocopyright --pvrlist`;
+	my $out = `$opt_cmdline->{getiplayer} --nocopyright --pvrlist`;
 	
 	# Remove text before first pvrsearch entry
 	$out =~ s/^.+?(pvrsearch\s.+)$/$1/s;
@@ -1118,7 +1075,7 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@record) {
 		chomp();
-		my $cmd = "$get_iplayer_cmd --nocopyright --pvrdel=\"$name\"";
+		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --pvrdel=\"$name\"";
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1139,7 +1096,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$get_iplayer_cmd --nocopyright --info --nopurge --type=$type \"pid:$pid\"";
+	my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --info --nopurge --type=$type \"pid:$pid\"";
 	print $fh p("Command: $cmd");
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -1167,7 +1124,7 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
-		my $cmd = "$get_iplayer_cmd --nocopyright --type $type --pid=\"$pid\" --pvrqueue --comment=\"$comment (queued: ".localtime().')"';
+		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --type $type --pid=\"$pid\" --pvrqueue --comment=\"$comment (queued: ".localtime().')"';
 		print $fh p("Command: $cmd");
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1230,8 +1187,8 @@ sub pvr_add {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$get_iplayer_cmd $options --pvradd=\"$searchname\"";
-	print $se "Command: $cmd"; #if $DEBUG;
+	my $cmd  = "$opt_cmdline->{getiplayer} $options --pvradd=\"$searchname\"";
+	print $se "Command: $cmd"; #if $opt_cmdline->{debug};
 	print $fh p("Command: $cmd");
 	my $cmdout = `$cmd`;
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1365,7 +1322,7 @@ sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = "$get_iplayer_cmd --nopurge --nocopyright --flush --type=$typelist --search=\"no search just flush\"";
+	my $cmd  = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --flush --type=$typelist --search=\"no search just flush\"";
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	system $cmd;
@@ -1698,8 +1655,8 @@ sub get_progs {
 
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-	my $cmd = "$get_iplayer_cmd $options --nocopyright --nopurge --listformat=\"ENTRY${fields}\"";
-	print $se "DEBUG: Command: $cmd\n"; # if $DEBUG;
+	my $cmd = "$opt_cmdline->{getiplayer} $options --nocopyright --nopurge --listformat=\"ENTRY${fields}\"";
+	print $se "DEBUG: Command: $cmd\n"; # if $opt_cmdline->{debug};
 	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
@@ -1755,7 +1712,7 @@ sub get_display_cols {
 ######################################################################
 sub begin_html {
 	print $fh "<html>";
-	print $fh "<HEAD><TITLE>get_iplayer Manager</TITLE>\n";
+	print $fh "<HEAD><TITLE>get_iplayer PVR Manager</TITLE>\n";
 	insert_stylesheet();
 	print $fh "</HEAD>\n";
 	insert_javascript();
@@ -1778,7 +1735,7 @@ sub http_headers {
 			next if not $opt->{$_}->{save};
 			my $cookie = $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y' );
 			push @cookies, $cookie;
-			print $se "DEBUG: Sending cookie: $cookie\n" if $DEBUG;
+			print $se "DEBUG: Sending cookie: $cookie\n" if $opt_cmdline->{debug};
 		}
 		# Ensure SAVE state is reset to off
 		$opt->{SAVE}->{current} = 0;
@@ -1791,7 +1748,7 @@ sub http_headers {
 		-cookie		=> [@cookies],
 	);
 
-	print $se "\nHEADERS:\n$headers\n" if $DEBUG;
+	print $se "\nHEADERS:\n$headers\n" if $opt_cmdline->{debug};
 	print $fh $headers;
 }
 
@@ -1813,7 +1770,7 @@ sub form_header {
 	print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
 		a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
 			label({ -class=>'title' },
-				'get_iplayer Manager',
+				'get_iplayer PVR Manager',
 			)
 		)
 	)));
@@ -1887,15 +1844,15 @@ sub process_params {
 		# Ignore cookies if we are saving new ones
 		if ( not $cgi->param('SAVE') ) {
 			if ( defined $cgi->param($_) ) {
-				print $se "DEBUG: GOT Param  $_ = ".$cgi->param($_)."\n" if $DEBUG;
+				print $se "DEBUG: GOT Param  $_ = ".$cgi->param($_)."\n" if $opt_cmdline->{debug};
 				$opt->{$_}->{current} = join ",", $cgi->param($_);
 			} elsif (  defined $cgi->cookie($_) ) {
-				print $se "DEBUG: GOT Cookie $_ = ".$cgi->cookie($_)."\n" if $DEBUG;
+				print $se "DEBUG: GOT Cookie $_ = ".$cgi->cookie($_)."\n" if $opt_cmdline->{debug};
 				$opt->{$_}->{current} = join ",", $cgi->cookie($_);
 			} else {
 				$opt->{$_}->{current} =  join ",", $opt->{$_}->{default};
 			}
-			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $DEBUG;
+			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_cmdline->{debug};
 		} else {
 			$opt->{$_}->{current} = join(",", $cgi->param($_) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
 		}
