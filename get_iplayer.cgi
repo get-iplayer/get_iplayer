@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.25';
+my $VERSION = '0.26';
 
 use strict;
 use CGI ':all';
@@ -80,7 +80,7 @@ EOF
 $opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
-	for ( './get_iplayer', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
+	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
 		$opt_cmdline->{getiplayer} = $_ if -x $_;
 	}
 }
@@ -509,7 +509,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|opml|runpvr|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|genplaylist|opml|runpvr|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -686,6 +686,18 @@ sub run_cgi {
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
+
+	# Get a playlist for a selected progs in form
+	} elsif ( $request_url =~ /^\/?genplaylist/i ) {
+		# Output headers
+		# To save file
+		my $headers = $cgi->header( -type => 'audio/x-mpegurl', -attachment => 'get_iplayer.m3u' );
+
+		# Send the headers to the browser
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+		print $fh $headers;
+		# ( host, outtype, modes, type, bitrate )
+		print $fh create_playlist_m3u( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '' );
 
 	# HTML page
 	} elsif ( $request_url =~ /^\/?(iplayer|)$/i ) {
@@ -1137,6 +1149,30 @@ sub pvr_queue {
 
 
 
+sub create_playlist_m3u {
+	my ( $request_host, $outtype, $bitrate ) = ( @_ );
+	my @playlist;
+	push @playlist, "#EXTM3U\n";
+
+	my @record = ( $cgi->param( 'PROGSELECT' ) );
+
+	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
+		# Format required, e.g.
+		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
+		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
+		#
+		push @playlist, "#EXTINF:-1,$type - $name - $episode";
+		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=$opt->{current}->{modes}&OUTTYPE=${pid}.${outtype}\n";
+	}
+
+	return join ("\n", @playlist);
+}
+
+
+
 sub build_cmd_options_urlencoded {
 	my @options;
 	for ( @_ ) {
@@ -1523,7 +1559,10 @@ sub search_progs {
 					'Search'
 				),
 				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()", },
-					'Queue Selected for Recording'
+					'Queue for Recording'
+				),
+				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';", },
+					'Create Playlist'
 				),
 				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()", },
 					'Add Current Search to PVR'
@@ -1783,7 +1822,7 @@ sub form_header {
 						-class => 'nav',
 						-width => 99,
 						-height => 32,
-						-src => "http://www.bbc.co.uk/iplayer/img/iplayer_logo.gif",
+						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
 					}),
 				),
 				a( { -class=>'nav', -onClick  => "history.back()", },
@@ -2004,7 +2043,7 @@ sub insert_stylesheet {
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 24.5%; }
+	LI.action		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
 	A.action		{ display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.action:hover		{ color: #ADADAD; text-decoration: none; }
