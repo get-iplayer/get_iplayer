@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.26';
+my $VERSION = '0.27';
 
 use strict;
 use CGI ':all';
@@ -674,7 +674,7 @@ sub run_cgi {
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
-		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current} );
+		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name' );
 
 	# Get a playlist for a specified 'PROGTYPES'
 	} elsif ( $request_url =~ /^\/?opml/i ) {
@@ -690,8 +690,9 @@ sub run_cgi {
 	# Get a playlist for a selected progs in form
 	} elsif ( $request_url =~ /^\/?genplaylist/i ) {
 		# Output headers
+		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 		# To save file
-		my $headers = $cgi->header( -type => 'audio/x-mpegurl', -attachment => 'get_iplayer.m3u' );
+		#my $headers = $cgi->header( -type => 'audio/x-mpegurl', -attachment => 'get_iplayer.m3u' );
 
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
@@ -801,12 +802,12 @@ sub stream_prog {
 
 
 sub get_playlist {
-	my ( $request_host, $outtype, $modes, $type, $bitrate, $search ) = ( @_ );
+	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $searchfields ) = ( @_ );
 	my @playlist;
 	$outtype =~ s/^.*\.//g;
 
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
-	my @out = `$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" $search`;
+	my @out = `$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" --fields="$searchfields" $search`;
 
 	push @playlist, "#EXTM3U\n";
 
@@ -1396,7 +1397,7 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'R/S' );
+	push @html, th( { -class => 'search' }, 'P/R/S' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -1464,6 +1465,8 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
+			a( { -class=>'search', -title=>'Play', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash&OUTTYPE=out.flv' }, 'P' )
+			.'/'.
 			a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
 			.'/'.
 			a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?PID='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
