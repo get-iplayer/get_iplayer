@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.12;
+my $version = 2.13;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -6106,7 +6106,7 @@ sub get {
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
 	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
-	return 'retry' if $return == 2 && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
 
 	# Success after successful live stream
 	if ( $opt->{stdout} && $opt->{nowrite} && $return == 0 ) {
@@ -6115,7 +6115,7 @@ sub get {
 	}
 
 	# Hack to get around flvstreamer/rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) || $return ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
 		unlink $file_tmp;
