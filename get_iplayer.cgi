@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.27';
+my $VERSION = '0.28';
 
 use strict;
 use CGI ':all';
@@ -190,8 +190,8 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
-my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL OUTPUT MODES PROXY HIDE SINCE /;
-my @order_settings = qw/ SCRIPTPATH HOMEDIR /;
+my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+my @order_settings = qw/ OUTPUT MODES PROXY /; # = qw/ SCRIPTPATH HOMEDIR /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
@@ -731,23 +731,24 @@ sub run_cgi {
 }
 
 
-
 sub pvr_run {
 	print $se "INFO: Starting Manual PVR Run\n";
-	my $cmd = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --hash --pvr";
-	print $se "DEBUG: running: $cmd\n";
-	print $fh '<pre>';
-
+	# Redirect both STDOUT and STDERR to client browser socket
+	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
 	# Unbuffered output
 	STDOUT->autoflush(1);
 	STDERR->autoflush(1);
-
-	# Redirect both STDOUT and STDERR to client browser socket
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-
-	# Run cmd
+	my $cmd = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --hash --pvr";
+	print $se "DEBUG: running: $cmd\n";
+	print $fh '<pre>';
+	# Before stderr
+	my $before_se = $se;
+	open(STDERR, ">&", $fh )   || die "can't dup client to stderr";
 	system $cmd;
+	# Restore stderr
+	$se = $before_se;
 	print $fh '</pre>';
+	print $fh p("PVR Run complete");
 }
 
 
@@ -967,11 +968,11 @@ sub show_pvr_list {
 	        # Sort by column click and change display class (colour) according to sort status
 	        my ($title, $class, $onclick);
 	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit()");
+                  ($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit()");
                 } else {
-                  ($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit()");
+                  ($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit()");
                 }
-                $class = 'sorted_reverse' if $sort_field eq $heading && $reverse;
+                $class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
 		push @html, th( { -class => 'search' },
 			label( {
@@ -1089,7 +1090,7 @@ sub pvr_del {
 	for my $name (@record) {
 		chomp();
 		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --pvrdel=\"$name\"";
-		print $fh p("Command: $cmd");
+		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Deleted: $name");
@@ -1110,11 +1111,11 @@ sub show_info {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
 	my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --info --nopurge --type=$type \"pid:$pid\"";
-	print $fh p("Command: $cmd");
+	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 	print $fh p("Info for $pid");
-	for ( @cmdout ) {
+	for ( grep !/^Added:/, @cmdout ) {
 		my ( $key, $val ) = ( $1, $2 ) if m{^(\w+?):\s*(.+?)\s*$};
 		next if $key =~ /(^$|^\d+$)/ || $val =~ /Matching Program/i;
 		$out .= "$key: $val\n";
@@ -1138,7 +1139,7 @@ sub pvr_queue {
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
 		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --type $type --pid=\"$pid\" --pvrqueue --comment=\"$comment (queued: ".localtime().')"';
-		print $fh p("Command: $cmd");
+		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Queued: $type: '$name - $episode' ($pid)");
@@ -1225,8 +1226,8 @@ sub pvr_add {
 	}
 
 	my $cmd  = "$opt_cmdline->{getiplayer} $options --pvradd=\"$searchname\"";
-	print $se "Command: $cmd"; #if $opt_cmdline->{debug};
-	print $fh p("Command: $cmd");
+	print $se "Command: $cmd";
+	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 	my $cmdout = `$cmd`;
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
@@ -1397,18 +1398,18 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'P/R/S' );
+	push @html, th( { -class => 'search' }, 'Play' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
 		# Sort by column click and change display class (colour) according to sort status
 		my ($title, $class, $onclick);
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=0; submit()");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=0; submit()");
 		}
-		$class = 'sorted_reverse' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
+		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
 		push @html, 
 			th( { -class => 'search' },
@@ -1465,11 +1466,11 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>'Play', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash&OUTTYPE=out.flv' }, 'P' )
-			.'/'.
-			a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
-			.'/'.
-			a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?PID='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
+			a( { -class=>'search', -title=>'Play', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
+			#.'/'.
+			#a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
+			#.'/'.
+			#a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?PID='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
 		);
 
 		for ( @displaycols ) {
@@ -1493,22 +1494,27 @@ sub search_progs {
 	# Generate the html for all these options in THIS ORDER
 	# Build basic options tables + hidden
 	my @optrows_basic;
+	push @optrows_basic, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Search Options:' ) );
 	for ( @order_basic_opts, @hidden_opts ) {
 		push @optrows_basic, build_option_html( $opt->{$_} );
 	}
 	# Build Advanced options table cells
 	my @optrows_advanced;
-	for ( @order_adv_opts ) {
-		push @optrows_advanced, build_option_html( $opt->{$_} );
+	if ( @order_adv_opts ) {
+		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Advanced Search Options:' ) );
+		for ( @order_adv_opts ) {
+			push @optrows_advanced, build_option_html( $opt->{$_} );
+		}
 	}
-	# Add 'Settings' title
-	push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_outer' }, 'Settings' ) );
-	# Build Settings table cells
+	# Add 'Settings' title (if required)
 	my @optrows_settings;
-	for ( @order_settings ) {
-		push @optrows_advanced, build_option_html( $opt->{$_} );
+	if ( @order_settings ) {
+		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Other Settings:' ) );
+		# Build Settings table cells
+		for ( @order_settings ) {
+			push @optrows_advanced, build_option_html( $opt->{$_} );
+		}
 	}
-	
 
 	# Set advanced options cell status and label
 	my $adv_style;
@@ -1527,7 +1533,7 @@ sub search_progs {
 			td( { -class=>'options_outer' },
 				# Advanced Options button
 				label( {
-					-class		=> 'options_outer',
+					-class		=> 'options_outer pointer',
 					-id		=> 'advanced_opts_button',
 					-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', 'Show Advanced Options', 'Hide Advanced Options' );",
 					},
@@ -1537,7 +1543,7 @@ sub search_progs {
 			td( { -class=>'options_outer' },
 				# Save Options button
 				label( {
-					-class		=> 'options_outer',
+					-class		=> 'options_outer pointer',
 					-onClick	=> "form.SAVE.value=1; submit();",
 					},
 					'Remember Options',
@@ -1632,16 +1638,16 @@ sub pagetrail {
 	# Page trail
 	my @pagetrail;
 
-	push @pagetrail, td( { -class=>'pagetrail' }, label( {
+	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Previous Page",
-		-class		=> 'pagetrail',
+		-class		=> 'pagetrail pointer',
 		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; submit()",},
 		"<<",
 	)) if $page > 1;
 
-	push @pagetrail, td( { -class=>'pagetrail' }, label( {
+	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page 1",
-		-class		=> 'pagetrail',
+		-class		=> 'pagetrail pointer',
 		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",},
 		"1",
 	)) if $page > 1;
@@ -1649,9 +1655,9 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page > $trailsize+2;
 
  	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
-		push @pagetrail, td( { -class=>'pagetrail' }, label( {
+		push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 			-title		=> "Page $pn",
-			-class		=> 'pagetrail',
+			-class		=> 'pagetrail pointer',
 			-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; submit()",},
 			"$pn",
 		)) if $pn > 1 && $pn != $page && $pn < $pages;
@@ -1663,16 +1669,16 @@ sub pagetrail {
 	}
 	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page < $pages-$trailsize-1;
 
-	push @pagetrail, td( { -class=>'pagetrail' }, label( {
+	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page ".$pages,
-		-class		=> 'pagetrail',
+		-class		=> 'pagetrail pointer',
 		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; submit()",},
 		"$pages",
 	)) if $page < $pages;
 
-	push @pagetrail, td( { -class=>'pagetrail' }, label( {
+	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Next Page",
-		-class		=> 'pagetrail',
+		-class		=> 'pagetrail pointer',
 		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; submit()",},
 		">>",
 	)) if $page < $pages;
@@ -1698,8 +1704,7 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 	my $cmd = "$opt_cmdline->{getiplayer} $options --nocopyright --nopurge --listformat=\"ENTRY${fields}\"";
-	print $se "DEBUG: Command: $cmd\n"; # if $opt_cmdline->{debug};
-	my @list = `$cmd`;
+	print $se "DEBUG: Command: $cmd\n";	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
 	for ( grep /^ENTRY/, @list ) {
@@ -1809,21 +1814,22 @@ sub form_header {
 			-method => "POST",
 	);
 	
-	print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
-		a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
-			label({ -class=>'title' },
-				'get_iplayer PVR Manager',
-			)
-		)
-	)));
+	#print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
+	#	a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
+	#		label({ -class=>'title' },
+	#			'get_iplayer PVR Manager',
+	#		)
+	#	)
+	#)));
 
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
 			li( { -class=>'nav' }, [
 				a( { -class=>'nav', -href=>"/" },
 					img({
+						-title => 'get_iplayer PVR Manager',
 						-class => 'nav',
-						-width => 99,
+						-width => 174,
 						-height => 32,
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
 					}),
@@ -2001,6 +2007,9 @@ sub insert_stylesheet {
 
 	<STYLE type="text/css">
 	
+	.pointer		{ cursor: pointer; cursor: hand; }
+	.pointer:hover		{ text-decoration: underline; }
+
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
 	INPUT			{ border: 0 none; background: #ddd; }
@@ -2011,7 +2020,7 @@ sub insert_stylesheet {
 	/* Nav bar */
 	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.nav			{ padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 16.2%; }
+	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 16.2%; }
 	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
 	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.nav:hover		{ color: #ADADAD; text-decoration: none; }
@@ -2042,17 +2051,17 @@ sub insert_stylesheet {
 	TH.options_outer	{ }
 	TD.options_outer	{ }
 	LABEL.options_outer	{ font-weight: bold; font-size: 110%; color: #4A4; } 
+	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
 	
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
+	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
 	A.action		{ display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.action:hover		{ color: #ADADAD; text-decoration: none; }
 
 	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
-	TD.pagetrail:hover	{ text-decoration: underline; }
 	#centered		{ height:20px; margin:0px auto 0; position: relative; }
 	LABEL.pagetrail		{ Color: #FFF; }
 	LABEL.pagetrail-current	{ Color: #F54997; }
