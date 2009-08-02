@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.13;
+my $version = 2.14;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3082,9 +3082,9 @@ sub mode_ver_download_retry_loop {
 				$prog->tag_file;
 				$prog->download_thumbnail if $opt->{thumb};
 				$prog->create_metadata_file if $opt->{metadata};
-				$prog->run_user_command( $opt->{command} ) if $opt->{command};
-				$prog->report() if $opt->{pvr};
 			}
+			$prog->run_user_command( $opt->{command} ) if $opt->{command} && ! $opt->{subsonly};
+			$prog->report() if $opt->{pvr};
 			return 0;
 
 		# Retry this mode
@@ -6061,6 +6061,9 @@ sub get {
 		$extraopts .= " --stop $opt->{stop}" if $opt->{stop};
 	}
 	
+	# Add hashes option if required
+	$extraopts .= " --hashes" if $opt->{hash};
+	
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
@@ -6105,18 +6108,22 @@ sub get {
 	$return = system($cmd) >> 8;
 	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
 
+	# exit behaviour when streaming
+	if ( $opt->{nowrite} && $opt->{stdout} ) {
+		if ( $return == 0 ) {
+			main::logger "\nINFO: Streaming completed successfully\n";
+			return 0;
+		} else {
+			main::logger "\nINFO: Streaming failed with exit code $return\n";
+			return 'abort';
+		}
+	}
+
 	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
 
-	# Success after successful live stream
-	if ( $opt->{stdout} && $opt->{nowrite} && $return == 0 ) {
-		main::logger "\nINFO: Streaming completed successfully\n";
-		return 0;
-	}
-
-	# Hack to get around flvstreamer/rtmpdump prentending to fail on successful flash stream recording or pretending to succeed where it failed
+	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
-		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
 		unlink $file_tmp;
 		return 'next';
