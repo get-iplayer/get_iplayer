@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.14;
+my $version = 2.15;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -119,17 +119,18 @@ my %user_agent = (
 # Define general 'option names' => ( <advanced>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # If you want the option to be hidden then don't specify <option help section>, use ''
 my $opt_format = {
+	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
 	category 	=> [ 0, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	conditions	=> [ 1, "conditions", 'Misc', '--conditions', 'Shows GPL conditions'],
-	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	debug		=> [ 1, "debug", 'Config', '--debug', "Debug output"],
 	dumpoptions	=> [ 1, "dumpoptions|dumpopts|dump-options", 'Display', '--dump-options', 'Dumps all options with their internal option key names'],
 	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
 	excludecategory	=> [ 1, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched catogories (regex or comma separated values)"],
 	excludechannel	=> [ 1, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
+	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	flush		=> [ 0, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
 	force		=> [ 1, "force|force-download", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
@@ -143,6 +144,7 @@ my $opt_format = {
 	id3v2		=> [ 0, "id3tag|id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
 	info		=> [ 0, "i|info", 'Display', '--info, -i', "Show full programme metadata and availability of modes and subtitles (max 50 matches)"],
 	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
+	itvnothread	=> [ 1, "itvnothread", 'Recording', '--itvnothread', "Disable parallel threaded recording for itv"],
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
 	listplugins	=> [ 1, "listplugins", 'Display', '--listplugins', "Display a list of currently available plugins or programme types"],
@@ -173,7 +175,6 @@ my $opt_format = {
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
 	quiet		=> [ 1, "q|quiet|silent", 'Output', '--quiet, -q', "No logging output"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
-	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
 	save 		=> [ 0, "save", 'Deprecated', '--save', "Save specified options as default"],
 	search		=> [ 1, "search=s", 'Misc', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
@@ -6988,7 +6989,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(webrequest|^test|subsonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|nocopyright|^test|subsonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
