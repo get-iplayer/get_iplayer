@@ -23,14 +23,18 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.28';
+my $VERSION = '0.29';
 
 use strict;
 use CGI ':all';
 use CGI::Cookie;
 use IO::File;
+use File::Copy;
 use HTML::Entities;
 use URI::Escape;
+use LWP::ConnCache;
+#use LWP::Debug qw(+);
+use LWP::UserAgent;
 use IO::Handle;
 use Getopt::Long;
 $| = 1;
@@ -45,7 +49,8 @@ Getopt::Long::Configure ("bundling");
 # cmdline opts take precedence
 GetOptions(
 	"help|h"			=> \$opt_cmdline->{help},
-	"port|listen|p=n"		=> \$opt_cmdline->{port},
+	"listen|address|l=s"		=> \$opt_cmdline->{listen},
+	"port|p=n"			=> \$opt_cmdline->{port},
 	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
 	"debug"				=> \$opt_cmdline->{debug},
@@ -65,6 +70,7 @@ Copyright (C) 2009 Phil Lewis
   See the GPLv3 for details.
 
 Options:
+ --listen,-l       Use the built-in web server and listen on this interface address (default: 0.0.0.0)
  --port,-p         Use the built-in web server and listen on this TCP port
  --getiplayer,-g   Path to the get_iplayer script
  --ffmpeg          Path to the ffmpeg binary
@@ -78,6 +84,7 @@ EOF
 
 # Some defaults
 $opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
+$opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
 	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
@@ -93,7 +100,7 @@ my @pids;
 my @displaycols;
 
 # Field names grabbed from get_iplayer
-my @headings = qw( index thumbnail pid available type name episode versionlist duration desc channel categories timeadded guidance web);
+my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web);
 
 # Default Displayed headings
 my @headings_default = qw( thumbnail type name episode desc channel categories );
@@ -106,7 +113,7 @@ my %fieldname = (
 	type			=> 'Type',
 	name			=> 'Name',
 	episode			=> 'Episode',
-	versionlist		=> 'Version List',
+	versions		=> 'Versions',
 	duration		=> 'Duration',
 	desc			=> 'Description',
 	channel			=> 'Channel',
@@ -145,7 +152,7 @@ my %prog_types_order = (
 	6	=> 'liveradio',
 );
 # Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, `$opt_cmdline->{getiplayer} --listplugins` );
+chomp( my @plugins = split /,/, `$opt_cmdline->{getiplayer} --nopurge --nocopyright --listplugins` );
 for my $type (keys %prog_types) {
 	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
 		# delete from %prog_types hash
@@ -181,6 +188,7 @@ my %nextpages = (
 	'pvr_run'			=> \&pvr_run,
 	'show_info'			=> \&show_info,
 	'flush'				=> \&flush,
+	'update_script'			=> \&update_script,
 );
 
 
@@ -190,8 +198,8 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
-my @order_adv_opts = qw/ VERSIONS CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
-my @order_settings = qw/ OUTPUT MODES PROXY /; # = qw/ SCRIPTPATH HOMEDIR /;
+my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+my @order_settings = qw/ OUTPUT MODES PROXY /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
@@ -281,26 +289,8 @@ my @nosearch_params = qw/ /;
 		save	=> 1,
 	};
 	
-	$opt->{SCRIPTPATH} = {
-		title	=> 'get_iplayer Script Location', # Title
-		webvar	=> 'SCRIPTPATH', # webvar
-		type	=> 'text', # type
-		default	=> $opt_cmdline->{getiplayer}, # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-	
-	$opt->{HOMEDIR} = {
-		title	=> 'get_iplayer Home Folder', # Title
-		webvar	=> 'HOMEDIR', # webvar
-		type	=> 'text', # type
-		default	=> $home, # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-	
 	$opt->{VERSIONLIST} = {
-		title	=> 'Programme Versions List', # Title
+		title	=> 'Programme Version', # Title
 		webvar	=> 'VERSIONLIST', # webvar
 		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
@@ -424,7 +414,7 @@ my @nosearch_params = qw/ /;
 	};
 
 
-### Crude Single-Threaded Perl CGI Web Server ###
+### Perl CGI Web Server ###
 use Socket;
 use IO::Socket;
 my $IGNOREEXIT = 0;
@@ -440,12 +430,14 @@ if ( $opt_cmdline->{port} > 0 ) {
 		# Setup and create socket
 		my $server = new IO::Socket::INET(
 			Proto => 'tcp',
+			LocalAddr => $opt_cmdline->{listen},
 			LocalPort => $opt_cmdline->{port},
 			Listen => SOMAXCONN,
 			Reuse => 1
 		);
 		$server or die "Unable to create server socket: $!";
-		print $se "INFO: Listening on port $opt_cmdline->{port}\n";
+		print $se "INFO: Listening on $opt_cmdline->{listen}:$opt_cmdline->{port}\n";
+		print $se "WARNING: Insecure Remote access is allowed, use --listen=127.0.0.1 to limit to this host only\n" if $opt_cmdline->{listen} ne '127.0.0.1';
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
 			my $procid = fork();
@@ -597,12 +589,8 @@ sub run_cgi {
 	# Process All options
 	process_params();
 
-	# Set script path dir and home dir
-	$home = $opt->{HOMEDIR}->{current};
 	# Set HOME env var for forked processes
 	$ENV{HOME} = $home;
-	# Set command path
-	$opt_cmdline->{getiplayer} = $opt->{SCRIPTPATH}->{current};
 
 	# Stream
 	if ( $request_url =~ /^\/?stream/i ) {
@@ -758,7 +746,7 @@ sub stream_mov {
 
 	print $se "INFO: Start Streaming $pid to browser\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my @cmd = ( $opt_cmdline->{getiplayer}, '--showopts', '--nocopyright', '--nopurge', '--modes=iphone', '--stream', "--pid=$pid" );
+	my @cmd = ( $opt_cmdline->{getiplayer}, '--nocopyright', get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ) );
 	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
 	system @cmd;
 
@@ -781,8 +769,7 @@ sub stream_prog {
 	# Enable buffering
 	STDOUT->autoflush(0);
 	$fh->autoflush(0);
-	my @cmd = ( $opt_cmdline->{getiplayer}, '--showopts', '--nocopyright', '--nopurge', "--modes=$modes", '--stream', "--pid=$pid" );
-
+	my @cmd = ( $opt_cmdline->{getiplayer}, '--nocopyright', get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid" ) );
 	my $command = join(' ', @cmd);
 
 	# If conversion is necessary
@@ -808,7 +795,8 @@ sub get_playlist {
 	$outtype =~ s/^.*\.//g;
 
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
-	my @out = `$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat="<pid>|<name>|<episode>|<desc>" --fields="$searchfields" $search`;
+	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "fields=$searchfields", "search=$search" );
+	my @out = `$cmd`;
 
 	push @playlist, "#EXTM3U\n";
 
@@ -823,6 +811,30 @@ sub get_playlist {
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
 		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
+	}
+
+	return join ("\n", @playlist);
+}
+
+
+
+sub create_playlist_m3u {
+	my ( $request_host, $outtype, $bitrate ) = ( @_ );
+	my @playlist;
+	push @playlist, "#EXTM3U\n";
+
+	my @record = ( $cgi->param( 'PROGSELECT' ) );
+
+	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
+		# Format required, e.g.
+		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
+		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
+		#
+		push @playlist, "#EXTINF:-1,$type - $name - $episode";
+		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=$opt->{current}->{modes}&OUTTYPE=${pid}.${outtype}\n";
 	}
 
 	return join ("\n", @playlist);
@@ -860,7 +872,7 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --listformat=\"<pid>|<name>|<episode>|<desc>\" --search=\"$search\"";
+		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" );
 		print $se "DEBUG: Command: $cmd\n";
 		for ( grep !/^Added:/, `$cmd` ) {
 			chomp();
@@ -881,7 +893,7 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --nopurge --type=$type --list=$list --channel=\"$search\"";
+		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" );
 		print $se "DEBUG: Command: $cmd\n";
 		for ( grep !/^Added:/, `$cmd` ) {
 			my $suffix;
@@ -907,6 +919,119 @@ sub get_opml {
 	push @playlist, "\t</body>\n</opml>";
 
 	return join ("\n", @playlist);
+}
+
+
+# Update script
+# Generic
+# Updates and overwrites this script - makes backup as <this file>.old
+# Update logic:
+# If the get_iplayer.cgi script is unwritable then quit
+# update script
+sub update_script {
+	my $update_url	= 'http://linuxcentre.net/get_iplayer/get_iplayer.cgi';
+	# Get version URL
+	my $script_file = $0;
+	my $ua = create_ua('update');
+
+	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
+	if ( ! -w $script_file ) {
+		print $se "ERROR: $script_file is not writable - aborting update\n";
+		exit 1;
+	}
+
+	print $se "INFO: Updating $script_file (from $VERSION)\n";
+	print $fh p("Updating $script_file (from $VERSION)");
+	if ( update_file( $ua, $update_url, $script_file ) ) {
+		print $fh p("Update Failed");
+	} else {
+		print $fh p("Update Succeeded - please restart the get_iplayer PVR Manager service");
+	}
+
+	return 0;
+}
+
+
+
+sub create_ua {
+	my $ua = LWP::UserAgent->new;
+	$ua->timeout( 10 );
+	$ua->agent( "get_iplayer PVR Manager updater version $VERSION" );
+	$ua->conn_cache(LWP::ConnCache->new());
+	return $ua;
+};	
+
+
+
+# Generic
+# Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
+# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
+sub request_url_retry {
+
+	my %OPTS = @LWP::Protocol::http::EXTRA_SOCK_OPTS;
+	$OPTS{SendTE} = 0;
+	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
+	
+	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
+	my $res;
+
+	# Malformed URL check
+	if ( $url !~ m{^\s*http\:\/\/}i ) {
+		print $se "ERROR: Malformed URL: '$url'\n";
+		return '';
+	}
+
+	my $i;
+	print $se "INFO: Getting page $url\n" if $opt->{verbose};
+	for ($i = 0; $i < $retries; $i++) {
+		$res = $ua->request( HTTP::Request->new( GET => $url ) );
+		if ( ! $res->is_success ) {
+			print $se $failmsg;
+		} else {
+			print $se $succeedmsg;
+			last;
+		}
+	}
+	# Return empty string if we failed
+	return '' if $i == $retries;
+
+	return $res->content;
+}
+
+
+
+# Updates a file:
+# Usage: update_file( <ua>, <url>, <dest filename> )
+sub update_file {
+	my $ua = shift;
+	my $url = shift;
+	my $dest_file = shift;
+	my $res;
+	# Download the file
+	if ( not $res = request_url_retry($ua, $url, 3) ) {
+		print $se "ERROR: Could not download update for ${dest_file} - Update aborted\n";
+		return 1;
+	}
+	# If the download was successful then copy over this file and make executable after making a backup of this script
+	if ( -f $dest_file ) {
+		if ( ! copy($dest_file, $dest_file.'.old') ) {
+			print $se "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
+			return 1;
+		}
+	}
+	# Check if file is writable
+	if ( not open( FILE, "> $dest_file" ) ) {
+		print $se "ERROR: $dest_file is not writable by the current user - Update aborted\n";
+		return 1;
+	}
+	# Windows needs this
+	binmode FILE;
+	# Write contents to file
+	print FILE $res;
+	close FILE;
+	chmod 0755, $dest_file;
+	print $se "INFO: Downloaded $dest_file\n";
+	return 0;
 }
 
 
@@ -1089,7 +1214,7 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@record) {
 		chomp();
-		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --pvrdel=\"$name\"";
+		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( "pvrdel=$name" );
 		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1110,7 +1235,7 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --info --nopurge --type=$type \"pid:$pid\"";
+	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" );
 	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 	my @cmdout = `$cmd`;
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -1138,7 +1263,7 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
-		my $cmd = "$opt_cmdline->{getiplayer} --nocopyright --type $type --pid=\"$pid\" --pvrqueue --comment=\"$comment (queued: ".localtime().')"';
+		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' );
 		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 		my $cmdout = `$cmd`;
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
@@ -1151,42 +1276,15 @@ sub pvr_queue {
 
 
 
-sub create_playlist_m3u {
-	my ( $request_host, $outtype, $bitrate ) = ( @_ );
-	my @playlist;
-	push @playlist, "#EXTM3U\n";
-
-	my @record = ( $cgi->param( 'PROGSELECT' ) );
-
-	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
-	for (@record) {
-		chomp();
-		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
-		# Format required, e.g.
-		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
-		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-		#
-		push @playlist, "#EXTINF:-1,$type - $name - $episode";
-		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=$opt->{current}->{modes}&OUTTYPE=${pid}.${outtype}\n";
-	}
-
-	return join ("\n", @playlist);
-}
-
-
-
-sub build_cmd_options_urlencoded {
+sub build_cmd_options {
 	my @options;
 	for ( @_ ) {
 		# skip non-options
 		next if $opt->{$_}->{optkey} eq '' || not defined $opt->{$_}->{optkey} || not $opt->{$_}->{optkey};
 		my $value = $opt->{$_}->{current};
-		push @options, CGI::escape("$opt->{$_}->{optkey}=$value") if $value ne '';
+		push @options, "$opt->{$_}->{optkey}=$value" if $value ne '';
 	}
-
-	# Return option with urlencoded values
-	return '--webrequest="'.(join '&', @options).'"';
-	
+	return @options;
 }
 
 
@@ -1205,11 +1303,23 @@ sub get_search_params {
 
 
 
+# Return get_iplayer command options when supplied an array of <key>=<value> options
+sub get_iplayer_webrequest_args {
+	my @cmdopts;
+	print $se 'DEBUG: get_iplayer options: "'.join('" "', @_)."\"\n";
+	for (@_) {
+		push @cmdopts, CGI::escape($_);
+	}
+	my $cmdline = '--webrequest="'.join('&', @cmdopts).'"';
+	return $cmdline;
+}
+
+
+
 sub pvr_add {
 
 	my $out;
 	my @params = get_search_params();
-	my $options = build_cmd_options_urlencoded( @params );
 
 	# Only allow alphanumerics,_,-,. here for security reasons
 	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
@@ -1225,7 +1335,7 @@ sub pvr_add {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = "$opt_cmdline->{getiplayer} $options --pvradd=\"$searchname\"";
+	my $cmd  = $opt_cmdline->{getiplayer}.' '.get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( @params ) );
 	print $se "Command: $cmd";
 	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
 	my $cmdout = `$cmd`;
@@ -1360,7 +1470,7 @@ sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
 	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --flush --type=$typelist --search=\"no search just flush\"";
+	my $cmd  = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'flush=1', 'nopurge=1', "type=$typelist", "search=no search just flush" );
 	print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	system $cmd;
@@ -1398,7 +1508,7 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'Play' );
+	push @html, th( { -class => 'search' }, 'Play / Queue' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -1466,7 +1576,9 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>'Play', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
+			a( { -class=>'search', -title=>'Play Now', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
+			.'|'.
+			a( { -class=>'search', -title=>'Queue for Recording', -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' )
 			#.'/'.
 			#a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
 			#.'/'.
@@ -1699,12 +1811,12 @@ sub get_progs {
 	my @params = @_;
 	my $options = '';
 
-	my $options = build_cmd_options_urlencoded( @params );
-
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-	my $cmd = "$opt_cmdline->{getiplayer} $options --nocopyright --nopurge --listformat=\"ENTRY${fields}\"";
-	print $se "DEBUG: Command: $cmd\n";	my @list = `$cmd`;
+	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
+
+	print $se "DEBUG: Command: $cmd\n";
+	my @list = `$cmd`;
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
 	for ( grep /^ENTRY/, @list ) {
@@ -1822,6 +1934,10 @@ sub form_header {
 	#	)
 	#)));
 
+	# Only highlight the 'Update PVR Manager' option if the script is writable
+	my $update_element = a( { -class=>'nav darker' }, 'Update PVR Manager' );
+	$update_element = a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='update_script'; formheader.submit()", }, 'Update PVR Manager' ) if -w $0;
+
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
 			li( { -class=>'nav' }, [
@@ -1834,11 +1950,11 @@ sub form_header {
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
 					}),
 				),
-				a( { -class=>'nav', -onClick  => "history.back()", },
-					'Back'
-				),
+				#a( { -class=>'nav', -onClick  => "history.back()", },
+				#	'Back'
+				#),
 				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='search_progs'; formheader.submit()", },
-					'Search'
+					'Home'
 				),
 				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_list'; formheader.submit()", },
 					'PVR List'
@@ -1846,6 +1962,7 @@ sub form_header {
 				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()", },
 					'Run PVR'
 				),
+				$update_element,
 				a( { -class=>'nav', -onClick => "parent.location='http://linuxcentre.net/projects/get_iplayer-pvr-manager/'", },
 					'Help'
 				),
@@ -1868,8 +1985,7 @@ sub form_header {
 #############################################
 sub form_footer {
 	print $fh p( b({-class=>"footer"},
-		"Note: Changes cannot be undone".
-		br()."&copy;2009 Phil Lewis - Licensed under GPLv3"
+		sprintf( "get_iplayer PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
 	));
 }
 
@@ -2009,6 +2125,8 @@ sub insert_stylesheet {
 	
 	.pointer		{ cursor: pointer; cursor: hand; }
 	.pointer:hover		{ text-decoration: underline; }
+
+	.darker			{ color: #ADADAD; }
 
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
