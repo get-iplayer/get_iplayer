@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.15;
+my $version = 2.16;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -863,9 +863,7 @@ sub list_progs {
 			$this->display_metadata( sort keys %{ $this } );
 		}
 	}
-	logger "\n";
-
-	logger "INFO: ".($#_ + 1)." Matching Programmes\n";
+	logger "\nINFO: ".($#_ + 1)." Matching Programmes\n" if $opt->{pvr} && $#_ >= 0;
 }
 
 
@@ -5187,7 +5185,6 @@ sub optional_list_entry_format {
 }
 
 
-
 sub clean_pid {
 	my $prog = shift;
 
@@ -5222,7 +5219,6 @@ sub get_links {
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels() };
-	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
 
 	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
 	for ( sort keys %channels ) {
@@ -5232,7 +5228,6 @@ sub get_links {
 			my $pid = $_;
 			my $name = $channels{$_};
 			my $episode = 'live';
-
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
 			# build data structure
@@ -5243,11 +5238,12 @@ sub get_links {
 				'episode'	=> $episode,
 				'desc'		=> "Live stream of $name",
 				'guidance'	=> '',
-				#'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
+				#'thumbnail'	=> "http://static.bbc.co.uk/mobile/iplayer_widget/img/ident_${pid}.png",
+				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/img/station_logos/${pid}.png",
 				'channel'	=> $channel,
 				#'categories'	=> join(',', @category),
 				'type'		=> $prog_type,
-				#'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
+				'web'		=> "http://www.bbc.co.uk/iplayer/playlive/${pid}/",
 			);
 	}
 	main::logger "\n";
@@ -6908,13 +6904,14 @@ sub run {
 
 	# For each PVR search (or single one if specified)
 	my @names = ( $single ) || ( sort {lc $a cmp lc $b} keys %{$pvr} );
+	main::logger "Running PVR Searches:\n";
 	for my $name ( @names ) {
 		# Ignore if this search is disabled
 		if ( $pvr->{$name}->{disable} ) {
-			main::logger "\nSkipping disabled PVR Search '$name'\n" if $opt->{verbose};
+			main::logger "\nSkipping '$name' (disabled)\n" if $opt->{verbose};
 			next;
 		}
-		main::logger "\nRunning PVR Search '$name'\n";
+		main::logger "$name\n";
 		# Clear then Load options for specified pvr search name
 		my @search_args = $pvr->load_options($name);
 
