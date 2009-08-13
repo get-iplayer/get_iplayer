@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.29';
+my $VERSION = '0.30';
 
 use strict;
 use CGI ':all';
@@ -230,8 +230,8 @@ my @nosearch_params = qw/ /;
 		title	=> 'Programmes per Page', # Title
 		webvar	=> 'PAGESIZE', # webvar
 		type	=> 'popup', # type
-		default	=> 17, # default
-		value	=> ['17','50','100','200','500'], # values
+		default	=> 20, # default
+		value	=> ['10','25','50','100','200','400'], # values
 		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
 		save	=> 1,
 	};
@@ -1407,13 +1407,13 @@ sub build_option_html {
 		# values in hash of $value->{<order>} => value
 		# labels in hash of $label->{$value}
 		# selected status in $status->{$value}
-		for (sort keys %{ $value } ) {
-			my $val = $value->{$_};
+		my @keylist = sort keys %{ $value };
+		my $count = 0;
+		while ( @keylist ) {
+			my $val = $value->{shift @keylist};
 			$element .=
 				td( { -class => 'options' },
 					table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
-						'',
-						$label->{$val},
 						checkbox(
 							-class		=> 'options',
 							-name		=> $webvar,
@@ -1422,13 +1422,19 @@ sub build_option_html {
 							-value 		=> $val,
 							-checked	=> $status->{$val},
 							-override	=> 1,
-						)
+						),
+						$label->{$val}
 					] ) ) )
-			);
+				);
+			# Spread over more rows if there are many elements
+			if ( not ( ($count+1) % 3 ) ) {
+				$element .= '<tr class="options_embedded">';
+			}
+			$count++;
 		}
-		my $inner_table = table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' },
+		my $inner_table = table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' },
 			$element
-		) ) );
+		) );
 			
 		push @html, th( { -class => 'options' }, $title ).td( { -class => 'options' }, $inner_table );
 	# Popup type
