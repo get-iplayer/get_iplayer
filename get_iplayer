@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.16;
+my $version = 2.17;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -151,7 +151,7 @@ my $opt_format = {
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after download. Valid types are: xbmc, generic"],
-	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi,flashaac,flashaudio,realaudio,wma"],
+	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaudio,realaudio,wma"],
 	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio radiomode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
@@ -4287,7 +4287,10 @@ sub get_stream_data {
 			get_stream_data_cdn( \%data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[789]\d\d/;
 
 			# flashhigh modes
-			get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/;
+			get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/ && $mattribs->{bitrate} =~ /[78]\d\d/;
+
+			# flashstd modes
+			get_stream_data_cdn( \%data, $mattribs, 'flashstd', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/ && $mattribs->{bitrate} =~ /[45]\d\d/;
 
 			# iPhone modes
 			if ( $mattribs->{width} =~ /4\d\d/ ) {
@@ -4479,7 +4482,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashnormal)"],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashstd,flashnormal)"],
 		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 tvmode"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
@@ -4508,15 +4511,15 @@ sub modelist {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'iphone';
 		} else {
-			$mlist = 'iphone,flashhigh,flashnormal';
+			$mlist = 'iphone,flashhigh,flashstd,flashnormal';
 		}
 	}
 	# Deal with BBC TV fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashhigh,flashnormal,flashlow,n95_wifi
 	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
-	$mlist = main::expand_list($mlist, 'best', 'flashhd,flashvhigh,flashhigh,iphone,flashlow,flashnormal');
-	$mlist = main::expand_list($mlist, 'flash', 'flashhigh,flashnormal');
-	$mlist = main::expand_list($mlist, 'rtmp', 'flashhigh,flashnormal');
+	$mlist = main::expand_list($mlist, 'best', 'flashhd,flashvhigh,flashhigh,iphone,flashstd,flashnormal,flashlow');
+	$mlist = main::expand_list($mlist, 'flash', 'flashhigh,flashstd,flashnormal');
+	$mlist = main::expand_list($mlist, 'rtmp', 'flashhigh,flashstd,flashnormal');
 
 	return $mlist;
 }
