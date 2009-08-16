@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.30';
+my $VERSION = '0.31';
 
 use strict;
 use CGI ':all';
@@ -1682,19 +1682,44 @@ sub search_progs {
 	print $fh div( { -class=>'action' },
 		ul( { -class=>'action' },
 			li( { -class=>'action' }, [
-				a( { -class=>'action', -onClick  => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()", },
+				a(
+					{
+						-class => 'action',
+						-title => 'Perform search based on search options',
+						-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
+					},
 					'Search'
 				),
-				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()", },
+				a(
+					{
+						-class => 'action',
+						-title => 'Queue selected programmes for one-off recording',
+						-onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()",
+					},
 					'Queue for Recording'
 				),
-				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';", },
+				a(
+					{
+						-class => 'action',
+						-title => 'Download an M3U playlist based on selected programmes',
+						-onClick => "form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';",
+					},
 					'Create Playlist'
 				),
-				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()", },
+				a(
+					{
+						-class => 'action',
+						-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
+						-onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()",
+					},
 					'Add Current Search to PVR'
 				),
-				a( { -class=>'action', -onClick => "form.NEXTPAGE.value='flush'; form.submit()", },
+				a(
+					{
+						-class => 'action',
+						-title => 'Refresh the list of programmes - can take a while',
+						-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
+					},
 					'Refresh Cache'
 				),
 			]),
@@ -1942,15 +1967,21 @@ sub form_header {
 
 	# Only highlight the 'Update PVR Manager' option if the script is writable
 	my $update_element = a( { -class=>'nav darker' }, 'Update PVR Manager' );
-	$update_element = a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='update_script'; formheader.submit()", }, 'Update PVR Manager' ) if -w $0;
+	$update_element = a(
+		{
+			-class=>'nav',
+			-title=>'Update the PVR Manager software - please restart it after updating',
+			-onClick => "formheader.NEXTPAGE.value='update_script'; formheader.submit()",
+		},
+		'Update PVR Manager' ) if -w $0;
 
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
 			li( { -class=>'nav' }, [
 				a( { -class=>'nav', -href=>"/" },
 					img({
-						-title => 'get_iplayer PVR Manager',
 						-class => 'nav',
+						-title => 'get_iplayer PVR Manager',
 						-width => 174,
 						-height => 32,
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
@@ -1959,17 +1990,37 @@ sub form_header {
 				#a( { -class=>'nav', -onClick  => "history.back()", },
 				#	'Back'
 				#),
-				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='search_progs'; formheader.submit()", },
+				a(
+					{
+						-class=>'nav',
+						-title=>'Main search page',
+						-onClick => "formheader.NEXTPAGE.value='search_progs'; formheader.submit()",
+					},
 					'Home'
 				),
-				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_list'; formheader.submit()", },
+				a(
+					{
+						-class=>'nav',
+						-title=>'List all saved PVR searches',
+						-onClick => "formheader.NEXTPAGE.value='pvr_list'; formheader.submit()",
+					},
 					'PVR List'
 				),
-				a( { -class=>'nav', -onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()", },
+				a(
+					{
+						-class=>'nav',
+						-title=>'Run the PVR now - wait for the PVR to complete',
+						-onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()",
+					},
 					'Run PVR'
 				),
 				$update_element,
-				a( { -class=>'nav', -onClick => "parent.location='http://linuxcentre.net/projects/get_iplayer-pvr-manager/'", },
+				a( 
+					{ 
+						-class=>'nav', 
+						-title=>'Show help and instructions', 
+						-onClick => "parent.location='http://linuxcentre.net/projects/get_iplayer-pvr-manager/'",
+					},
 					'Help'
 				),
 			]),
