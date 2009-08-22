@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.16;
+my $version = 2.17;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -154,6 +154,7 @@ my $opt_format = {
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaudio,realaudio,wma"],
 	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio radiomode"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
+	multimode	=> [ 1, "multimode", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nocopyright	=> [ 1, "nocopyright", 'Misc', '--nocopyright', "Don't display copyright header"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
@@ -659,7 +660,7 @@ sub find_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if check_download_history( $pid ) && ! $opt->{subsonly};
+		return 0 if ( ! $opt->{subsonly} ) && ( ! $opt->{multimode} ) && check_download_history( $pid );
 		
 		# Maybe we don't want to populate caches - this slows down --pid recordings ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -2047,31 +2048,41 @@ sub load_download_history {
 # Checks history for previous download of this pid
 sub check_download_history {
 	my $pid = shift;
-	my ($matchedpid, $name, $episode);
+	my $mode = shift;
 	return 0 if ! $pid;
-		
+
 	# Return if force option specified or stdout streaming only
 	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
-	
+
 	if ( ! open(HIST, "< $historyfile") ) {
 		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
 		return 0;
 	}
+	my @entries = grep /^$pid/, <HIST>;
+	close HIST;
 
-	# Find and parse first matching line
-	($matchedpid, $name, $episode) = ( split /\|/, (grep /^$pid/, <HIST>)[0] )[0,1,2];
-	if ( $matchedpid ) {
+	# Find and parse first matching history lines
+	for my $entry ( @entries ) {
+		my ( $name, $episode, $histmode ) = ( split /\|/, $entry )[1,2,5];
 		chomp $name;
 		chomp $episode;
-		logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
-		close HIST;
-		return 1;
-
-	} else {
-		logger "INFO: Programme not in download history\n" if $opt->{verbose};
-		close HIST;
-		return 0;
+		chomp $histmode;
+		main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in download history\n" if $opt->{debug};
+		if ( $opt->{multimode} ) {
+			# Strip any number off the end of the mode names for the comparison
+			$mode =~ s/\d+$//g;
+			$histmode =~ s/\d+$//g;
+			if ( $mode eq $histmode ) {
+				logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n";
+				return 1;
+			}
+		} else {
+			logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
+			return 1;
+		}
 	}
+	logger "INFO: Programme not in download history\n" if $opt->{verbose};
+	return 0;
 }
 
 
@@ -2914,7 +2925,7 @@ sub download_retry_loop {
 	# Run the type init
 	$prog->init();
 
-	return 0 if ( ! $opt->{streaminfo} ) && main::check_download_history( $prog->{pid} ) && ! $opt->{subsonly};
+	return 0 if ( ! $opt->{streaminfo} ) && ( ! $opt->{subsonly} ) && ( ! $opt->{multimode} ) && main::check_download_history( $prog->{pid} );
 
 	# Skip and warn if there is no pid
 	if ( ! $prog->{pid} ) {
@@ -3013,6 +3024,9 @@ sub download_retry_loop {
 				chomp( $mode );
 				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 				$prog->{mode} = $mode;
+
+				# If multimode is used, skip only modes which are in the history
+				next if $opt->{multimode} && main::check_download_history( $prog->{pid}, $mode );
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $prog->{verpids}->{$version} );
@@ -4167,6 +4181,7 @@ sub get_stream_data_cdn {
 		# Unknown CDN
 		} else {
 			new_stream_report($mattribs, $cattribs) if $opt->{verbose};
+			next;
 		}
 
 		get_stream_set_type( $conn, $mattribs, $cattribs );
@@ -6955,7 +6970,8 @@ sub queue {
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
 		if ( $opt_cmdline->{type} && $opt_cmdline->{type} !~ ',' ) {
-			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ! main::check_download_history( $opt_cmdline->{pid} );
+			# Add to PVR if not already in download history (unless multimode specified)
+			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! main::check_download_history( $opt_cmdline->{pid} ) ) || $opt->{multimode};
 		} else {
 			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
 			return 1;
