@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.17;
+my $version = 2.18;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -789,8 +789,8 @@ sub find_matches {
 	my @unique = grep { ! $seen{ $_ }++ } @match_list;
 	@match_list = @unique;
 
-	# Prune out pids already recorded if opt{hide} is specified
-	if ( $opt->{hide} && not $opt->{force} ) {
+	# Prune out pids already recorded if opt{hide} is specified (cannot hide for multimode)
+	if ( $opt->{hide} && ( not $opt->{force} ) && ( not $opt->{multimode} ) ) {
 		my @pruned;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
