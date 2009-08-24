@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.18;
+my $version = 2.19;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3032,8 +3032,8 @@ sub download_retry_loop {
 				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
-				# quit if successful or skip
-				last if $retcode == 0 || $retcode == 2;
+				# quit if successful or skip (unless --multimode selected)
+				last if ( $retcode == 0 || $retcode == 2 ) && ! $opt->{multimode};
 
 				# Only need to try one mode for subs
 				last if $opt->{subsonly};
