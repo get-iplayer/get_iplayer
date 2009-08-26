@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.20;
+my $version = 2.21;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -160,7 +160,7 @@ my $opt_format = {
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
-	packagemanager	=> [ 0, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update"],
+	packagemanager	=> [ 0, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
@@ -275,8 +275,10 @@ if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
-	$optfile_system = '/etc/get_iplayer/options';
-
+	$optfile_system = '/var/lib/get_iplayer/options';
+	if ( -f '/etc/get_iplayer/options' ) {
+		logger "WARNING: System-wide options in /etc/get_iplayer/options are now ignored, please use /var/lib/get_iplayer/options instead\n";
+	}
 # Otherwise look for windows style file locations
 } elsif ( defined $ENV{USERPROFILE} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
@@ -1560,6 +1562,8 @@ sub update_script {
 		} elsif ( $opt->{packagemanager} =~ /rpm/i ) {
 			logger "INFO: Please run the following command as root to update get_iplayer using $opt->{packagemanager}\n".
 			"  rpm -Uvh http://linuxcentre.net/get_iplayer/packages/get_iplayer-current.noarch.rpm\n";
+		} elsif ( $opt->{packagemanager} =~ /disable/i ) {
+			logger "ERROR: get_iplayer should only be updated using your local package management system, for more information see http://linuxcentre.net/installation\n";
 		} else {
 			logger "ERROR: get_iplayer was installed using '$opt->{packagemanager}' package manager please refer to the update documentation at http://linuxcentre.net/getiplayer/installation/\n";
 		}
