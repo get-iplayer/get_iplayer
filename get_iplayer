@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.21;
+my $version = 2.22;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -97,14 +97,14 @@ my %user_agent = (
 #	'desc'		=> <Long Description>,
 #	'available'	=> <Date/Time made available or remaining>,
 #	'duration'	=> <duration in HH:MM:SS>
-#	'versions'	=> <comma separated list of versions, e.g default, signed>
+#	'versions'	=> <comma separated list of versions, e.g default, signed, audiodescribed>
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <channel>
 #	'categories'	=> <Comma separated list of categories>
 # 	'type'		=> <prog_type>
 #	'timeadded'	=> <timestamp when programme was added to cache>
 #	'longname'	=> <Long name (only parsed in stage 1)>,
-#	'version'	=> <selected version e.g default, signed, etc - only set before recording>
+#	'version'	=> <selected version e.g default, signed, audiodescribed, etc - only set before recording>
 #	'filename'	=> <Path and Filename of saved file - set only while recording>
 #	'dir'		=> <Filename Directory of saved file - set only while recording>
 #	'fileprefix'	=> <Filename Prefix of saved file - set only while recording>
@@ -160,7 +160,7 @@ my $opt_format = {
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	pid		=> [ 0, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
-	packagemanager	=> [ 0, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
+	packagemanager	=> [ 1, "packagemanager=s", 'Misc', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
@@ -195,7 +195,7 @@ my $opt_format = {
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	type		=> [ 0, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	update		=> [ 0, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
-	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,default')"],
+	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,audiodescribed,default')"],
 	verbose		=> [ 1, "verbose|v", 'Config', '--verbose, -v', "Verbose"],
 	warranty	=> [ 1, "warranty", 'Misc', '--warranty', 'Displays warranty section of GPL'],
 	webrequest	=> [ 1, "webrequest=s", 'Misc', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
@@ -421,8 +421,6 @@ for ( progclass() ) {
 	# Set maximum index number
 	$max_index = progclass($_)->index_max if progclass($_)->index_max > $max_index;
 }
-my $min_download_size = 1024000;
-
 
 # Setup signal handlers
 $SIG{INT} = $SIG{PIPE} =\&cleanup;
@@ -787,10 +785,8 @@ sub find_matches {
 		}
 	}
 
-	# De-dup matches and retain order (don't ask!)
-	my %seen = ();
-	my @unique = grep { ! $seen{ $_ }++ } @match_list;
-	@match_list = @unique;
+	# De-dup matches and retain order
+	@match_list = main::make_array_unique_ordered( @match_list );
 
 	# Prune out pids already recorded if opt{hide} is specified (cannot hide for multimode)
 	if ( $opt->{hide} && ( not $opt->{force} ) && ( not $opt->{multimode} ) ) {
@@ -882,7 +878,7 @@ sub list_progs {
 			$this->download_thumbnail if $opt->{thumb} && $this->{thumbnail};
 		}
 	}
-	logger "\nINFO: ".($#_ + 1)." Matching Programmes\n" if $opt->{pvr} && $#_ >= 0;
+	logger "\nINFO: ".($#_ + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#_ >= 0 ) || ! $opt->{pvr};
 }
 
 
@@ -1012,6 +1008,16 @@ sub sort_index {
 		$counter++;
 	}
 	return 0;
+}
+
+
+
+sub make_array_unique_ordered {
+	# De-dup array and retain order (don't ask!)
+	my ( @array ) = ( @_ );
+	my %seen = ();
+	my @unique = grep { ! $seen{ $_ }++ } @array;
+	return @unique;
 }
 
 
@@ -2433,8 +2439,8 @@ sub usage {
 
 	# Build the help usage text
 	# Each section
-	for my $section ( 'Search', 'Display', 'Recording', 'Output', 'PVR', 'Config', 'External Program' ) {
-	#for my $section ( keys %section_name ) {
+	for my $section ( 'Search', 'Display', 'Recording', 'Output', 'PVR', 'Config', 'External Program', 'Misc' ) {
+		next if not defined $section_name{$section};
 		my @lines;
 		my @manlines;
 		my @dumplines;
@@ -4532,6 +4538,7 @@ sub channels {
 		'categories/sport/tv'		=> 'BBC Sport',
 	#	'categories/tv'			=> 'All',
 		'categories/signed'		=> 'Signed',
+		'categories/audiodescribed'	=> 'Audio Described',
 	};
 }
 
@@ -4643,7 +4650,7 @@ sub get_links {
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels() };
-	my $channel_feed_url = 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list/limit/400
+	my $channel_feed_url = 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
 
@@ -4661,7 +4668,7 @@ sub get_links {
 	push @channel_list, grep  /categor/, keys %channels;
 	for ( @channel_list ) {
 
-		my $url = "${channel_feed_url}/$_/list/limit/400";
+		my $url = "${channel_feed_url}/$_/list";
 		main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
 		main::logger "INFO: Got ".(grep /<entry/, split /\n/, $xml)." programmes\n" if $opt->{verbose};
@@ -4717,8 +4724,8 @@ sub get_links {
 		shift @entries;
 
 		foreach my $entry (@entries) {
-			my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $versions, $guidance );
-
+			my ( $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
+			
 			my $entry_flat = $entry;
 			$entry_flat =~ s/\n/ /g;
 
@@ -4755,7 +4762,7 @@ sub get_links {
 			# Merge and Skip if this pid is a duplicate
 			if ( defined $progref->{$pid} ) {
 				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-				# Since we use the 'Signed' channel to get sign zone data, merge the categories from this entry to the existing entry
+				# Since we use the 'Signed' (or 'Audio Described') channel to get sign zone/audio described data, merge the categories from this entry to the existing entry
 				if ( $progref->{$pid}->{categories} ne join(',', @category) ) {
 					my %cats;
 					$cats{$_} = 1 for ( split /,/, $progref->{$pid}->{categories} );
@@ -4764,28 +4771,30 @@ sub get_links {
 					$progref->{$pid}->{categories} = join(',', sort keys %cats);
 				}
 				# If this is a dupicate pid and the channel is now Signed then both versions are available
-				$progref->{$pid}->{versions} = 'default,signed' if $channel eq 'Signed';
+				$version = 'signed' if $channel eq 'Signed';
+				$version = 'audiodescribed' if $channel eq 'Audio Described';
+				# Add version to versions for existing prog
+				$progref->{$pid}->{versions} = join ',', main::make_array_unique_ordered( (split /,/, $progref->{$pid}->{versions}), $version );
 				next;
 			}
 
 			# Set guidance based on category
 			$guidance = 'Yes' if grep /guidance/i, @category;
 
-			# Check for signed-only version from Channel
-			if ($channel eq 'Signed') {
-				$versions = 'signed';
-			# Else if not channel 'Signed' then this must also have both versions available
-			} elsif ( grep /Sign Zone/, @category ) {
-				$versions = 'default,signed';
+			# Check for signed-only or audiodescribed-only version from Channel
+			if ( $channel eq 'Signed' ) {
+				$version = 'signed';
+			} elsif ( $channel eq 'Audio Described' ) {
+				$version = 'audiodescribed';
 			} else {
-				$versions = 'default';
+				$version = 'default';
 			}
 
 			# build data structure
 			$progref->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
 				'name'		=> $name,
-				'versions'	=> $versions,
+				'versions'	=> $version,
 				'episode'	=> $episode,
 				'desc'		=> $desc,
 				'guidance'	=> $guidance,
