@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.22;
+my $version = 2.23;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2038,8 +2038,8 @@ sub add_to_download_history {
 
 	# Add to history
 	if ( ! open(HIST, ">> $historyfile") ) {
-		logger "WARNING: Cannot write or append to $historyfile\n\n";
-		return 1;
+		logger "ERROR: Cannot write or append to $historyfile\n\n";
+		exit 11;
 	}
 	print HIST "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
 	close HIST;
@@ -3845,7 +3845,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $duration, $available, $channel, $expiry, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -3936,7 +3936,12 @@ sub get_metadata {
 	$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
 	$prog_type = 'tv' if $prog_type eq 'video';
 	$prog_type = 'radio' if $prog_type eq 'audio';
-	$longdesc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+	$desc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+	$longdesc = '';
+	$longdesc = $1 if $entry =~ m{<content type="html">\s*(.+?)\s*</content>};
+	decode_entities( $longdesc );
+	$longdesc =~ s|^.+<p>\s*(.+?)\s*</p>|$1|g;
+	$longdesc =~ s|[\n\r]| |g;
 	$summary = $1 if $entry =~ m{<summary>\s*(.*?)\s*</summary>};
 	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
@@ -4032,7 +4037,7 @@ sub get_metadata {
 	$prog->{versions}	= $versions;
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{desc}		= $longdesc || $prog->{desc} || $summary;
+	$prog->{desc}		= $longdesc || $desc || $prog->{desc} || $summary;
 	$prog->{player}		= $player;
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
