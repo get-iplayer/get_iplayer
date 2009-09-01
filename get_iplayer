@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.23;
+my $version = 2.24;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3845,7 +3845,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -3856,17 +3856,16 @@ sub get_metadata {
 	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/iplayer/widget/episodedetail/episode/${pid}/template/mobile/service_type/tv/
 
+	# This URL works for tv/radio prog types (has long synopsis):
+	# http://www.bbc.co.uk/programmes/{pid}.rdf
+
 	# This URL works for tv/radio prog types:
-	# $prog_feed_url = http://feeds.bbc.co.uk/iplayer/episode/$pid
+	# http://feeds.bbc.co.uk/iplayer/episode/$pid
+
+	# Works for all Verison PIDs to get the last/first broadcast dates
+	# http://www.bbc.co.uk/programmes/<verpid>.rdf
 
 	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
-
-	# Don't get metadata from this URL if the pid contains a full url (problem: this still tries for BBC iPlayer live channels)
-	$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '') if $prog->{pid} !~ m{^http}i;
-	decode_entities($entry);
-	main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
-	# Flatten
-	$entry =~ s|\n| |g;
 
 	# Entry format
 	#<?xml version="1.0" encoding="utf-8"?>                                      
@@ -3926,35 +3925,105 @@ sub get_metadata {
 	#    <link rel="parent" href="http://feeds.bbc.co.uk/iplayer/programme_set/b006wks4" type="application/atom+xml" title="Edith Bowman" />
 	#  </entry>
 	#</feed>
-		
-	if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
-		$expiry = $1;
-		$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
-	}
-	$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
-	$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
-	$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
-	$prog_type = 'tv' if $prog_type eq 'video';
-	$prog_type = 'radio' if $prog_type eq 'audio';
-	$desc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
-	$longdesc = '';
-	$longdesc = $1 if $entry =~ m{<content type="html">\s*(.+?)\s*</content>};
-	decode_entities( $longdesc );
-	$longdesc =~ s|^.+<p>\s*(.+?)\s*</p>|$1|g;
-	$longdesc =~ s|[\n\r]| |g;
-	$summary = $1 if $entry =~ m{<summary>\s*(.*?)\s*</summary>};
-	$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
-	$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
-	$thumbnail = $1 if $entry =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
-	$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
-	$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
-	$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
-	my @cats;
-	for (split /<media:category scheme=\".+?\"/, $entry) {
-		push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
+	# Don't get metadata from this URL if the pid contains a full url (problem: this still tries for BBC iPlayer live channels)
+	if ( $prog->{pid} !~ m{^http}i ) {
+		$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
+		decode_entities($entry);
+		main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+		# Flatten
+		$entry =~ s|\n| |g;
+
+		if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
+			$expiry = $1;
+			$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
+		}
+		$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
+		$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
+		$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
+		$prog_type = 'tv' if $prog_type eq 'video';
+		$prog_type = 'radio' if $prog_type eq 'audio';
+		$desc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+		$meddesc = '';
+		$meddesc = $1 if $entry =~ m{<content type="html">\s*(.+?)\s*</content>};
+		decode_entities( $meddesc );
+		$meddesc =~ s|^.+<p>\s*(.+?)\s*</p>|$1|g;
+		$meddesc =~ s|[\n\r]| |g;
+		$summary = $1 if $entry =~ m{<summary>\s*(.*?)\s*</summary>};
+		$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
+		$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
+		$thumbnail = $1 if $entry =~ m{<media:thumbnail url="([^"]+?)"\s+width="150"\s+height="84"\s*/>};
+		$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
+		$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
+		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
+
+		my @cats;
+		for (split /<media:category scheme=\".+?\"/, $entry) {
+			push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
+		}
+		$categories = join ',', @cats;
 	}
-	$categories = join ',', @cats;
+
+
+	# Even more info...
+	#<?xml version="1.0" encoding="utf-8"?>                                  
+	#<rdf:RDF xmlns:rdf      = "http://www.w3.org/1999/02/22-rdf-syntax-ns#" 
+	#         xmlns:rdfs     = "http://www.w3.org/2000/01/rdf-schema#"       
+	#         xmlns:foaf     = "http://xmlns.com/foaf/0.1/"                  
+	#         xmlns:po       = "http://purl.org/ontology/po/"                
+	#         xmlns:mo       = "http://purl.org/ontology/mo/"                
+	#         xmlns:skos     = "http://www.w3.org/2008/05/skos#"             
+	#         xmlns:time     = "http://www.w3.org/2006/time#"                
+	#         xmlns:dc       = "http://purl.org/dc/elements/1.1/"            
+	#         xmlns:dcterms  = "http://purl.org/dc/terms/"                   
+	#         xmlns:wgs84_pos= "http://www.w3.org/2003/01/geo/wgs84_pos#"    
+	#         xmlns:timeline = "http://purl.org/NET/c4dm/timeline.owl#"
+	#         xmlns:event    = "http://purl.org/NET/c4dm/event.owl#">
+	#
+	#<rdf:Description rdf:about="/programmes/b00mbvmz.rdf">
+	#  <rdfs:label>Description of the episode Episode 5</rdfs:label>
+	#  <dcterms:created rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2009-08-17T00:16:16+01:00</dcterms:created>
+	#  <dcterms:modified rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2009-08-21T16:09:30+01:00</dcterms:modified>
+	#  <foaf:primaryTopic rdf:resource="/programmes/b00mbvmz#programme"/>
+	#</rdf:Description>
+	#
+	#<po:Episode rdf:about="/programmes/b00mbvmz#programme">
+	#
+	#  <dc:title>Episode 5</dc:title>
+	#  <po:short_synopsis>Jem Stansfield tries to defeat the US Navy&#39;s latest weapon with foam and a crash helmet.</po:short_synopsis>
+	#  <po:medium_synopsis>Jem Stansfield attempts to defeat the US Navy&#39;s latest weapon with no more than some foam and a crash helmet, while zoologist Liz Bonnin gets in contact with her frog brain.</po:medium_synopsis>
+	#  <po:long_synopsis>Jem Stansfield attempts to defeat the US Navy&#39;s latest weapon with no more than some foam and a crash helmet.
+	#
+	#Zoologist Liz Bonnin gets in contact with her frog brain, Dallas Campbell re-programmes his caveman brain to become a thrill-seeker, and Dr Yan Wong gets his thrills from inhaling sulphur hexafluoride.
+	#The programme is co-produced with The Open University.
+	#For more ways to put science to the test, go to the Hands-on Science area at www.bbc.co.uk/bang for details of our free roadshow touring the UK and activities that you can try at home.</po:long_synopsis>
+	#  <po:microsite rdf:resource="http://www.bbc.co.uk/bang"/>
+	#  <po:masterbrand rdf:resource="/bbcone#service"/>
+	#  <po:position rdf:datatype="http://www.w3.org/2001/XMLSchema#int">5</po:position>
+	#  <po:genre rdf:resource="/programmes/genres/factual/scienceandnature/scienceandtechnology#genre" />
+	#  <po:version rdf:resource="/programmes/b00mbvhc#programme" />
+	#
+	#</po:Episode>
+	#
+	#<po:Series rdf:about="/programmes/b00lywwy#programme">
+	#  <po:episode rdf:resource="/programmes/b00mbvmz#programme"/>
+	#</po:Series>
+	#
+	#<po:Brand rdf:about="/programmes/b00lwxj1#programme">
+	#  <po:episode rdf:resource="/programmes/b00mbvmz#programme"/>
+	#</po:Brand>
+	#</rdf:RDF>
+
+	# Get metadata from this URL only if the pid contains a standard BBC iPlayer PID)
+	if ( $prog->{pid} =~ /^\w{8}$/ ) {
+		$entry = main::request_url_retry($ua, 'http://www.bbc.co.uk/programmes/'.$prog->{pid}.'.rdf', 3, '', '');
+		decode_entities($entry);
+		main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
+		# Flatten
+		$entry =~ s|[\n\r]| |g;
+		$longdesc = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>};
+	}
+
 
 	# Get list of available modes for each version available
 	# populate version pid metadata if we don't have it already
@@ -4037,7 +4106,7 @@ sub get_metadata {
 	$prog->{versions}	= $versions;
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{desc}		= $longdesc || $desc || $prog->{desc} || $summary;
+	$prog->{desc}		= $longdesc || $meddesc || $desc || $prog->{desc} || $summary;
 	$prog->{player}		= $player;
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
