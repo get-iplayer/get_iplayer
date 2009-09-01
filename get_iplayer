@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.24;
+my $version = 2.25;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4610,9 +4610,10 @@ sub channels {
 		'bbc_alba'			=> 'BBC Alba',
 		'categories/news/tv'		=> 'BBC News',
 		'categories/sport/tv'		=> 'BBC Sport',
-	#	'categories/tv'			=> 'All',
 		'categories/signed'		=> 'Signed',
 		'categories/audiodescribed'	=> 'Audio Described',
+		'popular/tv'			=> 'Popular',
+		'highlights/tv'			=> 'Highlights',
 	};
 }
 
@@ -4738,8 +4739,10 @@ sub get_links {
 	# Download index feed
 	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
 	my @channel_list;
-	push @channel_list, grep !/categor/, keys %channels;
+	push @channel_list, grep !/(categor|popular|highlights)/, keys %channels;
 	push @channel_list, grep  /categor/, keys %channels;
+	push @channel_list, grep  /popular/, keys %channels;
+	push @channel_list, grep  /highlights/, keys %channels;
 	for ( @channel_list ) {
 
 		my $url = "${channel_feed_url}/$_/list";
@@ -4837,13 +4840,20 @@ sub get_links {
 			if ( defined $progref->{$pid} ) {
 				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
 				# Since we use the 'Signed' (or 'Audio Described') channel to get sign zone/audio described data, merge the categories from this entry to the existing entry
-				if ( $progref->{$pid}->{categories} ne join(',', @category) ) {
+				if ( $progref->{$pid}->{categories} ne join(',', sort @category) ) {
 					my %cats;
-					$cats{$_} = 1 for ( split /,/, $progref->{$pid}->{categories} );
-					$cats{$_} = 1 for ( @category );
+					$cats{$_} = 1 for ( @category, split /,/, $progref->{$pid}->{categories} );
 					main::logger "INFO: Merged categories for $pid from $progref->{$pid}->{categories} to ".join(',', sort keys %cats)."\n" if $opt->{verbose};
 					$progref->{$pid}->{categories} = join(',', sort keys %cats);
 				}
+
+				# If this a popular or highlights programme then add these tags to categories
+				my %cats;
+				$cats{$_} = 1 for ( @category, split /,/, $progref->{$pid}->{categories} );
+				$cats{Popular} = 1 if $channel eq 'Popular';
+				$cats{Highlights} = 1 if $channel eq 'Highlights';
+				$progref->{$pid}->{categories} = join(',', sort keys %cats);
+
 				# If this is a dupicate pid and the channel is now Signed then both versions are available
 				$version = 'signed' if $channel eq 'Signed';
 				$version = 'audiodescribed' if $channel eq 'Audio Described';
@@ -4876,7 +4886,7 @@ sub get_links {
 				'duration'	=> 'Unknown',
 				'thumbnail'	=> "${thumbnail_prefix}/${pid}_150_84.jpg",
 				'channel'	=> $channel,
-				'categories'	=> join(',', @category),
+				'categories'	=> join(',', sort @category),
 				'type'		=> $prog_type,
 				'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
 			);
@@ -5126,7 +5136,6 @@ sub channels {
 		'bbc_radio_wales'			=> 'BBC Radio Wales',
 		'bbc_radio_cymru'			=> 'BBC Radio Cymru',
 		'bbc_world_service'			=> 'BBC World Service',
-#		'categories/radio'			=> 'All',
 		'bbc_radio_cumbria'			=> 'BBC Cumbria',
 		'bbc_radio_newcastle'			=> 'BBC Newcastle',
 		'bbc_tees'				=> 'BBC Tees',
@@ -5167,6 +5176,8 @@ sub channels {
 		'bbc_radio_cornwall'			=> 'BBC Cornwall',
 		'bbc_radio_guernsey'			=> 'BBC Guernsey',
 		'bbc_radio_jersey'			=> 'BBC Jersey',
+		'popular/radio'				=> 'Popular',
+		'highlights/radio'			=> 'Highlights',
 	};
 }
 
