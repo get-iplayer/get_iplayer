@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.25;
+my $version = 2.26;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -423,7 +423,7 @@ for ( progclass() ) {
 }
 
 # Setup signal handlers
-$SIG{INT} = $SIG{PIPE} =\&cleanup;
+$SIG{INT} = $SIG{PIPE} = \&cleanup;
 
 # Other Non option-dependant vars
 my $historyfile		= "${profile_dir}/download_history";
@@ -446,7 +446,7 @@ my @search_args = @ARGV;
 # Use --webrequest to specify options in urlencoded format
 if ( $opt->{webrequest} ) {
 	# parse GET args
-	my @webopts = split /[\&\?]/, $opt->{webrequest};
+	my @webopts = split /[\&\?\-]/, $opt->{webrequest};
 	for (@webopts) {
 		# URL decode it
 		s/\%([A-Fa-f0-9]{2})/pack('C', hex($1))/seg;
@@ -576,27 +576,36 @@ sub find_matches {
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
 	$cache_secs 		= $opt->{expiry} || 14400;
+
+	# External Binaries
 	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
-	$binopts->{mplayer}	= '-nolirc';
-	$binopts->{mplayer}	.= ' -v' if $opt->{debug};
-	$binopts->{mplayer}	.= ' -really-quiet' if $opt->{quiet};
+	push @{ $binopts->{mplayer} }, '-nolirc';
+	push @{ $binopts->{mplayer} }, '-v' if $opt->{debug};
+	push @{ $binopts->{mplayer} }, '-really-quiet' if $opt->{quiet};
+
 	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'ffmpeg';
-	$binopts->{ffmpeg}	= '';
+
 	$bin->{lame}		= $opt->{lame} || 'lame';
 	$binopts->{lame}	= '-f';
 	$binopts->{lame}	.= ' --quiet ' if $opt->{quiet};
+
 	$bin->{vlc}		= $opt->{vlc} || 'cvlc';
-	$binopts->{vlc}		= '-vv' if $opt->{verbose} || $opt->{debug};
+	push @{ $binopts->{vlc} }, '-vv' if $opt->{verbose} || $opt->{debug};
+
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
+
 	$bin->{tee}		= 'tee';
+
 	$bin->{flvstreamer}	= $opt->{flvstreamer} || $opt->{rtmpdump} || 'flvstreamer';
-	# quote binaries which allows for spaces in the path
-	for ( $bin->{mplayer}, $bin->{ffmpeg}, $bin->{lame}, $bin->{vlc}, $bin->{id3v2}, $bin->{tee}, $bin->{flvstreamer} ) {
+	push @{ $binopts->{flvstreamer} }, ( '--timeout', 10 );
+	push @{ $binopts->{flvstreamer}	}, '--quiet' if $opt->{quiet};
+	push @{ $binopts->{flvstreamer}	}, '--verbose' if $opt->{verbose};
+	push @{ $binopts->{flvstreamer}	}, '--debug' if $opt->{debug};
+
+	# quote binaries which allows for spaces in the path (only required if used via a shell)
+	for ( $bin->{lame}, $bin->{tee} ) {
 		s!^(.+)$!"$1"!g;
 	}
-	$binopts->{flvstreamer}	= ' --quiet' if $opt->{quiet};
-	$binopts->{flvstreamer}	= ' --verbose' if $opt->{verbose};
-	$binopts->{flvstreamer}	= ' --debug' if $opt->{debug};
 	# Set quiet, test and get options if we're asked for streaminfo
 	if ( $opt->{streaminfo} ) {
 		$opt->{test} 	= 1;
@@ -2151,7 +2160,7 @@ sub purge_downloaded_files {
 		if ($answer =~ /^yes$/i ) {
 			for ( @delete ) {
 				main::logger "INFO: Deleting $_\n";
-				system("unlink $_");
+				unlink $_;
 			}
 			main::logger "Programmes deleted\n";
 		} else {
@@ -2188,6 +2197,61 @@ sub list_unique_element_counts {
 	# display element + prog count
 	logger "$_ ($elements{$_})\n" for sort keys %elements;
 	return 0;
+}
+
+
+
+# Invokes command in @args as a system call (hopefully) without using a shell
+#  Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
+# Usage: run_cmd( <normal|STDERR|STDOUT>, @args )
+# Returns: exit code
+sub run_cmd {
+	my $mode = shift;
+	my @cmd = ( @_ );
+	my $rtn;
+	
+	main::logger "\n\nINFO: Command: ".(join ' ', @cmd)."\n\n" if $opt->{verbose};
+                
+	# Define what to do with STDOUT and STDERR of the child process
+	my $fh_child_out = ">&STDOUT";
+	my $fh_child_err = ">&STDERR";
+
+	if ( $mode eq 'STDOUT' ) {
+		$fh_child_out = $fh_child_err = ">&STDOUT";
+	} elsif ( $mode eq 'STDERR' ) {
+		$fh_child_out = $fh_child_err = ">&STDERR";
+	}
+
+	# Check if we have IPC::Open3 otherwise fallback on system()
+	eval "use IPC::Open3";
+
+	# use system(); - probably only likely in win32
+	if ($@) {
+		main::logger "WARNING: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		my $rtn = system( @cmd );
+
+	# Use open3()
+	} else {
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		my $procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
+		# Wait for child to complete
+		waitpid( $procid, 0 );
+		$rtn = $?;
+	}
+
+	# Interpret return code	      
+	if ( $opt->{verbose} ) {
+		if ( $rtn == -1 ) {
+			main::logger "ERROR: Command failed to execute: $!\n";
+		} elsif ( $rtn & 128 ) {
+			main::logger "WARNING: Command executed but coredumped\n";
+		} elsif ( $rtn & 127 ) {
+			main::logger sprintf "WARNING: Command executed but died with signal %d\n", $rtn & 127;
+		} else {
+			main::logger sprintf "INFO: Command exit code %d\n", $rtn >> 8;
+		}
+	}
+	return $rtn >> 8;
 }
 
 
@@ -2239,6 +2303,7 @@ sub StringUtils::sanitize_path {
 	$string =~ s/[^\w_\-\.\/\s]//gi if ! $opt->{whitespace};
 	return $string;
 }
+
 
 
 # Uses: global $lockfile
@@ -3176,9 +3241,16 @@ sub tag_file {
 		# Only tag if the required tool exists
 		if ( main::exists_in_path('id3v2') ) {
 			main::logger "INFO: id3 tagging $prog->{ext} file\n";
-			my $cmd = "$bin->{id3v2} --artist \"$id3_channel\" --album \"$id3_name\" --song \"$id3_episode\" --comment \"Description\":\"$id3_desc\" --year ".( (localtime())[5] + 1900 )." \"$prog->{filename}\" 1>&2";
-			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-			if ( system($cmd) ) {
+			my @cmd = (
+				$bin->{id3v2}, 
+				'--artist', $id3_channel,
+				'--album', $id3_name,
+				'--song', $id3_episode,
+				'--comment', 'Description:'.$id3_desc,
+				'--year', (localtime())[5] + 1900,
+				$prog->{filename},
+			);
+			if ( main::run_cmd( 'STDERR', @cmd ) ) {
 				main::logger "WARNING: Failed to tag $prog->{ext} file\n";
 				return 2;
 			}
@@ -3435,10 +3507,8 @@ sub run_user_command {
 
 	# run command
 	main::logger "INFO: Running command '$command'\n" if $opt->{verbose};
-	my $exit_value = system $command;
+	my $exit_value = main::run_cmd( 'normal', $command );
 	
-	# make exit code sane
-	$exit_value = $exit_value >> 8;
 	main::logger "ERROR: Command Exit Code: $exit_value\n" if $exit_value;
 	main::logger "INFO: Command succeeded\n" if $opt->{verbose} && ! $exit_value;
         return 0;
@@ -6149,6 +6219,7 @@ sub opt_format {
 # Actually do the RTMP streaming
 sub get {
 	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
+	my @cmdopts;
 
 	my $url_2 	= $streamdata{streamurl};
 	my $server	= $streamdata{server};
@@ -6160,10 +6231,10 @@ sub get {
 	my $port 	= $streamdata{port} || $opt->{rtmpport} || 1935;
 	my $protocol	= $streamdata{protocol} || 0;
 	my $mode	= $prog->{mode};
-	my $extraopts	= $streamdata{extraopts} || '';
+	push @cmdopts, ( split /\s+/, $streamdata{extraopts} ) if $streamdata{extraopts};
 
 	my $file_tmp;
-	my $cmd;
+	my @cmd;
 	
 	if ( $opt->{raw} ) {
 		$file_tmp = $prog->{filepart};
@@ -6178,86 +6249,87 @@ sub get {
 		
 	# Add custom options to flvstreamer/rtmpdump for this type if specified with --rtmp-<type>-opts
 	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
-		$extraopts .= ' '.$opt->{'rtmp'.$prog->{type}.'opts'};
+		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
 	}
 
-	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5' or 'FLVStreamer v1.7'
+	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5' or 'FLVStreamer v1.7a'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `$bin->{flvstreamer} 2>&1`)[0] );
+	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `"$bin->{flvstreamer}" 2>&1`)[0] );
 	$rtmpver =~ s/^\w+\s+v([\.\d]+).*$/$1/g;
 	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
-	# Add 20 sec timeout for newer versions
-	$extraopts .= ' --timeout 10' if $rtmpver >= 1.5;
+	# Save the effort and don't support < v1.5
+	if ( $rtmpver < 1.5 ) {
+		main::logger "WARNING: rtmpdump >= 1.5 or flvstreamer is required - please upgrade\n";
+		return 'next';
+	}
 
 	# Add --live option if required
 	if ( $streamdata{live} ) {
-		if ( $rtmpver < 1.5 ) {
-			main::logger "ERROR: rtmpdump >= 1.5 or flvstreamer is required for live streaming support\n";
-			exit 4;
-		} elsif ( $rtmpver < 1.8 ) {
+		if ( $rtmpver < 1.8 ) {
 			main::logger "WARNING: Please use flvstreamer v1.8 or later for more reliable live streaming\n";
 		}
-		$extraopts .= ' --live';
+		push @cmdopts, '--live';
 	}
 
 	# Add start stop options if defined
 	if ( $opt->{start} || $opt->{stop} ) {
 		if ( $rtmpver < 1.8 ) {
-			main::logger "WARNING: Please use flvstreamer v1.8c or later for start/stop features\n";
+			main::logger "ERROR: Please use flvstreamer v1.8c or later for start/stop features\n";
 			exit 4;
 		}
-		$extraopts .= " --start $opt->{start}" if $opt->{start};
-		$extraopts .= " --stop $opt->{stop}" if $opt->{stop};
+		push @cmdopts, ( '--start', $opt->{start} ) if $opt->{start};
+		push @cmdopts, ( '--stop', $opt->{stop} ) if $opt->{stop};
 	}
 	
 	# Add hashes option if required
-	$extraopts .= " --hashes" if $opt->{hash};
+	push @cmdopts, '--hashes' if $opt->{hash};
 	
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	# Deal with stdout streaming
-	my $common_args;
 	if ( $opt->{stdout} && not $opt->{nowrite} ) {
 		main::logger "ERROR: Cannot stream RTMP to STDOUT and file simultaneously\n";
 		exit 4;
 	}
 	if ( $opt->{stdout} && $opt->{nowrite} ) {
-		if ( $rtmpver >= 1.7) {
-			$common_args = "$extraopts";
-		} elsif ( $rtmpver >= 1.5 ) {
-			$common_args = "$extraopts -o -";
-		} else {
-			main::logger "ERROR: rtmpdump >= 1.5 or flvstreamer is required for streaming to STDOUT\n";
-			exit 4;
+		if ( $rtmpver < 1.7) {
+			push @cmdopts, ( '-o', '-' );
 		}
 	} else {
-		$common_args = "--resume $extraopts -o \"$file_tmp\" 1>&2";
+		push @cmdopts, ( '--resume', '-o', $file_tmp );
 	}
-
+	push @cmdopts, @{ $binopts->{flvstreamer} } if $binopts->{flvstreamer};
 	
 	my $return;
 	# Different invocation depending on version
-	# For ver < 1.4
-	if ( $rtmpver < 1.4 ) {
-		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --rtmp \"$url_2\" --auth \"$authstring\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
-	# For ver 1.4+ if playpath is defined
-	} elsif ( $rtmpver >= 1.4 && $playpath ) {
-		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --port $port --protocol \"$protocol\" --playpath \"$playpath\" --host \"$server\" --swfUrl \"$swfurl\" --tcUrl \"$tcurl\" --app \"$application\" $common_args";
-	# Using just streamurl (i.e. no playpath defined) - requires rtmpdump >= 1.5
-	} elsif ($rtmpver >= 1.5 ) {
-		$cmd = "$bin->{flvstreamer} $binopts->{flvstreamer} --port $port --rtmp \"$streamdata{streamurl}\" --protocol \"$protocol\" $common_args";
-	# Fail
+	# if playpath is defined
+	if ( $playpath ) {
+		@cmd = (
+			$bin->{flvstreamer},
+			'--port', $port,
+			'--protocol', $protocol,
+			'--playpath', $playpath,
+			'--host', $server,
+			'--swfUrl', $swfurl,
+			'--tcUrl', $tcurl,
+			'--app', $application,
+			@cmdopts,
+		);
+	# Using just streamurl (i.e. no playpath defined)
 	} else {
-		main::logger "ERROR: rtmpdump >= v1.5 is required\n";
-		return 'next';
+		@cmd = (
+			$bin->{flvstreamer},
+			'--port', $port,
+			'--protocol', $protocol,
+			'--rtmp', $streamdata{streamurl},
+			@cmdopts,
+		);
 	}
-	main::logger "\n\nINFO: Command: $cmd\n" if $opt->{verbose};
 
-	$return = system($cmd) >> 8;
-	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
+	$return = main::run_cmd( 'normal', @cmd );
 
 	# exit behaviour when streaming
 	if ( $opt->{nowrite} && $opt->{stdout} ) {
@@ -6293,20 +6365,38 @@ sub get {
 		# This works but it's really bad bacause it re-transcodes mp3 and takes forever :-(
 		# $cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$prog->{filepart}\" 1>&2";
 		# At last this removes the flv container and dumps the mp3 stream! - mplayer dumps core but apparently succeeds
-		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpaudio \"$file_tmp\" -dumpfile \"$prog->{filepart}\" 1>&2";
+		@cmd = (
+			$bin->{mplayer},
+			@{ $binopts->{mplayer} },
+			'-dumpaudio',
+			$file_tmp,
+			'-dumpfile', $prog->{filepart},
+		);
 	# Convert flv to aac/mp4a
 	} elsif ( $mode =~ /flashaac/ ) {
-		# This works as long as we specify aac andnot mp4a
-		$cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
+		# This works as long as we specify aac and not mp4a
+		@cmd = (
+			$bin->{ffmpeg},
+			'-i', $file_tmp,
+			'-vn',
+			'-acodec', 'copy',
+			'-y', $prog->{filepart},
+		);
 	# Convert video flv to mp4/avi if required
 	} else {
-		$cmd = "$bin->{ffmpeg} $binopts->{ffmpeg} -i \"$file_tmp\" -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
+		@cmd = (
+			$bin->{ffmpeg},
+			'-i', $file_tmp,
+			'-vcodec', 'copy',
+			'-acodec', 'copy',
+			'-f', $prog->{ext},
+			'-y', $prog->{filepart},
+		);
 	}
 
-	main::logger "\n\nINFO: Command: $cmd\n\n" if $opt->{verbose};
+
 	# Run flv conversion and delete source file on success
-	my $return = system($cmd) >> 8;
-	main::logger "INFO: Command exit code = $return\n" if $opt->{verbose};
+	my $return = main::run_cmd( 'STDERR', @cmd );
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
 			unlink( $file_tmp );
 
@@ -6401,7 +6491,7 @@ sub get {
 		main::logger "WARNING: fifos/named pipes are not supported - only limited output modes will be supported\n";
 	}
 	
-	main::logger "INFO: Stage 3 URL = $url\n" if $opt->{verbose};
+	main::logger "INFO: RTSP URL = $url\n" if $opt->{verbose};
 
 	# Create ID3 tagging options for lame (escape " for shell)
 	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
@@ -6410,24 +6500,32 @@ sub get {
 
 	# Use post-streaming transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
 	# (Fallback if no namedpipe support and raw/wav not specified)
-	if ( ! -p $namedpipe ) {
-		if ( ! ( $opt->{raw} || $opt->{wav} ) ) {
-			my $cmd;
+	if ( ( ! -p $namedpipe ) && ! ( $opt->{raw} || $opt->{wav} ) ) {
+			my @cmd;
 			# Remove filename extension
 			$prog->{filepart} =~ s/\.mp3$//gi;
 			# Remove named pipe
 			unlink $namedpipe;
 			main::logger "INFO: Recording wav format (followed by transcoding)\n";
-			$cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}.wav\" \"$url\" 1>&2";
+			@cmd = (
+				$bin->{mplayer},
+				@{ $binopts->{mplayer} },
+				'-cache', 128,
+				'-bandwidth', $bandwidth,
+				'-vc', 'null',
+				'-vo', 'null',
+				'-ao', "pcm:waveheader:fast:file=\"$prog->{filepart}.wav\"",
+				$url,
+			);
 			# Create symlink if required
 			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
-			if ( system($cmd) ) {
+			if ( main::run_cmd( 'STDERR', @cmd ) ) {
 				unlink $prog->{symlink};
 				return 'next';
 			}
 			# Transcode
 			main::logger "INFO: Transcoding $prog->{filepart}.wav\n";
-			$cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
+			my $cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
 			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 			# Create symlink if required
 			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
@@ -6438,20 +6536,23 @@ sub get {
 			unlink "$prog->{filepart}.wav";
 			move "$prog->{filepart}.mp3", $prog->{filename};
 			$prog->{ext} = 'mp3';
-		}
 		
-	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
-	# else do direct mplayer write to wav file if:
-	#  1) we don't have a named pipe available (e.g. in activeperl)
-	#  2) --wav was specified to write file only
 	} elsif ( $opt->{wav} && ! $opt->{stdout} ) {
 		main::logger "INFO: Writing wav format\n";
 		# Start the mplayer process and write to wav file
-		my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=\"$prog->{filepart}\" \"$url\" 1>&2";
-		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
+		my @cmd = (
+			$bin->{mplayer},
+			@{ $binopts->{mplayer} },
+			'-cache', 128,
+			'-bandwidth', $bandwidth,
+			'-vc', 'null',
+			'-vo', 'null',
+			'-ao', "pcm:waveheader:fast:file=\"$prog->{filepart}\"",
+			$url,
+		);
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
-		if ( system($cmd) ) {
+		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			unlink $prog->{symlink};
 			return 'next';
 		}
@@ -6463,19 +6564,27 @@ sub get {
 		# Write out to .ra ext instead (used on fallback if no fifo support)
 		main::logger "INFO: Writing raw realaudio stream\n";
 		# Start the mplayer process and write to raw file
-		my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -dumpstream -dumpfile \"$prog->{filepart}\" \"$url\" 1>&2";
-		main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
+		my @cmd = (
+			$bin->{mplayer},
+			@{ $binopts->{mplayer} },
+			'-cache', 128,
+			'-bandwidth', $bandwidth,
+			'-dumpstream',
+			'-dumpfile', $prog->{filepart},
+			$url,
+		);
 		# Create symlink if required
 		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
-		if ( system($cmd) ) {
+		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			unlink $prog->{symlink};
 			return 'next';
 		}
 		# Move file to done state
 		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
 
+	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
 	# Use transcoding via named pipes
-	} else {
+	} elsif ( -p $namedpipe )  {
 		$childpid = fork();
 		if (! $childpid) {
 			# Child starts here
@@ -6534,9 +6643,16 @@ sub get {
 		# Start the mplayer process and write to named pipe
 		# Raw mode
 		if ( $opt->{raw} ) {
-			my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 32 -bandwidth $bandwidth -dumpstream -dumpfile $namedpipe \"$url\" 1>&2";
-			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-			if ( system($cmd) ) {
+			my @cmd = (
+				$bin->{mplayer},
+				@{ $binopts->{mplayer} },
+				'-cache', 32,
+				'-bandwidth', $bandwidth,
+				'-dumpstream',
+				'-dumpfile', $namedpipe,
+				$url,
+			);
+			if ( main::run_cmd( 'STDERR', @cmd ) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				unlink $prog->{symlink};
@@ -6544,8 +6660,17 @@ sub get {
 			}
 		# WAV / mp3 mode - seems to fail....
 		} else {
-			my $cmd = "$bin->{mplayer} $binopts->{mplayer} -cache 128 -bandwidth $bandwidth -vc null -vo null -ao pcm:waveheader:fast:file=$namedpipe \"$url\" 1>&2";
-			if ( system($cmd) ) {
+			my @cmd = (
+				$bin->{mplayer},
+				@{ $binopts->{mplayer} },
+				'-cache', 128,
+				'-bandwidth', $bandwidth,
+				'-vc', 'null',
+				'-vo', 'null',
+				'-ao', "pcm:waveheader:fast:file=$namedpipe",
+				$url,
+			);
+			if ( main::run_cmd( 'STDERR', @cmd ) ) {
 				# If we fail then kill off child processes
 				kill 9, $childpid;
 				unlink $prog->{symlink};
@@ -6554,8 +6679,13 @@ sub get {
 		}
 		# Wait for child processes to prevent zombies
 		wait;
+
+		unlink $namedpipe;
+	} else {
+		main::logger "ERROR: Unsupported method of download on this platform\n";
+		return 'next';
 	}
-	unlink $namedpipe;
+
 	main::logger "INFO: Recorded $prog->{filename}\n";
 	# Re-symlink if required
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
@@ -6650,7 +6780,7 @@ sub get {
 		#vo: x11 uninit called but X11 not initialized..
 		#
 		#Exiting... (End of file)
-		$cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
+		$cmd = "\"$bin->{mplayer}\" ".(join ' ', @{ $binopts->{mplayer} } )." -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
 		# fork streaming threads
@@ -6853,22 +6983,37 @@ sub get {
 		chomp($url1);
 		$url = $url1;
 	}
-	
+
+	my @opts;
+	@opts = @{ $binopts->{vlc} } if $binopts->{vlc};
+
 	main::logger "INFO: URL = $url\n" if $opt->{verbose};
 	if ( ! $opt->{stdout} ) {
 		main::logger "INFO: Recording Low Quality H.264 stream\n";
-		my $cmd = "$bin->{vlc} $binopts->{vlc} --sout file/ts:$prog->{filepart} $url vlc://quit 1>&2";
-		if ( system($cmd) ) {
+		my @cmd = (
+			$bin->{vlc},
+			@opts,
+			'--sout', 'file/ts:'.$prog->{filepart},
+			$url,
+			'vlc://quit',
+		);
+		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			return 'next';
 		}
 
 	# to STDOUT
 	} else {
 		main::logger "INFO: Streaming Low Quality H.264 stream to stdout\n";
-		my $cmd = "$bin->{vlc} $binopts->{vlc} --sout file/ts:- $url vlc://quit 1>&2";
-		if ( system($cmd) ) {
+		my @cmd = (
+			$bin->{vlc},
+			@opts,
+			'--sout', 'file/ts:-',
+			$url,
+			'vlc://quit',
+		);
+		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			return 'next';
-		}	
+		}
 	}
 	main::logger "INFO: Recorded $prog->{filename}\n";
 	# Moving file into place as complete (if not stdout)

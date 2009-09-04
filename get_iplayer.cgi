@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.31';
+my $VERSION = '0.32';
 
 use strict;
 use CGI ':all';
@@ -152,7 +152,7 @@ my %prog_types_order = (
 	6	=> 'liveradio',
 );
 # Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, `$opt_cmdline->{getiplayer} --nopurge --nocopyright --listplugins` );
+chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--nopurge', '--nocopyright', '--listplugins' ) );
 for my $type (keys %prog_types) {
 	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
 		# delete from %prog_types hash
@@ -721,20 +721,18 @@ sub run_cgi {
 
 sub pvr_run {
 	print $se "INFO: Starting Manual PVR Run\n";
-	# Redirect both STDOUT and STDERR to client browser socket
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	# Unbuffered output
-	STDOUT->autoflush(1);
-	STDERR->autoflush(1);
-	my $cmd = "$opt_cmdline->{getiplayer} --nopurge --nocopyright --hash --pvr";
-	print $se "DEBUG: running: $cmd\n";
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nopurge',
+		'--nocopyright',
+		'--hash',
+		'--pvr',
+		'2>&1', # eek! - works around win32 inability to redirect STDERR nicely
+	);
+	#print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
-	# Before stderr
-	my $before_se = $se;
-	open(STDERR, ">&", $fh )   || die "can't dup client to stderr";
-	system $cmd;
-	# Restore stderr
-	$se = $before_se;
+	# Redirect both STDOUT and STDERR to client browser socket
+	run_cmd( $fh, $fh, @cmd );
 	print $fh '</pre>';
 	print $fh p("PVR Run complete");
 }
@@ -745,10 +743,13 @@ sub stream_mov {
 	my $pid = shift;
 
 	print $se "INFO: Start Streaming $pid to browser\n";
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my @cmd = ( $opt_cmdline->{getiplayer}, '--nocopyright', get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ) );
-	print $se "DEBUG: running: ".(join ' ', @cmd)."\n";
-	system @cmd;
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ),
+	);
+	run_cmd( $fh, $se, @cmd );
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
@@ -765,22 +766,63 @@ sub stream_prog {
 	
 	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output type '$type' and bitrate '$bitrate'\n";
 
-	open(STDOUT, ">&", $fh ) || die "can't dup client to stdout";
-	# Enable buffering
-	STDOUT->autoflush(0);
-	$fh->autoflush(0);
-	my @cmd = ( $opt_cmdline->{getiplayer}, '--nocopyright', get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid" ) );
-	my $command = join(' ', @cmd);
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid" ),
+	);
 
-	# If conversion is necessary
-	if ( $type && ! $bitrate ) {
-		$command .= " | $opt_cmdline->{ffmpeg} -i - -vn -f $type -";
-	} elsif ($type && $bitrate ) {
-		$command .= " | $opt_cmdline->{ffmpeg} -i - -vn -ab ${bitrate}k -f $type -";
+	
+	# If transcoding on the fly then use shell method of calling processes with a pipe
+	if ( $type ) {
+		# workaround to add quotes around the args because we are using a shell here
+		for ( @cmd ) {
+			s/^(.+)$/"$1"/g if ! m{^[\-\"]};
+		}
+		my $command = join(' ', @cmd);
+		open(STDOUT, ">&", $fh ) || die "can't dup client to stdout";
+		# Enable buffering
+		STDOUT->autoflush(0);
+		$fh->autoflush(0);
+		# If conversion is necessary
+		if ( ! $bitrate ) {
+			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -f $type -";
+		} else {
+			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ab ${bitrate}k -f $type -";
+		}
+		print $se "DEBUG: Command: $command\n";
+		system( $command );
+	
+	} else {
+		run_cmd( $fh, $se, @cmd );
 	}
 
-	print $se "DEBUG: Command: $command\n";
-	system $command;
+	## If transcoding on the fly
+	#if ( $type ) {
+	#	# If conversion is necessary
+	#	if ( ! $bitrate ) {
+	#		push @cmd, (
+	#			'|',
+	#			$opt_cmdline->{ffmpeg},
+	#			'-i', '-',
+	#			'-vn',
+	#			'-f', $type,
+	#			'-',
+	#		);
+	#	} else {
+	#		push @cmd, (
+	#			'|',
+	#			$opt_cmdline->{ffmpeg},
+	#			'-i', '-',
+	#			'-vn',
+	#			'-ab', "${bitrate}k",
+	#			'-f', $type,
+	#			'-',
+	#		);				
+	#	}
+	#}	
+	#run_cmd( $fh, $se, @cmd );
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
@@ -795,9 +837,12 @@ sub get_playlist {
 	$outtype =~ s/^.*\.//g;
 
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
-	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "fields=$searchfields", "search=$search" );
-	my @out = `$cmd`;
-
+	my @out = get_cmd_output(
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "fields=$searchfields", "search=$search" ),
+	);
 	push @playlist, "#EXTM3U\n";
 
 	# Extract and rewrite into m3u format
@@ -872,9 +917,13 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" );
-		print $se "DEBUG: Command: $cmd\n";
-		for ( grep !/^Added:/, `$cmd` ) {
+		my @out = get_cmd_output(
+			$opt_cmdline->{getiplayer},
+			'--nocopyright',
+			'--webrequest',
+			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" ),
+		);
+		for ( grep !/^Added:/, @out ) {
 			chomp();
 			# Strip unprinatble chars
 			s/(.)/(ord($1) > 127) ? "" : $1/egs;
@@ -893,9 +942,13 @@ sub get_opml {
 		push @playlist, "\t<body>";
 
 		# Extract and rewrite into playlist format
-		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" );
-		print $se "DEBUG: Command: $cmd\n";
-		for ( grep !/^Added:/, `$cmd` ) {
+		my @out = get_cmd_output(
+			$opt_cmdline->{getiplayer},
+			'--nocopyright',
+			'--webrequest',
+			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" ),
+		);
+		for ( grep !/^Added:/, @out ) {
 			my $suffix;
 			chomp();
 			# Strip unprinatble chars
@@ -1036,10 +1089,125 @@ sub update_file {
 
 
 
+# Invokes command in @args as a system call (hopefully) without using a shell
+#  Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
+# Usage: run_cmd( <''|STDOUTFH>, <''|STDERRFH>, @args )
+# Returns: exit code
+# Note: doesn't appear to work with 'in memory' filehandles
+sub run_cmd_unix {
+	# Define what to do with STDOUT and STDERR of the child process
+	my $fh_child_out = shift || "STDOUT";
+	my $fh_child_err = shift || "STDERR";
+	my @cmd = ( @_ );
+	my $rtn;
+
+	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	# Check if we have IPC::Open3 otherwise fallback on system()
+	eval "use IPC::Open3";
+	
+	# probably only likely in win32
+	if ($@) {
+		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		exit 1;
+
+	# Use open3()
+	} else {
+		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		my $procid = open3( 0, ">&".fileno($fh_child_out), ">&".fileno($fh_child_err), @cmd );
+		# Wait for child to complete
+		waitpid( $procid, 0 );
+		$rtn = $?;
+	}
+
+	# Interpret return code	      
+	print $se interpret_return_code( $rtn );
+
+	return $rtn >> 8;
+}
+
+
+
+# Invokes command in @args as a system call (hopefully) without using a shell
+#  Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
+# Usage: run_cmd( <''|STDOUTFH>, undef, @args )
+# Returns: exit code
+sub run_cmd {
+	# Define what to do with STDOUT and STDERR of the child process
+	my $fh_child_out = shift;
+	my $fh_child_err = shift;
+	my @cmd = ( @_ );
+	my $rtn;
+
+	# Disable buffering
+	$fh_child_out->autoflush(1);
+
+	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	# Redirect $fh_child_out to STDOUT
+	open(STDOUT, ">&", $fh_child_out ) || die "can't dup client to stdout";
+
+	$rtn = system( @cmd );
+
+	# Interpret return code	      
+	print $se interpret_return_code( $rtn );
+	return $rtn >> 8;
+}
+
+
+
+# Same as backticks but without needing a shell
+# sets $?
+# returns array of output
+sub get_cmd_output {
+	my ( @cmd ) = ( @_ );
+
+	# workaround to add quotes around the args because we are using a shell here
+	for ( @cmd ) {
+		s/^(.+)$/"$1"/g if ! m{^[\-\"]};
+	}
+
+	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
+
+	# Damnit these aren't supported under win32 - may aswell use backticks!
+	##open( CMD, '-|', @_ ) || print $se "ERROR: echo failed: $!\n";
+	##open( CMD, '-|' ) || exec @_ || print $se "ERROR: echo failed: $!\n";
+	open( CMD, ( join ' ', @cmd ).'|' ) || print $se "ERROR: echo failed: $!\n";
+	my @out = <CMD>;
+	close CMD;
+	#my @out = `@cmd`;
+
+	# Interpret return code	      
+	print $se interpret_return_code( $? );
+
+	return @out;
+}
+
+
+
+sub interpret_return_code {
+	# Interpret return code	      
+	if ( $_ == -1 ) {
+		return "ERROR: failed to execute: $!\n";
+	} elsif ( $_ & 128 ) {
+		return "WARNING: executed but coredumped\n";
+	} elsif ( $_ & 127 ) {
+		return sprintf "WARNING: executed but died with signal %d\n", $_ & 127;
+	} else {
+		return sprintf "DEBUG: Command exit code %d\n", $_ >> 8;
+	}
+}
+
+
+
 sub get_pvr_list {
 	my $pvrsearch;
-	my $out = `$opt_cmdline->{getiplayer} --nocopyright --pvrlist`;
-	
+	my $out = join "\n", get_cmd_output(
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--pvrlist',
+	);
 	# Remove text before first pvrsearch entry
 	$out =~ s/^.+?(pvrsearch\s.+)$/$1/s;
 	# Parse all 'pvrsearch' elements
@@ -1214,9 +1382,14 @@ sub pvr_del {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for my $name (@record) {
 		chomp();
-		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( "pvrdel=$name" );
-		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
-		my $cmdout = `$cmd`;
+		my @cmd = (
+			$opt_cmdline->{getiplayer},
+			'--nocopyright',
+			'--webrequest',
+			get_iplayer_webrequest_args( "pvrdel=$name" ),
+		);
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		my $cmdout = join "\n", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Deleted: $name");
 		$out .= $cmdout;
@@ -1235,9 +1408,14 @@ sub show_info {
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
-	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" );
-	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
-	my @cmdout = `$cmd`;
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" ),
+	);
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 	print $fh p("Info for $pid");
 	for ( grep !/^Added:/, @cmdout ) {
@@ -1263,9 +1441,14 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
-		my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' );
-		print $fh p("Command: $cmd") if $opt_cmdline->{debug};
-		my $cmdout = `$cmd`;
+		my @cmd = (
+			$opt_cmdline->{getiplayer},
+			'--nocopyright',
+			'--webrequest',
+			get_iplayer_webrequest_args( "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' ),
+		);
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		my $cmdout = join "\n", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Queued: $type: '$name - $episode' ($pid)");
 		$out .= $cmdout;
@@ -1310,7 +1493,7 @@ sub get_iplayer_webrequest_args {
 	for (@_) {
 		push @cmdopts, CGI::escape($_);
 	}
-	my $cmdline = '--webrequest="'.join('&', @cmdopts).'"';
+	my $cmdline = join('?', @cmdopts);
 	return $cmdline;
 }
 
@@ -1335,10 +1518,14 @@ sub pvr_add {
 		print $fh p("Current Matches: ".(keys %prog));
 	}
 
-	my $cmd  = $opt_cmdline->{getiplayer}.' '.get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( @params ) );
-	print $se "Command: $cmd";
-	print $fh p("Command: $cmd") if $opt_cmdline->{debug};
-	my $cmdout = `$cmd`;
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--webrequest',
+		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( @params ) ),
+	);
+	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	my $cmdout = join "\n", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
 	print $fh pre($out);
@@ -1475,11 +1662,14 @@ sub build_option_html {
 sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
-	open(STDOUT, ">&", $fh )   || die "can't dup client to stdout";
-	my $cmd  = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( 'flush=1', 'nopurge=1', "type=$typelist", "search=no search just flush" );
-	print $se "DEBUG: running: $cmd\n";
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'flush=1', 'nopurge=1', "type=$typelist", "search=no search just flush" ),
+	);
 	print $fh '<pre>';
-	system $cmd;
+	run_cmd( $fh, $se, @cmd );
 	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
 }
@@ -1844,10 +2034,13 @@ sub get_progs {
 
 	my $fields;
 	$fields .= "|<$_>" for @headings;
-	my $cmd = $opt_cmdline->{getiplayer}.' --nocopyright '.get_iplayer_webrequest_args( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
 
-	print $se "DEBUG: Command: $cmd\n";
-	my @list = `$cmd`;
+	my @list = get_cmd_output(
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--webrequest',
+		get_iplayer_webrequest_args( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" ),
+	);
 	return join("\n", @list) if $? && not $IGNOREEXIT;
 
 	for ( grep /^ENTRY/, @list ) {
