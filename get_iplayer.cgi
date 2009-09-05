@@ -23,7 +23,7 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.32';
+my $VERSION = '0.33';
 
 use strict;
 use CGI ':all';
@@ -1704,7 +1704,7 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'Play / Queue' );
+	push @html, th( { -class => 'search' }, 'Play<br />Queue<br />Series' );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -1772,13 +1772,11 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>'Play Now', -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
-			.'|'.
-			a( { -class=>'search', -title=>'Queue for Recording', -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' )
-			#.'/'.
-			#a( { -class=>'search', -title=>'Record', -href=>'/record?PID='.CGI::escape("$prog{$pid}->{type}:$pid").'&FILENAME='.CGI::escape("$prog{$pid}->{name}_$prog{$pid}->{episode}_$pid") }, 'R' )
-			#.'/'.
-			#a( { -class=>'search', -title=>'Stream mov', -href=>'/stream?PID='.CGI::escape("$prog{$pid}->{type}:$pid").$streamopts{ $prog{$pid}->{type} } }, 'S' )
+			a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
+			.'<br />'.
+			a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' )
+			.'<br />'.
+			label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; submit()" }, 'Series' )
 		);
 
 		for ( @displaycols ) {
