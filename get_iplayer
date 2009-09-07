@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.27;
+my $version = 2.28;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2271,6 +2271,7 @@ sub run_cmd {
 	my $mode = shift;
 	my @cmd = ( @_ );
 	my $rtn;
+	my $old_handler = $SIG{TERM};
 	
 	main::logger "\n\nINFO: Command: ".(join ' ', @cmd)."\n\n" if $opt->{verbose};
                 
@@ -2296,9 +2297,21 @@ sub run_cmd {
 	} else {
 		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
 		my $procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
+
+		# Setup signal handler for SIGTERM
+		$SIG{TERM} = sub {
+			my $signal = shift;
+			main::logger "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
+			# Kill process group with SIGTERM
+			kill 15, $procid;
+		};
+
 		# Wait for child to complete
 		waitpid( $procid, 0 );
 		$rtn = $?;
+
+		# Restore old signal handler for SIGTERM
+		$SIG{TERM} = $old_handler;
 	}
 
 	# Interpret return code	      
@@ -2335,6 +2348,7 @@ sub StringUtils::clean_utf8_and_whitespace {
 	$_[0] =~ s/\s+/ /g;
 	$_[0] =~ s/(^\s+|\s+$)//g;
 }
+
 
 
 # Generic
@@ -4923,7 +4937,7 @@ sub get_links {
 	push @channel_list, grep  /highlights/, keys %channels;
 	for ( @channel_list ) {
 
-		my $url = "${channel_feed_url}/$_/list";
+		my $url = "${channel_feed_url}/$_/list/limit/400";
 		main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
 		main::logger "INFO: Got ".(grep /<entry/, split /\n/, $xml)." programmes\n" if $opt->{verbose};
