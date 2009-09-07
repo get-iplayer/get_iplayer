@@ -23,7 +23,8 @@
 # Web: http://linuxcentre.net/iplayer
 # License: GPLv3 (see LICENSE.txt)
 #
-my $VERSION = '0.33';
+
+my $VERSION = '0.34';
 
 use strict;
 use CGI ':all';
@@ -37,6 +38,7 @@ use LWP::ConnCache;
 use LWP::UserAgent;
 use IO::Handle;
 use Getopt::Long;
+use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 $| = 1;
 my $fh;
 # Send log messages to this fh
@@ -421,7 +423,7 @@ my $IGNOREEXIT = 0;
 # If the port number is specified then run embedded web server
 if ( $opt_cmdline->{port} > 0 ) {
 	# Setup signal handlers
-	$SIG{INT} = $SIG{PIPE} = \&cleanup;
+	$SIG{INT} = $SIG{TERM} = $SIG{HUP} = $SIG{PIPE} = \&cleanup;
 	# Autoreap zombies
 	$SIG{CHLD} = 'IGNORE';
 	# Need this because with $SIG{CHLD} = 'IGNORE', backticks and systems calls always return -1
@@ -433,7 +435,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			LocalAddr => $opt_cmdline->{listen},
 			LocalPort => $opt_cmdline->{port},
 			Listen => SOMAXCONN,
-			Reuse => 1
+			Reuse => 1,
 		);
 		$server or die "Unable to create server socket: $!";
 		print $se "INFO: Listening on $opt_cmdline->{listen}:$opt_cmdline->{port}\n";
@@ -727,12 +729,11 @@ sub pvr_run {
 		'--nocopyright',
 		'--hash',
 		'--pvr',
-		'2>&1', # eek! - works around win32 inability to redirect STDERR nicely
 	);
 	#print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	# Redirect both STDOUT and STDERR to client browser socket
-	run_cmd( $fh, $fh, @cmd );
+	run_cmd( $fh, $fh, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("PVR Run complete");
 }
@@ -749,7 +750,7 @@ sub stream_mov {
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ),
 	);
-	run_cmd( $fh, $se, @cmd );
+	run_cmd( $fh, $se, 100000, @cmd );
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
@@ -795,7 +796,7 @@ sub stream_prog {
 		system( $command );
 	
 	} else {
-		run_cmd( $fh, $se, @cmd );
+		run_cmd( $fh, $se, 100000, @cmd );
 	}
 
 	## If transcoding on the fly
@@ -822,7 +823,7 @@ sub stream_prog {
 	#		);				
 	#	}
 	#}	
-	#run_cmd( $fh, $se, @cmd );
+	#run_cmd( $fh, $se, 100000, @cmd );
 
 	print $se "INFO: Finished Streaming $pid to browser\n";
 
@@ -1131,19 +1132,223 @@ sub run_cmd_unix {
 
 # Invokes command in @args as a system call (hopefully) without using a shell
 #  Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
-# Usage: run_cmd( <''|STDOUTFH>, undef, @args )
+# Usage: run_cmd( $stdout_fh, $stderr_fh, <buf_size>, @args )
 # Returns: exit code
 sub run_cmd {
+
+	# win32 kludge cos win is so broken
+	return run_cmd_win32( @_ ) if IS_WIN32;
+
+	# Define what to do with STDOUT and STDERR of the child process
+	use IO::Select;
+	use Symbol qw(gensym);
+	my $fh_cmd_out = shift;
+	my $fh_cmd_err = shift;
+	my $size = shift;
+	my $from = new IO::Handle;
+	my $err = new IO::Handle;
+	my @cmd = ( @_ );
+	my $rtn;
+
+	$fh_cmd_out->autoflush(1);
+	$fh_cmd_err->autoflush(1);
+	
+	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	# Check if we have IPC::Open3 otherwise fallback on system()
+	eval "use IPC::Open3";
+	
+	# probably only likely in win32
+	if ($@) {
+		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		exit 1;
+
+	# Use open3()
+	} else {
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		my $procid = open3( gensym, $from, $err, @cmd ) || print $se "ERROR: Could not execute command: $!\n";
+
+		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
+		$SIG{PIPE} = sub {
+			my $signal = shift;
+			print $se "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
+			# Kill process nicely with SIGTERM
+			kill 15, $procid;
+			# Kill this thread
+			exit 0;
+		};
+
+		my $childpidout = fork();
+
+		# Fork a child process to read from the indirect (STDOUT) fh of the spawned command and write it to the selected fh (browser client)
+		if ( $childpidout <= 0 ) {
+			# Not sure if these are necessary:
+			$fh_cmd_out->autoflush(1);
+			$from->autoflush(1);
+			# Read each char from command output and push to socket fh
+			my $char;
+			my $bytes;
+			while ( $bytes = read( $from, $char, $size ) ) {
+				if ( $bytes <= 0 ) {
+					print $se "DEBUG: STDOUT fd closed - killing thread\n";
+					exit 0;
+				} else {
+					print $fh_cmd_out $char;
+				}
+				last if $bytes < $size;
+			}
+			#print $se "CMD STDOUT FH EMPTY\n";
+			exit 0;
+		# Parent continues here
+		} elsif ( defined $childpidout ) {
+			print $se "DEBUG: Forked STDOUT reader with PID $childpidout\n";
+		# Failed to fork
+		} else {
+			print $se "ERROR: Failed to fork STDOUT reader process: $!\n";
+			exit 1;
+		}
+		
+		my $childpiderr = fork();
+
+		# Fork a child process to read from the indirect (STDERR) fh of the spawned command and write it to the selected fh (browser client)
+		if ( $childpiderr <= 0 ) {
+			# Not sure if these are necessary:
+			$fh_cmd_err->autoflush(1);
+			$err->autoflush(1);
+			# Read each char from command output and push to socket fh
+			my $char;
+			my $bytes;
+			# Assume that we don't want to buffer STDERR output of the command
+			$size = 1;
+			while ( $bytes = read( $err, $char, $size ) ) {
+				if ( $bytes <= 0 ) {
+					print $se "DEBUG: STDERR fd closed - killing thread\n";
+					exit 0;
+				} else {
+					print $fh_cmd_err $char;
+				}
+				last if $bytes < $size;
+			}
+			#print $se "CMD STDERR FH EMPTY\n";
+			exit 0;
+		# Parent continues here
+		} elsif ( defined $childpiderr ) {
+			print $se "DEBUG: Forked STDERR reader with PID $childpiderr\n";
+		# Failed to fork
+		} else {
+			print $se "ERROR: Failed to fork STDERR reader process: $!\n";
+			exit 1;
+		}
+
+		# Reap reader processes
+		waitpid( $childpidout, 0 );
+		waitpid( $childpiderr, 0 );
+
+		# Reap command child
+		waitpid( $procid, 0 );
+		$rtn = $?;
+	}
+
+	# Interpret return code	      
+	print $se interpret_return_code( $rtn );
+
+	return $rtn >> 8;
+}
+
+
+
+#  closing browser does not kill stream  i.e. flvstreamer - no SIGPIPE caught???
+sub run_cmd_win32_orig {
+	# Define what to do with STDOUT and STDERR of the child process
+	use Symbol qw(gensym);
+	my $fh_child_out = shift;
+	my $fh_child_err = shift;
+	my $size = shift;
+	my $from = new IO::Handle;
+	my $err = new IO::Handle;
+	my @cmd = ( @_ );
+	# eek! - works around win32 inability to redirect STDERR nicely
+	# If the stderr is supposed to go to the same fh and stdout then add '2>&1'
+	push @cmd, '2>&1' if fileno($fh_child_out) == fileno($fh_child_err);
+	my $rtn;
+
+	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	# Check if we have IPC::Open3 otherwise fallback on system()
+	eval "use IPC::Open3";
+	
+	# probably only likely in win32
+	if ($@) {
+		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		exit 1;
+
+	# Use open3()
+	} else {
+		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		$SIG{PIPE} = sub { my $signal = shift; print $se "\nINFO: (STDERR) Got signal = $signal\n"; print "\nINFO: (STDOUT) Got signal = $signal\n"; };
+
+		my $procid = open3( gensym, $from, '>&2', @cmd );
+
+		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
+		$SIG{PIPE} = sub {
+			my $signal = shift;
+			print $se "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
+			# Kill process nicely with SIGTERM
+			kill 15, $procid;
+			# Kill this thread
+			exit 0;
+		};
+
+		# Not sure if these are necessary:
+		$fh_child_out->autoflush(1);
+		$from->autoflush(1);
+
+		# Read each char from command output and push to socket fh
+		my $char;
+		my $bytes;
+		while ( $bytes = read( $from, $char, $size ) ) {
+			if ( $bytes <= 0 ) {
+				print $se "DEBUG: STDOUT fd closed - killing thread\n";
+				exit 0;
+			} else {
+				print $fh_child_out $char;
+			}
+			last if $bytes < $size;
+		}
+		#print $se "CMD STDOUT FH EMPTY\n";
+		
+		# Wait for child to complete
+		waitpid( $procid, 0 );
+		$rtn = $?;
+	}
+
+	# Interpret return code	      
+	print $se interpret_return_code( $rtn );
+
+	return $rtn >> 8;
+}
+
+
+
+# Works except for where both from and err go to fh - does not die when browser closes.
+# Also the browser does not get closed after cmd completes...
+# Uses shell when stderr needs to be redirected to stdout
+sub run_cmd_win32 {
 	# Define what to do with STDOUT and STDERR of the child process
 	my $fh_child_out = shift;
 	my $fh_child_err = shift;
+	my $size = shift;
 	my @cmd = ( @_ );
+	# eek! - works around win32 inability to redirect STDERR nicely
+	# If the stderr is supposed to go to the same fh and stdout then add '2>&1'
+	push @cmd, '2>&1' if fileno($fh_child_out) == fileno($fh_child_err);
 	my $rtn;
 
 	# Disable buffering
 	$fh_child_out->autoflush(1);
 
-	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+	print $se "INFO: Win32 Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
 	# Redirect $fh_child_out to STDOUT
 	open(STDOUT, ">&", $fh_child_out ) || die "can't dup client to stdout";
@@ -1161,6 +1366,73 @@ sub run_cmd {
 # sets $?
 # returns array of output
 sub get_cmd_output {
+
+	# win32 kludge cos win is so broken
+	return get_cmd_output_win32( @_ ) if IS_WIN32;
+
+	use Symbol qw(gensym);
+	my @cmd = ( @_ );
+	#my $to = new IO::Handle;
+	my $from = new IO::Handle;
+	my $error = new IO::Handle;
+	my $rtn;
+	my @out_from;
+	my @out_error;
+
+	#$to->autoflush(1);
+	$from->autoflush(1);
+	$error->autoflush(1);
+	
+	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	# Check if we have IPC::Open3 otherwise fallback on system()
+	eval "use IPC::Open3";
+
+	# probably only likely in win32
+	if ($@) {
+		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		exit 1;
+
+	# Use open3()
+	} else {
+		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		my $procid = open3( gensym, $from, $error, @cmd );
+		# Wait for child to complete
+
+		my $childpid = fork();
+		# Child
+		if ( $childpid == 0 ) {
+			while ( <$error> ) {
+				print $se "CMD STDERR: $_";
+			}
+			#print $se "CMD STDERR EMPTY\n";
+			exit 0;
+		# Parent
+		} elsif ( defined $childpid ) {
+			while ( <$from> ) {
+				push @out_from, $_;
+			}
+		} else {
+			print $se "ERROR: Could not fork STDERR reader process\n";
+			exit 1;
+		}
+		waitpid( $childpid, 0 );
+
+		waitpid( $procid, 0 );
+		$rtn = $?;
+	}
+
+	# Interpret return code	      
+	print $se interpret_return_code( $rtn );
+
+	return @out_from;
+}
+
+
+
+# Still uses shell
+sub get_cmd_output_win32 {
 	my ( @cmd ) = ( @_ );
 
 	# workaround to add quotes around the args because we are using a shell here
@@ -1169,14 +1441,9 @@ sub get_cmd_output {
 	}
 
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
-
-	# Damnit these aren't supported under win32 - may aswell use backticks!
-	##open( CMD, '-|', @_ ) || print $se "ERROR: echo failed: $!\n";
-	##open( CMD, '-|' ) || exec @_ || print $se "ERROR: echo failed: $!\n";
 	open( CMD, ( join ' ', @cmd ).'|' ) || print $se "ERROR: echo failed: $!\n";
 	my @out = <CMD>;
 	close CMD;
-	#my @out = `@cmd`;
 
 	# Interpret return code	      
 	print $se interpret_return_code( $? );
@@ -1669,7 +1936,7 @@ sub flush {
 		get_iplayer_webrequest_args( 'flush=1', 'nopurge=1', "type=$typelist", "search=no search just flush" ),
 	);
 	print $fh '<pre>';
-	run_cmd( $fh, $se, @cmd );
+	run_cmd( $fh, $se, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
 }
