@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.34';
+my $VERSION = '0.35';
 
 use strict;
 use CGI ':all';
@@ -2043,7 +2043,7 @@ sub search_progs {
 			.'<br />'.
 			a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' )
 			.'<br />'.
-			label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; submit()" }, 'Series' )
+			label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.SINCE.value=''; submit()" }, 'Series' )
 		);
 
 		for ( @displaycols ) {
