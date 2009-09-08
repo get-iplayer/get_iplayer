@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.28;
+my $version = 2.29;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -67,6 +67,8 @@ use strict;
 use Time::Local;
 use URI;
 use POSIX qw(:termios_h);
+my %SIGORIG;
+$SIGORIG{$_} = $SIG{$_} for keys %SIG; # Save default SIG actions
 $|=1;
 
 # Hash of where plugin files were found so that the correct ones can be updated
@@ -468,7 +470,7 @@ my @search_args = @ARGV;
 # Use --webrequest to specify options in urlencoded format
 if ( $opt->{webrequest} ) {
 	# parse GET args
-	my @webopts = split /[\&\?\-]/, $opt->{webrequest};
+	my @webopts = split /[\&\?]/, $opt->{webrequest};
 	for (@webopts) {
 		# URL decode it
 		$_ = main::url_decode( $_ );
@@ -2271,7 +2273,6 @@ sub run_cmd {
 	my $mode = shift;
 	my @cmd = ( @_ );
 	my $rtn;
-	my $old_handler = $SIG{TERM};
 	
 	main::logger "\n\nINFO: Command: ".(join ' ', @cmd)."\n\n" if $opt->{verbose};
                 
@@ -2295,38 +2296,55 @@ sub run_cmd {
 
 	# Use open3()
 	} else {
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		my $procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
-
-		# Setup signal handler for SIGTERM
-		$SIG{TERM} = sub {
+		my $procid;
+		# Don't create zombies
+		$SIG{CHLD} = 'IGNORE';
+		# Setup signal handler for SIGTERM/PIPE/INT - kill, kill, kill, killlllll
+		$SIG{TERM} = $SIG{PIPE} = $SIG{INT} = sub {
 			my $signal = shift;
-			main::logger "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
-			# Kill process group with SIGTERM
-			kill 15, $procid;
+			main::logger "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+			for my $sig ( qw/INT PIPE TERM KILL/ ) {
+				# Kill process with SIGs
+				main::logger "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+				kill $sig, $procid;
+				sleep 1;
+				if ( ! kill 0, $procid ) {
+					main::logger "INFO: $$ killed cmd PID=$procid\n";
+					last;
+				}
+				sleep 4;
+			}
+			exit 0;
 		};
+
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
 
 		# Wait for child to complete
 		waitpid( $procid, 0 );
 		$rtn = $?;
 
-		# Restore old signal handler for SIGTERM
-		$SIG{TERM} = $old_handler;
+		# Restore old signal handlers
+		$SIG{TERM} = $SIGORIG{TERM};
+		$SIG{PIPE} = $SIGORIG{PIPE};
+		$SIG{INT} = $SIGORIG{INT};
+		$SIG{CHLD} = $SIGORIG{CHLD};
 	}
 
-	# Interpret return code	      
-	if ( $opt->{verbose} ) {
-		if ( $rtn == -1 ) {
-			main::logger "ERROR: Command failed to execute: $!\n";
-		} elsif ( $rtn & 128 ) {
-			main::logger "WARNING: Command executed but coredumped\n";
-		} elsif ( $rtn & 127 ) {
-			main::logger sprintf "WARNING: Command executed but died with signal %d\n", $rtn & 127;
-		} else {
-			main::logger sprintf "INFO: Command exit code %d\n", $rtn >> 8;
-		}
+	# Interpret return code	and force return code 2 upon error      
+	my $return = $rtn >> 8;
+	if ( $rtn == -1 ) {
+		main::logger "ERROR: Command failed to execute: $!\n" if $opt->{verbose};
+		$return = 2 if ! $return;
+	} elsif ( $rtn & 128 ) {
+		main::logger "WARNING: Command executed but coredumped\n" if $opt->{verbose};
+		$return = 2 if ! $return;
+	} elsif ( $rtn & 127 ) {
+		main::logger sprintf "WARNING: Command executed but died with signal %d\n", $rtn & 127 if $opt->{verbose};
+		$return = 2 if ! $return;
 	}
-	return $rtn >> 8;
+	main::logger sprintf "INFO: Command exit code %d\n", $return if $return;
+	return $return;
 }
 
 
@@ -2355,9 +2373,11 @@ sub StringUtils::clean_utf8_and_whitespace {
 # Signal handler to clean up after a ctrl-c or kill
 sub cleanup {
 	my $signal = shift;
-	logger "INFO: Cleaning up (signal = $signal)\n" if $opt->{verbose};
+	logger "\nINFO: Cleaning up $0 (got signal $signal)\n"; # if $opt->{verbose};
 	unlink $namedpipe;
 	unlink $lockfile;
+	# Execute default signal handler
+	$SIGORIG{$signal}->() if $SIGORIG{$signal};
 	exit 1;
 }
 
