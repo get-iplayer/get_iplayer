@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.35';
+my $VERSION = '0.36';
 
 use strict;
 use CGI ':all';
@@ -423,7 +423,7 @@ my $IGNOREEXIT = 0;
 # If the port number is specified then run embedded web server
 if ( $opt_cmdline->{port} > 0 ) {
 	# Setup signal handlers
-	$SIG{INT} = $SIG{TERM} = $SIG{HUP} = $SIG{PIPE} = \&cleanup;
+####	$SIG{INT} = $SIG{TERM} = $SIG{HUP} = $SIG{PIPE} = \&cleanup;
 	# Autoreap zombies
 	$SIG{CHLD} = 'IGNORE';
 	# Need this because with $SIG{CHLD} = 'IGNORE', backticks and systems calls always return -1
@@ -736,6 +736,22 @@ sub pvr_run {
 	run_cmd( $fh, $fh, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("PVR Run complete");
+
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+			]),
+		),
+	);
 }
 
 
@@ -1123,9 +1139,7 @@ sub run_cmd_unix {
 	}
 
 	# Interpret return code	      
-	print $se interpret_return_code( $rtn );
-
-	return $rtn >> 8;
+	return interpret_return_code( $rtn );
 }
 
 
@@ -1165,18 +1179,27 @@ sub run_cmd {
 
 	# Use open3()
 	} else {
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		my $procid = open3( gensym, $from, $err, @cmd ) || print $se "ERROR: Could not execute command: $!\n";
-
+		my $procid;
 		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
-		$SIG{PIPE} = sub {
+		local $SIG{PIPE} = sub {
 			my $signal = shift;
-			print $se "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
-			# Kill process nicely with SIGTERM
-			kill 15, $procid;
-			# Kill this thread
+			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+			for my $sig ( qw/INT PIPE TERM KILL/ ) {
+				# Kill process with SIGs
+				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+				kill $sig, $procid;
+				sleep 1;
+				if ( ! kill 0, $procid ) {
+					print $se "INFO: $$ killed cmd PID=$procid\n";
+					last;
+				}
+				sleep 4;
+			}
 			exit 0;
 		};
+
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		$procid = open3( gensym, $from, $err, @cmd ) || print $se "ERROR: Could not execute command: $!\n";
 
 		my $childpidout = fork();
 
@@ -1190,7 +1213,7 @@ sub run_cmd {
 			my $bytes;
 			while ( $bytes = read( $from, $char, $size ) ) {
 				if ( $bytes <= 0 ) {
-					print $se "DEBUG: STDOUT fd closed - killing thread\n";
+					print $se "DEBUG: STDOUT fd closed - exiting thread\n";
 					exit 0;
 				} else {
 					print $fh_cmd_out $char;
@@ -1222,7 +1245,7 @@ sub run_cmd {
 			$size = 1;
 			while ( $bytes = read( $err, $char, $size ) ) {
 				if ( $bytes <= 0 ) {
-					print $se "DEBUG: STDERR fd closed - killing thread\n";
+					print $se "DEBUG: STDERR fd closed - exiting thread\n";
 					exit 0;
 				} else {
 					print $fh_cmd_err $char;
@@ -1247,12 +1270,13 @@ sub run_cmd {
 		# Reap command child
 		waitpid( $procid, 0 );
 		$rtn = $?;
+
+		# Restore sigpipe handler for reader and writer processes
+		$SIG{PIPE} = 'DEFAULT';
 	}
 
 	# Interpret return code	      
-	print $se interpret_return_code( $rtn );
-
-	return $rtn >> 8;
+	return interpret_return_code( $rtn );
 }
 
 
@@ -1284,21 +1308,26 @@ sub run_cmd_win32_orig {
 
 	# Use open3()
 	} else {
-		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		$SIG{PIPE} = sub { my $signal = shift; print $se "\nINFO: (STDERR) Got signal = $signal\n"; print "\nINFO: (STDOUT) Got signal = $signal\n"; };
-
-		my $procid = open3( gensym, $from, '>&2', @cmd );
-
+		my $procid;
 		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
-		$SIG{PIPE} = sub {
+		local $SIG{PIPE} = sub {
 			my $signal = shift;
-			print $se "\nINFO: Cleaning up (signal = $signal), killing cmd PID=$procid\n";
-			# Kill process nicely with SIGTERM
-			kill 15, $procid;
-			# Kill this thread
+			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+			for my $sig ( qw/INT PIPE TERM KILL/ ) {
+				# Kill process with SIGs
+				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+				kill $sig, $procid;
+				sleep 1;
+				if ( ! kill 0, $procid ) {
+					print $se "INFO: $$ killed cmd PID=$procid\n";
+					last;
+				}
+				sleep 4;
+			}
 			exit 0;
 		};
+
+		$procid = open3( gensym, $from, '>&2', @cmd );
 
 		# Not sure if these are necessary:
 		$fh_child_out->autoflush(1);
@@ -1321,12 +1350,13 @@ sub run_cmd_win32_orig {
 		# Wait for child to complete
 		waitpid( $procid, 0 );
 		$rtn = $?;
+
+		# Restore sigpipe handler for reader and writer processes
+		$SIG{PIPE} = 'DEFAULT';
 	}
 
 	# Interpret return code	      
-	print $se interpret_return_code( $rtn );
-
-	return $rtn >> 8;
+	return interpret_return_code( $rtn );
 }
 
 
@@ -1356,8 +1386,7 @@ sub run_cmd_win32 {
 	$rtn = system( @cmd );
 
 	# Interpret return code	      
-	print $se interpret_return_code( $rtn );
-	return $rtn >> 8;
+	return interpret_return_code( $rtn );
 }
 
 
@@ -1395,9 +1424,28 @@ sub get_cmd_output {
 
 	# Use open3()
 	} else {
+		my $procid;
+		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
+		local $SIG{PIPE} = sub {
+			my $signal = shift;
+			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+			for my $sig ( qw/INT PIPE TERM KILL/ ) {
+				# Kill process with SIGs
+				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+				kill $sig, $procid;
+				sleep 1;
+				if ( ! kill 0, $procid ) {
+					print $se "INFO: $$ killed cmd PID=$procid\n";
+					last;
+				}
+				sleep 4;
+			}
+			exit 0;
+		};
+
 		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
 		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		my $procid = open3( gensym, $from, $error, @cmd );
+		$procid = open3( gensym, $from, $error, @cmd );
 		# Wait for child to complete
 
 		my $childpid = fork();
@@ -1421,11 +1469,14 @@ sub get_cmd_output {
 
 		waitpid( $procid, 0 );
 		$rtn = $?;
+
+		# Restore sigpipe handler for reader and writer processes
+		$SIG{PIPE} = 'DEFAULT';
 	}
 
 	# Interpret return code	      
-	print $se interpret_return_code( $rtn );
-
+	interpret_return_code( $rtn );
+	
 	return @out_from;
 }
 
@@ -1446,7 +1497,7 @@ sub get_cmd_output_win32 {
 	close CMD;
 
 	# Interpret return code	      
-	print $se interpret_return_code( $? );
+	interpret_return_code( $? );
 
 	return @out;
 }
@@ -1454,16 +1505,21 @@ sub get_cmd_output_win32 {
 
 
 sub interpret_return_code {
-	# Interpret return code	      
-	if ( $_ == -1 ) {
-		return "ERROR: failed to execute: $!\n";
-	} elsif ( $_ & 128 ) {
-		return "WARNING: executed but coredumped\n";
-	} elsif ( $_ & 127 ) {
-		return sprintf "WARNING: executed but died with signal %d\n", $_ & 127;
-	} else {
-		return sprintf "DEBUG: Command exit code %d\n", $_ >> 8;
+	my $rtn = $_;
+	# Interpret return code	and force return code 2 upon error      
+	my $return = $rtn >> 8;
+	if ( $rtn == -1 ) {
+		print $se "ERROR: Command failed to execute: $!\n";
+		$return = 2 if ! $return;
+	} elsif ( $rtn & 128 ) {
+		print $se "WARNING: Command executed but coredumped\n";
+		$return = 2 if ! $return;
+	} elsif ( $rtn & 127 ) {
+		print $se sprintf "WARNING: Command executed but died with signal %d\n", $rtn & 127;
+		$return = 2 if ! $return;
 	}
+	print $se sprintf "INFO: Command exit code %d\n", $return if $return;
+	return $return;
 }
 
 
@@ -1572,12 +1628,29 @@ sub show_pvr_list {
 		-method => "POST",
 	);
 
-	print $fh button(
-		-class		=> 'search',
-		-name		=> 'Delete Selected PVR Entries',
-		-onClick 	=> "form.NEXTPAGE.value='pvr_del'; submit()",
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+				a(
+					{
+						-class => 'action',
+						-title => 'Delete selected programmes from PVR search list',
+						-onClick => "form.NEXTPAGE.value='pvr_del'; form.submit()",
+					},
+					'Delete Selected PVR Entries'
+				),
+			]),
+		),
 	);
-
 	print $fh table( {-class=>'search'} , @html );
 	# Make sure we go to the correct nextpage for processing
 	print $fh hidden(
@@ -1656,12 +1729,16 @@ sub pvr_del {
 			get_iplayer_webrequest_args( "pvrdel=$name" ),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
-		my $cmdout = join "\n", get_cmd_output( @cmd );
+		my $cmdout = join "", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Deleted: $name");
 		$out .= $cmdout;
 	}
-	print $fh pre($out);
+	print $fh "<pre>$out</pre>";
+
+	# Show list below
+	show_pvr_list();
+
 	return $out;
 }
 
@@ -1715,12 +1792,16 @@ sub pvr_queue {
 			get_iplayer_webrequest_args( "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' ),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
-		my $cmdout = join "\n", get_cmd_output( @cmd );
+		my $cmdout = join "", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Queued: $type: '$name - $episode' ($pid)");
 		$out .= $cmdout;
 	}
-	print $fh pre($out);
+	print $fh "<pre>$out</pre>";
+
+	# Show list below
+	show_pvr_list();
+
 	return $out;
 }
 
@@ -1787,15 +1868,19 @@ sub pvr_add {
 
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--nocopyright',
 		'--webrequest',
 		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
-	my $cmdout = join "\n", get_cmd_output( @cmd );
+	$out = join "", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
-	print $fh pre($out);
+	print $fh "<pre>$out</pre>";
+
+	# Show list below
+	show_pvr_list();
 
 	return $out;
 }
@@ -1939,6 +2024,23 @@ sub flush {
 	run_cmd( $fh, $se, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
+
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+			]),
+		),
+	);
+
 }
 
 
