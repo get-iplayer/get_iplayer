@@ -2297,23 +2297,28 @@ sub run_cmd {
 	# Use open3()
 	} else {
 		my $procid;
-		# Don't create zombies
-		$SIG{CHLD} = 'IGNORE';
-		# Setup signal handler for SIGTERM/PIPE/INT - kill, kill, kill, killlllll
+		# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
+		##### local $SIG{CHLD} = 'IGNORE';
+		# Setup signal handler for SIGTERM/INT/KILL - kill, kill, killlllll
 		$SIG{TERM} = $SIG{PIPE} = $SIG{INT} = sub {
 			my $signal = shift;
-			main::logger "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
-			for my $sig ( qw/INT PIPE TERM KILL/ ) {
-				# Kill process with SIGs
-				main::logger "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+			main::logger "\nINFO: Cleaning up (signal = $signal), killing PID=$procid:";
+			for my $sig ( qw/INT TERM KILL/ ) {
+				# Kill process with SIGs (try to allow proper handling of kill by child process)
+				if ( $opt->{verbose} ) {
+					main::logger "\nINFO: $$ killing cmd PID=$procid with SIG${sig}";
+				} else {
+					main::logger '.';
+				}
 				kill $sig, $procid;
 				sleep 1;
 				if ( ! kill 0, $procid ) {
-					main::logger "INFO: $$ killed cmd PID=$procid\n";
+					main::logger "\nINFO: $$ killed cmd PID=$procid\n";
 					last;
 				}
-				sleep 4;
+				sleep 1;
 			}
+			main::logger "\n";
 			exit 0;
 		};
 
@@ -2328,7 +2333,7 @@ sub run_cmd {
 		$SIG{TERM} = $SIGORIG{TERM};
 		$SIG{PIPE} = $SIGORIG{PIPE};
 		$SIG{INT} = $SIGORIG{INT};
-		$SIG{CHLD} = $SIGORIG{CHLD};
+		#$SIG{CHLD} = $SIGORIG{CHLD};
 	}
 
 	# Interpret return code	and force return code 2 upon error      
@@ -2343,7 +2348,7 @@ sub run_cmd {
 		main::logger sprintf "WARNING: Command executed but died with signal %d\n", $rtn & 127 if $opt->{verbose};
 		$return = 2 if ! $return;
 	}
-	main::logger sprintf "INFO: Command exit code %d\n", $return if $return;
+	main::logger sprintf "INFO: Command exit code %d (raw code = %d)\n", $return, $rtn if $return || $opt->{verbose};
 	return $return;
 }
 
