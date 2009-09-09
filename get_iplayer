@@ -594,7 +594,6 @@ sub find_matches {
 	if ( $opt->{player} && $opt->{nowrite} && $opt->{stdout} ) {
 		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
 		STDOUT->autoflush(1);
-		# Not that this piping works in Win32 anyway...
 		binmode STDOUT;
 	}
 	# Default to type=tv if no type option is set
@@ -3603,12 +3602,12 @@ sub generate_filenames {
 		}
 	}
 
-	print "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
-	print "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
-	print "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
-	print "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
-	print "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
-	print "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
+	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
+	main::logger "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
+	main::logger "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
+	main::logger "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
+	main::logger "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
+	main::logger "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
 
 	return 0;
 }
@@ -6036,7 +6035,7 @@ sub get {
 
 	# Override the $rearrange value is --raw option is specified
 	$rearrange = 1 if $prog->{type} eq 'tv' && not $opt->{raw};
-	print "DEBUG: Rearrang mov file mode = $rearrange (type: $prog->{type}, raw: $opt->{raw})\n" if $opt->{debug};
+	main::logger "DEBUG: Rearrang mov file mode = $rearrange (type: $prog->{type}, raw: $opt->{raw})\n" if $opt->{debug};
 		
 	# Use url prepend if required
 	if ( $opt->{proxy} =~ /^prepend:/ ) {
