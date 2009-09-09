@@ -2274,7 +2274,7 @@ sub run_cmd {
 	my @cmd = ( @_ );
 	my $rtn;
 	my $USE_SYSTEM = 0;
-	my $system_suffix;
+	#my $system_suffix;
 	
 	main::logger "\n\nINFO: Command: ".(join ' ', @cmd)."\n\n" if $opt->{verbose};
                 
@@ -2284,10 +2284,10 @@ sub run_cmd {
 
 	if ( $mode eq 'STDOUT' ) {
 		$fh_child_out = $fh_child_err = ">&STDOUT";
-		$system_suffix = '2>&1';
+		#$system_suffix = '2>&1';
 	} elsif ( $mode eq 'STDERR' ) {
 		$fh_child_out = $fh_child_err = ">&STDERR";
-		$system_suffix = '1>&2';
+		#$system_suffix = '1>&2';
 	}
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
@@ -2296,14 +2296,17 @@ sub run_cmd {
 	# use system(); - probably only likely in win32
 	if ($@) {
 		main::logger "WARNING: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		my $rtn = system( @cmd, $system_suffix );
+		#push @cmd, $system_suffix;
+		my $rtn = system( @cmd );
 
 	# use system() regardless
 	} elsif ( $USE_SYSTEM ) {
-		my $rtn = system( @cmd, $system_suffix );
+		#push @cmd, $system_suffix;
+		my $rtn = system( @cmd );
 
 	# Use open3()
 	} else {
+
 		my $procid;
 		# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
 		##### local $SIG{CHLD} = 'IGNORE';
