@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.36';
+my $VERSION = '0.37';
 
 use strict;
 use CGI ':all';
@@ -266,7 +266,7 @@ my @nosearch_params = qw/ /;
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashnormal,realaudio', # default
+		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio', # default
 		value	=> 40, # width values
 		save	=> 1,
 	};
@@ -896,7 +896,7 @@ sub create_playlist_m3u {
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode";
-		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=$opt->{current}->{modes}&OUTTYPE=${pid}.${outtype}\n";
+		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
 	}
 
 	return join ("\n", @playlist);
@@ -2136,7 +2136,7 @@ sub search_progs {
 		my %streamopts = (
 			radio		=> '&MODES=iphone&OUTTYPE=mp3',
 			tv		=> '&MODES=iphone&OUTTYPE=mov',
-			livetv		=> '&MODES=flashnormal&OUTTYPE=flv',
+			livetv		=> '&MODES=flash&OUTTYPE=flv',
 			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
 			itv		=> '&OUTTYPE=asf',
 		);
