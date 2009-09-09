@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.30;
+my $version = 2.31;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -139,6 +139,7 @@ my $opt_format = {
 	subsraw		=> [ 1, "subsraw", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
 	test		=> [ 1, "test|t", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail", 'Recording', '--thumb', "Download Thumbnail image if available"],
+	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
 
 	# Search
 	category 	=> [ 2, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
@@ -629,11 +630,23 @@ sub find_matches {
 	for ( $bin->{lame}, $bin->{tee} ) {
 		s!^(.+)$!"$1"!g;
 	}
-	# Set quiet, test and get options if we're asked for streaminfo
-	if ( $opt->{streaminfo} ) {
-		$opt->{test} 	= 1;
-		$opt->{get} 	= 1;
-		$opt->{quiet} 	= 1;
+	
+	# Set --subtitles if --subsonly is used
+	if ( $opt->{subsonly} ) {
+		$opt->{subtitles} = 1;
+	}
+
+	# Set --thumbnail if --thumbonly is used
+	if ( $opt->{thumbonly} ) {
+		$opt->{thumb} = 1;
+	}
+
+	# Set --get && --nowrite if --metadataonly is used
+	if ( $opt->{metadataonly} ) {
+		if ( ! $opt->{metadata} ) {
+			main::logger "ERROR: Please specify metadata type using --metadata=<type>\n";
+			exit 2;
+		}
 	}
 
 	# List all options and where they are set from then exit
@@ -646,10 +659,11 @@ sub find_matches {
 	}
 
 	# Sanity check some conflicting options
-	if ($opt->{nowrite} && (!$opt->{stdout})) {
+	if ( $opt->{nowrite} && ! $opt->{stdout} ) {
 		logger "ERROR: Cannot record to nowhere\n";
 		exit 1;
 	}
+
 	# Sanity check valid --type specified
 	for (keys %type) {
 		if ( not progclass($_) ) {
@@ -663,9 +677,6 @@ sub find_matches {
 	$opt->{tvmode} = 'n95_wifi' if $opt->{n95};
 	$opt->{radiomode} = 'realaudio' if $opt->{realaudio};
 	$opt->{radiomode} = 'iphone' if $opt->{mp3audio};
-
-	# Set --subtitles if --subsonly is used
-	$opt->{subtitles} = 1 if $opt->{subsonly};
 
 	# Web proxy
 	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
@@ -689,7 +700,7 @@ sub find_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if ( ! $opt->{subsonly} ) && ( ! $opt->{multimode} ) && ( ! $opt->{metadataonly} ) && check_download_history( $pid );
+		return 0 if ( ! $opt->{multimode} ) && check_download_history( $pid );
 	
 		# Maybe we don't want to populate caches - this slows down --pid recordings ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -913,23 +924,31 @@ sub list_progs {
 				$this->list_entry( '', 0, $number_of_types );
 			}
 		}
-		if ( $opt->{info} ) {
+		# Get info, create metadata, subtitles and/or thumbnail file (i.e. don't stream/record)
+		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{streaminfo} ) {
 			$this->get_metadata_general();
 			$this->get_metadata( $ua );
-			# display all attribs except 'streams'
-			$this->display_metadata( sort keys %{ $this } );
-		}
-		# Create metadata file (i.e. don't stream/record)
-		if ( $opt->{metadataonly} ) {
-			$this->get_metadata_general();
-			$this->get_metadata( $ua );
+			# info
+			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
 			# Search versions for versionlist versions
 			my @versions = $this->generate_version_list;
 			# Use first version in list if a version list is not specified
 			$this->{version} = $versions[0] || 'default';
 			$this->generate_filenames( $ua, $this->file_prefix_format() );
-			$this->create_metadata_file;
-			$this->download_thumbnail if $opt->{thumb} && $this->{thumbnail};
+			# subs
+			if ( $opt->{subsonly} ) {
+				# skip for non-tv
+				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt" ) if $this->{type} eq 'tv';
+			}
+			# metadata
+			$this->create_metadata_file if $opt->{metadataonly};
+			# thumbnail
+			$this->download_thumbnail if $opt->{thumbonly} && $this->{thumbnail};
+			# streaminfo
+			if ( $opt->{streaminfo} ) {
+				main::display_stream_info( $this, $this->{verpids}->{$version}, $version );
+				$opt->{quiet} = 0;
+			}
 		}
 	}
 	logger "\nINFO: ".($#_ + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#_ >= 0 ) || ! $opt->{pvr};
@@ -2087,12 +2106,12 @@ sub add_to_download_history {
 	my $prog = shift;
 	# Only add if a pid is specified
 	return 0 if ! $prog->{pid};
-	# Don't add to history if stdout streaming is used
-	return 0 if ( $opt->{stdout} && $opt->{nowrite} ) || $opt->{streaminfo};
+	# Don't add to history if nowrite is used
+	return 0 if $opt->{nowrite};
 
 	# Add to history
 	if ( ! open(HIST, ">> $historyfile") ) {
-		logger "ERROR: Cannot write or append to $historyfile\n\n";
+		logger "ERROR: Cannot write or append to $historyfile\n";
 		exit 11;
 	}
 	print HIST "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
@@ -3052,7 +3071,10 @@ sub init {
 # Return metadata of the prog
 sub get_metadata {
 	my $prog = shift;
+	my $ua = shift;
 	$prog->{modes}->{default} = $prog->modelist();
+	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
+	$prog->{versions} = join ',', sort keys %{ $prog->{verpids} };
 }
 
 
@@ -3148,7 +3170,6 @@ sub generate_version_list {
 	} else {
 		main::logger "INFO: Will search for versions: ".(join ',', @version_list)."\n" if $opt->{verbose};
 	}
-	#main::logger "INFO: Versions available: ".(join ',', sort keys %{ $prog->{verpids} })."\n";
 	return @version_list;
 }
 
@@ -3162,11 +3183,8 @@ sub download_retry_loop {
 	# Run the type init
 	$prog->init();
 
-	# return if metadataonly
-	return 0 if $opt->{metadataonly};
-
-	# If already downloaded then return (unless its for subsonly, multimode or streaminfo)
-	return 0 if ( ! $opt->{streaminfo} ) && ( ! $opt->{subsonly} ) && ( ! $opt->{multimode} ) && main::check_download_history( $prog->{pid} );
+	# If already downloaded then return (unless its for multimode)
+	return 0 if ( ! $opt->{multimode} ) && main::check_download_history( $prog->{pid} );
 
 	# Skip and warn if there is no pid
 	if ( ! $prog->{pid} ) {
@@ -3216,13 +3234,6 @@ sub download_retry_loop {
 				$prog->{streams}->{$version} = \%streamdata;
 			}
 
-			# Display media stream data if required
-			if ( $opt->{streaminfo} ) {
-				main::display_stream_info( $prog, $prog->{verpids}->{$version}, $version );
-				$opt->{quiet} = 0;
-				next;
-			}
-
 			########## mode loop ########
 			# record prog depending on the prog type
 
@@ -3256,9 +3267,6 @@ sub download_retry_loop {
 
 				# quit if successful or skip (unless --multimode selected)
 				last if ( $retcode == 0 || $retcode == 2 ) && ! $opt->{multimode};
-
-				# Only need to try one mode for subs
-				last if $opt->{subsonly};
 			}
 		}
 		# Break out of loop if we have a successful recording for this version and mode
@@ -3308,17 +3316,22 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			# No need to do all these post-tasks if its streaming-only or subs-only
-			if ( $opt->{subsonly} || ( $opt->{stdout} && $opt->{nowrite} ) ) {
+			# No need to do all these post-tasks if its streaming-only
+			if ( $opt->{stdout} ) {
+				# Run user command if streaming-only or a stream was writtem
+				$prog->run_user_command( $opt->{command} ) if $opt->{command};
 				# Skip
 			} else {
-				# Add to history, tag file, and run post-record command
-				main::add_to_download_history( $prog );
-				$prog->tag_file;
+				# Add to history, tag file, and run post-record command if a stream was written
+				main::logger "\n";
+				if ( ! $opt->{nowrite} ) {
+					main::add_to_download_history( $prog );
+					$prog->tag_file;
+					$prog->run_user_command( $opt->{command} ) if $opt->{command};
+				}
 				$prog->download_thumbnail if $opt->{thumb};
 				$prog->create_metadata_file if $opt->{metadata};
 			}
-			$prog->run_user_command( $opt->{command} ) if $opt->{command} && (! $opt->{subsonly});
 			$prog->report() if $opt->{pvr};
 			return 0;
 
@@ -3527,7 +3540,7 @@ sub generate_filenames {
 		$prog->get_metadata($ua);
 		$prog->get_metadata_general();
 	}
-	
+
 	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
 
 	# Add modename to default format string if multimode option is used
@@ -3585,11 +3598,9 @@ sub generate_filenames {
 		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
 	}
 
-	# If the file already exists (ignore when streaming, metadataonly, or subsonly)
+	# overwrite/error if the file already exists and is going to be written to
 	if (
-	 	(! $opt->{metadataonly})
-		&& (! $opt->{subsonly}) 
-		&& (! ( $opt->{stdout} &&  $opt->{nowrite} ) ) 
+		( ! $opt->{nowrite} )
 		&& -f $prog->{filename} 
 		&& stat($prog->{filename})->size > $prog->min_download_size()
 	) {
@@ -3786,29 +3797,29 @@ sub download_thumbnail {
 	my $image;
 		
 	if ( $prog->{thumbnail} =~ /^http/i ) {
-		main::logger "\nINFO: Getting thumbnail from $prog->{thumbnail}\n" if $opt->{verbose};
+		main::logger "INFO: Getting thumbnail from $prog->{thumbnail}\n" if $opt->{verbose};
 		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
 		$ext = $opt->{thumbext} || $ext;
 		$file = "$prog->{dir}/$prog->{fileprefix}.${ext}";
 
-		# Download subs
+		# Download thumb
 		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
 		if (! $image ) {
-			main::logger "\nERROR: Thumbnail Download failed\n";
+			main::logger "ERROR: Thumbnail Download failed\n";
 			return 1;
 		} else {
-			main::logger "\nINFO: Downloaded Thumbnail\n";
+			main::logger "INFO: Downloaded Thumbnail to '$file'\n";
 		}
 
 	} else {
 		# Return if we have no url
-		main::logger "\nINFO: Thumbnail not available\n" if $opt->{verbose};
+		main::logger "INFO: Thumbnail not available\n" if $opt->{verbose};
 		return 2;
 	}
 
 	# Write to file
 	unlink($file);
-	my $fh = main::open_file_append($file);
+	open( my $fh, "> $file" );
 	binmode $fh;
 	print $fh $image;
 	close $fh;
@@ -5173,9 +5184,6 @@ sub get_links {
 sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
-	# if subsonly required then skip for non-tv
-	return 'skip' if $opt->{subsonly} && $prog->{type} ne 'tv';
-
 	# Check if we need 'tee'
 	if ( $mode =~ /^real/ && (! main::exists_in_path('tee')) && $opt->{stdout} && (! $opt->{nowrite}) ) {
 		main::logger "\nERROR: tee does not exist in path, skipping\n";
@@ -5236,12 +5244,14 @@ sub download {
 	if ( $opt->{subtitles} ) {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
+		main::logger "\n";
 		$prog->download_subtitles( $ua, $subfile );
 	}
 
 
 	my $return = 0;
-	if ( ! $opt->{subsonly} ) {
+	# Only get the stream if we are writing a file or streaming
+	if ( $opt->{stdout} || ! $opt->{nowrite} ) {
 		# set mode
 		$prog->{mode} = $mode;
 
@@ -5258,7 +5268,7 @@ sub download {
 		# Re-enable proxy here if required
 		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
-	
+
 	# Rename the subtitle file accordingly
 	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
 
@@ -5279,30 +5289,33 @@ sub download_subtitles {
 	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles1}->{streamurl};
 	# Return if we have no url
 	if (! $suburl) {
-		main::logger "\nINFO: Subtitles not available\n";
+		main::logger "INFO: Subtitles not available\n";
 		return 2;
 	}
 
-	main::logger "\nINFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
+	main::logger "INFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
 
 	# Open subs file
 	unlink($file);
-	my $fh = main::open_file_append($file);
+	open( my $fh, "> $file" );
+	binmode $fh;
 
 	# Download subs
 	$subs = main::request_url_retry($ua, $suburl, 2);
 	if (! $subs ) {
-		main::logger "\nERROR: Subtitle Download failed\n";
+		main::logger "ERROR: Subtitle Download failed\n";
 		return 1;
 	} else {
 		# Dump raw subs into a file if required
 		if ( $opt->{subsraw} ) {
-			main::logger "\nINFO: Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.ttxt\n";
-			my $fhraw = main::open_file_append("$prog->{dir}/$prog->{fileprefix}.ttxt");
+			unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
+			main::logger "INFO: 'Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.ttxt'\n";
+			open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
+			binmode $fhraw;
 			print $fhraw $subs;
 			close $fhraw;
 		}
-		main::logger "\nINFO: Downloading Subtitles to $prog->{dir}/$prog->{fileprefix}.srt\n";
+		main::logger "INFO: Downloading Subtitles to '$prog->{dir}/$prog->{fileprefix}.srt'\n";
 	}
 
 	# Convert the format to srt
@@ -7487,7 +7500,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(webrequest|nocopyright|^test|metadataonly|subsonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|nocopyright|^test|metadataonly|subsonly|thumbonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
