@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.29;
+my $version = 2.30;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -2273,6 +2273,8 @@ sub run_cmd {
 	my $mode = shift;
 	my @cmd = ( @_ );
 	my $rtn;
+	my $USE_SYSTEM = 0;
+	my $system_suffix;
 	
 	main::logger "\n\nINFO: Command: ".(join ' ', @cmd)."\n\n" if $opt->{verbose};
                 
@@ -2282,8 +2284,10 @@ sub run_cmd {
 
 	if ( $mode eq 'STDOUT' ) {
 		$fh_child_out = $fh_child_err = ">&STDOUT";
+		$system_suffix = '2>&1';
 	} elsif ( $mode eq 'STDERR' ) {
 		$fh_child_out = $fh_child_err = ">&STDERR";
+		$system_suffix = '1>&2';
 	}
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
@@ -2292,7 +2296,11 @@ sub run_cmd {
 	# use system(); - probably only likely in win32
 	if ($@) {
 		main::logger "WARNING: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		my $rtn = system( @cmd );
+		my $rtn = system( @cmd, $system_suffix );
+
+	# use system() regardless
+	} elsif ( $USE_SYSTEM ) {
+		my $rtn = system( @cmd, $system_suffix );
 
 	# Use open3()
 	} else {
@@ -5064,6 +5072,9 @@ sub get_links {
 				( $name, $episode ) = ( $1, $2 );
 			} elsif ( $title =~ m{^(.+?):\s+(.+)$} ) {
 				( $name, $episode ) = ( $1, $2 );
+			# Catch all - i.e. no ':' separators
+			} else {
+				( $name, $episode ) = ( $title, $title );
 			}			
 
 			# This is not the availability!
