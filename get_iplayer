@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.31;
+my $version = 2.32;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -150,6 +150,7 @@ my $opt_format = {
 	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	search		=> [ 1, "search=s", 'Search', '--search <search term>', "GetOpt compliant way of specifying search args"],
+	history		=> [ 1, "history", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,audiodescribed,default')"],
@@ -241,12 +242,14 @@ my $opt_file = Options->new();
 Options->add_opt_format_object( $opt_format );
 
 # Set Programme/Pvr/Streamer class global var refs to the Options instance
+History->add_opt_object( $opt );
 Programme->add_opt_object( $opt );
 Pvr->add_opt_object( $opt );
 Pvr->add_opt_file_object( $opt_file );
 Pvr->add_opt_cmdline_object( $opt_cmdline );
 Streamer->add_opt_object( $opt );
-# Kludge: Create dummy Streamer and Programme instances (without a single instance, none of the bound options work)
+# Kludge: Create dummy Streamer, History and Programme instances (without a single instance, none of the bound options work)
+History->new();
 Programme->new();
 Streamer->new();
 
@@ -437,9 +440,8 @@ update_script() if $opt->{update} || $opt->{pluginsupdate};
 
 ########## Global vars ###########
 
-# Define cache file format (maybe this is better determined from the header line of the cache file)
-my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
-
+#my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
+my @history_format = qw/pid name episode type timeadded mode filename versions duration desc channel categories thumbnail guidance web/;
 # Ranges of numbers used in the indicies for each programme type
 my $max_index = 0;
 for ( progclass() ) {
@@ -550,14 +552,22 @@ if ( $opt->{pvradd} ) {
 
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
-	my %pids_history = main::load_download_history() if $opt->{hide};
-	find_matches( \%pids_history );
+	my $hist = History->new();
+	find_matches( $hist );
+
+# Show history
+} elsif ( $opt->{history} ) {
+	my $hist = History->new();
+	$hist->load();
+	# ensure we don't change any recordings
+	$opt->{nowrite} = 1;
+	$hist->show( @search_args );
 
 # Else just process command line args
 } else {
-	my %pids_history = main::load_download_history() if $opt->{hide};
-	download_matches( find_matches( \%pids_history, @search_args ) );
-	purge_downloaded_files( 30 );
+	my $hist = History->new();
+	download_matches( $hist, find_matches( $hist, @search_args ) );
+	purge_downloaded_files( $hist, 30 );
 }
 exit 0;
 
@@ -568,7 +578,7 @@ exit 0;
 # Returns: array of objects to be downloaded
 #      or: number of failed/remaining programmes to record using the match (excluding previously recorded progs) if --pid is specified
 sub find_matches {
-	my $pids_history_ref = shift;
+	my $hist = shift;
 	my @search_args = @_;
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
@@ -580,10 +590,13 @@ sub find_matches {
 	my %type;
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
+	# Load history if we need it
+	$hist->load() if $opt->{hide};
+
 	# Ensure lowercase types
-	$opt->{type}		= lc( $opt->{type} );
+	$opt->{type} = lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
-	$opt->{type} 		= join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
+	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 	$type{$_} = 1 for split /,/, $opt->{type};
 	# --stream is the same as --stdout --nowrite
 	if ( $opt->{stream} ) {
@@ -700,7 +713,7 @@ sub find_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if ( ! $opt->{multimode} ) && check_download_history( $pid );
+		return 0 if ( ! $opt->{multimode} ) && $hist->check( $pid );
 	
 		# Maybe we don't want to populate caches - this slows down --pid recordings ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -729,14 +742,14 @@ sub find_matches {
 				}
 				# Display pid for recording
 				list_progs( \%type, $this );
-				$retcode = $this->download_retry_loop();
+				$retcode = $this->download_retry_loop( $hist );
 				last if ! $retcode;
 			} else {
 				logger "INFO: pid found in cache\n";
 				$this = $prog{$pid};
 				# Display pid for recording
 				list_progs( \%type, $this );
-				$retcode = $this->download_retry_loop();
+				$retcode = $this->download_retry_loop( $hist );
 				last if ! $retcode;
 				# If it is in the cache then we'll not need to try the other types regardless of success
 				last;
@@ -817,7 +830,7 @@ sub find_matches {
 				$type{$prog_type} = 1;
 				# Get $prog_type stream links
 				get_links( \%prog, \%index_prog, $prog_type );
-				$got_cache{$prog_type} =1;
+				$got_cache{$prog_type} = 1;
 			}
 		}
 		# Now check again if the index number exists in the cache before adding this prog to the match list
@@ -836,7 +849,7 @@ sub find_matches {
 		my @pruned;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
-			if ( $pids_history_ref->{ $this->{pid} } ) {
+			if ( $hist->{ $this->{pid} } ) {
 				logger "DEBUG: Ignoring Prog: '$this->{index}: $this->{name} - $this->{episode}'\n" if $opt->{debug};
 			} else {
 				push @pruned, $this;
@@ -859,13 +872,14 @@ sub find_matches {
 
 
 sub download_matches {
+	my $hist = shift;
 	my @match_list = @_;
 
 	# Do the recordings based on list of index numbers if required
 	my $failcount;
 	if ( $opt->{get} || $opt->{stdout} ) {
 		for my $this (@match_list) {
-			$failcount += $this->download_retry_loop();
+			$failcount += $this->download_retry_loop( $hist );
 		}
 	}
 
@@ -878,7 +892,8 @@ sub download_matches {
 # Lists progs given an array of index numbers
 sub list_progs {
 	my $typeref = shift;
-	my $number_of_types = keys %{$typeref};
+	# Use a rogue value if undefined
+	my $number_of_types = keys %{$typeref} || 2;
 	my $ua = create_ua();
 	my %names;
 	
@@ -904,7 +919,7 @@ sub list_progs {
 	logger "Matches:\n" if $#_ >= 0;
 	for my $this (@_) {
 		# Only display if the prog name is set
-		if ( $this->{name} ) {
+		if ( $this->{name} || ! ( $opt->{series} || $opt->{tree} ) ) {
 			# Tree mode
 			if ( $opt->{tree} ) {
 				if (! defined $names{ $this->{name} }) {
@@ -928,13 +943,13 @@ sub list_progs {
 		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{streaminfo} ) {
 			$this->get_metadata_general();
 			$this->get_metadata( $ua );
-			# info
-			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
 			# Search versions for versionlist versions
 			my @versions = $this->generate_version_list;
 			# Use first version in list if a version list is not specified
 			$this->{version} = $versions[0] || 'default';
 			$this->generate_filenames( $ua, $this->file_prefix_format() );
+			# info
+			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
 			# subs
 			if ( $opt->{subsonly} ) {
 				# skip for non-tv
@@ -1013,11 +1028,11 @@ sub get_regex_matches {
 		# Only include programmes matching channels and category regexes
 		if ( $this->{channel} =~ /$channel_regex/i
 		  && $this->{categories} =~ /$category_regex/i
-		  && $this->{versions} =~ /$versions_regex/i
+		  && ( ( not defined $this->{versions} ) || $this->{versions} =~ /$versions_regex/i )
 		  && $this->{channel} !~ /$channel_exclude_regex/i
 		  && $this->{name} !~ /$exclude_regex/i
 		  && $this->{categories} !~ /$category_exclude_regex/i
-		  && $this->{timeadded} >= $now - ($since * 3600)
+		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
 		) {
 			# Custom search fields
 			if ( @searchfields ) {
@@ -1045,29 +1060,29 @@ sub get_regex_matches {
 
 
 
-# Usage: sort_index( \%prog, \%index_prog, $prog_type )
-# Populates the index fif the prog hash as well as creating the %index_prog hash
+# Usage: sort_index( \%prog, \%index_prog, [$prog_type], [sortfield] )
+# Populates the index if the prog hash as well as creating the %index_prog hash
 # Should be run after any number of get_links methods
 sub sort_index {
 	my $progref = shift;
 	my $index_progref = shift;
 	my $prog_type = shift;
-
-	# Add index field based on alphabetical sorting by prog name
+	my $sortfield = shift || 'name';
+	my $counter = 1;
+	my @sort_key;
+	
+	# Add index field based on alphabetical sorting by $sortfield
 	# Start index counter at 'min' for this prog type
-	my $counter = progclass($prog_type)->index_min;
+	$counter = progclass($prog_type)->index_min if defined $prog_type;
 
-	my @prog_pid;
-
-	# Create unique array of '<progname|pid>' for this prog type
-	for ( keys %{$progref} ) {
-		# skip prog not of correct type
-		next if $progref->{$_}->{type} ne $prog_type;
-		push @prog_pid, "$progref->{$_}->{name}|$_";
+	# Create unique array of '<$sortfield|pid>' for this prog type
+	for my $pid ( keys %{$progref} ) {
+		# skip prog not of correct type and type is defined
+		next if defined $prog_type && $progref->{$pid}->{type} ne $prog_type;
+		push @sort_key, "$progref->{$pid}->{$sortfield}|$pid";
 	}
-	# Sort by progname and index 
-	for (sort @prog_pid) {
-
+	# Sort by $sortfield and index 
+	for (sort @sort_key) {
 		# Extract pid
 		my $pid = (split /\|/)[1];
 
@@ -1109,6 +1124,16 @@ sub progclass {
 }
 
 
+
+# Returns classname for prog type or if not specified, an array of all prog types
+sub is_prog_type {
+	my $prog_type = shift;
+	return 1 if defined $prog_types{$prog_type};
+	return 0;
+}
+
+
+
 # Feed Info:
 #	# aod index
 #	http://www.bbc.co.uk/radio/aod/index_noframes.shtml
@@ -1141,6 +1166,8 @@ sub get_links {
 	my $index_progref = shift;
 	my $prog_type = shift;
 	my $only_load_from_cache = shift;
+	# Define cache file format (maybe this is better determined from the header line of the cache file)
+	my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
 	
 	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
@@ -2101,116 +2128,27 @@ sub exists_in_path {
 
 
 # Generic
-# Adds prog to history file (with a timestamp) so that it is not rerecorded after deletion
-sub add_to_download_history {
-	my $prog = shift;
-	# Only add if a pid is specified
-	return 0 if ! $prog->{pid};
-	# Don't add to history if nowrite is used
-	return 0 if $opt->{nowrite};
-
-	# Add to history
-	if ( ! open(HIST, ">> $historyfile") ) {
-		logger "ERROR: Cannot write or append to $historyfile\n";
-		exit 11;
-	}
-	print HIST "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
-	close HIST;
-	return 0;
-}
-
-
-
-# Generic
-# returns a hash (<pid> => <data>) for all the pids in the history file
-sub load_download_history {
-	my %pids_downloaded;
-
-	# Return if force option specified or stdout streaming only
-	return %pids_downloaded if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
-
-	logger "INFO: Loading download history\n" if $opt->{verbose};
-	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
-		return 0;
-	}
-	while ( <HIST> ) {
-		$pids_downloaded{$1} = $2 if m{^(.+?)\|(.*)$};
-		logger "DEBUG: Loaded '$1' = '$2' from download history\n" if $opt->{debug};
-	}
-	return %pids_downloaded;
-}
-
-
-
-# Generic
-# Checks history for previous download of this pid
-sub check_download_history {
-	my $pid = shift;
-	my $mode = shift;
-	return 0 if ! $pid;
-
-	# Return if force option specified or stdout streaming only
-	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
-
-	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
-		return 0;
-	}
-	my @entries = grep /^$pid/, <HIST>;
-	close HIST;
-
-	# Find and parse first matching history lines
-	for my $entry ( @entries ) {
-		my ( $name, $episode, $histmode ) = ( split /\|/, $entry )[1,2,5];
-		chomp $name;
-		chomp $episode;
-		chomp $histmode;
-		main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in download history\n" if $opt->{debug};
-		if ( $opt->{multimode} ) {
-			# Strip any number off the end of the mode names for the comparison
-			$mode =~ s/\d+$//g;
-			$histmode =~ s/\d+$//g;
-			if ( $mode eq $histmode ) {
-				logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n";
-				return 1;
-			}
-		} else {
-			logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
-			return 1;
-		}
-	}
-	logger "INFO: Programme not in download history\n" if $opt->{verbose};
-	return 0;
-}
-
-
-
-# Generic
 # Checks history for files that are over 30 days old and asks user if they should be deleted
 # "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
 sub purge_downloaded_files {
+	my $hist = shift;
 	my @delete;
 	my @proglist;
 	my $days = shift;
 			
+	# Load the history if it is empty
+	$hist->load() if ! keys %{ $hist };
+				
 	# Return if disabled or running in a typically non-interactive mode
 	return 0 if $opt->{nopurge} || $opt->{stdout} || $opt->{nowrite} || $opt->{quiet};
 	
-	if ( ! open(HIST, "< $historyfile") ) {
-		logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
-		return 0;
-	}
-
-	while( <HIST> ) {
-		chomp($_);
-		my ($pid, $name, $episode, $type, $time, $mode, $filename) = (split /\|/)[0,1,2,3,4,5,6];
-		if ( $time < (time() - $days*86400) && $filename && -f $filename ) {
-			my ($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+	for my $pid ( keys %{ $hist } ) {
+		my $record = $hist->{$pid};
+		if ( $record->{timeadded} < (time() - $days*86400) && $record->{filename} && -f $record->{filename} ) {
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-			my @t = gmtime( time() - $time );
-			push @proglist, "$name - $episode, Recorded: $t[7] days $t[2] hours ago";
-			push @delete, $filename;
+			my @t = gmtime( time() - $record->{timeadded} );
+			push @proglist, "$record->{name} - $record->{episode}, Recorded: $t[7] days $t[2] hours ago";
+			push @delete, $record->{filename};
 		}
 	}
 	
@@ -2960,6 +2898,233 @@ sub display {
 
 ########################################################
 
+################ History default class #################
+package History;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use strict;
+
+# Class vars
+# Global options
+my $opt_format_ref;
+
+# Constructor
+# Usage: $hist = History->new();
+sub new {
+	my $type = shift;
+	my %params = @_;
+	my $self = {};
+	for (keys %params) {
+		$self->{$_} = $params{$_};
+	}
+	## Ensure the subclass $opt var is pointing to the Superclass global optref
+	$opt = $History::optref;
+	bless $self, $type;
+}
+
+
+# $opt->{<option>} access method
+sub opt {
+	my $self = shift;
+	my $optname = shift;
+	return $opt->{$optname};
+}
+
+# Use to bind a new options ref to the class global $opt_ref var
+sub add_opt_object {
+	my $self = shift;
+	$History::optref = shift;
+}
+
+
+# Uses global @history_format
+# Adds prog to history file (with a timestamp) so that it is not rerecorded after deletion
+# Does not require a load()
+sub add {
+	my $hist = shift;
+	my $prog = shift;
+
+	# Only add if a pid is specified
+	return 0 if ! $prog->{pid};
+	# Don't add to history if nowrite is used
+	return 0 if $opt->{nowrite};
+
+	# Add to history
+	if ( ! open(HIST, ">> $historyfile") ) {
+		main::logger "ERROR: Cannot write or append to $historyfile\n";
+		exit 11;
+	}
+	# Temporarily add timestamp then delete it later
+	#my $timeadded = $prog->{timeadded};
+	$prog->{timeadded} = time();
+	# Write each field into a line in the history file
+	print HIST $prog->{$_}.'|' for @history_format;
+	print HIST "\n";
+	close HIST;
+	#delete $prog->{timestamp};
+	#$prog->{timeadded} = $timeadded;
+	return 0;
+}
+
+
+
+# Uses global @history_format
+# returns, for all the pids in the history file, $history->{pid}->{key} = value
+sub load {
+	my $hist = shift;
+
+	# Return if force option specified or stdout streaming only
+	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
+
+	main::logger "INFO: Loading download history\n" if $opt->{verbose};
+	if ( ! open(HIST, "< $historyfile") ) {
+		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
+		return 0;
+	}
+
+	while (<HIST>) {
+		chomp();
+		# Ignore comments
+		next if /^[\#\s]/;
+		# Populate %prog_old from cache
+		# Get history line
+		my @record = split /\|/;
+		my $record_entries;
+		# Update fields in %history hash for $pid
+		for ( @history_format ) {
+			$record_entries->{$_} = shift @record;
+		}
+		# Create new history entry
+		main::logger "WARNING: duplaicate pid $record_entries->{pid} in history\n" if defined $hist->{ $record_entries->{pid} } && $opt->{debug};
+		# workaround empty names
+		#$record_entries->{name} = 'pid:'.$record_entries->{pid} if ! $record_entries->{name};
+		$hist->{ $record_entries->{pid} } = History::new();
+		$hist->{ $record_entries->{pid} } = $record_entries;
+		main::logger "DEBUG: Loaded '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+	}
+	close (HIST);
+	return 0;
+}
+
+
+
+# Lists current history items (assumes loaded first)
+# Requires a load()
+sub show {
+	my $hist = shift;
+	my %prog;
+	my ( @search_args ) = ( @_ );
+	my %progtypes = main::progclass();
+
+	# This is a 'well dirty' hack to allow all the Programme class methods to be used on the history objects
+	# Basically involves copying all history objects into prog objects and then calling the required method
+
+	# Sort index by timestamp
+	my %index_hist;
+	main::sort_index( \%{ $hist }, \%index_hist, undef, 'timeadded' );
+
+	for my $index ( sort {$a <=> $b} keys %index_hist ) {
+		my $record = $index_hist{$index};
+		my $progrec;
+		if ( not main::is_prog_type( $record->{type} ) ) {
+			main::logger "WARNING: Programme type '$record->{type}' does not exist - using generic class\n" if $opt->{debug};
+			$progrec = Programme->new();
+		} else {
+			# instantiate a new Programme object and copy all metadata from this history object into it
+			$progrec = main::progclass( $record->{type} )->new();
+		}
+		for my $key ( keys %{ $record } ) {
+			$progrec->{$key} = $record->{$key};
+		}
+		$prog{ $progrec->{pid} } = $progrec;
+	}
+
+	# Parse remaining args
+	my @match_list;
+	for ( @search_args ) {
+		chomp();
+
+		# If Numerical value < $max_index and the object exists from loaded prog types
+		if ( /^[\d]+$/ && $_ <= $max_index ) {
+			if ( defined $index_hist{$_} ) {
+				main::logger "INFO: Search term '$_' is an Index value\n" if $opt->{verbose};
+				push @match_list, $prog{ $index_hist{$_}->{pid} };
+			}
+
+		# If PID then find matching programmes with 'pid:<pid>'
+		} elsif ( m{^\s*pid:(.+?)\s*$}i ) {
+			if ( defined $prog{$1} ) {
+				main::logger "INFO: Search term '$1' is a pid\n" if $opt->{verbose};
+				push @match_list, $prog{$1};
+			} else {
+				main::logger "INFO: Search term '$1' is a non-existent pid, use --pid instead\n";
+			}
+
+		# Else assume this is a programme name regex
+		} else {
+			main::logger "INFO: Search term '$_' is a substring\n" if $opt->{verbose};
+			push @match_list, main::get_regex_matches( \%prog, $_ );
+		}
+	}
+
+	# De-dup matches and retain order then list matching programmes in history
+	main::list_progs( undef, main::make_array_unique_ordered( @match_list ) );
+
+	return 0;
+}
+
+
+
+# Generic
+# Checks history for previous download of this pid
+# Does not require a load()
+sub check {
+	my $hist = shift;
+	my $pid = shift;
+	my $mode = shift;
+	return 0 if ! $pid;
+
+	# Return if force option specified or stdout streaming only
+	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
+
+	if ( ! open(HIST, "< $historyfile") ) {
+		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
+		return 0;
+	}
+	my @entries = grep /^$pid/, <HIST>;
+	close HIST;
+
+	# Find and parse first matching history lines
+	for my $entry ( @entries ) {
+		my ( $name, $episode, $histmode ) = ( split /\|/, $entry )[1,2,5];
+		chomp $name;
+		chomp $episode;
+		chomp $histmode;
+		main::main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in download history\n" if $opt->{debug};
+		if ( $opt->{multimode} ) {
+			# Strip any number off the end of the mode names for the comparison
+			$mode =~ s/\d+$//g;
+			$histmode =~ s/\d+$//g;
+			if ( $mode eq $histmode ) {
+				main::logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n";
+				return 1;
+			}
+		} else {
+			main::logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
+			return 1;
+		}
+	}
+	main::logger "INFO: Programme not in download history\n" if $opt->{verbose};
+	return 0;
+}
+
+
+
+
 #################### Programme class ###################
 
 package Programme;
@@ -3179,12 +3344,13 @@ sub generate_version_list {
 # Usage: download_retry_loop ( $prog )
 sub download_retry_loop {
 	my $prog = shift;
+	my $hist = shift;
 
 	# Run the type init
 	$prog->init();
 
 	# If already downloaded then return (unless its for multimode)
-	return 0 if ( ! $opt->{multimode} ) && main::check_download_history( $prog->{pid} );
+	return 0 if ( ! $opt->{multimode} ) && $hist->check( $prog->{pid} );
 
 	# Skip and warn if there is no pid
 	if ( ! $prog->{pid} ) {
@@ -3259,10 +3425,10 @@ sub download_retry_loop {
 				$prog->{mode} = $mode;
 
 				# If multimode is used, skip only modes which are in the history
-				next if $opt->{multimode} && main::check_download_history( $prog->{pid}, $mode );
+				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
-				$retcode = mode_ver_download_retry_loop( $prog, $ua, $mode, $version, $prog->{verpids}->{$version} );
+				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
 				# quit if successful or skip (unless --multimode selected)
@@ -3283,7 +3449,7 @@ sub download_retry_loop {
 
 # returns 1 on fail, 0 on success
 sub mode_ver_download_retry_loop {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my ( $prog, $hist, $ua, $mode, $version, $version_pid ) = ( @_ );
 	my $retries = $opt->{attempts} || 3;
 	my $count = 0;
 	my $retcode;
@@ -3325,7 +3491,7 @@ sub mode_ver_download_retry_loop {
 				# Add to history, tag file, and run post-record command if a stream was written
 				main::logger "\n";
 				if ( ! $opt->{nowrite} ) {
-					main::add_to_download_history( $prog );
+					$hist->add( $prog );
 					$prog->tag_file;
 					$prog->run_user_command( $opt->{command} ) if $opt->{command};
 				}
@@ -3586,7 +3752,11 @@ sub generate_filenames {
 
 	main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
 
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}";
+	# Use a dummy file ext if one isn't set - helps with readability of metadata
+	$prog->{ext} = 'EXT' if ! $prog->{ext};
+	
+	# Don't override the {filename} if it is already set (i.e. for history info)
+	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ! $prog->{filename};
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
 
 	# Create symlink filename if required
@@ -7410,7 +7580,8 @@ sub run {
 	my $single = shift;
 
 	# Don't attempt to record programmes with pids in history
-	my %pids_history = main::load_download_history();
+	my $hist = History->new();
+	$hist->load();
 
 	# Load all PVR searches
 	$pvr->load_list();
@@ -7440,12 +7611,12 @@ sub run {
 
 		# If this is a one-off queue pid entry then delete the PVR entry upon successful recoding(s)
 		if ( $pvr->{$name}->{pid} ) {
-			my $failcount = main::find_matches( \%pids_history );
+			my $failcount = main::find_matches( $hist );
 			$pvr->del( $name ) if not $failcount;
 
 		# Just make recordings of matching progs
 		} else {
-			main::download_matches( main::find_matches( \%pids_history, @search_args ) );
+			main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
 		}
 	}
 }
@@ -7460,13 +7631,14 @@ sub queue {
 
 	# Switch on --hide option
 	$opt->{hide} = 1;
-	my %pids_history = main::load_download_history();
+	my $hist = History->new();
+	$hist->load();
 
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
 		if ( $opt_cmdline->{type} && $opt_cmdline->{type} !~ ',' ) {
 			# Add to PVR if not already in download history (unless multimode specified)
-			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! main::check_download_history( $opt_cmdline->{pid} ) ) || $opt->{multimode};
+			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) ) || $opt->{multimode};
 		} else {
 			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
 			return 1;
@@ -7474,7 +7646,7 @@ sub queue {
 
 	# Search specified
 	} else {
-		my @matches = main::find_matches( \%pids_history, @search_args );
+		my @matches = main::find_matches( $hist, @search_args );
 		# Add a PVR entry for each matching prog PID
 		for my $this ( @matches ) {
 			$opt_cmdline->{pid} = $this->{pid};
