@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.37';
+my $VERSION = '0.38';
 
 use strict;
 use CGI ':all';
@@ -105,7 +105,7 @@ my @displaycols;
 my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web);
 
 # Default Displayed headings
-my @headings_default = qw( thumbnail type name episode desc channel categories );
+my @headings_default = qw( thumbnail type name episode desc channel categories timeadded );
 
 # Lookup table for nice field name headings
 my %fieldname = (
@@ -199,7 +199,7 @@ my %nextpages = (
 my $opt;
 
 # Options Ordering on page
-my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES /;
+my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES HISTORY/;
 my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
 my @order_settings = qw/ OUTPUT MODES PROXY /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
@@ -209,6 +209,7 @@ my @nosearch_params = qw/ /;
 # Store options definition here as hash of 'name' => [options]
 	$opt->{SEARCH} = {
 		title	=> 'Search', # Title
+		tooltip	=> 'Enter your partial text match (or regex expression)', # Tooltip
 		webvar	=> 'SEARCH', # webvar
 		optkey	=> 'search', # option key
 		type	=> 'text', # type
@@ -219,6 +220,7 @@ my @nosearch_params = qw/ /;
 	
 	$opt->{SEARCHFIELDS} = {
 		title	=> 'Search in', # Title
+		tooltip	=> 'Select which column you wish to search', # Tooltip
 		webvar	=> 'SEARCHFIELDS', # webvar
 		optkey	=> 'fields', # option
 		type	=> 'popup', # type
@@ -230,6 +232,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{PAGESIZE} = {
 		title	=> 'Programmes per Page', # Title
+		tooltip	=> 'Select the number of search results displayed on each page', # Tooltip
 		webvar	=> 'PAGESIZE', # webvar
 		type	=> 'popup', # type
 		default	=> 20, # default
@@ -240,6 +243,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{SORT} = {
 		title	=> 'Sort by', # Title
+		tooltip	=> 'Sort the results in this order', # Tooltip
 		webvar	=> 'SORT', # webvar
 		type	=> 'popup', # type
 		label	=> \%fieldname, # labels
@@ -251,6 +255,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{PROGTYPES} = {
 		title	=> 'Programme type', # Title
+		tooltip	=> 'Select the programme types you wish to search', # Tooltip
 		webvar	=> 'PROGTYPES', # webvar
 		optkey	=> 'type', # option
 		type	=> 'multiboolean', # type
@@ -263,6 +268,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{MODES} = {
 		title	=> 'Recording Modes', # Title
+		tooltip	=> 'Comma separated list of recording modes which should be tried in order', # Tooltip
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
@@ -273,6 +279,7 @@ my @nosearch_params = qw/ /;
 	
 	$opt->{OUTPUT} = {
 		title	=> 'Override Recordings Folder', # Title
+		tooltip	=> 'Folder on the server where recordings should be saved', # Tooltip
 		webvar	=> 'OUTPUT', # webvar
 		optkey	=> 'output', # option
 		type	=> 'text', # type
@@ -283,6 +290,7 @@ my @nosearch_params = qw/ /;
 	
 	$opt->{PROXY} = {
 		title	=> 'Web Proxy URL', # Title
+		tooltip	=> 'e.g. http://192.168.1.2:8080', # Tooltip
 		webvar	=> 'PROXY', # webvar
 		optkey	=> 'proxy', # option
 		type	=> 'text', # type
@@ -293,6 +301,7 @@ my @nosearch_params = qw/ /;
 	
 	$opt->{VERSIONLIST} = {
 		title	=> 'Programme Version', # Title
+		tooltip	=> 'Comma separated list of versions to try to record in order (e.g. default,signed,audiodescribed)', # Tooltip
 		webvar	=> 'VERSIONLIST', # webvar
 		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
@@ -303,6 +312,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{CATEGORY} = {
 		title	=> 'Categories Containing', # Title
+		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported', # Tooltip
 		webvar	=> 'CATEGORY', # webvar
 		optkey	=> 'category', # option
 		type	=> 'text', # type
@@ -313,6 +323,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{EXCLUDECATEGORY} = {
 		title	=> 'Exclude Categories Containing', # Title
+		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported', # Tooltip
 		webvar	=> 'EXCLUDECATEGORY', # webvar
 		optkey	=> 'excludecategory', # option
 		type	=> 'text', # type
@@ -323,6 +334,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{CHANNEL} = {
 		title	=> 'Channels Containing', # Title
+		tooltip	=> 'Comma separated list of channels to match. Partial word matches are supported', # Tooltip
 		webvar	=> 'CHANNEL', # webvar
 		optkey	=> 'channel', # option
 		type	=> 'text', # type
@@ -333,6 +345,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{EXCLUDECHANNEL} = {
 		title	=> 'Exclude Channels Containing', # Title
+		tooltip	=> 'Comma separated list of channels to exclude. Partial word matches are supported', # Tooltip
 		webvar	=> 'EXCLUDECHANNEL', # webvar
 		optkey	=> 'excludechannel', # option
 		type	=> 'text', # type
@@ -343,6 +356,7 @@ my @nosearch_params = qw/ /;
 
 	$opt->{HIDE} = {
 		title	=> 'Hide Recorded', # Title
+		tooltip	=> 'Whether to hide programmes that have already been successfully recorded', # Tooltip
 		webvar	=> 'HIDE', # webvar
 		optkey	=> 'hide', # option
 		type	=> 'radioboolean', # type
@@ -350,8 +364,19 @@ my @nosearch_params = qw/ /;
 		save	=> 1,
 	};
 
+	$opt->{HISTORY} = {
+		title	=> 'Search History', # Title
+		tooltip	=> 'Whether to display and search programmes in the recordings history', # Tooltip
+		webvar	=> 'HISTORY', # webvar
+		optkey	=> 'history', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
 	$opt->{SINCE} = {
 		title	=> 'Added Since (hours)', # Title
+		tooltip	=> 'Only show programmes added to the local programmes cache in the past number of hours', # Tooltip
 		webvar	=> 'SINCE', # webvar
 		optkey	=> 'since', # option
 		type	=> 'text', # type
@@ -1644,7 +1669,7 @@ sub show_pvr_list {
 					{
 						-class => 'action',
 						-title => 'Delete selected programmes from PVR search list',
-						-onClick => "form.NEXTPAGE.value='pvr_del'; form.submit()",
+						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { return false; } form.NEXTPAGE.value='pvr_del'; form.submit()",
 					},
 					'Delete Selected PVR Entries'
 				),
@@ -1748,6 +1773,7 @@ sub show_info {
 	my $progdata = ( $cgi->param( 'INFO' ) );
 	my $out;
 	my @html;
+	my %prog;
 	my ( $type, $pid ) = split /\|/, $progdata;
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
@@ -1758,16 +1784,53 @@ sub show_info {
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" ),
 	);
+	push @cmd, '--history' if $opt->{HISTORY}->{current};
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
-	print $fh p("Info for $pid");
-	for ( grep !/^Added:/, @cmdout ) {
+	for ( grep !/^(Added|INFO):/, @cmdout ) {
 		my ( $key, $val ) = ( $1, $2 ) if m{^(\w+?):\s*(.+?)\s*$};
 		next if $key =~ /(^$|^\d+$)/ || $val =~ /Matching Program/i;
 		$out .= "$key: $val\n";
+		$prog{$pid}->{$key} = $val;
+		# Make into a link if this value is a URL
+		$val = a( { -class=>'info', -title=>'Open URL', -href=>$val }, $val ) if $val =~ m{^http://.+};
 		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
 	}
+	# Show thumb if one exists
+	print $fh img( { -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+				a(
+					{
+						-class => 'action',
+						-title => "Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now",
+						-href => '/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv',
+					},
+					'Play Now'
+				),
+				a(
+					{
+						-class => 'action',
+						-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
+						-href => '/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}"),
+					},
+					'Queue for Recording'
+				),
+			]),
+		),
+	);
+					#label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.SINCE.value=''; submit()" }, 'Series' )
 	print $fh table( { -class => 'info' }, @html );
 	return $out;
 }
@@ -1856,21 +1919,24 @@ sub pvr_add {
 	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
 	$searchname =~ s/[^\w\-\. \+\(\)]/_/g;
 
-	# Check how many matches first
-	get_progs( @params );
-	my $matches = keys %prog;
-	if ( $matches > 30 ) {
-		print $fh p("ERROR: Search term '$opt->{SEARCH}->{current}' currently matches $matches programmes - keep below 30 current matches");
-		return 1;
-	} else {
-		print $fh p("Current Matches: ".(keys %prog));
-	}
+	# This is done on the client side now
+	## Check how many matches first
+	#get_progs( @params );
+	#my $matches = keys %prog;
+	#
+	#if ( $matches > 30 ) {
+	#	print $fh p("ERROR: Search term '$opt->{SEARCH}->{current}' currently matches $matches programmes - keep below 30 current matches");
+	#	return 1;
+	#} else {
+	#	print $fh p("Current Matches: ".(keys %prog));
+	#}
 
+	# Remove a few options from leaking into a PVR search
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( @params ) ),
+		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE)$/, @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -1891,6 +1957,7 @@ sub build_option_html {
 	my $arg = shift;
 	
 	my $title = $arg->{title};
+	my $tooltip = $arg->{tooltip};
 	my $webvar = $arg->{webvar};
 	my $option = $arg->{option};
 	my $type = $arg->{type};
@@ -1912,8 +1979,8 @@ sub build_option_html {
 
 	# On/Off
 	} elsif ( $type eq 'boolean' ) {
-		push @html, th( { -class => 'options' }, $title ).
-		td( { -class => 'options' },
+		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		td( { -class => 'options', -title => $tooltip },
 			checkbox(
 				-class		=> 'options',
 				-name		=> $webvar,
@@ -1928,8 +1995,8 @@ sub build_option_html {
 
 	# On/Off
 	} elsif ( $type eq 'radioboolean' ) {
-		push @html, th( { -class => 'options' }, $title ).
-		td( { -class => 'options' },
+		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		td( { -class => 'options', -title => $tooltip },
 			radio_group(
 				-class		=> 'options',
 				-name		=> $webvar,
@@ -1952,7 +2019,7 @@ sub build_option_html {
 			my $val = $value->{shift @keylist};
 			$element .=
 				td( { -class => 'options' },
-					table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
+					table ( { -class => 'options_embedded', -title => $tooltip }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
 						checkbox(
 							-class		=> 'options',
 							-name		=> $webvar,
@@ -1975,12 +2042,12 @@ sub build_option_html {
 			$element
 		) );
 			
-		push @html, th( { -class => 'options' }, $title ).td( { -class => 'options' }, $inner_table );
+		push @html, th( { -class => 'options', -title => $tooltip }, $title ).td( { -class => 'options' }, $inner_table );
 	# Popup type
 	} elsif ( $type eq 'popup' ) {
 		my @value = $arg->{value};
-		push @html, th( { -class => 'options' }, $title ).
-		td( { -class => 'options' }, 
+		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		td( { -class => 'options', -title => $tooltip }, 
 			popup_menu(
 				-class		=> 'options',
 				-name		=> $webvar,
@@ -1994,8 +2061,8 @@ sub build_option_html {
 
 	# text field
 	} elsif ( $type eq 'text' ) {
-		push @html, th( { -class => 'options' }, $title ).
-		td( { -class => 'options' },
+		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		td( { -class => 'options', -title => $tooltip },
 			textfield(
 				-class		=> 'options',
 				-name		=> $webvar,
@@ -2073,7 +2140,11 @@ sub search_progs {
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Pad empty column for R/S
-	push @html, th( { -class => 'search' }, 'Play<br />Queue<br />Series' );
+	if ( $opt->{HISTORY}->{current} ) {
+		push @html, th( { -class => 'search' }, 'Series' );
+	} else {
+		push @html, th( { -class => 'search' }, 'Play<br />Queue<br />Series' );	
+	}
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -2118,6 +2189,7 @@ sub search_progs {
 	push @html, "</tr>";
 
 	# Build each prog row
+	my $time = time();
 	for ( my $i = $first; $i < $last && $i <= $#pids; $i++ ) {
 		my $pid = $pids[$i]; 
 		my @row;
@@ -2141,16 +2213,20 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' )
-			.'<br />'.
-			a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' )
-			.'<br />'.
-			label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.SINCE.value=''; submit()" }, 'Series' )
+			( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />' )
+			.( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />' )
+			.label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' )
 		);
 
 		for ( @displaycols ) {
-			if ( /^thumbnail$/ ) {
+			# display thumb if defined
+			if ( /^thumbnail$/ && $prog{$pid}->{web} =~ m{^http://} ) {
 				push @row, td( {-class=>'search'}, a( { -title=>"Open URL", -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+			} elsif ( /^timeadded$/ ) {
+				# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
+				my @t = gmtime( $time - $prog{$pid}->{timeadded} );
+				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
+				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, "${years}$t[7]d $t[2]h ago" ) );
 			} else {
 				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
 			}
@@ -2236,6 +2312,10 @@ sub search_progs {
 	);
 
 	# Render options actions
+	my $number_of_matches = keys %prog;
+	# Grey-out 'Add Current Search to PVR' button if too many programme matches
+	my $add_search_class_suffix;
+	$add_search_class_suffix = ' darker' if $number_of_matches > 30;
 	print $fh div( { -class=>'action' },
 		ul( { -class=>'action' },
 			li( { -class=>'action' }, [
@@ -2251,7 +2331,7 @@ sub search_progs {
 					{
 						-class => 'action',
 						-title => 'Queue selected programmes for one-off recording',
-						-onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()",
+						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='pvr_queue'; form.submit()",
 					},
 					'Queue for Recording'
 				),
@@ -2259,15 +2339,15 @@ sub search_progs {
 					{
 						-class => 'action',
 						-title => 'Download an M3U playlist based on selected programmes',
-						-onClick => "form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';",
+						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';",
 					},
 					'Create Playlist'
 				),
 				a(
 					{
-						-class => 'action',
+						-class => 'action'.$add_search_class_suffix,
 						-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-						-onClick => "form.NEXTPAGE.value='pvr_add'; form.submit()",
+						-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
 					},
 					'Add Current Search to PVR'
 				),
@@ -2531,7 +2611,7 @@ sub form_header {
 		{
 			-class=>'nav',
 			-title=>'Update the PVR Manager software - please restart it after updating',
-			-onClick => "formheader.NEXTPAGE.value='update_script'; formheader.submit()",
+			-onClick => "if (! confirm('Please restart the PVR Manager service once the update has completed') ) { return false; } formheader.NEXTPAGE.value='update_script'; formheader.submit()",
 		},
 		'Update PVR Manager' ) if -w $0;
 
@@ -2547,9 +2627,6 @@ sub form_header {
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
 					}),
 				),
-				#a( { -class=>'nav', -onClick  => "history.back()", },
-				#	'Back'
-				#),
 				a(
 					{
 						-class=>'nav',
@@ -2712,6 +2789,21 @@ sub insert_javascript {
 	}
 
 	//
+	// Warn if none of the checkboxes named <name> are selected
+	//
+	function check_if_selected(f, name) {
+		// Loop through the elements of the form
+		for(var i = 0; i < f.length; i++) {
+			var e = f.elements[i];
+			if (e.type == "checkbox" && e.name == name && e.checked == true) {
+				return true;
+			}
+		}
+		alert("No programmes were selected");
+		return false;
+	}
+
+	//
 	// Submit Search only if enter is pressed from a textfield
 	// Called as: onKeyDown="return submitonEnter(event);"
 	//
@@ -2743,7 +2835,7 @@ sub insert_stylesheet {
 	.pointer		{ cursor: pointer; cursor: hand; }
 	.pointer:hover		{ text-decoration: underline; }
 
-	.darker			{ color: #ADADAD; }
+	.darker			{ color: #7D7D7D; }
 
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
@@ -2792,39 +2884,41 @@ sub insert_stylesheet {
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
-	A.action		{ display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
+	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.action:hover		{ color: #ADADAD; text-decoration: none; }
 
 	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
 	#centered		{ height:20px; margin:0px auto 0; position: relative; }
-	LABEL.pagetrail		{ Color: #FFF; }
-	LABEL.pagetrail-current	{ Color: #F54997; }
+	LABEL.pagetrail		{ color: #FFF; }
+	LABEL.pagetrail-current	{ color: #F54997; }
 
-	TABLE.colselect		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; }
+	TABLE.colselect		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
 	TR.colselect		{ text-align: left; }
 	TH.colselect		{ font-weight: bold; }
 	INPUT.colselect		{ font-size: 70%; }
 	LABEL.colselect		{ font-size: 70%; }
 	
-	TABLE.search		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
+	TABLE.search		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
 	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
 	TR.search		{ background: #444; }
 	TR.search:hover		{ background: #555; }
-	TH.search		{ Color: #FFF; text-align: center; background: #000; text-align: center; }
+	TH.search		{ color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.search		{ text-align: left; }
-	A.search		{ Color: #FFF; text-decoration: none; }
+	A.search		{ color: #FFF; text-decoration: none; }
 	LABEL.search		{ text-decoration: none; }
 	INPUT.search		{ font-size: 70%; background: #DDD; }
-	LABEL.sorted            { Color: #CFC; }
-	LABEL.unsorted          { Color: #FFF; }
-	LABEL.sorted_reverse    { Color: #FCC; }
+	LABEL.sorted            { color: #CFC; }
+	LABEL.unsorted          { color: #FFF; }
+	LABEL.sorted_reverse    { color: #FCC; }
 
-	TABLE.info		{ font-size: 70%; Color: #fff; background: #333; border-spacing: 2px; padding: 0; }
+	TABLE.info		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
 	TR.info			{ background: #444; }
 	TR.info:hover		{ background: #555; }
-	TH.info			{ Color: #FFF; text-align: center; background: #000; text-align: center; }
+	TH.info			{ color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.info			{ text-align: left; }
+	A.info			{ color: #FFF; text-decoration: underline; }
+	A.info:hover		{ color: #FFF; }
 
 	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
 	</STYLE>
