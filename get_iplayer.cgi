@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.38';
+my $VERSION = '0.39';
 
 use strict;
 use CGI ':all';
@@ -202,7 +202,7 @@ my $opt;
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES HISTORY/;
 my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
 my @order_settings = qw/ OUTPUT MODES PROXY /;
-my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE /;
+my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
 
@@ -400,6 +400,14 @@ my @nosearch_params = qw/ /;
 		save	=> 0,
 	};
 
+	# Make sure we go to the correct nextpage for processing
+	$opt->{ACTION} = {
+		webvar  => 'ACTION',
+		type	=> 'hidden',
+		default	=> '',
+		save	=> 0,
+	};
+
 	# Reverse sort value
 	$opt->{REVERSE} = {
 		webvar  => 'REVERSE',
@@ -528,7 +536,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|genplaylist|opml|runpvr|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|genplaylist|opml|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -541,7 +549,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 				# respond OK to browser
 				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
-				run_cgi( $client, $query_string, $request{URL}, $request{host} );
+				run_cgi( $client, $query_string, $request{URL}, 'http://'.$request{host}.'/' );
 
 			# Else 404
 			} else {
@@ -561,10 +569,27 @@ if ( $opt_cmdline->{port} > 0 ) {
 
 # If we're running as a proper CGI from a web server...
 } else {
-	run_cgi( *STDOUT );
+	# If we were called by a webserver and not the builtin webserver then seed some vars
+	my $prefix = $ENV{REQUEST_URI};
+	my $request_uri;
+	# remove trailing query
+	$prefix =~ s/\?.*$//gi;
+	my $query_string = $ENV{QUERY_STRING};
+	my $request_host = "http://$ENV{SERVER_NAME}:$ENV{SERVER_PORT}${prefix}";
+	$home = $ENV{HOME};
+	# Read POSTed data from STDIN if this is a form POST
+	if ( $ENV{REQUEST_METHOD} eq 'POST' ) {
+		my $content;
+		while ( <STDIN> ) {
+			$content .= $_;
+		}
+		$query_string = parse_post_form_string( $content );
+	}
+	run_cgi( *STDOUT, $query_string, undef, $request_host );
 }
 
 exit 0;
+
 
 
 sub cleanup {
@@ -598,7 +623,7 @@ sub run_cgi {
 	# Get filehandle for output
 	$fh = shift;
 	my $query_string = shift;
-	my $request_url = shift;
+	my $request_uri = shift;
 	my $request_host = shift;
 
 	# Clean globals
@@ -619,8 +644,14 @@ sub run_cgi {
 	# Set HOME env var for forked processes
 	$ENV{HOME} = $home;
 
+	my $action = $cgi->param( 'ACTION' ) || $request_uri;
+	# Strip the leading '/' to get the action
+	$action =~ s|^\/||g;
+	# rewrite short-form backwards compatible URIs
+	# e.g. http://server/stream?args -> http://server/get_iplayer.cgi?ACTION=stream&args
+
 	# Stream
-	if ( $request_url =~ /^\/?stream/i ) {
+	if ( $action eq 'stream' ) {
 		my $type = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
 		$type =~ s/^.*\.//g;
@@ -669,7 +700,7 @@ sub run_cgi {
 		}
 
 	# Record file
-	} elsif ( $request_url =~ /^\/?record/i ) {
+	} elsif ( $action eq 'record' ) {
 		# Output headers
 		# To save file
 		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $cgi->param('PID').'.mov' );
@@ -681,7 +712,7 @@ sub run_cgi {
 		stream_mov( $cgi->param('PID') );
 
 	# Get a playlist for a specified 'PROGTYPES'
-	} elsif ( $request_url =~ /^\/?playlist/i ) {
+	} elsif ( $action eq 'playlist' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 
@@ -692,7 +723,7 @@ sub run_cgi {
 		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name' );
 
 	# Get a playlist for a specified 'PROGTYPES'
-	} elsif ( $request_url =~ /^\/?opml/i ) {
+	} elsif ( $action eq 'opml' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'text/xml' );
 
@@ -703,7 +734,7 @@ sub run_cgi {
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
 
 	# Get a playlist for a selected progs in form
-	} elsif ( $request_url =~ /^\/?genplaylist/i ) {
+	} elsif ( $action eq 'genplaylist' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 		# To save file
@@ -716,7 +747,7 @@ sub run_cgi {
 		print $fh create_playlist_m3u( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '' );
 
 	# HTML page
-	} elsif ( $request_url =~ /^\/?(iplayer|)$/i ) {
+	} else {
 		# Output headers
 		http_headers();
 	
@@ -724,7 +755,7 @@ sub run_cgi {
 		begin_html();
 
 		# Page Routing
-		form_header();
+		form_header( $request_host );
 		if ( $opt_cmdline->{debug} ) {
 			print $fh $cgi->Dump();
 			#for my $key (sort keys %ENV) {
@@ -897,7 +928,7 @@ sub get_playlist {
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
-		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
+		push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
 	}
 
 	return join ("\n", @playlist);
@@ -921,7 +952,7 @@ sub create_playlist_m3u {
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode";
-		push @playlist, "http://${request_host}/stream?PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
+		push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
 	}
 
 	return join ("\n", @playlist);
@@ -973,7 +1004,7 @@ sub get_opml {
 			next if ! ( $pid && $name );
 			# Format required, e.g.
 			#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-			push @playlist, "\t\t<outline URL=\"".encode_entities("http://${request_host}/stream?PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}")."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
+			push @playlist, "\t\t<outline URL=\"".encode_entities("${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}")."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
 		}
 
 	# Channels/Names etc
@@ -1005,7 +1036,7 @@ sub get_opml {
 			$suffix = '&LIST=name' if $list eq 'channel';
 			# Format required, e.g.
 			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
-			push @playlist, "\t\t<outline URL=\"".encode_entities("http://${request_host}/opml?PROGTYPES=${type}&SEARCH=${itemregex}${suffix}&MODES=${modes}&OUTTYPE=a.wav")."\" text=\"".encode_entities("$item")."\" title=\"".encode_entities("$item")."\" type=\"playlist\" />";
+			push @playlist, "\t\t<outline URL=\"".encode_entities("${request_host}?ACTION=opml&PROGTYPES=${type}&SEARCH=${itemregex}${suffix}&MODES=${modes}&OUTTYPE=a.wav")."\" text=\"".encode_entities("$item")."\" title=\"".encode_entities("$item")."\" type=\"playlist\" />";
 		}
 
 	}
@@ -1799,6 +1830,9 @@ sub show_info {
 	}
 	# Show thumb if one exists
 	print $fh img( { -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
+	# Set optional output dir for pvr queue if set
+	my $outdir;
+	$outdir = '&OUTPUT='.CGI::escape("$opt->{OUTPUT}->{current}") if $opt->{OUTPUT}->{current};
 	# Render options actions
 	print $fh div( { -class=>'action' },
 		ul( { -class=>'action' },
@@ -1815,7 +1849,7 @@ sub show_info {
 					{
 						-class => 'action',
 						-title => "Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now",
-						-href => '/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv',
+						-href => '?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv',
 					},
 					'Play Now'
 				),
@@ -1823,7 +1857,7 @@ sub show_info {
 					{
 						-class => 'action',
 						-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
-						-href => '/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}"),
+						-href => '?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}"),
 					},
 					'Queue for Recording'
 				),
@@ -1852,7 +1886,7 @@ sub pvr_queue {
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
 			'--webrequest',
-			get_iplayer_webrequest_args( "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' ),
+			get_iplayer_webrequest_args( "output=".$cgi->param( 'OUTPUT' ), "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' ),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 		my $cmdout = join "", get_cmd_output( @cmd );
@@ -2121,6 +2155,10 @@ sub search_progs {
 	# Determine which cols to display
 	get_display_cols();
 
+	#for my $key (sort keys %ENV) {
+	#	print $fh $key, " = ", $ENV{$key}, "\n<br>";
+	#}    
+
 	# Get prog data
 	my $response;
 	my @params = get_search_params();
@@ -2188,6 +2226,10 @@ sub search_progs {
 	}
 	push @html, "</tr>";
 
+	# Set optional output dir for pvr queue if set
+	my $outdir;
+	$outdir = '&OUTPUT='.CGI::escape("$opt->{OUTPUT}->{current}") if $opt->{OUTPUT}->{current};
+
 	# Build each prog row
 	my $time = time();
 	for ( my $i = $first; $i < $last && $i <= $#pids; $i++ ) {
@@ -2213,8 +2255,8 @@ sub search_progs {
 			itv		=> '&OUTTYPE=asf',
 		);
 		push @row, td( {-class=>'search'}, 
-			( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'/playlist?PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />' )
-			.( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'/?NEXTPAGE=pvr_queue&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />' )
+			( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />' )
+			.( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />' )
 			.label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' )
 		);
 
@@ -2339,7 +2381,7 @@ sub search_progs {
 					{
 						-class => 'action',
 						-title => 'Download an M3U playlist based on selected programmes',
-						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.action='genplaylist'; form.submit(); form.action='';",
+						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value='';",
 					},
 					'Create Playlist'
 				),
@@ -2590,6 +2632,7 @@ sub http_headers {
 #
 #############################################
 sub form_header {
+	my $request_host = shift;
 	my $nextpage = shift || $cgi->param( 'NEXTPAGE' );
 
 	print $fh $cgi->start_form(
@@ -2618,20 +2661,21 @@ sub form_header {
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
 			li( { -class=>'nav' }, [
-				a( { -class=>'nav', -href=>"/" },
+				a( { -class=>'nav', -href=>$request_host },
 					img({
 						-class => 'nav',
 						-title => 'get_iplayer PVR Manager',
 						-width => 174,
 						-height => 32,
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
+						-href => $request_host,
 					}),
 				),
 				a(
 					{
 						-class=>'nav',
 						-title=>'Main search page',
-						-onClick => "formheader.NEXTPAGE.value='search_progs'; formheader.submit()",
+						-href => $request_host,
 					},
 					'Home'
 				),
@@ -2848,7 +2892,7 @@ sub insert_stylesheet {
 	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 16.2%; }
-	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
+	A.nav			{ color: #FFF; display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
 	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.nav:hover		{ color: #ADADAD; text-decoration: none; }
 
