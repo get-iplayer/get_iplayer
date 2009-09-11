@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.40';
+my $VERSION = '0.41';
 
 use strict;
 use CGI ':all';
@@ -369,9 +369,9 @@ my @nosearch_params = qw/ /;
 		tooltip	=> 'Whether to display and search programmes in the recordings history', # Tooltip
 		webvar	=> 'HISTORY', # webvar
 		optkey	=> 'history', # option
-		type	=> 'radioboolean', # type
+		type	=> 'boolean', # type
 		default	=> '0', # value
-		save	=> 1,
+		save	=> 0,
 	};
 
 	$opt->{SINCE} = {
@@ -2782,18 +2782,18 @@ sub form_header {
 	);
 	
 	# Only highlight the 'Update PVR Manager' option if the script is writable
-	my $update_element = a( { -class=>'nav darker' }, 'Update PVR Manager' );
+	my $update_element = a( { -class=>'nav darker' }, 'Update Software' );
 	$update_element = a(
 		{
 			-class=>'nav',
 			-title=>'Update the PVR Manager software - please restart it after updating',
 			-onClick => "if (! confirm('Please restart the PVR Manager service once the update has completed') ) { return false; } formheader.NEXTPAGE.value='update_script'; formheader.submit()",
 		},
-		'Update PVR Manager' ) if -w $0;
+		'Update Software' ) if -w $0;
 
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
-			li( { -class=>'nav' }, [
+			li( { -id=>'logo', -class=>'nav' },
 				a( { -class=>'nav', -href=>$request_host },
 					img({
 						-class => 'nav',
@@ -2804,13 +2804,23 @@ sub form_header {
 						-href => $request_host,
 					}),
 				),
+			),
+			li( { -class=>'nav' }, [
 				a(
 					{
 						-class=>'nav',
 						-title=>'Main search page',
 						-href => $request_host,
 					},
-					'Home'
+					'Search'
+				),
+				a(
+					{
+						-class=>'nav',
+						-title=>'History search page',
+						-onClick => "form.NEXTPAGE.value='search_progs'; form.HISTORY.checked = true; form.SORT.value='timeadded'; form.REVERSE.value=1; form.SINCE.value=''; form.CATEGORY.value=''; form.EXCLUDECATEGORY.value=''; form.CHANNEL.value=''; form.EXCLUDECHANNEL.value=''; form.submit(); ",
+					},
+					'Recordings'
 				),
 				a(
 					{
@@ -3006,6 +3016,7 @@ sub insert_stylesheet {
 	.pointer:hover		{ text-decoration: underline; }
 
 	.darker			{ color: #7D7D7D; }
+	#logo			{ width: 190px; }
 
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
@@ -3017,7 +3028,7 @@ sub insert_stylesheet {
 	/* Nav bar */
 	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 16.2%; }
+	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 13%; }
 	A.nav			{ color: #FFF; display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
 	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.nav:hover		{ color: #ADADAD; text-decoration: none; }
