@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.39';
+my $VERSION = '0.40';
 
 use strict;
 use CGI ':all';
@@ -536,7 +536,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist|genplaylist|opml|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist.*|genplaylist.*|opml|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -655,7 +655,7 @@ sub run_cgi {
 		my $type = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
 		$type =~ s/^.*\.//g;
-		# Stream mime types
+		# Stream mime types (tweaked to work well in vlc)
 		my %mimetypes = (
 			wav 	=> 'audio/x-wav',
 			flac	=> 'audio/x-flac',
@@ -699,6 +699,67 @@ sub run_cgi {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
 
+	} elsif ( $action eq 'direct' ) {
+		# get filename first
+		my $filename = get_direct_filename();
+		my $type = $filename;
+		# Remove fileprefix
+		$type =~ s/^.*\.//g;
+		# Stream mime types
+		my %mimetypes = (
+			wav 	=> 'audio/x-wav',
+			flac	=> 'audio/x-flac',
+			mp3 	=> 'audio/mpeg',
+			rm	=> 'audio/x-pn-realaudio',
+			mov 	=> 'video/quicktime',
+			# hmmmm...
+			mp4	=> 'video/mp4',
+			avi	=> 'video/x-flv',
+			flv	=> 'video/x-flv',
+			asf	=> 'video/x-ms-asf',
+		);
+
+		# If type is defined
+		if ( $mimetypes{$type} ) {
+
+			# Output headers
+			# to stream 
+			# This will enable seekable -Accept_Ranges=>'bytes',
+			my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
+
+			# Send the headers to the browser
+			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+			print $fh $headers;
+
+			print $se "INFO: Streaming file directly: $filename\n";
+			if ( ! open( STREAMIN, "< $filename" ) ) {
+				print $se "INFO: Cannot Read file '$filename'\n";
+				exit 4;
+			}
+
+			# Read each char from command output and push to socket fh
+			my $char;
+			my $bytes;
+			# Assume that we don't want to buffer STDERR output of the command
+			my $size = 100000;
+			while ( $bytes = read( STREAMIN, $char, $size ) ) {
+				if ( $bytes <= 0 ) {
+					close STREAMIN;
+					print $se "DEBUG: Stream thread has completed\n";
+					exit 0;
+				} else {
+					print $fh $char;
+					print $se '#';
+				}
+				last if $bytes < $size;
+			}
+			close STREAMIN;
+			print $se "INFO: Stream thread has completed\n";
+
+		} else {
+			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
+		}
+
 	# Record file
 	} elsif ( $action eq 'record' ) {
 		# Output headers
@@ -712,7 +773,7 @@ sub run_cgi {
 		stream_mov( $cgi->param('PID') );
 
 	# Get a playlist for a specified 'PROGTYPES'
-	} elsif ( $action eq 'playlist' ) {
+	} elsif ( $action eq 'playlist' || $action eq 'playlistdirect' || $action eq 'playlistfiles' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 
@@ -720,7 +781,7 @@ sub run_cgi {
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
-		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name' );
+		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name', $action );
 
 	# Get a playlist for a specified 'PROGTYPES'
 	} elsif ( $action eq 'opml' ) {
@@ -734,7 +795,7 @@ sub run_cgi {
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
 
 	# Get a playlist for a selected progs in form
-	} elsif ( $action eq 'genplaylist' ) {
+	} elsif ( $action eq 'genplaylist' || $action eq 'genplaylistdirect' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 		# To save file
@@ -744,7 +805,7 @@ sub run_cgi {
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
-		print $fh create_playlist_m3u( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '' );
+		print $fh create_playlist_m3u( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '', $action );
 
 	# HTML page
 	} else {
@@ -905,30 +966,45 @@ sub stream_prog {
 
 
 sub get_playlist {
-	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $searchfields ) = ( @_ );
+	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $searchfields, $request ) = ( @_ );
 	my @playlist;
 	$outtype =~ s/^.*\.//g;
 
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
-	my @out = get_cmd_output(
+	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "fields=$searchfields", "search=$search" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>|<filename>', "fields=$searchfields", "search=$search" ),
 	);
+	push @cmd, '--history' if $request eq 'playlistfiles' || $request eq 'playlistdirect';
+	my @out = get_cmd_output( @cmd );
+
 	push @playlist, "#EXTM3U\n";
 
 	# Extract and rewrite into m3u format
 	for ( grep !/^Added:/ , @out ) {
 		chomp();
-		my ($pid, $name, $episode, $desc) = (split /\|/)[0,1,2,3];
+		my ( $pid, $name, $episode, $desc, $filename ) = (split /\|/)[0,1,2,3,4];
 		next if ! ( $pid && $name );
 		# Format required, e.g.
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
-		push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";
+
+		# playlist with direct streaming fo files through webserver
+		if ( $request eq 'playlistdirect' ) {
+			push @playlist, "${request_host}?ACTION=direct&PID=${type}:${pid}&OUTTYPE=${filename}\n";
+
+		# playlist with local files
+		} elsif ( $request eq 'playlistfiles' ) {
+			push @playlist, "file://${filename}\n";
+
+		# playlist of proxied urls for streaming online prog via web server
+		} else {
+			push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";		
+		}
 	}
 
 	return join ("\n", @playlist);
@@ -937,7 +1013,7 @@ sub get_playlist {
 
 
 sub create_playlist_m3u {
-	my ( $request_host, $outtype, $bitrate ) = ( @_ );
+	my ( $request_host, $outtype, $bitrate, $request ) = ( @_ );
 	my @playlist;
 	push @playlist, "#EXTM3U\n";
 
@@ -952,7 +1028,20 @@ sub create_playlist_m3u {
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode";
-		push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
+		#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
+		# playlist with direct streaming fo files through webserver
+		if ( $request eq 'genplaylistdirect' ) {
+			push @playlist, "${request_host}?ACTION=direct&PID=${type}:${pid}\n";
+
+		## playlist with local files
+		#} elsif ( $request eq 'playlistfiles' ) {
+		#	push @playlist, "file://${filename}\n";
+
+		# playlist of proxied urls for streaming online prog via web server
+		} else {
+			push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
+			#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";		
+		}
 	}
 
 	return join ("\n", @playlist);
@@ -1870,6 +1959,36 @@ sub show_info {
 }
 
 
+# PID=${type}:${pid}&OUTTYPE=${filename}
+sub get_direct_filename {
+	my $progdata = ( $cgi->param( 'PID' ) );
+	my $out;
+	my @html;
+	my %prog;
+	my ( $type, $pid ) = split /[\|:]/, $progdata;
+
+	# Get the 'filename' entry from --history --info for this pid
+	chomp();
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--history',
+		'--webrequest',
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" ),
+	);
+	print $se p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	my @cmdout = get_cmd_output( @cmd );
+	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
+
+	# Extract the filename
+	my $match = ( grep /^filename:/, @cmdout )[0];
+	my $filename;
+	$filename = $1 if $match =~ m{^\w+?:\s*(.+?)\s*$};
+
+	return $filename;
+}
+
+
 
 sub pvr_queue {
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
@@ -2177,12 +2296,10 @@ sub search_progs {
 	my @html;
 	push @html, "<tr>";
 	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+
 	# Pad empty column for R/S
-	if ( $opt->{HISTORY}->{current} ) {
-		push @html, th( { -class => 'search' }, 'Series' );
-	} else {
-		push @html, th( { -class => 'search' }, 'Play<br />Queue<br />Series' );	
-	}
+	push @html, th( { -class => 'search' }, 'Actions' );
+
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
@@ -2254,11 +2371,26 @@ sub search_progs {
 			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
 			itv		=> '&OUTTYPE=asf',
 		);
-		push @row, td( {-class=>'search'}, 
-			( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />' )
-			.( ! $opt->{HISTORY}->{current} && a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />' )
-			.label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' )
-		);
+
+		my $links;
+		# 'Play'
+		$links .= a( { -class=>'search', -title=>"Play from Internet", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />';
+		if ( $opt->{HISTORY}->{current} ) {
+			# 'PlayWeb' - not on vlc
+			### vlc cannot read mov or mp4 from stdin :-(
+			$links .= a( { -class=>'search', -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid") },  'PlayWeb' ).'<br />';
+			# 'PlayFile' - works with vlc
+			$links .= a( { -class=>'search', -title=>"Play from local file", -href=>'?ACTION=playlistfiles&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid") },  'PlayFile' ).'<br />';
+			# 'PlayDirect' - depends on browser support
+			$links .= a( { -class=>'search', -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=$prog{$pid}->{type}|".CGI::escape("$pid") },  'PlayDirect' ).'<br />';
+		} else {
+			# 'Queue'
+			$links .=  a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';		
+		}
+		$links .= label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
+
+		# Add links to row
+		push @row, td( {-class=>'search'}, $links );
 
 		for ( @displaycols ) {
 			# display thumb if defined
@@ -2385,6 +2517,15 @@ sub search_progs {
 					},
 					'Create Playlist'
 				),
+				### vlc cannot read mov or mp4 from stdin :-(
+				#a(
+				#	{
+				#		-class => 'action',
+				#		-title => 'Download an M3U playlist based on selected programmes for direct streaming',
+				#		-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
+				#	},
+				#	'Create Local Playlist'
+				#),
 				a(
 					{
 						-class => 'action'.$add_search_class_suffix,
@@ -2640,14 +2781,6 @@ sub form_header {
 			-method => "POST",
 	);
 	
-	#print $fh  table( { -id=>'centered', -class=>'title' }, Tr( { -class=>'title' }, td( { -class=>'title' },
-	#	a( { -class=>'title', -href => "http://linuxcentre.net/getiplayer/" }, 
-	#		label({ -class=>'title' },
-	#			'get_iplayer PVR Manager',
-	#		)
-	#	)
-	#)));
-
 	# Only highlight the 'Update PVR Manager' option if the script is writable
 	my $update_element = a( { -class=>'nav darker' }, 'Update PVR Manager' );
 	$update_element = a(
@@ -2691,7 +2824,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'Run the PVR now - wait for the PVR to complete',
-						-onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.submit()",
+						-onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab'; formheader.submit()",
 					},
 					'Run PVR'
 				),
@@ -2716,11 +2849,7 @@ sub form_header {
 
 
 
-#############################################
-#
 # Form Footer 
-#
-#############################################
 sub form_footer {
 	print $fh p( b({-class=>"footer"},
 		sprintf( "get_iplayer PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
@@ -2728,11 +2857,8 @@ sub form_footer {
 }
 
 
-#############################################
-#
+
 # End HTML
-#
-#############################################
 sub html_end {
 	print $fh "\n</body>";
 	print $fh "\n</html>\n";
