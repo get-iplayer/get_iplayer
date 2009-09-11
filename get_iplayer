@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.32;
+my $version = 2.33;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4029,10 +4029,26 @@ use base 'Programme';
 sub get_verpids {
 	my ( $prog, $ua ) = @_;
 	my $url;
+
+	# If this is already a live or streaming verpid just pass it through	
+	# e.g. http://www.bbc.co.uk/mediaselector/4/gtis/?server=cp52115.live.edgefcs.net&identifier=sport1a@s2388&kind=akamai&application=live&cb=28022
+	if ( $prog->{pid} =~ m{^http.+/mediaselector/4/[gm]tis}i ) {
+		# bypass all the xml parsing and return
+		$prog->{verpids}->{default} = $1 if $prog->{pid} =~ m{^.+(\?.+)$};
+
+		# Name
+		my $title;
+		$title = $1 if $prog->{pid} =~ m{identifier=(.+?)&};
+		$title =~ s/\@/_/g;
+
+		# Add to prog hash
+		$prog->{versions} = join ',', keys %{ $prog->{verpids} };
+		$prog->{longname} = decode_entities($title);
+		return 0;
 	
 	# Determine if the is a standard pid, Live TV or EMP TV URL
 	# EMP URL
-	if ( $prog->{pid} =~ /^http/i ) {
+	} elsif ( $prog->{pid} =~ /^http/i ) {
 		$url = $prog->{pid};
 		# Scrape the EMP web page and get playlist URL
 		my $xml = main::request_url_retry( $ua, $url, 3 );
