@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.41';
+my $VERSION = '0.42';
 
 use strict;
 use CGI ':all';
@@ -576,6 +576,12 @@ if ( $opt_cmdline->{port} > 0 ) {
 	$prefix =~ s/\?.*$//gi;
 	my $query_string = $ENV{QUERY_STRING};
 	my $request_host = "http://$ENV{SERVER_NAME}:$ENV{SERVER_PORT}${prefix}";
+	# determine whether http or https
+	my $request_protocol = 'http';
+	if ( defined $ENV{'HTTPS'} ) {
+		$request_protocol = $ENV{'HTTPS'}=='on'?'https':'http';
+	}
+	my $request_host = "${request_protocol}://$ENV{SERVER_NAME}:$ENV{SERVER_PORT}${prefix}";
 	$home = $ENV{HOME};
 	# Read POSTed data from STDIN if this is a form POST
 	if ( $ENV{REQUEST_METHOD} eq 'POST' ) {
@@ -880,6 +886,7 @@ sub stream_mov {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--hash',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ),
 	);
@@ -903,6 +910,7 @@ sub stream_prog {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--hash',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid" ),
 	);
