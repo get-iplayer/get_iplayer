@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.43';
+my $VERSION = '0.44';
 
 use strict;
 use CGI ':all';
@@ -187,6 +187,7 @@ my %nextpages = (
 	'search_progs'			=> \&search_progs,	# Main Programme Listings
 	'search_history'		=> \&search_history,	# Recorded Programme Listings
 	'pvr_queue'			=> \&pvr_queue,		# Queue Recording of Selected Progs
+	'recordings_delete'		=> \&recordings_delete,	# Delete Files for Selected Recordings
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'			=> \&pvr_add,
@@ -202,10 +203,11 @@ my %nextpages = (
 my $opt;
 
 # Options Ordering on page
-my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES HISTORY/;
+my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY/;
 my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
-my @order_settings = qw/ OUTPUT MODES PROXY METADATA SUBTITLES THUMB /;
-my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE ACTION /;
+my @order_settings = qw/ /;
+my @order_prefs = qw/ SORT PAGESIZE OUTPUT MODES HIDEDELETED PROXY SUBTITLES METADATA THUMB /;
+my @hidden_opts = qw/ SAVE ADVANCED PREFS REVERSE PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
 
@@ -298,7 +300,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|playlist.*|genplaylist.*|opml|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|record|recordings_delete|playlist.*|genplaylist.*|opml|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -409,7 +411,7 @@ sub run_cgi {
 	# Add some default headings for history mode
 	if ( $cgi->param( 'HISTORY' ) || $nextpage eq 'search_history' ) {
 		push @headings, ( 'filename', 'mode' );
-		push @headings_default, ( 'filename', 'mode' );	
+		push @headings_default, ( 'mode' );	
 	}
 
 	# Process All options
@@ -475,7 +477,8 @@ sub run_cgi {
 
 	} elsif ( $action eq 'direct' ) {
 		# get filename first
-		my $filename = get_direct_filename();
+		my ( $pid, $mode ) = (split /\|/, $cgi->param( 'PID' ) )[0,1];
+		my $filename = get_direct_filename( $pid, $mode );
 		my $type = $filename;
 		# Remove fileprefix
 		$type =~ s/^.*\.//g;
@@ -752,7 +755,7 @@ sub get_playlist {
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>|<filename>', "fields=$searchfields", "search=$search" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$search" ),
 	);
 	push @cmd, '--history' if $request eq 'playlistfiles' || $request eq 'playlistdirect';
 	my @out = get_cmd_output( @cmd );
@@ -762,17 +765,15 @@ sub get_playlist {
 	# Extract and rewrite into m3u format
 	for ( grep !/^Added:/ , @out ) {
 		chomp();
-		my ( $pid, $name, $episode, $desc, $filename ) = (split /\|/)[0,1,2,3,4];
+		my ( $pid, $name, $episode, $desc, $filename, $mode ) = (split /\|/)[0,1,2,3,4,5];
 		next if ! ( $pid && $name );
 		# Format required, e.g.
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
-		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-		#
 		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'playlistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${pid}&OUTTYPE=${filename}\n";
+			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}}&OUTTYPE=${filename}\n";
 
 		# playlist with local files
 		} elsif ( $request eq 'playlistfiles' ) {
@@ -799,7 +800,8 @@ sub create_playlist_m3u {
 	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
 	for (@record) {
 		chomp();
-		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
+		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
+		next if ! ($type && $pid );
 		# Format required, e.g.
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
@@ -808,7 +810,7 @@ sub create_playlist_m3u {
 		#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${pid}\n";
+			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}\n";
 
 		## playlist with local files
 		#} elsif ( $request eq 'playlistfiles' ) {
@@ -1737,12 +1739,17 @@ sub show_info {
 
 
 
-# PID=${type}:${pid}&OUTTYPE=${filename}
+# Get filename from history based on PID and mode
+# PID=$pid|$mode
 sub get_direct_filename {
+	my ( $pid, $mode ) = ( @_ );
 	my $out;
 	my @html;
 	my %prog;
-	my $pid = $cgi->param( 'PID' );
+
+
+	# Skip if not defined
+	return '' if ! ( $pid && $mode );
 
 	# Get the 'filename' entry from --history --info for this pid
 	chomp();
@@ -1751,16 +1758,16 @@ sub get_direct_filename {
 		'--nocopyright',
 		'--history',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", 'listformat=filename: <filename>' ),
+		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", 'listformat=filename: <filename>|<mode>' ),
 	);
-	print $se p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	print $se p("Command: ".( join ' ', @cmd ) ); # if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 
 	# Extract the filename
 	my $match = ( grep /^filename:/, @cmdout )[0];
 	my $filename;
-	$filename = $1 if $match =~ m{^\w+?:\s*(.+?)\s*$};
+	$filename = $1 if $match =~ m{^\w+?:\s*(.+?)\|$mode\s*$};
 
 	return $filename;
 }
@@ -1781,7 +1788,8 @@ sub pvr_queue {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	for (@record) {
 		chomp();
-		my ( $type, $pid, $name, $episode ) = ($1, $2, $3, $4) if m{^(.+?)\|(.+?)\|(.+?)\|(.+?)$};
+		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
+		next if ! ($type && $pid );
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
@@ -1809,6 +1817,40 @@ sub pvr_queue {
 
 
 
+sub recordings_delete {
+	# Gets the multiple selections of progs to queue from PROGSELECT
+	my @record = ( $cgi->param( 'PROGSELECT' ) );
+	# The 'Queue' action button uses SEARCH to pass it's pvr_queue data
+	if ( $#record < 0 ) {
+		push @record, $cgi->param( 'SEARCH' )
+	}
+
+	my @params = get_search_params();
+	my $out;
+
+	# Queue all selected '<type>|<pid>' entries in the PVR
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
+		next if ! ($mode && $pid );
+		my $filename = get_direct_filename( $pid, $mode );
+		if ( -f $filename ) {
+			if ( unlink( $filename ) ) {
+				print $fh p("Deleted: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
+			} else {
+				print $fh p("ERROR: Failed to Delete: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");			
+			}
+		} else {
+			print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
+		}
+	}
+	print $fh "<pre>$out</pre>";
+
+	return $out;
+}
+
+
+
 sub build_cmd_options {
 	my @options;
 	for ( @_ ) {
@@ -1824,7 +1866,6 @@ sub build_cmd_options {
 
 sub get_search_params {
 	my @params;
-
 	for ( keys %{ $opt } ) {
 		# skip non-options
 		next if $opt->{$_}->{optkey} eq '' || not defined $opt->{$_}->{optkey} || not $opt->{$_}->{optkey};
@@ -2017,6 +2058,7 @@ sub build_option_html {
 }
 
 
+
 sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	print $se "INFO: Flushing\n";
@@ -2152,14 +2194,23 @@ sub search_progs {
 	# Build each prog row
 	my $time = time();
 	for ( my $i = $first; $i < $last && $i <= $#pids; $i++ ) {
+		my $search_class;
 		my $pid = $pids[$i]; 
 		my @row;
-		push @row, td( {-class=>'search'},
+
+		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
+		if ( $opt->{HISTORY}->{current} && ( ! $opt->{HIDEDELETED}->{current} ) && ( ( $prog{$pid}->{filename} && ! -f $prog{$pid}->{filename} ) || ! $prog{$pid}->{filename} ) ) {
+			$search_class = 'search darker';
+		} else {
+			$search_class = 'search';
+		}
+
+		push @row, td( {-class=>$search_class},
 			checkbox(
-				-class		=> 'search',
+				-class		=> $search_class,
 				-name		=> 'PROGSELECT',
 				-label		=> '',
-				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}",
+				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}",
 				-checked	=> 0,
 				-override	=> 1,
 			)
@@ -2176,39 +2227,41 @@ sub search_progs {
 
 		my $links;
 		# 'Play'
-		$links .= a( { -class=>'search', -title=>"Play from Internet", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />';
+		$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />';
 		if ( $opt->{HISTORY}->{current} ) {
-			# 'PlayWeb' - not on vlc
-			### vlc cannot read mov or mp4 from stdin :-(
-			$links .= a( { -class=>'search', -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid") },  'PlayWeb' ).'<br />';
-			# 'PlayFile' - works with vlc
-			$links .= a( { -class=>'search', -title=>"Play from local file", -href=>'?ACTION=playlistfiles&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid") },  'PlayFile' ).'<br />';
-			# 'PlayDirect' - depends on browser support
-			$links .= a( { -class=>'search', -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=".CGI::escape("$pid") },  'PlayDirect' ).'<br />';
+			if ( -f $prog{$pid}->{filename} ) {
+				# 'PlayWeb' - not on vlc
+				### vlc cannot read mov or mp4 from stdin :-(
+				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayWeb' ).'<br />';
+				# 'PlayFile' - works with vlc
+				$links .= a( { -class=>$search_class, -title=>"Play from local file", -href=>'?ACTION=playlistfiles&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayFile' ).'<br />';
+				# 'PlayDirect' - depends on browser support
+				$links .= a( { -class=>$search_class, -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=".CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayDirect' ).'<br />';
+			}
 		} else {
 			# 'Queue'
-			$links .=  label( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Queue' ).'<br />';
-			#$links .=  a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';
+			$links .=  label( { -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Queue' ).'<br />';
+			#$links .=  a( { -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';
 		}
-		$links .= label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
+		$links .= label( { -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
 
 		# Add links to row
-		push @row, td( {-class=>'search'}, $links );
+		push @row, td( {-class=>$search_class}, $links );
 
 		for ( @displaycols ) {
 			# display thumb if defined
 			if ( /^thumbnail$/ && $prog{$pid}->{web} =~ m{^http://} ) {
-				push @row, td( {-class=>'search'}, a( { -title=>"Open URL", -class=>'search', -href=>$prog{$pid}->{web} }, img( { -class=>'search', -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+				push @row, td( {-class=>$search_class}, a( { -title=>"Open URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			} elsif ( /^timeadded$/ ) {
 				# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 				my @t = gmtime( $time - $prog{$pid}->{timeadded} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, "${years}$t[7]d $t[2]h ago" ) );
 			} else {
-				push @row, td( {-class=>'search'}, label( { -class=>'search', -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
 			}
 		}
-		push @html, Tr( {-class=>'search'}, @row );
+		push @html, Tr( {-class=>$search_class}, @row );
 	}
 
 
@@ -2218,6 +2271,26 @@ sub search_progs {
 		-method => "POST",
 	);
 
+	# Set advanced options cell status and label
+	my $adv_style;
+	my $adv_label;
+	if ( $opt->{ADVANCED}->{current} eq 'no' || not $opt->{ADVANCED}->{current} ) {
+		$adv_style = "display: none;";
+		$adv_label = '+ Advanced Search';
+	} else {
+		$adv_style = "display: table;";
+		$adv_label = '- Advanced Search';
+	}
+
+	my $prefs_style;
+	my $prefs_label;
+	if ( $opt->{PREFS}->{current} eq 'no' || not $opt->{PREFS}->{current} ) {
+		$prefs_style = "display: none;";
+		$prefs_label = '+ Preferences';
+	} else {
+		$prefs_style = "display: table;";
+		$prefs_label = '- Preferences';
+	}
 
 	# Generate the html for all these options in THIS ORDER
 	# Build basic options tables + hidden
@@ -2226,7 +2299,37 @@ sub search_progs {
 	for ( @order_basic_opts, @hidden_opts ) {
 		push @optrows_basic, build_option_html( $opt->{$_} );
 	}
-	# Build Advanced options table cells
+	# Add pink prefs/options/save options buttons
+	push @optrows_basic,
+		td( { -class=>'options_outer' },
+			# Advanced Options button
+			label( {
+				-class		=> 'options_outer pointer',
+				-id		=> 'advanced_opts_button',
+				-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', '+ Advanced Search', '- Advanced Search' );",
+				},
+				$adv_label,
+			).
+			'<br />'.
+			# Preferences button
+			label( {
+				-class		=> 'options_outer pointer',
+				-id		=> 'prefs_button',
+				-onClick	=> "toggle_display( 'option_PREFS', 'prefs', 'prefs_button', '+ Preferences', '- Preferences' );",
+				},
+				$prefs_label,
+			).
+			'<br />'.
+			# Save Options button
+			label( {
+				-class		=> 'options_outer pointer',
+				-onClick	=> "form.SAVE.value=1; submit();",
+				},
+				'Remember Options',
+			),
+		);
+		
+	# Build Advanced Search table cells
 	my @optrows_advanced;
 	if ( @order_adv_opts ) {
 		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Advanced Search Options:' ) );
@@ -2243,47 +2346,26 @@ sub search_progs {
 			push @optrows_advanced, build_option_html( $opt->{$_} );
 		}
 	}
-
-	# Set advanced options cell status and label
-	my $adv_style;
-	my $adv_label;
-	if ( $opt->{ADVANCED}->{current} eq 'no' || not $opt->{ADVANCED}->{current} ) {
-		$adv_style = "display: none;";
-		$adv_label = 'Show Advanced Options';
-	} else {
-		$adv_style = "display: table;";
-		$adv_label = 'Hide Advanced Options';
+	# Build Preferences table cells
+	my @optrows_prefs;
+	if ( @order_prefs ) {
+		push @optrows_prefs, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Preferences:' ) );
+		for ( @order_prefs ) {
+			push @optrows_prefs, build_option_html( $opt->{$_} );
+		}
 	}
 
 	# Render outer options table frame (keeping advanced cell initially hidden)
 	print $fh table( { -class=>'options_outer' },
-		Tr( { -class=>'options_outer' },
-			td( { -class=>'options_outer' },
-				# Advanced Options button
-				label( {
-					-class		=> 'options_outer pointer',
-					-id		=> 'advanced_opts_button',
-					-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', 'Show Advanced Options', 'Hide Advanced Options' );",
-					},
-					$adv_label,
-				),
-			),
-			td( { -class=>'options_outer' },
-				# Save Options button
-				label( {
-					-class		=> 'options_outer pointer',
-					-onClick	=> "form.SAVE.value=1; submit();",
-					},
-					'Remember Options',
-				),
-			)
-		),
 		Tr( { -class=>'options_outer' }, 
 			td( { -class=>'options_outer' },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_basic ] ) )
 			).
 			td( { -class=>'options_outer', -id=>'advanced_opts', -style=>"$adv_style" },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_advanced ] ) )
+			).
+			td( { -class=>'options_outer', -id=>'prefs', -style=>"$prefs_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_prefs ] ) )
 			)
 		),
 	);
@@ -2293,62 +2375,98 @@ sub search_progs {
 	# Grey-out 'Add Current Search to PVR' button if too many programme matches
 	my $add_search_class_suffix;
 	$add_search_class_suffix = ' darker' if $number_of_matches > 30;
-	print $fh div( { -class=>'action' },
-		ul( { -class=>'action' },
-			li( { -class=>'action' }, [
-				a(
-					{
-						-class => 'action',
-						-title => 'Perform search based on search options',
-						-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
-					},
-					'Search'
-				),
-				a(
-					{
-						-class => 'action',
-						-title => 'Queue selected programmes for one-off recording',
-						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='pvr_queue'; form.submit()",
-					},
-					'Queue for Recording'
-				),
-				a(
-					{
-						-class => 'action',
-						-title => 'Download an M3U playlist based on selected programmes',
-						-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value='';",
-					},
-					'Create Playlist'
-				),
-				### vlc cannot read mov or mp4 from stdin :-(
-				#a(
-				#	{
-				#		-class => 'action',
-				#		-title => 'Download an M3U playlist based on selected programmes for direct streaming',
-				#		-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
-				#	},
-				#	'Create Local Playlist'
-				#),
-				a(
-					{
-						-class => 'action'.$add_search_class_suffix,
-						-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-						-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
-					},
-					'Add Current Search to PVR'
-				),
-				a(
-					{
-						-class => 'action',
-						-title => 'Refresh the list of programmes - can take a while',
-						-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
-					},
-					'Refresh Cache'
-				),
-			]),
-		),
-	);
+	my %action_button;
+	$action_button{'Search'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Perform search based on search options',
+				-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
+			},
+			'Search'
+		);
+	$action_button{'Queue for Recording'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Queue selected programmes for one-off recording',
+				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='pvr_queue'; form.submit()",
+			},
+			'Queue for Recording'
+		);
+	$action_button{'Delete Recordings'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Permanently delete selected recorded files',
+				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='recordings_delete'; form.submit()",
+			},
+			'Delete Recordings'
+		);
+	$action_button{'Create Playlist'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Download an M3U playlist based on selected programmes',
+				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value='';",
+			},
+			'Create Playlist'
+		);
+	$action_button{'Create Local Playlist'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Download an M3U playlist based on selected programmes for direct streaming',
+				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
+			},
+			'Create Local Playlist'
+		);
+	$action_button{'Add Current Search to PVR'} = 
+		a(
+			{
+				-class => 'action'.$add_search_class_suffix,
+				-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
+				-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
+			},
+			'Add Current Search to PVR'
+		);
+	$action_button{'Refresh Cache'} = 
+		a(
+			{
+				-class => 'action',
+				-title => 'Refresh the list of programmes - can take a while',
+				-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
+			},
+			'Refresh Cache'
+		);
 
+	# Render action bar
+	if ( $opt->{HISTORY}->{current} ) {
+		print $fh div( { -class=>'action' },
+			ul( { -class=>'action' },
+				li( { -class=>'action' }, [
+					$action_button{'Search'},
+					$action_button{'Delete Recordings'},
+					$action_button{'Create Playlist'},
+					#$action_button{'Create Local Playlist'}, # vlc cannot read mov or mp4 from stdin :-(
+					$action_button{'Add Current Search to PVR'},
+				]),
+			),
+		);
+	} else {
+		print $fh div( { -class=>'action' },
+			ul( { -class=>'action' },
+				li( { -class=>'action' }, [
+					$action_button{'Search'},
+					$action_button{'Queue for Recording'},
+					$action_button{'Create Playlist'},
+					$action_button{'Add Current Search to PVR'},
+					$action_button{'Refresh Cache'},
+				]),
+			),
+		);
+	}
+	
 	print $fh @pagetrail;
 	print $fh table( {-class=>'search' }, @html );
 	print $fh @pagetrail;
@@ -2489,6 +2607,9 @@ sub get_progs {
 		for (my $i=0; $i <= $#headings; $i++) {
 			$record->{$headings[$i]} = $element[$i];
 		}
+
+		# Grey-out history lines which files have been deleted
+		next if $opt->{HISTORY}->{current} && $opt->{HIDEDELETED}->{current} && ( ( $record->{filename} && ! -f $record->{filename} ) || ! $record->{filename} );
 
 		# store record in the prog global hash (prog => pid)
 		$prog{ $record->{'pid'} } = $record;
@@ -2749,7 +2870,7 @@ sub process_params {
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
 		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 	
@@ -2760,7 +2881,7 @@ sub process_params {
 		optkey	=> 'output', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 	
@@ -2771,7 +2892,7 @@ sub process_params {
 		optkey	=> 'proxy', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 	
@@ -2782,7 +2903,7 @@ sub process_params {
 		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
 		default	=> 'default', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 
@@ -2793,7 +2914,7 @@ sub process_params {
 		optkey	=> 'category', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 
@@ -2804,7 +2925,7 @@ sub process_params {
 		optkey	=> 'excludecategory', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 
@@ -2815,7 +2936,7 @@ sub process_params {
 		optkey	=> 'channel', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 
@@ -2826,7 +2947,7 @@ sub process_params {
 		optkey	=> 'excludechannel', # option
 		type	=> 'text', # type
 		default	=> '', # default
-		value	=> 40, # width values
+		value	=> 30, # width values
 		save	=> 1,
 	};
 
@@ -2895,6 +3016,16 @@ sub process_params {
 		save	=> 1,
 	};
 
+	# Whether to hide deleted programmes from the Recordings display.
+	$opt->{HIDEDELETED} = {
+		title	=> 'Hide Deleted Recordings', # Title
+		tooltip	=> 'Whether to hide deleted programmes from the recordings history list', # Tooltip
+		webvar	=> 'HIDEDELETED', # webvar
+		type	=> 'radioboolean', # type
+		default	=> 0, # value
+		save	=> 1,
+	};
+
 	### Non-visible options ##
 	$opt->{COLS} = {
 		webvar	=> 'COLS', # webvar
@@ -2942,7 +3073,15 @@ sub process_params {
 		save	=> 1,
 	};
 
-	# Save the status of the Advanced options settings
+	# Remeber the status of the prefs display
+	$opt->{PREFS} = {
+		webvar	=> 'PREFS', # webvar
+		type	=> 'hidden', # type
+		default	=> 'no', # value
+		save	=> 1,
+	};
+
+	# Save the status of the Advanced Search options and preferences settings
 	$opt->{SAVE} = {
 		webvar	=> 'SAVE', # webvar
 		type	=> 'hidden', # type
@@ -3095,23 +3234,29 @@ sub insert_stylesheet {
 	.pointer		{ cursor: pointer; cursor: hand; }
 	.pointer:hover		{ text-decoration: underline; }
 
+	.pointer_noul		{ cursor: pointer; cursor: hand; }
+
 	.darker			{ color: #7D7D7D; }
 	#logo			{ width: 190px; }
+
+	#smaller80pc		{ font-size: 80%; }
 
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
 	IMG			{ border: 0; }
 	INPUT			{ border: 0 none; background: #ddd; }
+	A			{ color: #FFF; text-decoration: none; }
+	A:hover			{ text-decoration: none; }
 
 	TABLE.title 		{ font-size: 150%; border-spacing: 0px; padding: 0px; }
-	A.title			{ color: #F54997; text-decoration: none; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
+	A.title			{ color: #F54997; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
 
 	/* Nav bar */
 	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 13%; }
-	A.nav			{ color: #FFF; display: block; height: 42px; line-height: 42px; text-align: center; text-decoration: none; }
+	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; }
 	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.nav:hover		{ color: #ADADAD; text-decoration: none; }
+	A.nav:hover		{ color: #ADADAD; }
 
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
 	INPUT.header		{ font-size: 80%; } 
@@ -3138,16 +3283,16 @@ sub insert_stylesheet {
 	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
 	TH.options_outer	{ }
 	TD.options_outer	{ }
-	LABEL.options_outer	{ font-weight: bold; font-size: 110%; color: #4A4; } 
+	LABEL.options_outer	{ font-weight: bold; font-size: 80%; color: #F54997; } 
 	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
 	
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
-	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; text-decoration: none; }
+	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.action:hover		{ color: #ADADAD; text-decoration: none; }
+	A.action:hover		{ color: #ADADAD; }
 
 	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
 	#centered		{ height:20px; margin:0px auto 0; position: relative; }
@@ -3166,7 +3311,7 @@ sub insert_stylesheet {
 	TR.search:hover		{ background: #555; }
 	TH.search		{ color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.search		{ text-align: left; }
-	A.search		{ color: #FFF; text-decoration: none; }
+	A.search		{ }
 	LABEL.search		{ text-decoration: none; }
 	INPUT.search		{ font-size: 70%; background: #DDD; }
 	LABEL.sorted            { color: #CFC; }
@@ -3178,8 +3323,8 @@ sub insert_stylesheet {
 	TR.info:hover		{ background: #555; }
 	TH.info			{ color: #FFF; text-align: center; background: #000; text-align: center; }
 	TD.info			{ text-align: left; }
-	A.info			{ color: #FFF; text-decoration: underline; }
-	A.info:hover		{ color: #FFF; }
+	A.info			{ text-decoration: underline; }
+	A.info:hover		{ }
 
 	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
 	</STYLE>
