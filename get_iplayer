@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.33;
+my $version = 2.34;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -172,8 +172,8 @@ my $opt_format = {
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
 	thumbext	=> [ 1, "thumbext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
-	thumbsize	=> [ 1, "thumbsize=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
-	thumbsizemeta	=> [ 1, "thumbsizemeta=n", 'Output', '--thumbsizemeta <index|width>', "Default thumbnail size/index to use for metadata (see --info for thumbnailN: to get size/index)"],
+	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
+	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata (see --info for thumbnailN: to get size/index)"],
 	whitespace	=> [ 1, "whitespace|ws|w", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
@@ -2986,6 +2986,7 @@ sub load {
 		return 0;
 	}
 
+	# Slow. Needs to be faster
 	while (<HIST>) {
 		chomp();
 		# Ignore comments
@@ -2999,12 +3000,19 @@ sub load {
 			$record_entries->{$_} = shift @record;
 		}
 		# Create new history entry
-		main::logger "WARNING: duplaicate pid $record_entries->{pid} in history\n" if defined $hist->{ $record_entries->{pid} } && $opt->{debug};
-		# workaround empty names
-		#$record_entries->{name} = 'pid:'.$record_entries->{pid} if ! $record_entries->{name};
-		$hist->{ $record_entries->{pid} } = History::new();
-		$hist->{ $record_entries->{pid} } = $record_entries;
-		main::logger "DEBUG: Loaded '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+		if ( defined $hist->{ $record_entries->{pid} } ) {
+			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
+			# Append filename and modes - could be a multimode entry
+			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode};
+			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename};
+			main::logger "DEBUG: Loaded and merged '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+		} else {
+			# workaround empty names
+			#$record_entries->{name} = 'pid:'.$record_entries->{pid} if ! $record_entries->{name};
+			$hist->{ $record_entries->{pid} } = History::new();
+			$hist->{ $record_entries->{pid} } = $record_entries;
+			main::logger "DEBUG: Loaded '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+		}
 	}
 	close (HIST);
 	return 0;
@@ -3839,6 +3847,8 @@ sub list_entry {
 	main::logger "\n${prog_type}$prog->{name}\n" if $opt->{tree} && ! $tree;
 	# Display based on output options
 	if ( $opt->{listformat} ) {
+		# Slow. Needs to be faster e.g:
+		#main::logger 'ENTRY'."$prog->{index}|$prog->{thumbnail}|$prog->{pid}|$prog->{available}|$prog->{type}|$prog->{name}|$prog->{episode}|$prog->{versions}|$prog->{duration}|$prog->{desc}|$prog->{channel}|$prog->{categories}|$prog->{timeadded}|$prog->{guidance}|$prog->{web}|$prog->{filename}|$prog->{mode}\n";
 		main::logger $prefix.$prog->substitute( $opt->{listformat}, 2 )."\n";
 	} elsif ( $opt->{series} && $episode_width && $episode_count && ! $opt->{tree} ) {
 		main::logger sprintf( "%s%-${episode_width}s %5s %s\n", $prefix, $prog->{name}, "($episode_count)", $prog->{categories} );
@@ -4357,7 +4367,7 @@ sub get_metadata {
 			$count++;
 		}
 		# Use the default cache thumbnail unless --thumbsize=NNN is used where NNN is either the width or thumbnail index number
-		$thumbnail = $thumbnails{ $opt->{thumbsizemeta} } if $thumbnails{ $opt->{thumbsizemeta} };
+		$thumbnail = $thumbnails{ $opt->{thumbsize} } if $thumbnails{ $opt->{thumbsize} };
 		$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
 		$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
@@ -5340,7 +5350,7 @@ sub get_links {
 			}
 
 			# Default to 150px width thumbnail;
-			my $thumbsize = $opt->{thumbsize} || 150;
+			my $thumbsize = $opt->{thumbsizecache} || 150;
 
 			# build data structure
 			$progref->{$pid} = main::progclass($prog_type)->new(
@@ -7652,7 +7662,8 @@ sub queue {
 
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
-		if ( $opt_cmdline->{type} && $opt_cmdline->{type} !~ ',' ) {
+		# ensure we only have one prog type defined
+		if ( $opt->{type} && $opt->{type} !~ /,/ ) {
 			# Add to PVR if not already in download history (unless multimode specified)
 			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) ) || $opt->{multimode};
 		} else {
