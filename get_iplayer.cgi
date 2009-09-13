@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.42';
+my $VERSION = '0.43';
 
 use strict;
 use CGI ':all';
@@ -126,6 +126,8 @@ my %fieldname = (
 	web			=> 'Web Page',
 	pvrsearch		=> 'PVR Search',
 	comment			=> 'Comment',
+	filename		=> 'Filename',
+	mode			=> 'Mode',
 	'name,episode'		=> 'Name+Episode',
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
@@ -183,6 +185,7 @@ my $nextpage;
 # Page routing based on NEXTPAGE CGI parameter
 my %nextpages = (
 	'search_progs'			=> \&search_progs,	# Main Programme Listings
+	'search_history'		=> \&search_history,	# Recorded Programme Listings
 	'pvr_queue'			=> \&pvr_queue,		# Queue Recording of Selected Progs
 	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
@@ -201,252 +204,11 @@ my $opt;
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PAGESIZE SORT PROGTYPES HISTORY/;
 my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
-my @order_settings = qw/ OUTPUT MODES PROXY /;
+my @order_settings = qw/ OUTPUT MODES PROXY METADATA SUBTITLES THUMB /;
 my @hidden_opts = qw/ SAVE ADVANCED REVERSE PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
 
-# Store options definition here as hash of 'name' => [options]
-	$opt->{SEARCH} = {
-		title	=> 'Search', # Title
-		tooltip	=> 'Enter your partial text match (or regex expression)', # Tooltip
-		webvar	=> 'SEARCH', # webvar
-		optkey	=> 'search', # option key
-		type	=> 'text', # type
-		default	=> '.*', # default
-		value	=> 20, # width values
-		save	=> 0,
-	};
-	
-	$opt->{SEARCHFIELDS} = {
-		title	=> 'Search in', # Title
-		tooltip	=> 'Select which column you wish to search', # Tooltip
-		webvar	=> 'SEARCHFIELDS', # webvar
-		optkey	=> 'fields', # option
-		type	=> 'popup', # type
-		label	=> \%fieldname, # labels
-		default	=> 'name', # default
-		value	=> [ (@headings,'name,episode','name,episode,desc') ], # values
-		save	=> 1,
-	};
-
-	$opt->{PAGESIZE} = {
-		title	=> 'Programmes per Page', # Title
-		tooltip	=> 'Select the number of search results displayed on each page', # Tooltip
-		webvar	=> 'PAGESIZE', # webvar
-		type	=> 'popup', # type
-		default	=> 20, # default
-		value	=> ['10','25','50','100','200','400'], # values
-		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
-		save	=> 1,
-	};
-
-	$opt->{SORT} = {
-		title	=> 'Sort by', # Title
-		tooltip	=> 'Sort the results in this order', # Tooltip
-		webvar	=> 'SORT', # webvar
-		type	=> 'popup', # type
-		label	=> \%fieldname, # labels
-		default	=> 'index', # default
-		value	=> [@headings], # values
-		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
-		save	=> 1,
-	};
-
-	$opt->{PROGTYPES} = {
-		title	=> 'Programme type', # Title
-		tooltip	=> 'Select the programme types you wish to search', # Tooltip
-		webvar	=> 'PROGTYPES', # webvar
-		optkey	=> 'type', # option
-		type	=> 'multiboolean', # type
-		label	=> \%prog_types, # labels
-		default => 'tv',
-		#status	=> \%type, # default status
-		value	=> \%prog_types_order, # order of values
-		save	=> 1,
-	};
-
-	$opt->{MODES} = {
-		title	=> 'Recording Modes', # Title
-		tooltip	=> 'Comma separated list of recording modes which should be tried in order', # Tooltip
-		webvar	=> 'MODES', # webvar
-		optkey	=> 'modes', # option
-		type	=> 'text', # type
-		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-	
-	$opt->{OUTPUT} = {
-		title	=> 'Override Recordings Folder', # Title
-		tooltip	=> 'Folder on the server where recordings should be saved', # Tooltip
-		webvar	=> 'OUTPUT', # webvar
-		optkey	=> 'output', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-	
-	$opt->{PROXY} = {
-		title	=> 'Web Proxy URL', # Title
-		tooltip	=> 'e.g. http://192.168.1.2:8080', # Tooltip
-		webvar	=> 'PROXY', # webvar
-		optkey	=> 'proxy', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-	
-	$opt->{VERSIONLIST} = {
-		title	=> 'Programme Version', # Title
-		tooltip	=> 'Comma separated list of versions to try to record in order (e.g. default,signed,audiodescribed)', # Tooltip
-		webvar	=> 'VERSIONLIST', # webvar
-		optkey	=> 'versionlist', # option
-		type	=> 'text', # type
-		default	=> 'default', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{CATEGORY} = {
-		title	=> 'Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported', # Tooltip
-		webvar	=> 'CATEGORY', # webvar
-		optkey	=> 'category', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{EXCLUDECATEGORY} = {
-		title	=> 'Exclude Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported', # Tooltip
-		webvar	=> 'EXCLUDECATEGORY', # webvar
-		optkey	=> 'excludecategory', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{CHANNEL} = {
-		title	=> 'Channels Containing', # Title
-		tooltip	=> 'Comma separated list of channels to match. Partial word matches are supported', # Tooltip
-		webvar	=> 'CHANNEL', # webvar
-		optkey	=> 'channel', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{EXCLUDECHANNEL} = {
-		title	=> 'Exclude Channels Containing', # Title
-		tooltip	=> 'Comma separated list of channels to exclude. Partial word matches are supported', # Tooltip
-		webvar	=> 'EXCLUDECHANNEL', # webvar
-		optkey	=> 'excludechannel', # option
-		type	=> 'text', # type
-		default	=> '', # default
-		value	=> 40, # width values
-		save	=> 1,
-	};
-
-	$opt->{HIDE} = {
-		title	=> 'Hide Recorded', # Title
-		tooltip	=> 'Whether to hide programmes that have already been successfully recorded', # Tooltip
-		webvar	=> 'HIDE', # webvar
-		optkey	=> 'hide', # option
-		type	=> 'radioboolean', # type
-		default	=> '0', # value
-		save	=> 1,
-	};
-
-	$opt->{HISTORY} = {
-		title	=> 'Search History', # Title
-		tooltip	=> 'Whether to display and search programmes in the recordings history', # Tooltip
-		webvar	=> 'HISTORY', # webvar
-		optkey	=> 'history', # option
-		type	=> 'boolean', # type
-		default	=> '0', # value
-		save	=> 0,
-	};
-
-	$opt->{SINCE} = {
-		title	=> 'Added Since (hours)', # Title
-		tooltip	=> 'Only show programmes added to the local programmes cache in the past number of hours', # Tooltip
-		webvar	=> 'SINCE', # webvar
-		optkey	=> 'since', # option
-		type	=> 'text', # type
-		value	=> 3, # width values
-		default => '',
-		save	=> 1,
-	};
-
-	### Non-visible options ##
-	$opt->{COLS} = {
-		webvar	=> 'COLS', # webvar
-		default	=> undef, # width values
-		save	=> 0,
-	};
-
-	# Make sure we go to the correct nextpage for processing
-	$opt->{NEXTPAGE} = {
-		webvar  => 'NEXTPAGE',
-		type	=> 'hidden',
-		default	=> 'search_progs',
-		save	=> 0,
-	};
-
-	# Make sure we go to the correct nextpage for processing
-	$opt->{ACTION} = {
-		webvar  => 'ACTION',
-		type	=> 'hidden',
-		default	=> '',
-		save	=> 0,
-	};
-
-	# Reverse sort value
-	$opt->{REVERSE} = {
-		webvar  => 'REVERSE',
-		type	=> 'hidden',
-		default	=> 0,
-		save	=> 1,
-	};
-
-	# Make sure we go to the correct next page no.
-	$opt->{PAGENO} = {
-		webvar  => 'PAGENO',
-		type	=> 'hidden',
-		default	=> 1,
-		save	=> 0,
-	};
-
-	# Remeber the status of the Advanced options display
-	$opt->{ADVANCED} = {
-		webvar	=> 'ADVANCED', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
-
-	# Save the status of the Advanced options settings
-	$opt->{SAVE} = {
-		webvar	=> 'SAVE', # webvar
-		type	=> 'hidden', # type
-		default	=> '0', # value
-		save	=> 0,
-	};
-
-	# INFO for page info if clicked
-	$opt->{INFO} = {
-		webvar  => 'INFO',
-		type	=> 'hidden',
-		default	=> 0,
-		save	=> 0,
-	};
 
 
 ### Perl CGI Web Server ###
@@ -644,6 +406,12 @@ sub run_cgi {
 	# Get next page
 	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
 
+	# Add some default headings for history mode
+	if ( $cgi->param( 'HISTORY' ) || $nextpage eq 'search_history' ) {
+		push @headings, ( 'filename', 'mode' );
+		push @headings_default, ( 'filename', 'mode' );	
+	}
+
 	# Process All options
 	process_params();
 
@@ -823,6 +591,7 @@ sub run_cgi {
 
 		# Page Routing
 		form_header( $request_host );
+		#print $fh $cgi->Dump();
 		if ( $opt_cmdline->{debug} ) {
 			print $fh $cgi->Dump();
 			#for my $key (sort keys %ENV) {
@@ -1003,7 +772,7 @@ sub get_playlist {
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'playlistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${type}:${pid}&OUTTYPE=${filename}\n";
+			push @playlist, "${request_host}?ACTION=direct&PID=${pid}&OUTTYPE=${filename}\n";
 
 		# playlist with local files
 		} elsif ( $request eq 'playlistfiles' ) {
@@ -1039,7 +808,7 @@ sub create_playlist_m3u {
 		#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${type}:${pid}\n";
+			push @playlist, "${request_host}?ACTION=direct&PID=${pid}\n";
 
 		## playlist with local files
 		#} elsif ( $request eq 'playlistfiles' ) {
@@ -1737,9 +1506,9 @@ sub show_pvr_list {
 	        # Sort by column click and change display class (colour) according to sort status
 	        my ($title, $class, $onclick);
 	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit()");
+                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit()");
                 } else {
-                  ($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit()");
+                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit()");
                 }
                 $class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
@@ -1950,14 +1719,14 @@ sub show_info {
 					},
 					'Play Now'
 				),
-				a(
-					{
-						-class => 'action',
-						-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
-						-href => '?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}"),
-					},
-					'Queue for Recording'
-				),
+				#a(
+				#	{
+				#		-class => 'action',
+				#		-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
+				#		-onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()",
+				#	},
+				#	'Queue for Recording'
+				#),
 			]),
 		),
 	);
@@ -1967,13 +1736,13 @@ sub show_info {
 }
 
 
+
 # PID=${type}:${pid}&OUTTYPE=${filename}
 sub get_direct_filename {
-	my $progdata = ( $cgi->param( 'PID' ) );
 	my $out;
 	my @html;
 	my %prog;
-	my ( $type, $pid ) = split /[\|:]/, $progdata;
+	my $pid = $cgi->param( 'PID' );
 
 	# Get the 'filename' entry from --history --info for this pid
 	chomp();
@@ -1982,7 +1751,7 @@ sub get_direct_filename {
 		'--nocopyright',
 		'--history',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', "search=pid:$pid" ),
+		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", 'listformat=filename: <filename>' ),
 	);
 	print $se p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
@@ -1999,7 +1768,14 @@ sub get_direct_filename {
 
 
 sub pvr_queue {
+	# Gets the multiple selections of progs to queue from PROGSELECT
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
+	# The 'Queue' action button uses SEARCH to pass it's pvr_queue data
+	if ( $#record < 0 ) {
+		push @record, $cgi->param( 'SEARCH' )
+	}
+	
+	my @params = get_search_params();
 	my $out;
 
 	# Queue all selected '<type>|<pid>' entries in the PVR
@@ -2009,11 +1785,13 @@ sub pvr_queue {
 		my $comment = "$name - $episode";
 		$comment =~ s/\'\"//g;
 		$comment =~ s/[^\s\w\d\-:\(\)]/_/g;
+		$comment =~ s/^_*//g;
+		$comment =~ s/_*$//g;
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
 			'--webrequest',
-			get_iplayer_webrequest_args( "output=".$cgi->param( 'OUTPUT' ), "type=$type", 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')' ),
+			get_iplayer_webrequest_args( 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')', build_cmd_options( grep !/^(HISTORY|SINCE|SEARCH|SEARCHFIELDS|VERSIONLIST|EXCLUDEC.+)$/, @params ) ),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 		my $cmdout = join "", get_cmd_output( @cmd );
@@ -2273,6 +2051,22 @@ sub flush {
 
 
 
+# Just a wrapper to search_progs which defines history search settings for 'Recordings' tab
+sub search_history {
+	$opt->{HISTORY}->{current} = 1;
+	$opt->{SORT}->{current} = 'timeadded';
+	$opt->{REVERSE}->{current} = 1;
+	$opt->{SINCE}->{current} = '';
+	$opt->{CATEGORY}->{current} = '';
+	$opt->{EXCLUDECATEGORY}->{current} = '';
+	$opt->{CHANNEL}->{current} = '';
+	$opt->{EXCLUDECHANNEL}->{current} = '';
+	search_progs();
+}
+
+
+
+
 sub search_progs {
 	# Set default status for progtypes
 	my %type;
@@ -2390,10 +2184,11 @@ sub search_progs {
 			# 'PlayFile' - works with vlc
 			$links .= a( { -class=>'search', -title=>"Play from local file", -href=>'?ACTION=playlistfiles&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid") },  'PlayFile' ).'<br />';
 			# 'PlayDirect' - depends on browser support
-			$links .= a( { -class=>'search', -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=$prog{$pid}->{type}|".CGI::escape("$pid") },  'PlayDirect' ).'<br />';
+			$links .= a( { -class=>'search', -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=".CGI::escape("$pid") },  'PlayDirect' ).'<br />';
 		} else {
 			# 'Queue'
-			$links .=  a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';		
+			$links .=  label( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Queue' ).'<br />';
+			#$links .=  a( { -class=>'search', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';
 		}
 		$links .= label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
 
@@ -2826,7 +2621,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'History search page',
-						-onClick => "form.NEXTPAGE.value='search_progs'; form.HISTORY.checked = true; form.SORT.value='timeadded'; form.REVERSE.value=1; form.SINCE.value=''; form.CATEGORY.value=''; form.EXCLUDECATEGORY.value=''; form.CHANNEL.value=''; form.EXCLUDECHANNEL.value=''; form.submit(); ",
+						-onClick => "formheader.NEXTPAGE.value='search_history'; formheader.submit();",
 					},
 					'Recordings'
 				),
@@ -2851,7 +2646,7 @@ sub form_header {
 					{ 
 						-class=>'nav', 
 						-title=>'Show help and instructions', 
-						-onClick => "parent.location='http://linuxcentre.net/projects/get_iplayer-pvr-manager/'",
+						-href => "http://linuxcentre.net/projects/get_iplayer-pvr-manager/",
 					},
 					'Help'
 				),
@@ -2886,6 +2681,283 @@ sub html_end {
 
 # Gets and sets the CGI parameters (POST/Cookie) in the $opt hash - also sets $opt{VAR}->{current} from default or POST
 sub process_params {
+
+	# Store options definition here as hash of 'name' => [options]
+	$opt->{SEARCH} = {
+		title	=> 'Search', # Title
+		tooltip	=> 'Enter your partial text match (or regex expression)', # Tooltip
+		webvar	=> 'SEARCH', # webvar
+		optkey	=> 'search', # option key
+		type	=> 'text', # type
+		default	=> '.*', # default
+		value	=> 20, # width values
+		save	=> 0,
+	};
+	
+	$opt->{SEARCHFIELDS} = {
+		title	=> 'Search in', # Title
+		tooltip	=> 'Select which column you wish to search', # Tooltip
+		webvar	=> 'SEARCHFIELDS', # webvar
+		optkey	=> 'fields', # option
+		type	=> 'popup', # type
+		label	=> \%fieldname, # labels
+		default	=> 'name', # default
+		value	=> [ (@headings,'name,episode','name,episode,desc') ], # values
+		save	=> 1,
+	};
+
+	$opt->{PAGESIZE} = {
+		title	=> 'Programmes per Page', # Title
+		tooltip	=> 'Select the number of search results displayed on each page', # Tooltip
+		webvar	=> 'PAGESIZE', # webvar
+		type	=> 'popup', # type
+		default	=> 20, # default
+		value	=> ['10','25','50','100','200','400'], # values
+		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		save	=> 1,
+	};
+
+	$opt->{SORT} = {
+		title	=> 'Sort by', # Title
+		tooltip	=> 'Sort the results in this order', # Tooltip
+		webvar	=> 'SORT', # webvar
+		type	=> 'popup', # type
+		label	=> \%fieldname, # labels
+		default	=> 'index', # default
+		value	=> [@headings], # values
+		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		save	=> 1,
+	};
+
+	$opt->{PROGTYPES} = {
+		title	=> 'Programme type', # Title
+		tooltip	=> 'Select the programme types you wish to search', # Tooltip
+		webvar	=> 'PROGTYPES', # webvar
+		optkey	=> 'type', # option
+		type	=> 'multiboolean', # type
+		label	=> \%prog_types, # labels
+		default => 'tv',
+		#status	=> \%type, # default status
+		value	=> \%prog_types_order, # order of values
+		save	=> 1,
+	};
+
+	$opt->{MODES} = {
+		title	=> 'Recording Modes', # Title
+		tooltip	=> 'Comma separated list of recording modes which should be tried in order', # Tooltip
+		webvar	=> 'MODES', # webvar
+		optkey	=> 'modes', # option
+		type	=> 'text', # type
+		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
+	$opt->{OUTPUT} = {
+		title	=> 'Override Recordings Folder', # Title
+		tooltip	=> 'Folder on the server where recordings should be saved', # Tooltip
+		webvar	=> 'OUTPUT', # webvar
+		optkey	=> 'output', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
+	$opt->{PROXY} = {
+		title	=> 'Web Proxy URL', # Title
+		tooltip	=> 'e.g. http://192.168.1.2:8080', # Tooltip
+		webvar	=> 'PROXY', # webvar
+		optkey	=> 'proxy', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+	
+	$opt->{VERSIONLIST} = {
+		title	=> 'Programme Version', # Title
+		tooltip	=> 'Comma separated list of versions to try to record in order (e.g. default,signed,audiodescribed)', # Tooltip
+		webvar	=> 'VERSIONLIST', # webvar
+		optkey	=> 'versionlist', # option
+		type	=> 'text', # type
+		default	=> 'default', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+
+	$opt->{CATEGORY} = {
+		title	=> 'Categories Containing', # Title
+		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported', # Tooltip
+		webvar	=> 'CATEGORY', # webvar
+		optkey	=> 'category', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+
+	$opt->{EXCLUDECATEGORY} = {
+		title	=> 'Exclude Categories Containing', # Title
+		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported', # Tooltip
+		webvar	=> 'EXCLUDECATEGORY', # webvar
+		optkey	=> 'excludecategory', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+
+	$opt->{CHANNEL} = {
+		title	=> 'Channels Containing', # Title
+		tooltip	=> 'Comma separated list of channels to match. Partial word matches are supported', # Tooltip
+		webvar	=> 'CHANNEL', # webvar
+		optkey	=> 'channel', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+
+	$opt->{EXCLUDECHANNEL} = {
+		title	=> 'Exclude Channels Containing', # Title
+		tooltip	=> 'Comma separated list of channels to exclude. Partial word matches are supported', # Tooltip
+		webvar	=> 'EXCLUDECHANNEL', # webvar
+		optkey	=> 'excludechannel', # option
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 40, # width values
+		save	=> 1,
+	};
+
+	$opt->{HIDE} = {
+		title	=> 'Hide Recorded', # Title
+		tooltip	=> 'Whether to hide programmes that have already been successfully recorded', # Tooltip
+		webvar	=> 'HIDE', # webvar
+		optkey	=> 'hide', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
+	my %metadata_labels = ( ''=>'Off', xbmc=>'XBMC Episode nfo format', xbmc_movie=>'XBMC Movie nfo format', generic=>'Generic XML' );
+	$opt->{METADATA} = {
+		title	=> 'Download Meta-data', # Title
+		tooltip	=> 'Format of metadata file to create when recording', # Tooltip
+		webvar	=> 'METADATA', # webvar
+		optkey	=> 'metadata', # option
+		type	=> 'popup', # type
+		#label	=> \%fieldname, # labels
+		label	=> , \%metadata_labels, # labels
+		default	=> '', # default
+		value	=> [ ( '', 'xbmc', 'xbmc_movie', 'generic' ) ], # values
+		save	=> 1,
+	};
+
+	$opt->{SUBTITLES} = {
+		title	=> 'Download Subtitles', # Title
+		tooltip	=> 'Whether to download the subtitles when recording', # Tooltip
+		webvar	=> 'SUBTITLES', # webvar
+		optkey	=> 'subtitles', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
+	$opt->{THUMB} = {
+		title	=> 'Download Thumbnail', # Title
+		tooltip	=> 'Whether to download the thumbnail when recording', # Tooltip
+		webvar	=> 'THUMB', # webvar
+		optkey	=> 'thumb', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
+	$opt->{HISTORY} = {
+		title	=> 'Search History', # Title
+		tooltip	=> 'Whether to display and search programmes in the recordings history', # Tooltip
+		webvar	=> 'HISTORY', # webvar
+		optkey	=> 'history', # option
+		type	=> 'boolean', # type
+		default	=> '0', # value
+		save	=> 0,
+	};
+
+	$opt->{SINCE} = {
+		title	=> 'Added Since (hours)', # Title
+		tooltip	=> 'Only show programmes added to the local programmes cache in the past number of hours', # Tooltip
+		webvar	=> 'SINCE', # webvar
+		optkey	=> 'since', # option
+		type	=> 'text', # type
+		value	=> 3, # width values
+		default => '',
+		save	=> 1,
+	};
+
+	### Non-visible options ##
+	$opt->{COLS} = {
+		webvar	=> 'COLS', # webvar
+		default	=> undef, # width values
+		save	=> 0,
+	};
+
+	# Make sure we go to the correct nextpage for processing
+	$opt->{NEXTPAGE} = {
+		webvar  => 'NEXTPAGE',
+		type	=> 'hidden',
+		default	=> 'search_progs',
+		save	=> 0,
+	};
+
+	# Make sure we go to the correct nextpage for processing
+	$opt->{ACTION} = {
+		webvar  => 'ACTION',
+		type	=> 'hidden',
+		default	=> '',
+		save	=> 0,
+	};
+
+	# Reverse sort value
+	$opt->{REVERSE} = {
+		webvar  => 'REVERSE',
+		type	=> 'hidden',
+		default	=> 0,
+		save	=> 1,
+	};
+
+	# Make sure we go to the correct next page no.
+	$opt->{PAGENO} = {
+		webvar  => 'PAGENO',
+		type	=> 'hidden',
+		default	=> 1,
+		save	=> 0,
+	};
+
+	# Remeber the status of the Advanced options display
+	$opt->{ADVANCED} = {
+		webvar	=> 'ADVANCED', # webvar
+		type	=> 'hidden', # type
+		default	=> 'no', # value
+		save	=> 1,
+	};
+
+	# Save the status of the Advanced options settings
+	$opt->{SAVE} = {
+		webvar	=> 'SAVE', # webvar
+		type	=> 'hidden', # type
+		default	=> '0', # value
+		save	=> 0,
+	};
+
+	# INFO for page info if clicked
+	$opt->{INFO} = {
+		webvar  => 'INFO',
+		type	=> 'hidden',
+		default	=> 0,
+		save	=> 0,
+	};
+
 	for ( keys %{ $opt } ) {
 		# Ignore cookies if we are saving new ones
 		if ( not $cgi->param('SAVE') ) {
