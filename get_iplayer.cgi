@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.44';
+my $VERSION = '0.45';
 
 use strict;
 use CGI ':all';
@@ -38,6 +38,8 @@ use LWP::ConnCache;
 use LWP::UserAgent;
 use IO::Handle;
 use Getopt::Long;
+use Cwd 'abs_path';
+use File::Basename;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 $| = 1;
 my $fh;
@@ -572,7 +574,7 @@ sub run_cgi {
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
 
 	# Get a playlist for a selected progs in form
-	} elsif ( $action eq 'genplaylist' || $action eq 'genplaylistdirect' ) {
+	} elsif ( $action eq 'genplaylist' || $action eq 'genplaylistdirect' || $action eq 'genplaylistfile' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 		# To save file
@@ -773,11 +775,11 @@ sub get_playlist {
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'playlistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}}&OUTTYPE=${filename}\n";
+			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}}&OUTTYPE=".basename( $filename )."\n";
 
 		# playlist with local files
 		} elsif ( $request eq 'playlistfiles' ) {
-			push @playlist, "file://${filename}\n";
+			push @playlist, search_absolute_path( $filename )."\n";
 
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
@@ -799,30 +801,37 @@ sub create_playlist_m3u {
 
 	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
 	for (@record) {
+		my $url;
 		chomp();
 		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
 		next if ! ($type && $pid );
-		# Format required, e.g.
-		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
-		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-		#
-		push @playlist, "#EXTINF:-1,$type - $name - $episode";
-		#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
+
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}\n";
+			$url = "${request_host}?ACTION=direct&PID=${pid}|${mode}";
 
-		## playlist with local files
-		#} elsif ( $request eq 'playlistfiles' ) {
-		#	push @playlist, "file://${filename}\n";
+		# playlist with local files
+		} elsif ( $request eq 'genplaylistfile' ) {
+			# Lookup filename (add it if defined - even if relative)
+			# check for -f $filename if you want to exclude files that cannot be found
+			my $filename = get_direct_filename( $pid, $mode );
+			$url = $filename if $filename;
 
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
-			push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}\n";
-			#push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";		
+			$url = "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}";
 		}
-	}
 
+		# Skip empty urls
+		next if ! $url;
+		
+		# Format required, e.g.
+		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
+		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
+		push @playlist, "#EXTINF:-1,$type - $name - $episode";
+		push @playlist, "$url\n";
+
+	}
 	return join ("\n", @playlist);
 }
 
@@ -1769,7 +1778,50 @@ sub get_direct_filename {
 	my $filename;
 	$filename = $1 if $match =~ m{^\w+?:\s*(.+?)\|$mode\s*$};
 
-	return $filename;
+	return search_absolute_path( $filename );
+}
+
+
+
+# Hack to work around relative paths in recordings history
+sub search_absolute_path {
+	my $filename = shift;
+	my $abs_path;
+
+	# win32 doesn't seem to like abs_path
+	# rewrite win32 paths
+	if ( IS_WIN32 ) {
+		# add a hardcoded prefix for now if relative path (assume relative to local get_iplayer script)
+		if ( $filename !~ m{^[A-Za-z]:} && $filename =~ m{^(\.|\.\.|[A-Za-z])} ) {
+			$filename = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
+		}
+		# twiddle the / to \
+		$filename =~ s!(\\/|/|\/)!\\!g;
+		return $filename;
+	}
+
+	#print $se "FILENAME='$filename'";
+
+	# Try using CWD
+	if ( -f abs_path($filename) ) {
+		$abs_path = abs_path($filename);
+
+	# else try dir of get_iplayer
+	} elsif ( -f dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename ) {
+		$abs_path = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
+
+	# else try dir current output dir option
+	} elsif ( $opt->{OUTPUT}->{current} && -f abs_path( $opt->{OUTPUT}->{current} ).'/'.$filename ) {
+		$abs_path = abs_path( $opt->{OUTPUT}->{current} ).'/'.$filename;
+
+	# Else just return the relative path
+	} else {
+		$abs_path = $filename;
+	}
+	
+	#print $se "  ->  ABSPATH='$abs_path'\n";
+	
+	return $abs_path;
 }
 
 
@@ -2194,15 +2246,15 @@ sub search_progs {
 	# Build each prog row
 	my $time = time();
 	for ( my $i = $first; $i < $last && $i <= $#pids; $i++ ) {
-		my $search_class;
+		my $search_class = 'search';
 		my $pid = $pids[$i]; 
 		my @row;
 
 		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
-		if ( $opt->{HISTORY}->{current} && ( ! $opt->{HIDEDELETED}->{current} ) && ( ( $prog{$pid}->{filename} && ! -f $prog{$pid}->{filename} ) || ! $prog{$pid}->{filename} ) ) {
-			$search_class = 'search darker';
-		} else {
-			$search_class = 'search';
+		if ( $opt->{HISTORY}->{current} && ! $opt->{HIDEDELETED}->{current} ) {
+			if ( ( ! $prog{$pid}->{filename} ) || ! -f $prog{$pid}->{filename} ) {
+					$search_class = 'search darker';
+			}
 		}
 
 		push @row, td( {-class=>$search_class},
@@ -2241,9 +2293,8 @@ sub search_progs {
 		} else {
 			# 'Queue'
 			$links .=  label( { -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Queue' ).'<br />';
-			#$links .=  a( { -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -href=>'?NEXTPAGE=pvr_queue'.$outdir.'&PROGSELECT='.CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}") }, 'Queue' ).'<br />';
+			$links .= label( { -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
 		}
-		$links .= label( { -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
 
 		# Add links to row
 		push @row, td( {-class=>$search_class}, $links );
@@ -2412,14 +2463,14 @@ sub search_progs {
 			},
 			'Create Playlist'
 		);
-	$action_button{'Create Local Playlist'} = 
+	$action_button{'Create File Playlist'} = 
 		a(
 			{
 				-class => 'action',
-				-title => 'Download an M3U playlist based on selected programmes for direct streaming',
-				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
+				-title => 'Download an M3U playlist based on selected programmes for local file streaming',
+				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistfile'; form.submit(); form.ACTION.value='';",
 			},
-			'Create Local Playlist'
+			'Create File Playlist'
 		);
 	$action_button{'Add Current Search to PVR'} = 
 		a(
@@ -2448,7 +2499,7 @@ sub search_progs {
 					$action_button{'Search'},
 					$action_button{'Delete Recordings'},
 					$action_button{'Create Playlist'},
-					#$action_button{'Create Local Playlist'}, # vlc cannot read mov or mp4 from stdin :-(
+					$action_button{'Create File Playlist'}, # vlc cannot read mov or mp4 from stdin :-(
 					$action_button{'Add Current Search to PVR'},
 				]),
 			),
@@ -2608,8 +2659,18 @@ sub get_progs {
 			$record->{$headings[$i]} = $element[$i];
 		}
 
-		# Grey-out history lines which files have been deleted
-		next if $opt->{HISTORY}->{current} && $opt->{HIDEDELETED}->{current} && ( ( $record->{filename} && ! -f $record->{filename} ) || ! $record->{filename} );
+		my $search_class = 'search';
+
+		# get the real path if file is defined
+		$record->{filename} = search_absolute_path( $record->{filename} ) if $record->{filename};
+
+		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
+		if ( $opt->{HISTORY}->{current} && $opt->{HIDEDELETED}->{current} ) {
+			if ( ( $record->{filename} && ! -f $record->{filename} ) || ! $record->{filename} ) {
+				# set line to be greyed-out if the file doesn't exist
+				next;
+			}
+		}
 
 		# store record in the prog global hash (prog => pid)
 		$prog{ $record->{'pid'} } = $record;
