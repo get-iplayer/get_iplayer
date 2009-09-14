@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.34;
+my $version = 2.35;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3153,7 +3153,7 @@ use POSIX qw(mkfifo);
 use strict;
 use Time::Local;
 use URI;
-
+use Cwd 'abs_path';
 
 # Class vars
 # Global options
@@ -3715,7 +3715,8 @@ sub generate_filenames {
 		$prog->get_metadata_general();
 	}
 
-	$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
+	# Determine direcotry and find it's absolute path
+	$prog->{dir} = abs_path( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
 
 	# Add modename to default format string if multimode option is used
 	$format .= ' <mode>' if $opt->{multimode};
