@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.35;
+my $version = 2.36;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -209,9 +209,13 @@ my $opt_format = {
 	listplugins	=> [ 1, "listplugins", 'Display', '--listplugins', "Display a list of currently available plugins or programme types"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
 	nocopyright	=> [ 1, "nocopyright", 'Display', '--nocopyright', "Don't display copyright header"],
+	page		=> [ 1, "page=n", 'Display', '--page <number>', "Page number to display for multipage output"],
+	pagesize	=> [ 1, "pagesize=n", 'Display', '--pagesize <number>', "Number of matches displayed on a page for multipage output"],
 	quiet		=> [ 1, "q|quiet|silent", 'Display', '--quiet, -q', "No logging output"],
 	series		=> [ 0, "series", 'Display', '--series', "Display Programme series names only with number of episodes"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
+	sortmatches	=> [ 1, "sortmatches|sort=s", 'Display', '--sort <fieldname>', "Field to use to sort displayed matches"],
+	sortreverse	=> [ 1, "sortreverse", 'Display', '--sortreverse', "Reverse order of sorted matches"],
 	streaminfo	=> [ 1, "streaminfo", 'Display', '--streaminfo', "Returns all of the media stream urls of the programme(s)"],
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
@@ -335,6 +339,8 @@ for my $plugin_dir ( ( $plugin_dir_user, $plugin_dir_system ) ) {
 			$prog_types{$1} = "Programme::$1";
 			#logger "INFO: Loading $_\n";
 			require $_;
+			# Kludge: Create dummy instance (without a single instance, none of the bound options work)
+			$prog_types{$1}->new();
 		}
 	}
 }
@@ -461,7 +467,6 @@ my $info_limit		= 40;
 my $proxy_save;
 
 # Option dependant var definitions
-my $cache_secs;
 my $bin;
 my $binopts;
 my @search_args = @ARGV;
@@ -612,7 +617,6 @@ sub find_matches {
 	}
 	# Default to type=tv if no type option is set
 	$type{tv}		= 1 if keys %type == 0;
-	$cache_secs 		= $opt->{expiry} || 14400;
 
 	# External Binaries
 	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
@@ -896,47 +900,106 @@ sub list_progs {
 	my $number_of_types = keys %{$typeref} || 2;
 	my $ua = create_ua();
 	my %names;
+	my ( @matches ) = ( @_ );
 	
+
 	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt->{info} ) {
 		# Truncate array if were lisiting info and > $info_limit entries are requested - be nice to the beeb!
-		if ( $#_ >= $info_limit ) {
-			$#_ = $info_limit - 1;
+		if ( $#matches >= $info_limit ) {
+			$#matches = $info_limit - 1;
 			logger "WARNING: Only processing the first $info_limit matches\n";
 		}
+	}
+
+	# Sort array by specified field
+	if ( $opt->{sortmatches} ) {
+		# disable tree mode
+		delete $opt->{tree};
+
+		# Lookup table for numeric search fields
+		my %sorttype = (
+			index		=> 1,
+			duration	=> 1,
+			timeadded	=> 1,
+		);
+		my $sort_prog;
+		for my $this ( @matches ) {
+			# field needs to be made to be unique by adding '|pid'
+			$sort_prog->{ "$this->{ $opt->{sortmatches} }|$this->{pid}" } = $this;
+		}
+		@matches = ();
+		# Numeric search
+		if ( defined $sorttype{ $opt->{sortmatches} } ) {
+			for my $key ( sort {$a <=> $b} keys %{ $sort_prog } ) {
+				push @matches, $sort_prog->{$key};
+			}
+		# alphanumeric search
+		} else {
+			for my $key ( sort {lc $a cmp lc $b} keys %{ $sort_prog } ) {
+				push @matches, $sort_prog->{$key};
+			}
+		}
+	}
+	# Reverse sort?
+	if ( $opt->{sortreverse} ) {
+		my @tmp = reverse @matches;
+		@matches = @tmp;
 	}
 
 	# Determine number of episodes for each name
 	my %episodes;
 	my $episode_width;
 	if ( $opt->{series} ) {
-		for my $this (@_) {
+		for my $this (@matches) {
 			$episodes{ $this->{name} }++;
 			$episode_width = length( $this->{name} ) if length( $this->{name} ) > $episode_width;
 		}
 	}
 
-	logger "Matches:\n" if $#_ >= 0;
-	for my $this (@_) {
+	# Sort display order by field (won't work in tree mode)
+	
+
+	# Calculate page sizes etc if required
+	my $items = $#matches+1;
+	my ( $pages, $page, $pagesize, $first, $last );
+	if ( ! $opt->{page} ) {
+		logger "Matches:\n" if $#matches >= 0;
+	} else {
+		$pagesize = $opt->{pagesize} || 25;
+		# Calc first and last programme numbers
+		$first = $pagesize * ( $opt->{page} - 1 );
+		$last = $first + $pagesize;
+		# How many pages
+		$pages = int( $items / $pagesize ) + 1;
+		# If we request a page that is too high
+		$opt->{page} = $pages if $page > $pages;
+		logger "Matches (Page $opt->{page}/${pages}".()."):\n" if $#matches >= 0;
+	}
+	# loop through all programmes in match
+	for ( my $count=0; $count < $items; $count++ ) {
+		my $this = @matches[$count];
 		# Only display if the prog name is set
-		if ( $this->{name} || ! ( $opt->{series} || $opt->{tree} ) ) {
-			# Tree mode
-			if ( $opt->{tree} ) {
-				if (! defined $names{ $this->{name} }) {
-					$this->list_entry( '', 0, $number_of_types );
-					$names{ $this->{name} } = 1;
+		if ( ( ! $opt->{page} ) || ( $opt->{page} && $count >= $first && $count < $last ) ) {
+			if ( $this->{name} || ! ( $opt->{series} || $opt->{tree} ) ) {
+				# Tree mode
+				if ( $opt->{tree} ) {
+					if (! defined $names{ $this->{name} }) {
+						$this->list_entry( '', 0, $number_of_types );
+						$names{ $this->{name} } = 1;
+					} else {
+						$this->list_entry( '', 1, $number_of_types );
+					}
+				# Series mode
+				} elsif ( $opt->{series} ) {
+					if (! defined $names{ $this->{name} }) {
+						$this->list_entry( '', 0, $number_of_types, $episodes{ $this->{name} }, $episode_width );
+						$names{ $this->{name} } = 1;
+					}
+				# Normal mode
 				} else {
-					$this->list_entry( '', 1, $number_of_types );
+					$this->list_entry( '', 0, $number_of_types );
 				}
-			# Series mode
-			} elsif ( $opt->{series} ) {
-				if (! defined $names{ $this->{name} }) {
-					$this->list_entry( '', 0, $number_of_types, $episodes{ $this->{name} }, $episode_width );
-					$names{ $this->{name} } = 1;
-				}
-			# Normal mode
-			} else {
-				$this->list_entry( '', 0, $number_of_types );
 			}
 		}
 		# Get info, create metadata, subtitles and/or thumbnail file (i.e. don't stream/record)
@@ -966,7 +1029,7 @@ sub list_progs {
 			}
 		}
 	}
-	logger "\nINFO: ".($#_ + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#_ >= 0 ) || ! $opt->{pvr};
+	logger "\nINFO: ".($#matches + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
 }
 
 
@@ -1207,6 +1270,8 @@ sub get_links {
 	}
 
 	# if a cache file doesn't exist/corrupted/empty, flush option is specified or original file is older than $cache_sec then download new data
+	my $cache_secs = main::progclass( $prog_type )->expiry() || 14400;
+	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && ! $opt->{flush};
 	if ( (! $only_load_from_cache) && ( 
 			(! keys %prog_old) || 
 			(! -f $cachefile) || 
@@ -1216,7 +1281,11 @@ sub get_links {
 		) {
 
 		# Get links for specific type of programme class
-		progclass( $prog_type )->get_links( $progref, $prog_type );
+		if ( progclass( $prog_type )->get_links( $progref, $prog_type ) != 0 ) {
+			# failed - leave cache unchanged
+			main::logger "ERROR: Failed to retrieve programmes for $prog_type - skipping\n";
+			return 0;
+		}
 
 		# Sort index for this prog type
 		sort_index( $progref, $index_progref, $prog_type );
@@ -2923,6 +2992,7 @@ sub new {
 	}
 	## Ensure the subclass $opt var is pointing to the Superclass global optref
 	$opt = $History::optref;
+	# should this be $main::type ?
 	bless $self, $type;
 }
 
@@ -3192,6 +3262,12 @@ sub modelist {
 # Default minimum expected download size for a programme type
 sub min_download_size {
 	return 1024000;
+}
+
+
+# Default cache expiry in seconds
+sub expiry {
+	return 14400;
 }
 
 
@@ -3726,6 +3802,9 @@ sub generate_filenames {
 	# If we dont have longname defined just set it to name
 	$prog->{longname} = $prog->{name} if ! $prog->{longname};
 
+	# If we dont have name defined just set it to longname
+	$prog->{name} = $prog->{longname} if ! $prog->{name};
+
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
@@ -4061,6 +4140,8 @@ sub get_verpids {
 	# EMP URL
 	} elsif ( $prog->{pid} =~ /^http/i ) {
 		$url = $prog->{pid};
+		# May aswell set the web page metadata here if not set
+		$prog->{web} = $prog->{pid} if ! $prog->{web};
 		# Scrape the EMP web page and get playlist URL
 		my $xml = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $xml ) {
@@ -7498,6 +7579,74 @@ sub get {
 		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename};
 		# re-symlink file
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	}
+
+	return 0;
+}
+
+
+
+package Streamer::filestreamonly;
+
+# Inherit from Streamer class
+use base 'Streamer';
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use strict;
+
+# Generic
+# Actually do the file streaming
+sub get {
+	my ( $stream, $ua, $url, $prog ) = @_;
+	my $start_time = time();
+
+	main::logger "INFO: URL = $url\n" if $opt->{verbose};
+
+	# Just remove any existing file
+	unlink $prog->{filepart};
+	
+	# Streaming
+	if ( $opt->{stdout} && $opt->{nowrite} ) {
+		main::logger "INFO: Streaming $url to STDOUT\n" if $opt->{verbose};
+		if ( ! open(FH, "< $url") ) {
+			main::logger "ERROR: Cannot open $url: $!\n";
+			return 'next';
+		}
+		# Fix for binary - needed for Windows
+		binmode STDOUT;
+
+		# Read each char from command output and push to STDOUT
+		my $char;
+		my $bytes;
+		my $size = 200000;
+		while ( $bytes = read( FH, $char, $size ) ) {
+			if ( $bytes <= 0 ) {
+				close FH;
+				last;
+			} else {
+				print STDOUT $char;
+			}
+			last if $bytes < $size;
+		}
+		close FH;
+		main::logger "DEBUG: streaming $url completed\n" if $opt->{debug};
+
+	# Recording - disabled
+	} else {
+		# Commented out cos this is stream-only - don't want anything in history as a result
+		#main::logger "INFO: Copying $url to $prog->{filepart}\n" if $opt->{verbose};
+		#if ( ! copy( $url, $prog->{filepart} ) ) {
+		#	main::logger "\rERROR: Recording failed\n";
+			main::logger "\rERROR: Recording failed - this is a stream-only programme\n";
+			return 'next';
+		#}
+		#move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename};
+		## symlink file
+		#$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	}
 
 	return 0;
