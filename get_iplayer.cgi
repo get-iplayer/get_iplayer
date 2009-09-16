@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.45';
+my $VERSION = '0.46';
 
 use strict;
 use CGI ':all';
@@ -134,13 +134,6 @@ my %fieldname = (
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
 
-# Lookup table for nice field name headings
-my %sorttype = (
-	index		=> 'numeric',
-	duration	=> 'numeric',
-	timeadded	=> 'numeric',
-);
-
 my %prog_types = (
 	tv	=> 'BBC TV',
 	radio	=> 'BBC Radio',
@@ -149,6 +142,7 @@ my %prog_types = (
 	livetv	=> 'Live BBC TV',
 	liveradio => 'Live BBC Radio',
 );
+
 my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio',
@@ -157,6 +151,7 @@ my %prog_types_order = (
 	5	=> 'livetv',
 	6	=> 'liveradio',
 );
+
 # Get list of currently valid and prune %prog types and add new entry
 chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--nopurge', '--nocopyright', '--listplugins' ) );
 for my $type (keys %prog_types) {
@@ -205,7 +200,7 @@ my %nextpages = (
 my $opt;
 
 # Options Ordering on page
-my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY/;
+my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
 my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
 my @order_settings = qw/ /;
 my @order_prefs = qw/ SORT PAGESIZE OUTPUT MODES HIDEDELETED PROXY SUBTITLES METADATA THUMB /;
@@ -302,7 +297,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|stream|record|recordings_delete|playlist.*|genplaylist.*|opml|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(iplayer|stream|recordings_delete|playlist.*|genplaylist.*|opml|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -430,9 +425,11 @@ sub run_cgi {
 
 	# Stream
 	if ( $action eq 'stream' ) {
-		my $type = $cgi->param( 'OUTTYPE' ) || 'flv';
+		my $ext = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
-		$type =~ s/^.*\.//g;
+		$ext =~ s/^.*\.//g;
+		# lowecase
+		$ext = lc( $ext );
 		# Stream mime types (tweaked to work well in vlc)
 		my %mimetypes = (
 			wav 	=> 'audio/x-wav',
@@ -447,15 +444,15 @@ sub run_cgi {
 		);
 
 		# Default mime type depending on mode
-		$type = 'flv' if $opt->{MODES}->{current} =~ /^flash/ && ! $type;
+		$ext = 'flv' if $opt->{MODES}->{current} =~ /^flash/ && ! $ext;
 
-		# If type is defined
-		if ( $mimetypes{$type} ) {
+		# If mimetype is defined
+		if ( $mimetypes{$ext} ) {
 
 			# Output headers
 			# to stream 
 			# This will enable seekable -Accept_Ranges=>'bytes',
-			my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
+			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
 			# Send the headers to the browser
 			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
@@ -464,26 +461,30 @@ sub run_cgi {
 			# Default Recipies
 			# Need to determine --type and then set the default --modes and default outtype for conversion if required
 			# No conversion for iphone radio as mp3
-			$type = undef if $opt->{MODES}->{current} eq 'iphone' && $type eq 'mp3';
+			$ext = undef if $opt->{MODES}->{current} eq 'iphone' && $ext eq 'mp3';
 			# No conversion for realaudio radio as rm
-			$type = undef if $opt->{MODES}->{current} eq 'realaudio' && $type eq 'rm';
+			$ext = undef if $opt->{MODES}->{current} eq 'realaudio' && $ext eq 'rm';
 			# No conversion for flv
-			$type = undef if $type eq 'flv';
+			$ext = undef if $ext eq 'flv';
 			# Don't set type and convert if video
-			$type = undef if $mimetypes{$type} =~ /^video/;
+			$ext = undef if $mimetypes{$ext} =~ /^video/;
 
-			stream_prog( $cgi->param( 'PID' ), $opt->{MODES}->{current}, $type, $cgi->param( 'BITRATE' ) );
+			stream_prog( $cgi->param( 'PID' ), $cgi->param( 'PROGTYPES' ), $opt->{MODES}->{current}, $ext, $cgi->param( 'BITRATE' ) );
 		} else {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
 
 	} elsif ( $action eq 'direct' ) {
 		# get filename first
-		my ( $pid, $mode ) = (split /\|/, $cgi->param( 'PID' ) )[0,1];
-		my $filename = get_direct_filename( $pid, $mode );
-		my $type = $filename;
+		my $progtype = $cgi->param( 'PROGTYPES' );
+		my $pid = $cgi->param( 'PID' );
+		my $mode = $cgi->param( 'MODES' );
+		my $filename = get_direct_filename( $pid, $mode, $progtype );
+		my $ext = $filename;
 		# Remove fileprefix
-		$type =~ s/^.*\.//g;
+		$ext =~ s/^.*\.//g;
+		# lowecase
+		$ext = lc( $ext );
 		# Stream mime types
 		my %mimetypes = (
 			wav 	=> 'audio/x-wav',
@@ -499,12 +500,12 @@ sub run_cgi {
 		);
 
 		# If type is defined
-		if ( $mimetypes{$type} ) {
+		if ( $mimetypes{$ext} ) {
 
 			# Output headers
 			# to stream 
 			# This will enable seekable -Accept_Ranges=>'bytes',
-			my $headers = $cgi->header( -type => $mimetypes{$type}, -Connection => 'close' );
+			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
 			# Send the headers to the browser
 			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
@@ -539,18 +540,6 @@ sub run_cgi {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
 
-	# Record file
-	} elsif ( $action eq 'record' ) {
-		# Output headers
-		# To save file
-		my $headers = $cgi->header( -type => 'video/quicktime', -attachment => $cgi->param('FILENAME').'.mov' || $cgi->param('PID').'.mov' );
-
-		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
-		print $fh $headers;
-
-		stream_mov( $cgi->param('PID') );
-
 	# Get a playlist for a specified 'PROGTYPES'
 	} elsif ( $action eq 'playlist' || $action eq 'playlistdirect' || $action eq 'playlistfiles' ) {
 		# Output headers
@@ -559,8 +548,8 @@ sub run_cgi {
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
-		# ( host, outtype, modes, type, bitrate )
-		print $fh get_playlist( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name', $action );
+		# ( host, outtype, modes, progtype, bitrate, search, searchfields, action )
+		print $fh create_playlist_m3u_single( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name', $action );
 
 	# Get a playlist for a specified 'PROGTYPES'
 	} elsif ( $action eq 'opml' ) {
@@ -584,7 +573,7 @@ sub run_cgi {
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
-		print $fh create_playlist_m3u( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '', $action );
+		print $fh create_playlist_m3u_multi( $request_host, $cgi->param('OUTTYPE') || 'flv', $cgi->param('BITRATE') || '', $action );
 
 	# HTML page
 	} else {
@@ -674,24 +663,22 @@ sub stream_mov {
 
 
 sub stream_prog {
-	my $pid = shift;
-	my $modes = shift || 'flash,iphone';
-	my $type = shift;
-	my $bitrate = shift;
+	my ( $pid , $type, $modes, $ext, $bitrate ) = ( @_ );
+	# Default modes to try
+	$modes = 'flashaac,flash,iphone,realaudio' if ! $modes;
 	
-	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output type '$type' and bitrate '$bitrate'\n";
+	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output ext '$ext' and bitrate '$bitrate'\n";
 
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--hash',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid", "type=$type" ),
 	);
-
 	
 	# If transcoding on the fly then use shell method of calling processes with a pipe
-	if ( $type ) {
+	if ( $ext ) {
 		# workaround to add quotes around the args because we are using a shell here
 		for ( @cmd ) {
 			s/^(.+)$/"$1"/g if ! m{^[\-\"]};
@@ -703,9 +690,9 @@ sub stream_prog {
 		$fh->autoflush(0);
 		# If conversion is necessary
 		if ( ! $bitrate ) {
-			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -f $type -";
+			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -f $ext -";
 		} else {
-			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ab ${bitrate}k -f $type -";
+			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -ab ${bitrate}k -f $ext -";
 		}
 		print $se "DEBUG: Command: $command\n";
 		system( $command );
@@ -715,7 +702,7 @@ sub stream_prog {
 	}
 
 	## If transcoding on the fly
-	#if ( $type ) {
+	#if ( $ext ) {
 	#	# If conversion is necessary
 	#	if ( ! $bitrate ) {
 	#		push @cmd, (
@@ -723,7 +710,7 @@ sub stream_prog {
 	#			$opt_cmdline->{ffmpeg},
 	#			'-i', '-',
 	#			'-vn',
-	#			'-f', $type,
+	#			'-f', $ext,
 	#			'-',
 	#		);
 	#	} else {
@@ -733,7 +720,7 @@ sub stream_prog {
 	#			'-i', '-',
 	#			'-vn',
 	#			'-ab', "${bitrate}k",
-	#			'-f', $type,
+	#			'-f', $ext,
 	#			'-',
 	#		);				
 	#	}
@@ -747,79 +734,139 @@ sub stream_prog {
 
 
 
-sub get_playlist {
+sub create_playlist_m3u_single {
 	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $searchfields, $request ) = ( @_ );
 	my @playlist;
 	$outtype =~ s/^.*\.//g;
 
+	my $searchterm = $search;
+	# this is already a wildcard default regex...
+	if ( $search eq '.*' ) {
+		$searchterm = '.*';
+	# if it's a URL then bypass regex stuff
+	} elsif ( $search =~ m{^http} ) {
+		$searchterm = $search;
+	# make search term regex friendly
+	} else {
+		$searchterm =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
+	}
+		
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$search" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm" ),
 	);
-	push @cmd, '--history' if $request eq 'playlistfiles' || $request eq 'playlistdirect';
+	# Only add history search if the request is of this type or is a PlayFile from localfiles type
+	if ( ( $request eq 'playlistfiles' || $request eq 'playlistdirect' ) && ! ( $search =~ m{^/} && $searchfields eq 'pid' ) ) {
+		push @cmd, '--history';
+	}
 	my @out = get_cmd_output( @cmd );
 
 	push @playlist, "#EXTM3U\n";
 
 	# Extract and rewrite into m3u format
-	for ( grep !/^Added:/ , @out ) {
+	# /home/lewispj/mp3/Rock/radiohead/Ok Computer/radiohead - (07) fitter happier.mp3||(07) Fitter Happier|, , (256kbps/44.1kHz)|<filename>|<mode>
+	for ( grep !/^(Added:|Matches|$)/ , @out ) {
 		chomp();
-		my ( $pid, $name, $episode, $desc, $filename, $mode ) = (split /\|/)[0,1,2,3,4,5];
-		next if ! ( $pid && $name );
-		# Format required, e.g.
-		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
-		push @playlist, "#EXTINF:-1,$type - $name - $episode - $desc";
+		my $url;
+		my ( $pid, $name, $episode, $desc, $filename, $mode, $channel ) = (split /\|/)[1,2,3,4,5,6,7];
+		#print $se "XXXXX: $pid, $name, $episode, $desc, $filename, $mode\n";
+		# sanitze modes && filename
+		$mode = '' if $mode eq '<mode>';
+		$filename = '' if $filename eq '<filename>';
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'playlistdirect' ) {
-			push @playlist, "${request_host}?ACTION=direct&PID=${pid}|${mode}}&OUTTYPE=".basename( $filename )."\n";
+			next if ! ( $pid && $type && $mode );
+			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ) );
+
+		# If pid is actually a filename then use it cos this is a local file type programme
+		} elsif ( $request eq 'playlistfiles' && $pid =~ m{^/} ) {
+			next if ! $pid;
+			$url = search_absolute_path( $pid ) if $pid;
 
 		# playlist with local files
 		} elsif ( $request eq 'playlistfiles' ) {
-			push @playlist, search_absolute_path( $filename )."\n";
+			next if ! $filename;
+			$url = search_absolute_path( $filename );
 
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
-			push @playlist, "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}\n";		
+			next if ! ( $type && $pid );
+			my $suffix;
+			#if ( $pid !~ m{^/} ) {
+				$suffix = "${pid}.${outtype}";
+			#} else {
+			#	$suffix = $pid;
+			#}
+			$url = build_url_stream( $request_host, $type, $pid, $mode, $suffix );
 		}
-	}
 
+		# Format required, e.g.
+		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
+		push @playlist, "#EXTINF:-1,$type - $channel - $name - $episode - $desc";
+		push @playlist, "$url\n";
+		
+	}
+	print $se join ("\n", @playlist);
 	return join ("\n", @playlist);
 }
 
 
 
-sub create_playlist_m3u {
+sub create_playlist_m3u_multi {
 	my ( $request_host, $outtype, $bitrate, $request ) = ( @_ );
 	my @playlist;
 	push @playlist, "#EXTM3U\n";
 
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
 
-	# Create m3u from all selected '<type>|<pid>|<name>|<episode>' entries in the PVR
+	# If a URL was specified by the User (assume auto mode list is OK):
+	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
+	}
+
+	# Create m3u from all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		my $url;
 		chomp();
-		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
+		my ( $type, $pid, $name, $episode, $mode, $channel ) = (split /\|/)[0,1,2,3,4,5];
 		next if ! ($type && $pid );
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			$url = "${request_host}?ACTION=direct&PID=${pid}|${mode}";
+			$url = build_url_direct( $request_host, $type, $pid, $mode, undef );
 
 		# playlist with local files
 		} elsif ( $request eq 'genplaylistfile' ) {
-			# Lookup filename (add it if defined - even if relative)
-			# check for -f $filename if you want to exclude files that cannot be found
-			my $filename = get_direct_filename( $pid, $mode );
-			$url = $filename if $filename;
+			# If pid is actually a filename then use it cos this is a local file type programme
+			if ( $pid =~ m{^/} ) {
+				my $filename = search_absolute_path( $pid );
+				$url = $filename if $filename;
+			} else {
+				# Lookup filename (add it if defined - even if relative)
+				# check for -f $filename if you want to exclude files that cannot be found
+				my $filename = get_direct_filename( $pid, $mode, $type );
+				$url = $filename if $filename;
+			}
+
+		# Uncomment this to make all playlists local for localfiles types
+		# If pid is actually a filename then use it cos this is a local file type programme
+		#} elsif ( $pid =~ m{^/} ) {
+		#	my $filename = search_absolute_path( $pid );
+		#	$url = $filename if $filename;
 
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
-			$url = "${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=".( $opt->{current}->{modes} || $opt->{MODES}->{default} )."&OUTTYPE=${pid}.${outtype}";
+			my $suffix;
+			#if ( $pid !~ m{^/} ) {
+				$suffix = "${pid}.${outtype}";
+			#} else {
+			#	$suffix = $pid;
+			#}
+			$url = build_url_stream( $request_host, $type, $pid, $opt->{MODES}->{current} || $opt->{MODES}->{default}, $suffix );
 		}
 
 		# Skip empty urls
@@ -828,10 +875,11 @@ sub create_playlist_m3u {
 		# Format required, e.g.
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-		push @playlist, "#EXTINF:-1,$type - $name - $episode";
+		push @playlist, "#EXTINF:-1,$type - $channel - $name - $episode";
 		push @playlist, "$url\n";
 
 	}
+	print $se join ("\n", @playlist);
 	return join ("\n", @playlist);
 }
 
@@ -873,15 +921,13 @@ sub get_opml {
 			'--webrequest',
 			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" ),
 		);
-		for ( grep !/^Added:/, @out ) {
+		for ( grep !/^(Added:|Matches|$)/, @out ) {
 			chomp();
 			# Strip unprinatble chars
 			s/(.)/(ord($1) > 127) ? "" : $1/egs;
 			my ($pid, $name, $episode, $desc) = (split /\|/)[0,1,2,3];
 			next if ! ( $pid && $name );
-			# Format required, e.g.
-			#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
-			push @playlist, "\t\t<outline URL=\"".encode_entities("${request_host}?ACTION=stream&PID=${type}:${pid}&MODES=${modes}&OUTTYPE=${pid}.${outtype}")."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
+			push @playlist, "\t\t<outline URL=\"".encode_entities( build_url_stream( $request_host, $type, $pid, $modes, $outtype ) )."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
 		}
 
 	# Channels/Names etc
@@ -898,7 +944,7 @@ sub get_opml {
 			'--webrequest',
 			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" ),
 		);
-		for ( grep !/^Added:/, @out ) {
+		for ( grep !/^(Added:|Matches|$)/, @out ) {
 			my $suffix;
 			chomp();
 			# Strip unprinatble chars
@@ -923,6 +969,51 @@ sub get_opml {
 
 	return join ("\n", @playlist);
 }
+
+
+
+### Playlist URL builders
+sub build_url_direct {
+	my ( $request_host, $progtypes, $pid, $modes, $outtype ) = ( @_ );
+	# Sanity check
+	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
+	# CGI::escape
+	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype );
+	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
+	# Build URL
+	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}";
+}
+
+
+# "${request_host}?ACTION=stream&PROGTYPES=${type}&PID=${pid}&MODES=${modes}&OUTTYPE=${suffix}";
+sub build_url_stream {
+	my ( $request_host, $progtypes, $pid, $modes, $outtype ) = ( @_ );
+	# Sanity check
+	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
+	# CGI::escape
+	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype );
+	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
+	# Build URL
+	return "${request_host}?ACTION=stream&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}";
+}
+
+
+# Play from Internet/'Play':		 ?ACTION=playlist	&SEARCHFIELDS=pid	&SEARCH=$pid	&MODES=${modes}	&PROGTYPES=${type}	&OUTTYPE=${outtype}'
+## 'PlayFile' - works with vlc
+# Play from local file/'PlayFile'	 ?ACTION=playlistfiles	&SEARCHFIELDS=pid	&SEARCH=$pid	&MODES=${modes}	&PROGTYPES=${type}
+## 'PlayWeb' - not on vlc
+# Play from file on web server/'PlayWeb' ?ACTION=playlistdirect	&SEARCHFIELDS=pid	&SEARCH=$pid	&MODES=${modes}
+sub build_url_playlist {
+	my ( $request_host, $action, $searchfields, $search, $modes, $progtypes, $outtype ) = ( @_ );
+	# Sanity check
+	#print $se "DEBUG: building $action request using:  SEARCHFIELDS=${searchfields}  SEARCH=${search}  MODES=${modes}  PROGTYPES=${progtypes}  OUTTYPE=${outtype}\n";
+	# CGI::escape
+	$_ = CGI::escape($_) for ( $action, $searchfields, $search, $modes, $progtypes, $outtype );
+	#print $se "DEBUG: building $action request using:  SEARCHFIELDS=${searchfields}  SEARCH=${search}  MODES=${modes}  PROGTYPES=${progtypes}  OUTTYPE=${outtype}\n";
+	# Build URL
+	return "${request_host}?ACTION=${action}&SEARCHFIELDS=${searchfields}&SEARCH=${search}&MODES=${modes}&PROGTYPES=${progtypes}&OUTTYPE=${outtype}";
+}
+
 
 
 # Update script
@@ -1577,7 +1668,7 @@ sub show_pvr_list {
 					{
 						-class => 'action',
 						-title => 'Delete selected programmes from PVR search list',
-						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { return false; } form.NEXTPAGE.value='pvr_del'; form.submit()",
+						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } form.NEXTPAGE.value='pvr_del'; form.submit()",
 					},
 					'Delete Selected PVR Entries'
 				),
@@ -1618,6 +1709,12 @@ sub get_sorted {
 	my $data = shift;
 	my $sort_field = shift;
 	my $reverse = shift;
+	# Lookup table for nice field name headings
+	my %sorttype = (
+		index		=> 'numeric',
+		duration	=> 'numeric',
+		timeadded	=> 'numeric',
+	);
 
 	# Insert search '<key>~~~<sort_field>' for each prog in hash
 	for my $key (keys %{ $data } ) {
@@ -1726,9 +1823,9 @@ sub show_info {
 					{
 						-class => 'action',
 						-title => "Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now",
-						-href => '?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv',
+						-href => build_url_playlist( '', 'playlist', 'pid', $pid, $prog{$pid}->{mode} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv' ),
 					},
-					'Play Now'
+					'Play'
 				),
 				#a(
 				#	{
@@ -1736,7 +1833,7 @@ sub show_info {
 				#		-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
 				#		-onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()",
 				#	},
-				#	'Queue for Recording'
+				#	'Record'
 				#),
 			]),
 		),
@@ -1748,28 +1845,29 @@ sub show_info {
 
 
 
-# Get filename from history based on PID and mode
+# Get filename from history based on PID, mode and type
 # PID=$pid|$mode
 sub get_direct_filename {
-	my ( $pid, $mode ) = ( @_ );
+	my ( $pid, $mode, $type ) = ( @_ );
 	my $out;
 	my @html;
 	my %prog;
 
-
 	# Skip if not defined
-	return '' if ! ( $pid && $mode );
+	return '' if ! ( $pid && $mode && $type );
+
+	# make the pid regex friendly
+	$pid =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
 
 	# Get the 'filename' entry from --history --info for this pid
-	chomp();
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--history',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", 'listformat=filename: <filename>|<mode>' ),
+		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <filename>|<mode>' ),
 	);
-	print $se p("Command: ".( join ' ', @cmd ) ); # if $opt_cmdline->{debug};
+	print $se "Command: ".( join ' ', @cmd )."\n"; # if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 
@@ -1829,7 +1927,7 @@ sub search_absolute_path {
 sub pvr_queue {
 	# Gets the multiple selections of progs to queue from PROGSELECT
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
-	# The 'Queue' action button uses SEARCH to pass it's pvr_queue data
+	# The 'Record' action button uses SEARCH to pass it's pvr_queue data
 	if ( $#record < 0 ) {
 		push @record, $cgi->param( 'SEARCH' )
 	}
@@ -1837,7 +1935,12 @@ sub pvr_queue {
 	my @params = get_search_params();
 	my $out;
 
-	# Queue all selected '<type>|<pid>' entries in the PVR
+	# If a URL was specified by the User (assume auto mode list is OK):
+	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
+	}
+
+	# Queue all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		chomp();
 		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
@@ -1872,7 +1975,7 @@ sub pvr_queue {
 sub recordings_delete {
 	# Gets the multiple selections of progs to queue from PROGSELECT
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
-	# The 'Queue' action button uses SEARCH to pass it's pvr_queue data
+	# The 'Delete' action button uses SEARCH to pass it's recordings_delete data
 	if ( $#record < 0 ) {
 		push @record, $cgi->param( 'SEARCH' )
 	}
@@ -1880,17 +1983,17 @@ sub recordings_delete {
 	my @params = get_search_params();
 	my $out;
 
-	# Queue all selected '<type>|<pid>' entries in the PVR
+	# Queue all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		chomp();
 		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
 		next if ! ($mode && $pid );
-		my $filename = get_direct_filename( $pid, $mode );
+		my $filename = get_direct_filename( $pid, $mode, $type );
 		if ( -f $filename ) {
 			if ( unlink( $filename ) ) {
 				print $fh p("Deleted: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
 			} else {
-				print $fh p("ERROR: Failed to Delete: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");			
+				print $fh p("ERROR: Failed to Delete: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
 			}
 		} else {
 			print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
@@ -2175,18 +2278,14 @@ sub search_progs {
 	#}    
 
 	# Get prog data
-	my $response;
 	my @params = get_search_params();
-	if ( $response = get_progs( @params ) ) {
+	my ( $matchcount, $response ) = ( get_progs( @params ) );
+	if ( $response ) {
 		print $fh p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
 		return 1;
 	}
 
-	# Sort
-	@pids = get_sorted( \%prog, $opt->{SORT}->{current}, $opt->{REVERSE}->{current} );
-
-	my ($first, $last, @pagetrail) = pagetrail( $opt->{PAGENO}->{current}, $opt->{PAGESIZE}->{current}, $#pids+1, 7 );
-
+	my ($first, $last, @pagetrail) = pagetrail( $opt->{PAGENO}->{current}, $opt->{PAGESIZE}->{current}, $matchcount, 7 );
 
 	# Default displaycols
 	my @html;
@@ -2242,10 +2341,9 @@ sub search_progs {
 	# Set optional output dir for pvr queue if set
 	my $outdir;
 	$outdir = '&OUTPUT='.CGI::escape("$opt->{OUTPUT}->{current}") if $opt->{OUTPUT}->{current};
-
 	# Build each prog row
 	my $time = time();
-	for ( my $i = $first; $i < $last && $i <= $#pids; $i++ ) {
+	for ( my $i = 0; $i <= $#pids; $i++ ) {
 		my $search_class = 'search';
 		my $pid = $pids[$i]; 
 		my @row;
@@ -2257,12 +2355,13 @@ sub search_progs {
 			}
 		}
 
+		# Format of PROGSELECT: TYPE|PID|NAME|EPISODE|MODE|CHANNEL
 		push @row, td( {-class=>$search_class},
 			checkbox(
 				-class		=> $search_class,
 				-name		=> 'PROGSELECT',
 				-label		=> '',
-				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}",
+				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}|$prog{$pid}->{channel}",
 				-checked	=> 0,
 				-override	=> 1,
 			)
@@ -2275,39 +2374,57 @@ sub search_progs {
 			livetv		=> '&MODES=flash&OUTTYPE=flv',
 			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
 			itv		=> '&OUTTYPE=asf',
+			localfiles	=> '&OUTTYPE=mp3',
 		);
 
 		my $links;
 		# 'Play'
-		$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>'?ACTION=playlist&PROGTYPES='.CGI::escape($prog{$pid}->{type}).'&SEARCH='.CGI::escape($pid).'&SEARCHFIELDS=pid&MODES=flash,iphone,realaudio&OUTTYPE=out.flv' }, 'Play' ).'<br />';
-		if ( $opt->{HISTORY}->{current} ) {
+		$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv' ) }, 'Play' ).'<br />';
+		if ( $pid =~ m{^/} ) {
+			if ( -f $pid ) {
+				# Bug: cannot detect mime type
+				## 'PlayDirect' - depends on browser support
+				#$links .= a( { -class=>$search_class, -title=>"Stream file into browser", -href=>"?ACTION=direct&PROGTYPES=$prog{$pid}->{type}&PID=".CGI::escape("$pid")."&MODES=$prog{$pid}->{mode}" },  'PlayDirect' ).'<br />';
+				# 'PlayFile' - works with vlc
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) },  'PlayFile' ).'<br />';
+			}
+		} elsif ( $opt->{HISTORY}->{current} ) {
 			if ( -f $prog{$pid}->{filename} ) {
 				# 'PlayWeb' - not on vlc
-				### vlc cannot read mov or mp4 from stdin :-(
-				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayWeb' ).'<br />';
+				### Bug: vlc cannot read mov or mp4 from stdin - only flv :-( - feature works but pointless
+				#$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayWeb' ).'<br />';
 				# 'PlayFile' - works with vlc
-				$links .= a( { -class=>$search_class, -title=>"Play from local file", -href=>'?ACTION=playlistfiles&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayFile' ).'<br />';
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) },  'PlayFile' ).'<br />';
 				# 'PlayDirect' - depends on browser support
-				$links .= a( { -class=>$search_class, -title=>"Stream file into browser", -href=>"?ACTION=direct&PID=".CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayDirect' ).'<br />';
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, undef ) },  'PlayDirect' ).'<br />';
 			}
 		} else {
-			# 'Queue'
-			$links .=  label( { -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Queue' ).'<br />';
-			$links .= label( { -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Series' );
+			# 'Record'
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Record' ).'<br />';
+			$links .= label( { -id=>'nowrap', -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Add Series' );
 		}
 
 		# Add links to row
 		push @row, td( {-class=>$search_class}, $links );
 
 		for ( @displaycols ) {
-			# display thumb if defined
-			if ( /^thumbnail$/ && $prog{$pid}->{web} =~ m{^http://} ) {
-				push @row, td( {-class=>$search_class}, a( { -title=>"Open URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+			# display thumb if defined (will have to use proxy to get file:// thumbs)
+			if ( /^thumbnail$/ ) {
+				if ( $prog{$pid}->{thumbnail} =~ m{^http://} ) {
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+				} else {
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, 'Open URL' ) );
+				}
 			} elsif ( /^timeadded$/ ) {
 				# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 				my @t = gmtime( $time - $prog{$pid}->{timeadded} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, "${years}$t[7]d $t[2]h ago" ) );
+			} elsif ( /^desc$/ ) {
+				# truncate the description if it is too long
+				my $text = $prog{$pid}->{$_};
+				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $text ) );
 			} else {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
 			}
@@ -2427,69 +2544,62 @@ sub search_progs {
 	my $add_search_class_suffix;
 	$add_search_class_suffix = ' darker' if $number_of_matches > 30;
 	my %action_button;
-	$action_button{'Search'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Perform search based on search options',
-				-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
-			},
-			'Search'
-		);
-	$action_button{'Queue for Recording'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Queue selected programmes for one-off recording',
-				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='pvr_queue'; form.submit()",
-			},
-			'Queue for Recording'
-		);
-	$action_button{'Delete Recordings'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Permanently delete selected recorded files',
-				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='recordings_delete'; form.submit()",
-			},
-			'Delete Recordings'
-		);
-	$action_button{'Create Playlist'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Download an M3U playlist based on selected programmes',
-				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value='';",
-			},
-			'Create Playlist'
-		);
-	$action_button{'Create File Playlist'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Download an M3U playlist based on selected programmes for local file streaming',
-				-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { return false; } form.NEXTPAGE.value='create_playlist_m3u'; form.ACTION.value='genplaylistfile'; form.submit(); form.ACTION.value='';",
-			},
-			'Create File Playlist'
-		);
-	$action_button{'Add Current Search to PVR'} = 
-		a(
-			{
-				-class => 'action'.$add_search_class_suffix,
-				-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-				-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
-			},
-			'Add Current Search to PVR'
-		);
-	$action_button{'Refresh Cache'} = 
-		a(
-			{
-				-class => 'action',
-				-title => 'Refresh the list of programmes - can take a while',
-				-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
-			},
-			'Refresh Cache'
-		);
+	$action_button{'Search'} = a(
+		{
+			-class => 'action',
+			-title => 'Perform search based on search options',
+			-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
+		},
+		'Search'
+	);
+	$action_button{'Record'} = a(
+		{
+			-class => 'action',
+			-title => 'Queue selected programmes (or Quick URL) for one-off recording',
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } form.NEXTPAGE.value='pvr_queue'; form.submit(); form.URL.value='';",
+		},
+		'Record'
+	);
+	$action_button{'Delete'} = a(
+		{
+			-class => 'action',
+			-title => 'Permanently delete selected recorded files',
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.NEXTPAGE.value='recordings_delete'; form.submit()",
+		},
+		'Delete'
+	);
+	$action_button{'Play'} = a(
+		{
+			-class => 'action',
+			-title => 'Get a Playlist based on selected programmes (or Quick URL) to stream in your media player',
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; form.URL.value='';",
+		},
+		'Play'
+	);
+	$action_button{'Play Files'} = a(
+		{
+			-class => 'action',
+			-title => 'Get a Playlist based on selected programmes for local file streaming in your media player',
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.ACTION.value='genplaylistfile'; form.submit(); form.ACTION.value='';",
+		},
+		'Play Files'
+	);
+	$action_button{'Add Search to PVR'} = a(
+		{
+			-class => 'action'.$add_search_class_suffix,
+			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
+			-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
+		},
+		'Add Search to PVR'
+	);
+	$action_button{'Refresh Cache'} = a(
+		{
+			-class => 'action',
+			-title => 'Refresh the list of programmes - can take a while',
+			-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
+		},
+		'Refresh Cache'
+	);
 
 	# Render action bar
 	if ( $opt->{HISTORY}->{current} ) {
@@ -2497,10 +2607,10 @@ sub search_progs {
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
-					$action_button{'Delete Recordings'},
-					$action_button{'Create Playlist'},
-					$action_button{'Create File Playlist'}, # vlc cannot read mov or mp4 from stdin :-(
-					$action_button{'Add Current Search to PVR'},
+					$action_button{'Delete'},
+					$action_button{'Play'},
+					$action_button{'Play Files'}, # vlc cannot read mov or mp4 from stdin :-(
+					$action_button{'Add Search to PVR'},
 				]),
 			),
 		);
@@ -2509,9 +2619,9 @@ sub search_progs {
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
-					$action_button{'Queue for Recording'},
-					$action_button{'Create Playlist'},
-					$action_button{'Add Current Search to PVR'},
+					$action_button{'Record'},
+					$action_button{'Play'},
+					$action_button{'Add Search to PVR'},
 					$action_button{'Refresh Cache'},
 				]),
 			),
@@ -2637,13 +2747,26 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 
+	my ( @webrequest_args ) = ( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
+	# Page params
+	if ( $opt->{PAGENO}->{current} && $opt->{PAGESIZE}->{current} ) {
+		push @webrequest_args, ( "page=$opt->{PAGENO}->{current}", "pagesize=$opt->{PAGESIZE}->{current}" );
+	}
+	# Sort param
+	push @webrequest_args, "sortreverse=$opt->{PAGENO}->{current}" if $opt->{REVERSE}->{current};
+	# sort reverse param
+	push @webrequest_args, "sortmatches=$opt->{SORT}->{current}" if $opt->{SORT}->{current} && $opt->{SORT}->{current} ne 'name';
+	# Run command
 	my @list = get_cmd_output(
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" ),
+		get_iplayer_webrequest_args( @webrequest_args ),
 	);
-	return join("\n", @list) if $? && not $IGNOREEXIT;
+	return ( '0', join("\n", @list) ) if $? && not $IGNOREEXIT;
+	# Get total matches count
+	my $matchcount = pop @list;
+	$matchcount = $1 if $matchcount =~ m{^INFO:\s*(\d+?)\s+};
 
 	for ( grep /^ENTRY/, @list ) {
 		chomp();
@@ -2674,7 +2797,9 @@ sub get_progs {
 
 		# store record in the prog global hash (prog => pid)
 		$prog{ $record->{'pid'} } = $record;
+		push @pids, $record->{'pid'};
 	}
+	return ( $matchcount, '' );
 }
 
 
@@ -2876,6 +3001,17 @@ sub process_params {
 		save	=> 0,
 	};
 	
+	$opt->{URL} = {
+		title	=> 'Quick URL', # Title
+		tooltip	=> "Enter your URL for Recording (then click 'Record' or 'Play')", # Tooltip
+		webvar	=> 'URL', # webvar
+		#optkey	=> 'url', # option key
+		type	=> 'text', # type
+		default	=> '', # default
+		value	=> 36, # width values
+		save	=> 0,
+	};
+	
 	$opt->{SEARCHFIELDS} = {
 		title	=> 'Search in', # Title
 		tooltip	=> 'Select which column you wish to search', # Tooltip
@@ -2895,7 +3031,7 @@ sub process_params {
 		type	=> 'popup', # type
 		default	=> 20, # default
 		value	=> ['10','25','50','100','200','400'], # values
-		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		onChange=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",
 		save	=> 1,
 	};
 
@@ -3259,7 +3395,6 @@ sub insert_javascript {
 				return true;
 			}
 		}
-		alert("No programmes were selected");
 		return false;
 	}
 
@@ -3299,7 +3434,7 @@ sub insert_stylesheet {
 
 	.darker			{ color: #7D7D7D; }
 	#logo			{ width: 190px; }
-
+	#nowrap			{ white-space: nowrap; }
 	#smaller80pc		{ font-size: 80%; }
 
 	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
