@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.47';
+my $VERSION = '0.48';
 
 use strict;
 use CGI ':all';
@@ -66,7 +66,7 @@ usage() if $opt_cmdline->{help} || @ARGV;
 
 # Usage
 sub usage {
-	my $text = sprintf "get_iplayer PVR Manager v%.2f, ", $VERSION;
+	my $text = sprintf "get_iplayer Web PVR Manager v%.2f, ", $VERSION;
 	$text .= <<'EOF';
 Copyright (C) 2009 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
@@ -202,9 +202,8 @@ my $opt;
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
 my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE /;
-my @order_settings = qw/ /;
 my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
-my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB /;
+my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE /;
 my @order_streaming_tab = qw/ BITRATE VSIZE VFR /;
 my @hidden_opts = qw/ SAVE SEARCHTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
@@ -218,8 +217,6 @@ use IO::Socket;
 my $IGNOREEXIT = 0;
 # If the port number is specified then run embedded web server
 if ( $opt_cmdline->{port} > 0 ) {
-	# Setup signal handlers
-####	$SIG{INT} = $SIG{TERM} = $SIG{HUP} = $SIG{PIPE} = \&cleanup;
 	# Autoreap zombies
 	$SIG{CHLD} = 'IGNORE';
 	# Need this because with $SIG{CHLD} = 'IGNORE', backticks and systems calls always return -1
@@ -1108,10 +1105,38 @@ sub update_script {
 	print $se "INFO: Updating $script_file (from $VERSION)\n";
 	print $fh p("Updating $script_file (from $VERSION)");
 	if ( update_file( $ua, $update_url, $script_file ) ) {
-		print $fh p("Update Failed");
+		print $fh p("Updating Web PVR Manager Failed");
 	} else {
-		print $fh p("Update Succeeded - please restart the get_iplayer PVR Manager service");
+		print $fh p("Updating Web PVR Manager Succeeded - please restart the get_iplayer Web PVR Manager service");
 	}
+
+	print $se "INFO: Updating get_iplayer\n";
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--nopurge',
+		'--update',
+	);
+	print $fh '<pre>';
+	run_cmd( $fh, $se, 1, @cmd );
+	print $fh '</pre>';
+	print $fh p("Updated get_iplayer");
+
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+			]),
+		),
+	);
 
 	return 0;
 }
@@ -1121,7 +1146,7 @@ sub update_script {
 sub create_ua {
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout( 10 );
-	$ua->agent( "get_iplayer PVR Manager updater version $VERSION" );
+	$ua->agent( "get_iplayer Web PVR Manager updater version $VERSION" );
 	$ua->conn_cache(LWP::ConnCache->new());
 	return $ua;
 };	
@@ -1741,7 +1766,7 @@ sub show_pvr_list {
 						-title => 'Delete selected programmes from PVR search list',
 						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } form.NEXTPAGE.value='pvr_del'; form.submit()",
 					},
-					'Delete Selected PVR Entries'
+					'Delete'
 				),
 			]),
 		),
@@ -2146,24 +2171,12 @@ sub pvr_add {
 	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
 	$searchname =~ s/[^\w\-\. \+\(\)]/_/g;
 
-	# This is done on the client side now
-	## Check how many matches first
-	#get_progs( @params );
-	#my $matches = keys %prog;
-	#
-	#if ( $matches > 30 ) {
-	#	print $fh p("ERROR: Search term '$opt->{SEARCH}->{current}' currently matches $matches programmes - keep below 30 current matches");
-	#	return 1;
-	#} else {
-	#	print $fh p("Current Matches: ".(keys %prog));
-	#}
-
 	# Remove a few options from leaking into a PVR search
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE)$/, @params ) ),
+		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE|HIDE|FORCE)$/, @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -2536,40 +2549,40 @@ sub search_progs {
 	my $search_label;
 	if ( $opt->{SEARCHTAB}->{current} eq 'no' || not $opt->{SEARCHTAB}->{current} ) {
 		$search_style = "display: none;";
-		$search_label = '+ Advanced Search';
+		$search_label = 'Advanced Search';
 	} else {
 		$search_style = "display: table;";
-		$search_label = '- Advanced Search';
+		$search_label = 'Advanced Search';
 	}
 
 	my $display_style;
 	my $display_label;
 	if ( $opt->{DISPLAYTAB}->{current} eq 'no' || not $opt->{DISPLAYTAB}->{current} ) {
 		$display_style = "display: none;";
-		$display_label = '+ Display Preferences';
+		$display_label = 'Display Options';
 	} else {
 		$display_style = "display: table;";
-		$display_label = '- Display Preferences';
+		$display_label = 'Display Options';
 	}
 
 	my $recording_style;
 	my $recording_label;
 	if ( $opt->{RECORDINGTAB}->{current} eq 'no' || not $opt->{RECORDINGTAB}->{current} ) {
 		$recording_style = "display: none;";
-		$recording_label = '+ Recording Preferences';
+		$recording_label = 'Recording Options';
 	} else {
 		$recording_style = "display: table;";
-		$recording_label = '- Recording Preferences';
+		$recording_label = 'Recording Options';
 	}
 
 	my $streaming_style;
 	my $streaming_label;
 	if ( $opt->{STREAMINGTAB}->{current} eq 'no' || not $opt->{STREAMINGTAB}->{current} ) {
 		$streaming_style = "display: none;";
-		$streaming_label = '+ Streaming Preferences';
+		$streaming_label = 'Streaming Options';
 	} else {
 		$streaming_style = "display: table;";
-		$streaming_label = '- Streaming Preferences';
+		$streaming_label = 'Streaming Options';
 	}
 
 	# Generate the html for all these options in THIS ORDER
@@ -2577,50 +2590,53 @@ sub search_progs {
 	# Add pink prefs/options/save options buttons
 	my @optrows_nav;
 	push @optrows_nav,
-		td( { -class=>'options' },
-			# Search Options button
-			label( {
-				-class		=> 'options_outer pointer',
-				-id		=> 'button_SEARCHTAB',
-				-onClick	=> "show_prefs_tab( [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-				},
-				$search_label,
-			).
-			'<br />'.
-			# Display Preferences button
-			label( {
-				-class		=> 'options_outer pointer',
-				-id		=> 'button_DISPLAYTAB',
-				-onClick	=> "show_prefs_tab( [ 'DISPLAYTAB', 'SEARCHTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-				},
-				$display_label,
-			).
-			'<br />'.
-			# Recording Preferences button
-			label( {
-				-class		=> 'options_outer pointer',
-				-id		=> 'button_RECORDINGTAB',
-				-onClick	=> "show_prefs_tab( [ 'RECORDINGTAB', 'DISPLAYTAB', 'SEARCHTAB', 'STREAMINGTAB' ] );",
-				},
-				$recording_label,
-			).
-			'<br />'.
-			# Streaming Preferences button
-			label( {
-				-class		=> 'options_outer pointer',
-				-id		=> 'button_STREAMINGTAB',
-				-onClick	=> "show_prefs_tab( [ 'STREAMINGTAB', 'DISPLAYTAB', 'SEARCHTAB', 'RECORDINGTAB' ] );",
-				},
-				$streaming_label,
-			).
-			'<br />'.
-			# Save Options button
-			label( {
-				-class		=> 'options_outer pointer',
-				-onClick	=> "form.SAVE.value=1; submit();",
-				},
-				'Remember Options',
-			),
+		ul( { -class=>'options' },
+			li( { -class=>'options' }, [
+				# Search Options button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-id		=> 'button_SEARCHTAB',
+					-title		=> 'Show Advanced Search Options tab',
+					-onClick	=> "show_options_tab( 'SEARCHTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					},
+					$search_label,
+				),
+				# Display Options button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-id		=> 'button_DISPLAYTAB',
+					-title		=> 'Show Display Options tab',
+					-onClick	=> "show_options_tab( 'DISPLAYTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					},
+					$display_label,
+				),
+				# Recording Options button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-id		=> 'button_RECORDINGTAB',
+					-title		=> 'Show Recording Options tab',
+					-onClick	=> "show_options_tab( 'RECORDINGTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					},
+					$recording_label,
+				),
+				# Streaming Options button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-id		=> 'button_STREAMINGTAB',
+					-title		=> 'Show Streaming Options tab',
+					-onClick	=> "show_options_tab( 'STREAMINGTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					},
+					$streaming_label,
+				),
+				# Save as Default  button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-title		=> 'Rememeber Current Options as Default',
+					-onClick	=> "form.SAVE.value=1; submit();",
+					},
+					'Save As Default',
+				),
+			] ) # end li
 		);
 		
 	# Build basic options tables + hidden
@@ -2638,47 +2654,39 @@ sub search_progs {
 			push @optrows_advanced, build_option_html( $opt->{$_} );
 		}
 	}
-	# Add 'Settings' title (if required)
-	my @optrows_settings;
-	if ( @order_settings ) {
-		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Other Settings:' ) );
-		# Build Settings table cells
-		for ( @order_settings ) {
-			push @optrows_advanced, build_option_html( $opt->{$_} );
-		}
-	}
-	# Build Display Preferences table cells
+
+	# Build Display Options table cells
 	my @optrows_display;
 	if ( @order_display_tab ) {
-		push @optrows_display, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Display Preferences:' ) );
+		push @optrows_display, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Display Options:' ) );
 		for ( @order_display_tab ) {
 			push @optrows_display, build_option_html( $opt->{$_} );
 		}
 	}
 
-	# Build Recording Preferences table cells
+	# Build Recording Options table cells
 	my @optrows_recording;
 	if ( @order_recording_tab ) {
-		push @optrows_recording, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Recording Preferences:' ) );
+		push @optrows_recording, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Recording Options:' ) );
 		for ( @order_recording_tab ) {
 			push @optrows_recording, build_option_html( $opt->{$_} );
 		}
 	}
 
-	# Build Streaming Preferences table cells
+	# Build Streaming Options table cells
 	my @optrows_streaming;
 	if ( @order_streaming_tab ) {
-		push @optrows_streaming, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Remote Streaming Preferences:' ) );
+		push @optrows_streaming, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Remote Streaming Options:' ) );
 		for ( @order_streaming_tab ) {
 			push @optrows_streaming, build_option_html( $opt->{$_} );
 		}
 	}
 
-	# Render outer options table frame (keeping advanced cell initially hidden)
+	# Render outer options table frame (keeping some tabs hidden)
 	print $fh table( { -class=>'options_outer' },
 		Tr( { -class=>'options_outer' }, 
 			td( { -class=>'options_outer' },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_nav ] ) )
+				@optrows_nav
 			).
 			td( { -class=>'options_outer' },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_basic ] ) )
@@ -2698,11 +2706,9 @@ sub search_progs {
 		),
 	);
 
-	# Render options actions
-	my $number_of_matches = keys %prog;
 	# Grey-out 'Add Current Search to PVR' button if too many programme matches
 	my $add_search_class_suffix;
-	$add_search_class_suffix = ' darker' if $number_of_matches > 30;
+	$add_search_class_suffix = ' darker' if $matchcount > 30;
 	my %action_button;
 	$action_button{'Search'} = a(
 		{
@@ -2756,7 +2762,7 @@ sub search_progs {
 		{
 			-class => 'action'.$add_search_class_suffix,
 			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-			-onClick => "if ( $number_of_matches > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
+			-onClick => "if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
 		},
 		'Add Search to PVR'
 	);
@@ -3005,7 +3011,7 @@ sub get_display_cols {
 ######################################################################
 sub begin_html {
 	print $fh "<html>";
-	print $fh "<HEAD><TITLE>get_iplayer PVR Manager</TITLE>\n";
+	print $fh "<HEAD><TITLE>get_iplayer Web PVR Manager</TITLE>\n";
 	insert_stylesheet();
 	print $fh "</HEAD>\n";
 	insert_javascript();
@@ -3061,13 +3067,13 @@ sub form_header {
 			-method => "POST",
 	);
 	
-	# Only highlight the 'Update PVR Manager' option if the script is writable
+	# Only highlight the 'Update Software' option if the script is writable
 	my $update_element = a( { -class=>'nav darker' }, 'Update Software' );
 	$update_element = a(
 		{
 			-class=>'nav',
-			-title=>'Update the PVR Manager software - please restart it after updating',
-			-onClick => "if (! confirm('Please restart the PVR Manager service once the update has completed') ) { return false; } formheader.NEXTPAGE.value='update_script'; formheader.submit()",
+			-title=>'Update the Web PVR Manager and get_iplayer software - please restart Web PVR Manager after updating',
+			-onClick => "if (! confirm('Please restart the Web PVR Manager service once the update has completed') ) { return false; } formheader.NEXTPAGE.value='update_script'; formheader.submit()",
 		},
 		'Update Software' ) if -w $0;
 
@@ -3077,7 +3083,7 @@ sub form_header {
 				a( { -class=>'nav', -href=>$request_host },
 					img({
 						-class => 'nav',
-						-title => 'get_iplayer PVR Manager',
+						-title => 'get_iplayer Web PVR Manager',
 						-width => 174,
 						-height => 32,
 						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
@@ -3142,7 +3148,7 @@ sub form_header {
 # Form Footer 
 sub form_footer {
 	print $fh p( b({-class=>"footer"},
-		sprintf( "get_iplayer PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
+		sprintf( "get_iplayer Web PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
 	));
 }
 
@@ -3175,7 +3181,6 @@ sub process_params {
 		title	=> 'Quick URL', # Title
 		tooltip	=> "Enter your URL for Recording (then click 'Record' or 'Play')", # Tooltip
 		webvar	=> 'URL', # webvar
-		#optkey	=> 'url', # option key
 		type	=> 'text', # type
 		default	=> '', # default
 		value	=> 36, # width values
@@ -3221,7 +3226,6 @@ sub process_params {
 		title	=> 'Reverse sort', # Title
 		tooltip	=> 'Reverse the sort order', # Tooltip
 		webvar	=> 'REVERSE', # webvar
-		optkey	=> 'sortreverse', # option
 		type	=> 'radioboolean', # type
 		#onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
 		default	=> '0', # value
@@ -3334,6 +3338,16 @@ sub process_params {
 		tooltip	=> 'Whether to hide programmes that have already been successfully recorded', # Tooltip
 		webvar	=> 'HIDE', # webvar
 		optkey	=> 'hide', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
+	$opt->{FORCE} = {
+		title	=> 'Force Recording', # Title
+		tooltip	=> "Ignore the history and re-record a programme (Please delete the existing recording first). Doesn't apply to PVR Searches or 'Add Series'", # Tooltip
+		webvar	=> 'FORCE', # webvar
+		optkey	=> 'force', # option
 		type	=> 'radioboolean', # type
 		default	=> '0', # value
 		save	=> 1,
@@ -3577,15 +3591,15 @@ sub insert_javascript {
 	// Hide show an element (and modify the text of the button/label)
 	// e.g. document.getElementById('advanced_opts').style.display='table';
 	//
-	// Usage: show_prefs_tab( [ 'TAB1', 'TAB2' ] );
+	// Usage: show_options_tab( SELECTEDID, [ 'TAB1', 'TAB2' ] );
 	// Displays first tab in list or tab suffixes
 	// tab_TAB1 is the table element
 	// option_TAB1 is the form variable
 	// button_TAB1 is the label
-	function show_prefs_tab( tabs ) {
+	function show_options_tab( selectedid, tabs ) {
 
 		// selected tab element
-		var selected_tab = document.getElementById( 'tab_' + tabs[0] );
+		var selected_tab = document.getElementById( 'tab_' + selectedid );
 
 		// Loop through the above tab elements
 		for(var i = 0; i < tabs.length; i++) {
@@ -3595,11 +3609,13 @@ sub insert_javascript {
 			if ( tab == selected_tab ) {
 				tab.style.display = '';
 				option.value = 'yes';
-				button.innerHTML = '- ' + button.innerHTML.substring(2);
+				//button.innerHTML = '- ' + button.innerHTML.substring(2);
+				button.style.color = '#ADADAD';
 			} else {
 				tab.style.display = 'none';
 				option.value = 'no';
-				button.innerHTML = '+ ' + button.innerHTML.substring(2);
+				//button.innerHTML = '+ ' + button.innerHTML.substring(2);
+				button.style.color = '#F54997';
 			}
 		}
 		return true;
@@ -3722,6 +3738,9 @@ sub insert_stylesheet {
 	TH.options_embedded	{ width: 20px }
 	TD.options_embedded	{ width: 20px }
 
+	//DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	UL.options		{ list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	LI.options		{ text-align: left; cursor: pointer; cursor: hand; padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; margin: 0; margin-left: 0px; margin-bottom: 5px; }
 	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TR.options		{ white-space: nowrap; }
 	TH.options		{ width: 20px }
@@ -3730,11 +3749,11 @@ sub insert_stylesheet {
 	INPUT.options		{ font-size: 100%; } 
 	SELECT.options		{ font-size: 100%; } 
 
-	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 10px 0px; padding: 0; white-space: nowrap; }
+	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; }
 	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
 	TH.options_outer	{ }
-	TD.options_outer	{ }
-	LABEL.options_outer	{ font-weight: bold; font-size: 80%; color: #F54997; } 
+	TD.options_outer	{ padding-right: 10px; }
+	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
 	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
 	
 	/* Action bar */
