@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.46';
+my $VERSION = '0.47';
 
 use strict;
 use CGI ':all';
@@ -201,10 +201,12 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
-my @order_adv_opts = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL HIDE SINCE /;
+my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE /;
 my @order_settings = qw/ /;
-my @order_prefs = qw/ SORT PAGESIZE OUTPUT MODES HIDEDELETED PROXY SUBTITLES METADATA THUMB /;
-my @hidden_opts = qw/ SAVE ADVANCED PREFS REVERSE PAGENO INFO NEXTPAGE ACTION /;
+my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
+my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB /;
+my @order_streaming_tab = qw/ BITRATE VSIZE VFR /;
+my @hidden_opts = qw/ SAVE SEARCHTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
 
@@ -423,7 +425,7 @@ sub run_cgi {
 	# rewrite short-form backwards compatible URIs
 	# e.g. http://server/stream?args -> http://server/get_iplayer.cgi?ACTION=stream&args
 
-	# Stream
+	# Stream from get_iplayer STDOUT (optionally transcoding if required)
 	if ( $action eq 'stream' ) {
 		my $ext = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
@@ -469,7 +471,7 @@ sub run_cgi {
 			# Don't set type and convert if video
 			$ext = undef if $mimetypes{$ext} =~ /^video/;
 
-			stream_prog( $cgi->param( 'PID' ), $cgi->param( 'PROGTYPES' ), $opt->{MODES}->{current}, $ext, $cgi->param( 'BITRATE' ) );
+			stream_prog( $cgi->param( 'PID' ), $cgi->param( 'PROGTYPES' ), $opt->{MODES}->{current}, $ext, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
 		} else {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
@@ -480,24 +482,38 @@ sub run_cgi {
 		my $pid = $cgi->param( 'PID' );
 		my $mode = $cgi->param( 'MODES' );
 		my $filename = get_direct_filename( $pid, $mode, $progtype );
-		my $ext = $filename;
+		# Use OUTTYPE for transcoding if required - get output ext
+		my $ext = lc( $cgi->param( 'OUTTYPE' ) );
 		# Remove fileprefix
 		$ext =~ s/^.*\.//g;
-		# lowecase
-		$ext = lc( $ext );
+		# get file source ext
+		my $src_ext = $filename;
+		$src_ext =~ s/^.*\.//g;
 		# Stream mime types
 		my %mimetypes = (
 			wav 	=> 'audio/x-wav',
 			flac	=> 'audio/x-flac',
+			aac	=> 'audio/mpeg',
 			mp3 	=> 'audio/mpeg',
 			rm	=> 'audio/x-pn-realaudio',
 			mov 	=> 'video/quicktime',
-			# hmmmm...
 			mp4	=> 'video/mp4',
 			avi	=> 'video/x-flv',
 			flv	=> 'video/x-flv',
 			asf	=> 'video/x-ms-asf',
 		);
+
+		# default recipies
+		# cannot stream mp4/avi so transcode to flv
+		# Add types here which you want re-muxed into flv
+		#if ( $src_ext =~ m{^(mp4|avi|mov|mp3|aac)$} && ! $ext ) {
+		if ( $src_ext =~ m{^(mp4|avi|mov)$} && ! $ext ) {
+			$ext = 'flv';
+		}
+		# Else Default to no transcoding
+		$ext = $src_ext if ! $ext;
+
+		print $se "INFO: Streaming OUTTYPE:$ext MIMETYPE=$mimetypes{$ext} FILE:$filename to client\n";
 
 		# If type is defined
 		if ( $mimetypes{$ext} ) {
@@ -511,31 +527,7 @@ sub run_cgi {
 			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 			print $fh $headers;
 
-			print $se "INFO: Streaming file directly: $filename\n";
-			if ( ! open( STREAMIN, "< $filename" ) ) {
-				print $se "INFO: Cannot Read file '$filename'\n";
-				exit 4;
-			}
-
-			# Read each char from command output and push to socket fh
-			my $char;
-			my $bytes;
-			# Assume that we don't want to buffer STDERR output of the command
-			my $size = 100000;
-			while ( $bytes = read( STREAMIN, $char, $size ) ) {
-				if ( $bytes <= 0 ) {
-					close STREAMIN;
-					print $se "DEBUG: Stream thread has completed\n";
-					exit 0;
-				} else {
-					print $fh $char;
-					print $se '#';
-				}
-				last if $bytes < $size;
-			}
-			close STREAMIN;
-			print $se "INFO: Stream thread has completed\n";
-
+			stream_file( $filename, $mimetypes{$ext}, $src_ext, $ext, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
 		} else {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
@@ -663,11 +655,11 @@ sub stream_mov {
 
 
 sub stream_prog {
-	my ( $pid , $type, $modes, $ext, $bitrate ) = ( @_ );
+	my ( $pid , $type, $modes, $ext, $abitrate, $vsize ) = ( @_ );
 	# Default modes to try
 	$modes = 'flashaac,flash,iphone,realaudio' if ! $modes;
 	
-	print $se "INFO: Start Streaming $pid to browser using modes '$modes' and output ext '$ext' and bitrate '$bitrate'\n";
+	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize'(unused)\n";
 
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -689,11 +681,20 @@ sub stream_prog {
 		STDOUT->autoflush(0);
 		$fh->autoflush(0);
 		# If conversion is necessary
-		if ( ! $bitrate ) {
-			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -f $ext -";
-		} else {
-			$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -ab ${bitrate}k -f $ext -";
-		}
+		# Video
+#		if ( $ext =~ m{^(mp4|avi)$} ) {
+#			if ( ! $bitrate ) {
+#				$command .= " | \"$opt_cmdline->{ffmpeg}\"  -f $ext -i - -vcodec copy -acodec copy -f flv -";
+#				#$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -f $ext -";
+#			} else {
+#				$command .= " | \"$opt_cmdline->{ffmpeg}\"  -f $ext -i - -vcodec copy -acodec copy -ab ${bitrate}k -f flv -";
+#				#$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 -ab ${bitrate}k -f $ext -";
+#			}	
+		my $cmd_br;
+		$cmd_br = "-acodec libfaac -ab ${abitrate}k " if $abitrate =~ m{^\d+$};
+		#$cmd_br .= "-s ${vsize} " if $vsize;
+		$command .= " | \"$opt_cmdline->{ffmpeg}\" -i - -vn -ac 2 $cmd_br -f $ext -";
+
 		print $se "DEBUG: Command: $command\n";
 		system( $command );
 	
@@ -701,33 +702,103 @@ sub stream_prog {
 		run_cmd( $fh, $se, 100000, @cmd );
 	}
 
-	## If transcoding on the fly
-	#if ( $ext ) {
-	#	# If conversion is necessary
-	#	if ( ! $bitrate ) {
-	#		push @cmd, (
-	#			'|',
-	#			$opt_cmdline->{ffmpeg},
-	#			'-i', '-',
-	#			'-vn',
-	#			'-f', $ext,
-	#			'-',
-	#		);
-	#	} else {
-	#		push @cmd, (
-	#			'|',
-	#			$opt_cmdline->{ffmpeg},
-	#			'-i', '-',
-	#			'-vn',
-	#			'-ab', "${bitrate}k",
-	#			'-f', $ext,
-	#			'-',
-	#		);				
-	#	}
-	#}	
-	#run_cmd( $fh, $se, 100000, @cmd );
-
 	print $se "INFO: Finished Streaming $pid to browser\n";
+
+	return 0;
+}
+
+
+			
+# Stream a file to browser/client
+sub stream_file {
+	my ( $filename, $mimetype, $src_ext, $ext, $abitrate, $vsize, $vfr ) = ( @_ );
+
+	print $se "INFO: Start Direct Streaming $filename to browser using mimetype '$mimetype', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video fram rate '$vfr'\n";
+
+	# If transcoding required (i.e. output ext != source ext)
+	if ( lc( $ext ) ne lc( $src_ext ) ) {
+		my @cmd_aopts;
+		if ( $abitrate =~ m{^\d+$} ) {
+			push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', "${abitrate}k" );
+		} else {
+			push @cmd_aopts, ( '-acodec', 'copy' );
+		}
+
+		my @cmd;
+		$fh->autoflush(0);
+		# If conversion is necessary
+		# Video
+		if ( $mimetype =~ m{^video} ) {
+			my @cmd_vopts;
+
+			# Apply video size
+			push @cmd_vopts, ( '-s', "${vsize}" ) if $vsize =~ m{^\d+x\d+$};
+
+			# Apply video framerate - caveat - bitrate defaults to 200k if only vfr is set
+			push @cmd_vopts, ( '-r', $vfr ) if $vfr =~ m{^\d$};
+			
+			# Apply sameq if framerate only and no bitrate
+			push @cmd_vopts, '-sameq' if $vfr =~ m{^\d$} && $vsize !~ m{^\d+x\d+$};
+
+			# Add in the codec if we are transcoding and not remuxing the stream
+			if ( @cmd_vopts ) {
+				push @cmd_vopts, ( '-vcodec', 'libx264' );
+			} else {
+				push @cmd_vopts, ( '-vcodec', 'copy' );
+			}
+
+			@cmd = (
+				$opt_cmdline->{ffmpeg},
+				'-f', $src_ext,
+				'-i', $filename,
+				@cmd_aopts,
+				@cmd_vopts,					
+				'-f', $ext,
+				'-',
+			);
+		# Audio
+		} else {
+			@cmd = (
+				$opt_cmdline->{ffmpeg},
+				'-f', $src_ext,
+				'-i', $filename,
+				'-vn',
+				@cmd_aopts,
+				'-ac', 2,
+				'-f', $ext,
+				'-',
+			);
+		}
+		print $se "DEBUG: Command args: ".(join ' ', @cmd)."\n";
+		run_cmd( $fh, $se, 100000, @cmd );
+		print $se "INFO: Finished Streaming and transcoding $filename to browser\n";
+
+	} else {
+		print $se "INFO: Streaming file directly: $filename\n";
+		if ( ! open( STREAMIN, "< $filename" ) ) {
+			print $se "INFO: Cannot Read file '$filename'\n";
+			exit 4;
+		}
+
+		# Read each char from command output and push to socket fh
+		my $char;
+		my $bytes;
+		# Assume that we don't want to buffer STDERR output of the command
+		my $size = 100000;
+		while ( $bytes = read( STREAMIN, $char, $size ) ) {
+			if ( $bytes <= 0 ) {
+				close STREAMIN;
+				print $se "DEBUG: Stream thread has completed\n";
+				exit 0;
+			} else {
+				print $fh $char;
+				print $se '#';
+			}
+			last if $bytes < $size;
+		}
+		close STREAMIN;
+		print $se "INFO: Finished Streaming $filename to browser\n";
+	}
 
 	return 0;
 }
@@ -780,7 +851,7 @@ sub create_playlist_m3u_single {
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'playlistdirect' ) {
 			next if ! ( $pid && $type && $mode );
-			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ) );
+			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ), $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 
 		# If pid is actually a filename then use it cos this is a local file type programme
 		} elsif ( $request eq 'playlistfiles' && $pid =~ m{^/} ) {
@@ -837,7 +908,7 @@ sub create_playlist_m3u_multi {
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			$url = build_url_direct( $request_host, $type, $pid, $mode, undef );
+			$url = build_url_direct( $request_host, $type, $pid, $mode, undef, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 
 		# playlist with local files
 		} elsif ( $request eq 'genplaylistfile' ) {
@@ -974,14 +1045,14 @@ sub get_opml {
 
 ### Playlist URL builders
 sub build_url_direct {
-	my ( $request_host, $progtypes, $pid, $modes, $outtype ) = ( @_ );
+	my ( $request_host, $progtypes, $pid, $modes, $outtype, $history, $bitrate, $vsize, $vfr ) = ( @_ );
 	# Sanity check
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
 	# CGI::escape
-	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype );
-	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
+	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $history, $bitrate, $vsize );
+	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}  BITRATE=${bitrate}  VSIZE=${vsize}  VFR=${vfr}\n";
 	# Build URL
-	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}";
+	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}";
 }
 
 
@@ -1845,16 +1916,34 @@ sub show_info {
 
 
 
-# Get filename from history based on PID, mode and type
-# PID=$pid|$mode
+# Get filename from history based on PID, MODE and TYPE
+# If the PID is a filename then filename is still searched using PID and TYPE
 sub get_direct_filename {
 	my ( $pid, $mode, $type ) = ( @_ );
 	my $out;
 	my @html;
 	my %prog;
+	my $pidisfile;
+	my $history = 1;
 
-	# Skip if not defined
-	return '' if ! ( $pid && $mode && $type );
+	print $se "DEBUG: Looking up filename for MODE=$mode TYPE=$type PID=$pid\n";
+	
+	# set this flag if required and unset history if pid is a file
+	if ( -f $pid ) {
+		print $se "DEBUG: PID is a valid filename\n";
+		$pidisfile = 1;
+		$history = 0;
+	}
+
+	# Skip if not defined or, if pid is a file and no type defined
+	if ( $pidisfile && ! $type ) {
+		print $se "ERROR: Cannot lookup filename for PID which is a filename if type is not set\n";
+		return '';
+	}
+	if ( ( ! $pidisfile ) && ! ( $pid && $mode && $type ) ) {
+		print $se "ERROR: Cannot lookup filename unless PID, MODE and TYPE are set\n";
+		return '';
+	}
 
 	# make the pid regex friendly
 	$pid =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
@@ -1863,9 +1952,8 @@ sub get_direct_filename {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
-		'--history',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <filename>|<mode>' ),
+		get_iplayer_webrequest_args( 'nopurge=1', "history=$history", 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <pid>|<filename>|<mode>' ),
 	);
 	print $se "Command: ".( join ' ', @cmd )."\n"; # if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
@@ -1874,7 +1962,11 @@ sub get_direct_filename {
 	# Extract the filename
 	my $match = ( grep /^filename:/, @cmdout )[0];
 	my $filename;
-	$filename = $1 if $match =~ m{^\w+?:\s*(.+?)\|$mode\s*$};
+	if ( $pidisfile ) {
+		$filename = $1 if $match =~ m{^filename: (\/.+?)\|<filename>\|<mode>\s*$};
+	} else {
+		$filename = $1 if $match =~ m{^filename: .+?\|\s*(.+?)\|$mode\s*$};
+	}
 
 	return search_absolute_path( $filename );
 }
@@ -2121,12 +2213,12 @@ sub build_option_html {
 				-name		=> $webvar,
 				-id		=> "option_$webvar",
 				-label		=> '',
-				#-value 		=> 1,
+				#-value 	=> 1,
 				-checked	=> $current,
 				-override	=> 1,
 			)
 		);
-
+print $se "BOOLEAN $webvar: VALUE=$value STATUS=$status CURRENT=$current\n";
 
 	# On/Off
 	} elsif ( $type eq 'radioboolean' ) {
@@ -2140,7 +2232,6 @@ sub build_option_html {
 				-override	=> 1,				
 			)
 		);
-
 
 	# Multi-On/Off
 	} elsif ( $type eq 'multiboolean' ) {
@@ -2300,10 +2391,11 @@ sub search_progs {
 
 		# Sort by column click and change display class (colour) according to sort status
 		my ($title, $class, $onclick);
+
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=1; submit()");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; submit()");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE.value=0; submit()");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; submit()");
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
@@ -2382,21 +2474,21 @@ sub search_progs {
 		$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv' ) }, 'Play' ).'<br />';
 		if ( $pid =~ m{^/} ) {
 			if ( -f $pid ) {
-				# Bug: cannot detect mime type
-				## 'PlayDirect' - depends on browser support
-				#$links .= a( { -class=>$search_class, -title=>"Stream file into browser", -href=>"?ACTION=direct&PROGTYPES=$prog{$pid}->{type}&PID=".CGI::escape("$pid")."&MODES=$prog{$pid}->{mode}" },  'PlayDirect' ).'<br />';
+				# 'PlayDirect' - depends on browser support
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, undef, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 				# 'PlayFile' - works with vlc
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) },  'PlayFile' ).'<br />';
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
 			}
 		} elsif ( $opt->{HISTORY}->{current} ) {
 			if ( -f $prog{$pid}->{filename} ) {
 				# 'PlayWeb' - not on vlc
 				### Bug: vlc cannot read mov or mp4 from stdin - only flv :-( - feature works but pointless
-				#$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") },  'PlayWeb' ).'<br />';
+				#$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") }, 'PlayWeb' ).'<br />';
 				# 'PlayFile' - works with vlc
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) },  'PlayFile' ).'<br />';
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
 				# 'PlayDirect' - depends on browser support
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, undef ) },  'PlayDirect' ).'<br />';
+				# e.g. http://127.0.0.1:18080/?ACTION=direct&PROGTYPES=tv&PID=b00mw0bd&MODES=flashhigh1&OUTTYPE=aaa.flv&HISTORY=1
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, undef, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 			}
 		} else {
 			# 'Record'
@@ -2439,53 +2531,87 @@ sub search_progs {
 		-method => "POST",
 	);
 
-	# Set advanced options cell status and label
-	my $adv_style;
-	my $adv_label;
-	if ( $opt->{ADVANCED}->{current} eq 'no' || not $opt->{ADVANCED}->{current} ) {
-		$adv_style = "display: none;";
-		$adv_label = '+ Advanced Search';
+	# Set  cell status and label for each tab
+	my $search_style;
+	my $search_label;
+	if ( $opt->{SEARCHTAB}->{current} eq 'no' || not $opt->{SEARCHTAB}->{current} ) {
+		$search_style = "display: none;";
+		$search_label = '+ Advanced Search';
 	} else {
-		$adv_style = "display: table;";
-		$adv_label = '- Advanced Search';
+		$search_style = "display: table;";
+		$search_label = '- Advanced Search';
 	}
 
-	my $prefs_style;
-	my $prefs_label;
-	if ( $opt->{PREFS}->{current} eq 'no' || not $opt->{PREFS}->{current} ) {
-		$prefs_style = "display: none;";
-		$prefs_label = '+ Preferences';
+	my $display_style;
+	my $display_label;
+	if ( $opt->{DISPLAYTAB}->{current} eq 'no' || not $opt->{DISPLAYTAB}->{current} ) {
+		$display_style = "display: none;";
+		$display_label = '+ Display Preferences';
 	} else {
-		$prefs_style = "display: table;";
-		$prefs_label = '- Preferences';
+		$display_style = "display: table;";
+		$display_label = '- Display Preferences';
+	}
+
+	my $recording_style;
+	my $recording_label;
+	if ( $opt->{RECORDINGTAB}->{current} eq 'no' || not $opt->{RECORDINGTAB}->{current} ) {
+		$recording_style = "display: none;";
+		$recording_label = '+ Recording Preferences';
+	} else {
+		$recording_style = "display: table;";
+		$recording_label = '- Recording Preferences';
+	}
+
+	my $streaming_style;
+	my $streaming_label;
+	if ( $opt->{STREAMINGTAB}->{current} eq 'no' || not $opt->{STREAMINGTAB}->{current} ) {
+		$streaming_style = "display: none;";
+		$streaming_label = '+ Streaming Preferences';
+	} else {
+		$streaming_style = "display: table;";
+		$streaming_label = '- Streaming Preferences';
 	}
 
 	# Generate the html for all these options in THIS ORDER
-	# Build basic options tables + hidden
-	my @optrows_basic;
-	push @optrows_basic, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Search Options:' ) );
-	for ( @order_basic_opts, @hidden_opts ) {
-		push @optrows_basic, build_option_html( $opt->{$_} );
-	}
+
 	# Add pink prefs/options/save options buttons
-	push @optrows_basic,
-		td( { -class=>'options_outer' },
-			# Advanced Options button
+	my @optrows_nav;
+	push @optrows_nav,
+		td( { -class=>'options' },
+			# Search Options button
 			label( {
 				-class		=> 'options_outer pointer',
-				-id		=> 'advanced_opts_button',
-				-onClick	=> "toggle_display( 'option_ADVANCED', 'advanced_opts', 'advanced_opts_button', '+ Advanced Search', '- Advanced Search' );",
+				-id		=> 'button_SEARCHTAB',
+				-onClick	=> "show_prefs_tab( [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 				},
-				$adv_label,
+				$search_label,
 			).
 			'<br />'.
-			# Preferences button
+			# Display Preferences button
 			label( {
 				-class		=> 'options_outer pointer',
-				-id		=> 'prefs_button',
-				-onClick	=> "toggle_display( 'option_PREFS', 'prefs', 'prefs_button', '+ Preferences', '- Preferences' );",
+				-id		=> 'button_DISPLAYTAB',
+				-onClick	=> "show_prefs_tab( [ 'DISPLAYTAB', 'SEARCHTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 				},
-				$prefs_label,
+				$display_label,
+			).
+			'<br />'.
+			# Recording Preferences button
+			label( {
+				-class		=> 'options_outer pointer',
+				-id		=> 'button_RECORDINGTAB',
+				-onClick	=> "show_prefs_tab( [ 'RECORDINGTAB', 'DISPLAYTAB', 'SEARCHTAB', 'STREAMINGTAB' ] );",
+				},
+				$recording_label,
+			).
+			'<br />'.
+			# Streaming Preferences button
+			label( {
+				-class		=> 'options_outer pointer',
+				-id		=> 'button_STREAMINGTAB',
+				-onClick	=> "show_prefs_tab( [ 'STREAMINGTAB', 'DISPLAYTAB', 'SEARCHTAB', 'RECORDINGTAB' ] );",
+				},
+				$streaming_label,
 			).
 			'<br />'.
 			# Save Options button
@@ -2497,11 +2623,18 @@ sub search_progs {
 			),
 		);
 		
+	# Build basic options tables + hidden
+	my @optrows_basic;
+	push @optrows_basic, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Search Options:' ) );
+	for ( @order_basic_opts, @hidden_opts ) {
+		push @optrows_basic, build_option_html( $opt->{$_} );
+	}
+
 	# Build Advanced Search table cells
 	my @optrows_advanced;
-	if ( @order_adv_opts ) {
+	if ( @order_search_tab ) {
 		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Advanced Search Options:' ) );
-		for ( @order_adv_opts ) {
+		for ( @order_search_tab ) {
 			push @optrows_advanced, build_option_html( $opt->{$_} );
 		}
 	}
@@ -2514,12 +2647,30 @@ sub search_progs {
 			push @optrows_advanced, build_option_html( $opt->{$_} );
 		}
 	}
-	# Build Preferences table cells
-	my @optrows_prefs;
-	if ( @order_prefs ) {
-		push @optrows_prefs, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Preferences:' ) );
-		for ( @order_prefs ) {
-			push @optrows_prefs, build_option_html( $opt->{$_} );
+	# Build Display Preferences table cells
+	my @optrows_display;
+	if ( @order_display_tab ) {
+		push @optrows_display, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Display Preferences:' ) );
+		for ( @order_display_tab ) {
+			push @optrows_display, build_option_html( $opt->{$_} );
+		}
+	}
+
+	# Build Recording Preferences table cells
+	my @optrows_recording;
+	if ( @order_recording_tab ) {
+		push @optrows_recording, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Recording Preferences:' ) );
+		for ( @order_recording_tab ) {
+			push @optrows_recording, build_option_html( $opt->{$_} );
+		}
+	}
+
+	# Build Streaming Preferences table cells
+	my @optrows_streaming;
+	if ( @order_streaming_tab ) {
+		push @optrows_streaming, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Remote Streaming Preferences:' ) );
+		for ( @order_streaming_tab ) {
+			push @optrows_streaming, build_option_html( $opt->{$_} );
 		}
 	}
 
@@ -2527,13 +2678,22 @@ sub search_progs {
 	print $fh table( { -class=>'options_outer' },
 		Tr( { -class=>'options_outer' }, 
 			td( { -class=>'options_outer' },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_nav ] ) )
+			).
+			td( { -class=>'options_outer' },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_basic ] ) )
 			).
-			td( { -class=>'options_outer', -id=>'advanced_opts', -style=>"$adv_style" },
+			td( { -class=>'options_outer', -id=>'tab_SEARCHTAB', -style=>"$search_style" },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_advanced ] ) )
 			).
-			td( { -class=>'options_outer', -id=>'prefs', -style=>"$prefs_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_prefs ] ) )
+			td( { -class=>'options_outer', -id=>'tab_DISPLAYTAB', -style=>"$display_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_display ] ) )
+			).
+			td( { -class=>'options_outer', -id=>'tab_RECORDINGTAB', -style=>"$recording_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_recording ] ) )
+			).
+			td( { -class=>'options_outer', -id=>'tab_STREAMINGTAB', -style=>"$streaming_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_streaming ] ) )
 			)
 		),
 	);
@@ -2584,6 +2744,14 @@ sub search_progs {
 		},
 		'Play Files'
 	);
+	$action_button{'Play Remote'} = a(
+		{
+			-class => 'action',
+			-title => 'Get a Playlist based on selected programmes for remote file streaming in your media player',
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
+		},
+		'Play Remote'
+	);
 	$action_button{'Add Search to PVR'} = a(
 		{
 			-class => 'action'.$add_search_class_suffix,
@@ -2609,7 +2777,8 @@ sub search_progs {
 					$action_button{'Search'},
 					$action_button{'Delete'},
 					$action_button{'Play'},
-					$action_button{'Play Files'}, # vlc cannot read mov or mp4 from stdin :-(
+					$action_button{'Play Files'},
+					$action_button{'Play Remote'},
 					$action_button{'Add Search to PVR'},
 				]),
 			),
@@ -2621,6 +2790,7 @@ sub search_progs {
 					$action_button{'Search'},
 					$action_button{'Record'},
 					$action_button{'Play'},
+					$action_button{'Play Remote'},
 					$action_button{'Add Search to PVR'},
 					$action_button{'Refresh Cache'},
 				]),
@@ -3047,6 +3217,17 @@ sub process_params {
 		save	=> 1,
 	};
 
+	$opt->{REVERSE} = {
+		title	=> 'Reverse sort', # Title
+		tooltip	=> 'Reverse the sort order', # Tooltip
+		webvar	=> 'REVERSE', # webvar
+		optkey	=> 'sortreverse', # option
+		type	=> 'radioboolean', # type
+		#onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		default	=> '0', # value
+		save	=> 1,
+	};
+
 	$opt->{PROGTYPES} = {
 		title	=> 'Programme type', # Title
 		tooltip	=> 'Select the programme types you wish to search', # Tooltip
@@ -3213,6 +3394,38 @@ sub process_params {
 		save	=> 1,
 	};
 
+	my %vsize_labels = ( ''=>'Native', '1280x720'=>'1280x720', '832x468'=>'832x468', '640x360'=>'640x360', '512x288'=>'512x288', '480x272'=>'480x272', '320x176'=>'320x176', '176x96'=>'176x96' );
+	$opt->{VSIZE} = {
+		title	=> 'Remote Streaming Video Size', # Title
+		tooltip	=> "Video size '<width>x<height>' to transcode remotely played files - leave blank for native size", # Tooltip
+		webvar	=> 'VSIZE', # webvar
+		type	=> 'popup', # type
+		label	=> , \%vsize_labels, # labels
+		default	=> '', # default
+		value	=> [ (sort {$a <=> $b} keys %vsize_labels) ], # values
+		save	=> 1,
+	};
+
+	$opt->{BITRATE} = {
+		title	=> 'Remote Audio Bitrate', # Title
+		tooltip	=> 'Remote Audio Bitrate (in kbps) to transcode remotely played files - leave blank for native bitrate', # Tooltip
+		webvar	=> 'BITRATE', # webvar
+		type	=> 'text', # type
+		value	=> 3, # width values
+		default => '',
+		save	=> 1,
+	};
+
+	$opt->{VFR} = {
+		title	=> 'Remote Video Frame Rate', # Title
+		tooltip	=> 'Remote Video Frame Rate (in frames per second) to transcode remotely played files - leave blank for native framerate', # Tooltip
+		webvar	=> 'VFR', # webvar
+		type	=> 'text', # type
+		value	=> 2, # width values
+		default => '',
+		save	=> 1,
+	};
+
 	# Whether to hide deleted programmes from the Recordings display.
 	$opt->{HIDEDELETED} = {
 		title	=> 'Hide Deleted Recordings', # Title
@@ -3246,14 +3459,6 @@ sub process_params {
 		save	=> 0,
 	};
 
-	# Reverse sort value
-	$opt->{REVERSE} = {
-		webvar  => 'REVERSE',
-		type	=> 'hidden',
-		default	=> 0,
-		save	=> 1,
-	};
-
 	# Make sure we go to the correct next page no.
 	$opt->{PAGENO} = {
 		webvar  => 'PAGENO',
@@ -3263,16 +3468,32 @@ sub process_params {
 	};
 
 	# Remeber the status of the Advanced options display
-	$opt->{ADVANCED} = {
-		webvar	=> 'ADVANCED', # webvar
+	$opt->{SEARCHTAB} = {
+		webvar	=> 'SEARCHTAB', # webvar
 		type	=> 'hidden', # type
 		default	=> 'no', # value
 		save	=> 1,
 	};
 
 	# Remeber the status of the prefs display
-	$opt->{PREFS} = {
-		webvar	=> 'PREFS', # webvar
+	$opt->{DISPLAYTAB} = {
+		webvar	=> 'DISPLAYTAB', # webvar
+		type	=> 'hidden', # type
+		default	=> 'no', # value
+		save	=> 1,
+	};
+
+	# Remeber the status of the Advanced options display
+	$opt->{RECORDINGTAB} = {
+		webvar	=> 'RECORDINGTAB', # webvar
+		type	=> 'hidden', # type
+		default	=> 'no', # value
+		save	=> 1,
+	};
+
+	# Remeber the status of the Advanced options display
+	$opt->{STREAMINGTAB} = {
+		webvar	=> 'STREAMINGTAB', # webvar
 		type	=> 'hidden', # type
 		default	=> 'no', # value
 		save	=> 1,
@@ -3294,6 +3515,7 @@ sub process_params {
 		save	=> 0,
 	};
 
+	# Go through each of the options defined above
 	for ( keys %{ $opt } ) {
 		# Ignore cookies if we are saving new ones
 		if ( not $cgi->param('SAVE') ) {
@@ -3307,6 +3529,7 @@ sub process_params {
 				$opt->{$_}->{current} =  join ",", $opt->{$_}->{default};
 			}
 			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_cmdline->{debug};
+			
 		} else {
 			$opt->{$_}->{current} = join(",", $cgi->param($_) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
 		}
@@ -3346,6 +3569,38 @@ sub insert_javascript {
 			e.style.display = '';
 			l.textContent = hidetext;
 			document.getElementById(optid).value = 'yes';
+		}
+		return true;
+	}
+
+	//
+	// Hide show an element (and modify the text of the button/label)
+	// e.g. document.getElementById('advanced_opts').style.display='table';
+	//
+	// Usage: show_prefs_tab( [ 'TAB1', 'TAB2' ] );
+	// Displays first tab in list or tab suffixes
+	// tab_TAB1 is the table element
+	// option_TAB1 is the form variable
+	// button_TAB1 is the label
+	function show_prefs_tab( tabs ) {
+
+		// selected tab element
+		var selected_tab = document.getElementById( 'tab_' + tabs[0] );
+
+		// Loop through the above tab elements
+		for(var i = 0; i < tabs.length; i++) {
+			var tab    = document.getElementById( 'tab_' + tabs[i] );
+			var option = document.getElementById( 'option_' + tabs[i] );
+			var button = document.getElementById( 'button_' + tabs[i] );
+			if ( tab == selected_tab ) {
+				tab.style.display = '';
+				option.value = 'yes';
+				button.innerHTML = '- ' + button.innerHTML.substring(2);
+			} else {
+				tab.style.display = 'none';
+				option.value = 'no';
+				button.innerHTML = '+ ' + button.innerHTML.substring(2);
+			}
 		}
 		return true;
 	}
@@ -3485,7 +3740,7 @@ sub insert_stylesheet {
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 19.5%; }
+	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 15.5%; }
 	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.action:hover		{ color: #ADADAD; }
