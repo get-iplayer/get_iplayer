@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.50';
+my $VERSION = '0.51';
 
 use strict;
 use CGI ':all';
@@ -467,6 +467,8 @@ sub run_cgi {
 			$ext = undef if $opt->{MODES}->{current} eq 'iphone' && $ext eq 'mp3';
 			# No conversion for realaudio radio as rm
 			$ext = undef if $opt->{MODES}->{current} eq 'realaudio' && $ext eq 'rm';
+			# stream mp3 natively
+			$ext = undef if $ext eq 'mp3';
 			# No conversion for flv
 			## $ext = undef if $ext eq 'flv';
 			# Disable transcoing if none is specified as OUTTYPE/STREAMTYPE - no point in doing this as we have then no idea of the mimetype
@@ -791,7 +793,8 @@ sub build_ffmpeg_args {
 			}
 		} else {
 			if ( lc( $ext ) eq 'flv' ) {
-				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', '320k' );
+				# 160k is the max for libfaac!
+				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', '160k' );
 			}
 			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox liveradio flashaac)
 			#push @cmd_aopts, ( '-acodec', 'copy' );
@@ -891,10 +894,10 @@ sub create_playlist_m3u_single {
 		$mode = '' if $mode eq '<mode>';
 		$filename = '' if $filename eq '<filename>';
 
-		# playlist with direct streaming fo files through webserver
+		# playlist with direct streaming for files through webserver
 		if ( $request eq 'playlistdirect' ) {
 			next if ! ( $pid && $type && $mode );
-			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ), $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
+			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ), $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 
 		# If pid is actually a filename then use it cos this is a local file type programme
 		} elsif ( $request eq 'playlistfiles' && $pid =~ m{^/} ) {
@@ -946,7 +949,7 @@ sub create_playlist_m3u_multi {
 
 		# playlist with direct streaming fo files through webserver
 		if ( $request eq 'genplaylistdirect' ) {
-			$url = build_url_direct( $request_host, $type, $pid, $mode, $outtype, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
+			$url = build_url_direct( $request_host, $type, $pid, $mode, $outtype, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 
 		# playlist with local files
 		} elsif ( $request eq 'genplaylistfile' ) {
@@ -1078,14 +1081,14 @@ sub get_opml {
 
 ### Playlist URL builders
 sub build_url_direct {
-	my ( $request_host, $progtypes, $pid, $modes, $outtype, $history, $bitrate, $vsize, $vfr ) = ( @_ );
+	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype, $history, $bitrate, $vsize, $vfr ) = ( @_ );
 	# Sanity check
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
 	# CGI::escape
-	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $history, $bitrate, $vsize );
+	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $streamtype, $history, $bitrate, $vsize );
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}  BITRATE=${bitrate}  VSIZE=${vsize}  VFR=${vfr}\n";
 	# Build URL
-	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}";
+	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}";
 }
 
 
@@ -1740,9 +1743,9 @@ sub show_pvr_list {
 	        # Sort by column click and change display class (colour) according to sort status
 	        my ($title, $class, $onclick);
 	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit()");
+                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit(); RestoreFormVars(form);");
                 } else {
-                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit()");
+                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit(); RestoreFormVars(form); ");
                 }
                 $class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
@@ -1800,7 +1803,7 @@ sub show_pvr_list {
 					{
 						-class => 'action',
 						-title => 'Delete selected programmes from PVR search list',
-						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } form.NEXTPAGE.value='pvr_del'; form.submit()",
+						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_del'; form.submit(); RestoreFormVars(form);",
 					},
 					'Delete'
 				),
@@ -1970,7 +1973,6 @@ sub show_info {
 			]),
 		),
 	);
-					#label( { -class=>'search pointer', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.SINCE.value=''; submit()" }, 'Series' )
 	print $fh table( { -class => 'info' }, @html );
 	return $out;
 }
@@ -2441,9 +2443,9 @@ sub search_progs {
 		my ($title, $class, $onclick);
 
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; submit()");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; submit();");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; submit()");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; submit();");
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
@@ -2468,7 +2470,7 @@ sub search_progs {
 								-value 		=> $heading,
 								-checked	=> 1,
 								-override	=> 1,
-								-onChange	=> "form.NEXTPAGE.value='search_progs'; submit()"
+								-onChange	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);"
 							)
 						)
 					]
@@ -2523,31 +2525,34 @@ sub search_progs {
 		if ( $pid =~ m{^/} ) {
 			if ( -f $pid ) {
 				# Play
-				$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current} ) }, 'Play' ).'<br />';
-				# 'PlayDirect' - depends on browser support
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
-				# 'PlayFile' - works with vlc
+				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current} ) }, 'Play' ).'<br />';
+				# PlayFile
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'PlayFile' ).'<br />';
+				# PlayDirect
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 			}
 		# History mode
 		} elsif ( $opt->{HISTORY}->{current} ) {
 			if ( -f $prog{$pid}->{filename} ) {
-				# 'PlayWeb' - not on vlc
-				### Bug: vlc cannot read mov or mp4 from stdin - only flv :-( - feature works but pointless
-				#$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>'?ACTION=playlistdirect&SEARCHFIELDS=pid&SEARCH='.CGI::escape("$pid|$prog{$pid}->{mode}") }, 'PlayWeb' ).'<br />';
-				# 'PlayFile' - works with vlc
+				# Play (Play Remote)
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv' ) }, 'Play' ).'<br />';
+				# PlayFile
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
-				# 'PlayDirect' - depends on browser support
-				# e.g. http://127.0.0.1:18080/?ACTION=direct&PROGTYPES=tv&PID=b00mw0bd&MODES=flashhigh1&OUTTYPE=aaa.flv&HISTORY=1
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
+				# PlayDirect - depends on browser support
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 			}
 		# Search mode
 		} else {
-			# Play
+		# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current} ) }, 'Play' ).'<br />';
-			# 'Record'
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "form.NEXTPAGE.value='pvr_queue'; var orig = form.SEARCH.value; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); form.SEARCH.value=orig;" }, 'Record' ).'<br />';
-			$links .= label( { -id=>'nowrap', -class=>'search pointer_noul', -title=>"Add Series '$prog{$pid}->{name}' to PVR", -onClick=>"form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='^$prog{$pid}->{name}\$'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit()" }, 'Add Series' );
+			# Record
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
+			# Add Series
+			$links .= label( {
+				-id=>'nowrap', 
+				-class=>'search pointer_noul', 
+				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
+				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".CGI::escape("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
 
 		# Add links to row
@@ -2565,19 +2570,18 @@ sub search_progs {
 				# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 				my @t = gmtime( $time - $prog{$pid}->{timeadded} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
 			} elsif ( /^desc$/ ) {
 				# truncate the description if it is too long
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $text ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $text ) );
 			} else {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"form.NEXTPAGE.value='show_info'; form.INFO.value='$prog{$pid}->{type}|$pid'; submit()" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>$search_class}, @row );
 	}
-
 
 	# Search form
 	print $fh start_form(
@@ -2673,7 +2677,7 @@ sub search_progs {
 				label( {
 					-class		=> 'options_outer pointer_noul',
 					-title		=> 'Rememeber Current Options as Default',
-					-onClick	=> "form.SAVE.value=1; submit();",
+					-onClick	=> "BackupFormVars(form); form.SAVE.value=1; submit(); RestoreFormVars(form);",
 					},
 					'Save As Default',
 				),
@@ -2755,7 +2759,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Perform search based on search options',
-			-onClick => "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit()",
+			-onClick => "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
 		},
 		'Search'
 	);
@@ -2763,7 +2767,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Queue selected programmes (or Quick URL) for one-off recording',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } form.NEXTPAGE.value='pvr_queue'; form.submit(); form.URL.value='';",
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.submit(); RestoreFormVars(form); form.URL.value='';",
 		},
 		'Record'
 	);
@@ -2771,7 +2775,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Permanently delete selected recorded files',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.NEXTPAGE.value='recordings_delete'; form.submit()",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='recordings_delete'; form.submit(); RestoreFormVars(form);",
 		},
 		'Delete'
 	);
@@ -2779,7 +2783,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes (or Quick URL) to stream in your media player',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; form.URL.value='';",
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; RestoreFormVars(form); form.URL.value='';",
 		},
 		'Play'
 	);
@@ -2787,7 +2791,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for local file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.ACTION.value='genplaylistfile'; form.submit(); form.ACTION.value='';",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylistfile'; form.submit(); RestoreFormVars(form);",
 		},
 		'Play Files'
 	);
@@ -2795,7 +2799,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for remote file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } form.ACTION.value='genplaylistdirect'; form.submit(); form.ACTION.value='';",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylistdirect'; form.submit(); RestoreFormVars(form);",
 		},
 		'Play Remote'
 	);
@@ -2803,7 +2807,7 @@ sub search_progs {
 		{
 			-class => 'action'.$add_search_class_suffix,
 			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-			-onClick => "if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } form.NEXTPAGE.value='pvr_add'; form.submit()",
+			-onClick => "if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
 		},
 		'Add Search to PVR'
 	);
@@ -2811,7 +2815,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Refresh the list of programmes - can take a while',
-			-onClick => "form.NEXTPAGE.value='flush'; form.submit()",
+			-onClick => "BackupFormVars(form); form.NEXTPAGE.value='flush'; form.submit(); RestoreFormVars(form);",
 		},
 		'Refresh Cache'
 	);
@@ -2864,7 +2868,7 @@ sub search_progs {
 						-value 		=> $heading,
 						-checked	=> 0,
 						-override	=> 1,
-						-onChange	=> "form.NEXTPAGE.value='search_progs'; submit()",
+						-onChange	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
 					)
 				])
 			)
@@ -2903,14 +2907,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Previous Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; submit()",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; submit(); RestoreFormVars(form);",},
 		"<<",
 	)) if $page > 1;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page 1",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit(); RestoreFormVars(form);",},
 		"1",
 	)) if $page > 1;
 
@@ -2920,7 +2924,7 @@ sub pagetrail {
 		push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail pointer',
-			-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; submit()",},
+			-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; submit(); RestoreFormVars(form);",},
 			"$pn",
 		)) if $pn > 1 && $pn != $page && $pn < $pages;
 		push @pagetrail, td( { -class=>'pagetrail' }, label( {
@@ -2934,14 +2938,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page ".$pages,
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; submit()",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; submit(); RestoreFormVars(form);",},
 		"$pages",
 	)) if $page < $pages;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Next Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; submit()",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; submit(); RestoreFormVars(form);",},
 		">>",
 	)) if $page < $pages;
 
@@ -3114,7 +3118,7 @@ sub form_header {
 		{
 			-class=>'nav',
 			-title=>'Update the Web PVR Manager and get_iplayer software - please restart Web PVR Manager after updating',
-			-onClick => "if (! confirm('Please restart the Web PVR Manager service once the update has completed') ) { return false; } formheader.NEXTPAGE.value='update_script'; formheader.submit()",
+			-onClick => "if (! confirm('Please restart the Web PVR Manager service once the update has completed') ) { return false; } BackupFormVars(formheader); formheader.NEXTPAGE.value='update_script'; formheader.submit(); RestoreFormVars(formheader);",
 		},
 		'Update Software' ) if -w $0;
 
@@ -3145,7 +3149,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'History search page',
-						-onClick => "formheader.NEXTPAGE.value='search_history'; formheader.submit();",
+						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);",
 					},
 					'Recordings'
 				),
@@ -3153,7 +3157,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'List all saved PVR searches',
-						-onClick => "formheader.NEXTPAGE.value='pvr_list'; formheader.submit()",
+						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);",
 					},
 					'PVR List'
 				),
@@ -3161,7 +3165,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'Run the PVR now - wait for the PVR to complete',
-						-onClick => "formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab'; formheader.submit()",
+						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab'; formheader.submit(); RestoreFormVars(formheader);",
 					},
 					'Run PVR'
 				),
@@ -3247,7 +3251,7 @@ sub process_params {
 		type	=> 'popup', # type
 		default	=> 20, # default
 		value	=> ['10','25','50','100','200','400'], # values
-		onChange=> "form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit()",
+		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit(); RestoreFormVars(form);",
 		save	=> 1,
 	};
 
@@ -3259,7 +3263,7 @@ sub process_params {
 		label	=> \%fieldname, # labels
 		default	=> 'index', # default
 		value	=> [@headings], # values
-		onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
 		save	=> 1,
 	};
 
@@ -3268,7 +3272,7 @@ sub process_params {
 		tooltip	=> 'Reverse the sort order', # Tooltip
 		webvar	=> 'REVERSE', # webvar
 		type	=> 'radioboolean', # type
-		#onChange=> "form.NEXTPAGE.value='search_progs'; submit()",
+		#onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
 		default	=> '0', # value
 		save	=> 1,
 	};
@@ -3481,13 +3485,16 @@ sub process_params {
 		save	=> 1,
 	};
 
+	my %streamtype_labels = ( ''=>'Auto', 'none'=>'Disable Transcoding', 'flv'=>'Flash Video (flv)', 'mov'=>'Quicktime (mov)', 'asf'=>'Advanced Streaming Format (asf)', 'avi'=>'AVI', 'mp3'=>'MP3 (Audio Only)', 'aac'=>'AAC (Audio Only)', 'wav'=>'WAV (Audio Only)', 'flac'=>'FLAC (Audio Only)' );
 	$opt->{STREAMTYPE} = {
 		title	=> "Remote Streaming type", # Title
 		tooltip	=> "Force the output to be this type when using 'Play Remote' for 'PlayDirect' streaming(e.g. flv, mov). Specify 'none' to disable transcoding/remuxing.  Leave blank for auto-detection", # Tooltip
 		webvar	=> 'STREAMTYPE', # webvar
-		type	=> 'text', # type
-		value	=> 4, # width values
-		default => '',
+		type	=> 'popup', # type
+		label	=> , \%streamtype_labels, # labels
+		default	=> '', # default
+		value	=> [ '', 'none', 'flv', 'mov', 'asf', 'avi', 'mp3', 'aac', 'wav', 'flac' ], # values
+		onChange=> "submit();",
 		save	=> 1,
 	};
 
@@ -3614,28 +3621,38 @@ sub insert_javascript {
 
 	<script type="text/javascript">
 
-	//
-	// Hide show an element (and modify the text of the button/label)
-	// e.g. document.getElementById('advanced_opts').style.display='table';
-	//
-	function toggle_display( optid, hideid, labelid, showtext, hidetext) {
+	// global hash table for saving copy of form
+	var form_backup = {};
 	
-		// get unique element for specified id
-		var e = document.getElementById(hideid);
-		var l = document.getElementById(labelid);
-
-		// toggle hide and show
-		// then update the text value of the calling element
-		if ( e.style.display != 'none' ) {
-			e.style.display = 'none';
-			l.textContent = showtext;
-			document.getElementById(optid).value = 'no';
-		} else {
-			e.style.display = '';
-			l.textContent = hidetext;
-			document.getElementById(optid).value = 'yes';
+	//
+	// Copy all non-grouped form values into a global hash
+	//
+	function BackupFormVars( form ) {
+		// empty out array
+		for(var key in form_backup) {
+			delete( form_backup[key] );
 		}
-		return true;
+
+		// copy forms elements
+		var elem = form.elements;
+		for(var i = 0; i < elem.length; i++) {
+			// exclude radio and checkbox types - can be duplicate names in groups...
+			if ( elem[i].type != "checkbox" && elem[i].type != "radio" ) {
+				form_backup[ elem[i].name ] = elem[i].value;
+			}
+		} 
+	}
+
+	//
+	// Copy all form values in the global hash into the specified form
+	//	
+	function RestoreFormVars( form ) {
+		// copy form elements
+		for(var key in form_backup) {
+			form.elements[ key ].value = form_backup[key];
+			// delete element
+			delete( form_backup[key] );
+		}
 	}
 
 	//
@@ -3647,6 +3664,7 @@ sub insert_javascript {
 	// tab_TAB1 is the table element
 	// option_TAB1 is the form variable
 	// button_TAB1 is the label
+	//
 	function show_options_tab( selectedid, tabs ) {
 
 		// selected tab element
@@ -3789,7 +3807,7 @@ sub insert_stylesheet {
 	TH.options_embedded	{ width: 20px }
 	TD.options_embedded	{ width: 20px }
 
-	//DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	/*DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }*/
 	UL.options		{ list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	LI.options		{ text-align: left; cursor: pointer; cursor: hand; padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; margin: 0; margin-left: 0px; margin-bottom: 5px; }
 	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
