@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.49';
+my $VERSION = '0.50';
 
 use strict;
 use CGI ':all';
@@ -451,7 +451,7 @@ sub run_cgi {
 		# If mimetype is defined
 		if ( $mimetypes{$ext} ) {
 			# flv audio
-			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} eq 'radio' || $opt->{PROGTYPES}->{current} eq 'podcast';
+			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio|podcast)$};
 
 			# Output headers to stream 
 			# This will enable seekable: -Accept_Ranges=>'bytes',
@@ -782,9 +782,19 @@ sub build_ffmpeg_args {
 		my ( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr ) = ( @_ );
 		my @cmd_aopts;
 		if ( $abitrate =~ m{^\d+$} ) {
-			push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', "${abitrate}k" );
+			# if this is flv stream output then use the AAC codec
+			if ( lc( $ext ) eq 'flv' ) {
+				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', "${abitrate}k" );
+			# else just copy  the codec?
+			} else {
+				push @cmd_aopts, ( '-ab', "${abitrate}k" );
+			}
 		} else {
-			push @cmd_aopts, ( '-acodec', 'copy' );
+			if ( lc( $ext ) eq 'flv' ) {
+				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', '320k' );
+			}
+			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox liveradio flashaac)
+			#push @cmd_aopts, ( '-acodec', 'copy' );
 		}
 
 		my @cmd;
