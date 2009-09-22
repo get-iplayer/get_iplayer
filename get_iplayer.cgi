@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.51';
+my $VERSION = '0.52';
 
 use strict;
 use CGI ':all';
@@ -203,7 +203,7 @@ my $opt;
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
 my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE /;
 my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
-my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE /;
+my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE AUTOWEBREFRESH AUTOPVRRUN /;
 my @order_streaming_tab = qw/ BITRATE VSIZE VFR STREAMTYPE /;
 my @hidden_opts = qw/ SAVE SEARCHTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
@@ -434,6 +434,8 @@ sub run_cgi {
 			wav 	=> 'audio/x-wav',
 			flac	=> 'audio/x-flac',
 			mp3 	=> 'audio/mpeg',
+			aac	=> 'audio/mpeg',
+			m4a	=> 'audio/mpeg',
 			rm	=> 'audio/x-pn-realaudio',
 			mov 	=> 'video/quicktime',
 			mp4	=> 'video/x-flv',
@@ -473,12 +475,14 @@ sub run_cgi {
 			## $ext = undef if $ext eq 'flv';
 			# Disable transcoing if none is specified as OUTTYPE/STREAMTYPE - no point in doing this as we have then no idea of the mimetype
 			### Need a way to disable transcoding here - pass and check STREAMTYPE?
+			my $notranscode = 0;
 			if ( $opt->{STREAMTYPE}->{current} =~ /none/i ) {
 				print $se "INFO: Transcoding disabled (OUTTYPE=none)\n";
 				$ext = undef;
+				$notranscode = 1;
 			}
 			# no transcode if $ext is undefined
-			stream_prog( $mimetypes{$ext}, $cgi->param( 'PID' ), $cgi->param( 'PROGTYPES' ), $opt->{MODES}->{current}, $ext, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
+			stream_prog( $mimetypes{$ext}, $cgi->param( 'PID' ), $cgi->param( 'PROGTYPES' ), $opt->{MODES}->{current}, $ext, $notranscode, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 		} else {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
@@ -504,6 +508,7 @@ sub run_cgi {
 			wav 	=> 'audio/x-wav',
 			flac	=> 'audio/x-flac',
 			aac	=> 'audio/mpeg',
+			m4a	=> 'audio/mpeg',
 			mp3 	=> 'audio/mpeg',
 			rm	=> 'audio/x-pn-realaudio',
 			mov 	=> 'video/quicktime',
@@ -514,10 +519,12 @@ sub run_cgi {
 		);
 
 		# default recipies
-		# Disable transcoing if none is specified as OUTTYPE/STREAMTYPE
+		# Disable transcoding if none is specified as OUTTYPE/STREAMTYPE
+		my $notranscode = 0;
 		if ( $ext =~ /none/i ) {
 			print $se "INFO: Transcoding disabled (OUTTYPE=none)\n";
 			$ext = $src_ext;
+			$notranscode = 1;
 
 		# cannot stream mp4/avi so transcode to flv
 		# Add types here which you want re-muxed into flv
@@ -544,7 +551,7 @@ sub run_cgi {
 			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 			print $fh $headers;
 
-			stream_file( $filename, $mimetypes{$ext}, $src_ext, $ext, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
+			stream_file( $filename, $mimetypes{$ext}, $src_ext, $ext, $notranscode, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
 		} else {
 			print $se "ERROR: Aborting client thread - output mime type is undetermined\n";
 		}
@@ -596,11 +603,8 @@ sub run_cgi {
 
 	# HTML page
 	} else {
-		# Output headers
-		http_headers();
-	
-		# html start
-		begin_html();
+		# Output header and html start
+		begin_html( $request_host );
 
 		# Page Routing
 		form_header( $request_host );
@@ -627,6 +631,7 @@ sub run_cgi {
 
 
 sub pvr_run {
+	print $fh "<strong><p>The cache will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
 	print $se "INFO: Starting Manual PVR Run\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -642,6 +647,9 @@ sub pvr_run {
 	print $fh '</pre>';
 	print $fh p("PVR Run complete");
 
+	# Load the refresh tab if required
+	my $autopvrrun = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
+
 	# Render options actions
 	print $fh div( { -class=>'action' },
 		ul( { -class=>'action' },
@@ -649,10 +657,18 @@ sub pvr_run {
 				a(
 					{
 						-class=>'action',
-						-title => 'Go Back',
-						-onClick  => "history.back()",
+						-title => 'Close',
+						-onClick  => "RefreshTab( '?NEXTPAGE=flush&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun).", 1 );",
 					},
-					'Back'
+					'PVR Run Now'
+				),
+				a(
+					{
+						-class=>'action',
+						-title => 'Close',
+						-onClick  => "window.close()",
+					},
+					'Close'
 				),
 			]),
 		),
@@ -661,28 +677,8 @@ sub pvr_run {
 
 
 
-sub stream_mov {
-	my $pid = shift;
-
-	print $se "INFO: Start Streaming $pid to browser\n";
-	my @cmd = (
-		$opt_cmdline->{getiplayer},
-		'--nocopyright',
-		'--hash',
-		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', 'modes=iphone', 'stream=1', "pid=$pid" ),
-	);
-	run_cmd( $fh, $se, 100000, @cmd );
-
-	print $se "INFO: Finished Streaming $pid to browser\n";
-
-	return 0;
-}
-
-
-
 sub stream_prog {
-	my ( $mimetype, $pid , $type, $modes, $ext, $abitrate, $vsize, $vfr ) = ( @_ );
+	my ( $mimetype, $pid , $type, $modes, $ext, $notranscode, $abitrate, $vsize, $vfr ) = ( @_ );
 	# Default modes to try
 	$modes = 'flashaac,flash,iphone,realaudio' if ! $modes;
 	
@@ -692,12 +688,13 @@ sub stream_prog {
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--hash',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "modes=$modes", 'stream=1', "pid=$pid", "type=$type" ),
 	);
 
 	# If transcoding on the fly then use shell method of calling processes with a pipe
-	if ( $ext ) {
+	if ( $ext && ! $notranscode ) {
 
 		# workaround to add quotes around the args because we are using a shell here
 		for ( @cmd ) {
@@ -736,12 +733,12 @@ sub stream_prog {
 			
 # Stream a file to browser/client
 sub stream_file {
-	my ( $filename, $mimetype, $src_ext, $ext, $abitrate, $vsize, $vfr ) = ( @_ );
+	my ( $filename, $mimetype, $src_ext, $ext, $notranscode, $abitrate, $vsize, $vfr ) = ( @_ );
 
 	print $se "INFO: Start Direct Streaming $filename to browser using mimetype '$mimetype', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video fram rate '$vfr'\n";
 
-	# If transcoding required (i.e. output ext != source ext)
-	if ( lc( $ext ) ne lc( $src_ext ) ) {
+	# If transcoding required (i.e. output ext != source ext) - OR, if one of the transcoing options is set
+	if ( ( ! $notranscode ) && ( lc( $ext ) ne lc( $src_ext ) || $abitrate || $vsize || $vfr ) ) {
 		$fh->autoflush(0);
 
 		my @cmd = build_ffmpeg_args( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr );
@@ -785,7 +782,9 @@ sub build_ffmpeg_args {
 		my @cmd_aopts;
 		if ( $abitrate =~ m{^\d+$} ) {
 			# if this is flv stream output then use the AAC codec
-			if ( lc( $ext ) eq 'flv' ) {
+			if ( lc( $ext ) =~ m{^(flv|aac|m4a)$} ) {
+				# Tweak: ffmpeg cannot understand aac or m4a as audio output formats - force flash audio
+				$ext = 'flv' if lc( $ext ) =~ m{^(aac|m4a)$} && $mimetype =~ m{^audio};
 				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', "${abitrate}k" );
 			# else just copy  the codec?
 			} else {
@@ -872,6 +871,7 @@ sub create_playlist_m3u_single {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm" ),
 	);
@@ -913,7 +913,7 @@ sub create_playlist_m3u_single {
 		} else {
 			next if ! ( $type && $pid );
 			my $suffix = "${pid}.${outtype}";
-			$url = build_url_stream( $request_host, $type, $pid, $mode || $modes, $suffix, $opt->{STREAMTYPE}->{current} );
+			$url = build_url_stream( $request_host, $type, $pid, $mode || $modes, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 		}
 
 		# Format required, e.g.
@@ -973,7 +973,7 @@ sub create_playlist_m3u_multi {
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
 			my $suffix = "${pid}.${outtype}";
-			$url = build_url_stream( $request_host, $type, $pid, $mode, $suffix, $opt->{STREAMTYPE}->{current} );
+			$url = build_url_stream( $request_host, $type, $pid, $mode, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 		}
 
 		# Skip empty urls
@@ -1025,6 +1025,7 @@ sub get_opml {
 		my @out = get_cmd_output(
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
+			'--expiry=999999999',
 			'--webrequest',
 			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" ),
 		);
@@ -1048,6 +1049,7 @@ sub get_opml {
 		my @out = get_cmd_output(
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
+			'--expiry=999999999',
 			'--webrequest',
 			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" ),
 		);
@@ -1094,14 +1096,14 @@ sub build_url_direct {
 
 # "${request_host}?ACTION=stream&PROGTYPES=${type}&PID=${pid}&MODES=${modes}&OUTTYPE=${suffix}";
 sub build_url_stream {
-	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype ) = ( @_ );
+	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype, $bitrate, $vsize, $vfr ) = ( @_ );
 	# Sanity check
 	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
 	# CGI::escape
-	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $streamtype );
+	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $streamtype, $bitrate, $vsize, $vfr );
 	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
 	# Build URL
-	return "${request_host}?ACTION=stream&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}";
+	return "${request_host}?ACTION=stream&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}";
 }
 
 
@@ -1111,14 +1113,14 @@ sub build_url_stream {
 ## 'PlayWeb' - not on vlc
 # Play from file on web server/'PlayWeb' ?ACTION=playlistdirect	&SEARCHFIELDS=pid	&SEARCH=$pid	&MODES=${modes}
 sub build_url_playlist {
-	my ( $request_host, $action, $searchfields, $search, $modes, $progtypes, $outtype, $streamtype ) = ( @_ );
+	my ( $request_host, $action, $searchfields, $search, $modes, $progtypes, $outtype, $streamtype, $bitrate, $vsize, $vfr ) = ( @_ );
 	# Sanity check
 	#print $se "DEBUG: building $action request using:  SEARCHFIELDS=${searchfields}  SEARCH=${search}  MODES=${modes}  PROGTYPES=${progtypes}  OUTTYPE=${outtype}\n";
 	# CGI::escape
-	$_ = CGI::escape($_) for ( $action, $searchfields, $search, $modes, $progtypes, $outtype, $streamtype );
+	$_ = CGI::escape($_) for ( $action, $searchfields, $search, $modes, $progtypes, $outtype, $streamtype, $bitrate, $vsize, $vfr );
 	#print $se "DEBUG: building $action request using:  SEARCHFIELDS=${searchfields}  SEARCH=${search}  MODES=${modes}  PROGTYPES=${progtypes}  OUTTYPE=${outtype}\n";
 	# Build URL
-	return "${request_host}?ACTION=${action}&SEARCHFIELDS=${searchfields}&SEARCH=${search}&MODES=${modes}&PROGTYPES=${progtypes}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}";
+	return "${request_host}?ACTION=${action}&SEARCHFIELDS=${searchfields}&SEARCH=${search}&MODES=${modes}&PROGTYPES=${progtypes}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}";
 }
 
 
@@ -1153,6 +1155,7 @@ sub update_script {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--nopurge',
 		'--update',
 	);
@@ -1688,6 +1691,7 @@ sub get_pvr_list {
 	my $out = join "\n", get_cmd_output(
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--pvrlist',
 	);
 	# Remove text before first pvrsearch entry
@@ -1890,6 +1894,7 @@ sub pvr_del {
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
+			'--expiry=999999999',
 			'--webrequest',
 			get_iplayer_webrequest_args( "pvrdel=$name" ),
 		);
@@ -1921,6 +1926,7 @@ sub show_info {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', 'fields=pid', "search=$pid" ),
 	);
@@ -1958,7 +1964,7 @@ sub show_info {
 					{
 						-class => 'action',
 						-title => "Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now",
-						-href => build_url_playlist( '', 'playlist', 'pid', $pid, $prog{$pid}->{mode} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, $cgi->param( 'OUTTYPE' ) || 'out.flv', $cgi->param( 'STREAMTYPE' ) ),
+						-href => build_url_playlist( '', 'playlist', 'pid', $pid, $prog{$pid}->{mode} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, $cgi->param( 'OUTTYPE' ) || 'out.flv', $cgi->param( 'STREAMTYPE' ), $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) ),
 					},
 					'Play'
 				),
@@ -2015,6 +2021,7 @@ sub get_direct_filename {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "history=$history", 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <pid>|<filename>|<mode>' ),
 	);
@@ -2108,6 +2115,7 @@ sub pvr_queue {
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
 			'--nocopyright',
+			'--expiry=999999999',
 			'--webrequest',
 			get_iplayer_webrequest_args( 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')', build_cmd_options( grep !/^(HISTORY|SINCE|SEARCH|SEARCHFIELDS|VERSIONLIST|EXCLUDEC.+)$/, @params ) ),
 		);
@@ -2213,6 +2221,7 @@ sub pvr_add {
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE|HIDE|FORCE)$/, @params ) ),
 	);
@@ -2357,6 +2366,7 @@ sub build_option_html {
 
 sub flush {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	print $se "INFO: Flushing\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -2369,6 +2379,9 @@ sub flush {
 	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
 
+	# Load the refresh tab if required
+	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
+
 	# Render options actions
 	print $fh div( { -class=>'action' },
 		ul( { -class=>'action' },
@@ -2376,10 +2389,18 @@ sub flush {
 				a(
 					{
 						-class=>'action',
-						-title => 'Go Back',
-						-onClick  => "history.back()",
+						-title => 'Refresh Cache Now',
+						-onClick  => "RefreshTab( '?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
 					},
-					'Back'
+					'Force Refresh'
+				),
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "window.close()",
+					},
+					'Close'
 				),
 			]),
 		),
@@ -2525,7 +2546,7 @@ sub search_progs {
 		if ( $pid =~ m{^/} ) {
 			if ( -f $pid ) {
 				# Play
-				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current} ) }, 'Play' ).'<br />';
+				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'PlayFile' ).'<br />';
 				# PlayDirect
@@ -2535,7 +2556,7 @@ sub search_progs {
 		} elsif ( $opt->{HISTORY}->{current} ) {
 			if ( -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv' ) }, 'Play' ).'<br />';
+				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
 				# PlayDirect - depends on browser support
@@ -2544,7 +2565,7 @@ sub search_progs {
 		# Search mode
 		} else {
 		# Play
-			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current} ) }, 'Play' ).'<br />';
+			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
 			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
 			# Add Series
@@ -2811,11 +2832,13 @@ sub search_progs {
 		},
 		'Add Search to PVR'
 	);
+	#my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
 	$action_button{'Refresh Cache'} = a(
 		{
 			-class => 'action',
 			-title => 'Refresh the list of programmes - can take a while',
-			-onClick => "BackupFormVars(form); form.NEXTPAGE.value='flush'; form.submit(); RestoreFormVars(form);",
+			-onClick => "BackupFormVars(form); form.target='_newtab_refresh'; form.NEXTPAGE.value='flush'; form.submit(); RestoreFormVars(form); form.target=''; form.NEXTPAGE.value=''; ",
+			#-onClick => "window.frames['dataframe'].window.location.replace('?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh')",
 		},
 		'Refresh Cache'
 	);
@@ -2981,6 +3004,7 @@ sub get_progs {
 	my @list = get_cmd_output(
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
+		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( @webrequest_args ),
 	);
@@ -3044,56 +3068,6 @@ sub get_display_cols {
 	@displaycols = @headings_default if $#displaycols < 0;
 
 	return 0;
-}
-
-
-
-######################################################################
-#
-#   begin_html
-#      Sets "title", Sends <HTML> and <BODY> flags
-#
-######################################################################
-sub begin_html {
-	print $fh "<html>";
-	print $fh "<HEAD><TITLE>get_iplayer Web PVR Manager</TITLE>\n";
-	insert_stylesheet();
-	print $fh "</HEAD>\n";
-	insert_javascript();
-	print $fh "<body>\n";
-}
-
-
-
-# Send HTTP headers to browser
-sub http_headers {
-	my $mimetype = 'text/html';
-	my $filename = shift;
-	
-	# Save settings if selected
-	my @cookies;
-	if ( $cgi->param('SAVE') ) {
-		print $se "DEBUG: Sending cookies\n";
-		for ( %{ $opt } ) {
-			# skip if opt not allowed to be saved
-			next if not $opt->{$_}->{save};
-			my $cookie = $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y' );
-			push @cookies, $cookie;
-			print $se "DEBUG: Sending cookie: $cookie\n" if $opt_cmdline->{debug};
-		}
-		# Ensure SAVE state is reset to off
-		$opt->{SAVE}->{current} = 0;
-	}
-
-	# Send the headers to the browser
-	my $headers = $cgi->header(
-		-type		=> $mimetype,
-		-charset	=> 'utf-8',
-		-cookie		=> [@cookies],
-	);
-
-	print $se "\nHEADERS:\n$headers\n" if $opt_cmdline->{debug};
-	print $fh $headers;
 }
 
 
@@ -3165,7 +3139,7 @@ sub form_header {
 					{
 						-class=>'nav',
 						-title=>'Run the PVR now - wait for the PVR to complete',
-						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab'; formheader.submit(); RestoreFormVars(formheader);",
+						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';",
 					},
 					'Run PVR'
 				),
@@ -3181,17 +3155,18 @@ sub form_header {
 			]),
 		),
 	);
-
-	print $fh hidden( -name => "NEXTPAGE", -value => 'search_progs', -override => 1 );
-	print $fh $cgi->end_form();
-	
-	#hr({-size=>1});
+	print $fh hidden( -name => 'AUTOPVRRUN', -value => $opt->{AUTOPVRRUN}->{current}, -override => 1 );
+	print $fh hidden( -name => 'NEXTPAGE', -value => 'search_progs', -override => 1 );
+	print $fh $cgi->end_form();	
 }
 
 
 
 # Form Footer 
 sub form_footer {
+	#print $fh "<iframe src=\"about:blank\" height=\"100\" width=\"95%\" name=\"dataframe\"></iframe>";
+	#print $fh "<iframe src=\"about:blank\" height=\"0\" width=\"0\" name=\"dataframe\"></iframe>";
+	# <script type=\"text/javascript\">window.frames['dataframe'].window.location.replace('loadData.html');</script>
 	print $fh p( b({-class=>"footer"},
 		sprintf( "get_iplayer Web PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
 	));
@@ -3432,6 +3407,26 @@ sub process_params {
 		save	=> 1,
 	};
 
+	$opt->{AUTOWEBREFRESH} = {
+		title	=> 'Auto-Refresh Cache Interval', # Title
+		tooltip	=> 'Automatically refresh the default caches in another browser tab (hours)', # Tooltip
+		webvar	=> 'AUTOWEBREFRESH', # webvar
+		type	=> 'text', # type
+		default	=> 1, # default
+		value	=> 3, # width values
+		save	=> 1,
+	};
+
+	$opt->{AUTOPVRRUN} = {
+		title	=> 'Auto-Run PVR Interval', # Title
+		tooltip	=> 'Automatically run the PVR in another browser tab (hours)', # Tooltip
+		webvar	=> 'AUTOPVRRUN', # webvar
+		type	=> 'text', # type
+		default	=> 4, # default
+		value	=> 3, # width values
+		save	=> 1,
+	};
+
 	$opt->{HISTORY} = {
 		title	=> 'Search History', # Title
 		tooltip	=> 'Whether to display and search programmes in the recordings history', # Tooltip
@@ -3610,6 +3605,62 @@ sub process_params {
 
 
 
+######################################################################
+#
+#   begin_html
+# 
+#   Send HTTP headers to browser
+#   Sets "title", Sends <HTML> and <BODY> flags
+#
+######################################################################
+sub begin_html {
+	my $request_host = shift;
+	my $mimetype = 'text/html';
+	
+	# Save settings if selected
+	my @cookies;
+	if ( $cgi->param('SAVE') ) {
+		print $se "DEBUG: Sending cookies\n";
+		for ( %{ $opt } ) {
+			# skip if opt not allowed to be saved
+			next if not $opt->{$_}->{save};
+			my $cookie = $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y' );
+			push @cookies, $cookie;
+			print $se "DEBUG: Sending cookie: $cookie\n" if $opt_cmdline->{debug};
+		}
+		# Ensure SAVE state is reset to off
+		$opt->{SAVE}->{current} = 0;
+	}
+
+	# Send the headers to the browser
+	my $headers = $cgi->header(
+		-type		=> $mimetype,
+		-charset	=> 'utf-8',
+		-cookie		=> [@cookies],
+	);
+
+	print $se "\nHEADERS:\n$headers\n" if $opt_cmdline->{debug};
+	print $fh $headers;
+
+	print $fh "<html>";
+	print $fh "<HEAD><TITLE>get_iplayer Web PVR Manager</TITLE>\n";
+	insert_stylesheet();
+	print $fh "</HEAD>\n";
+	insert_javascript();
+	# Load the refresh tab if required
+	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
+	my $autopvrrun  = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
+	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'flush' ) {
+		print $fh "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
+	} elsif ( $autopvrrun && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
+		print $fh "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
+	} else {
+		print $fh "<body>\n";
+	}
+}
+
+
+
 #############################################
 #
 # Javascript Functions here
@@ -3620,6 +3671,14 @@ sub insert_javascript {
 	print $fh <<EOF;
 
 	<script type="text/javascript">
+	
+	function RefreshTab(url, time, force ) {
+		if ( force ) {
+			window.location.href = url;
+		}
+		setTimeout( "RefreshTab('" + url + "'," + time + ", 1 )", time );
+	}
+
 
 	// global hash table for saving copy of form
 	var form_backup = {};
