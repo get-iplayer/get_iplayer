@@ -79,16 +79,42 @@ sub modelist {
 
 
 
+# Recursive function to recursively find files in a directory
+sub find_matching_files {
+	my $dir = shift;
+	my $file_regex = shift || '.+';
+	$dir =~ s|\/+$||g;
+	my @filelist;
+	my ( $node, $lvl_counter, $list_length );
+	if ( opendir( DIR, $dir ) ) {
+		my @lines = grep !/^(\.\.|\.)\/?$/, readdir( DIR );
+		closedir( DIR );
+		for ( @lines ) {
+			$node = $dir.'/'.$_;
+			if( -d $node && ! -l $node ) {
+				push @filelist, find_matching_files( $node, $file_regex );
+				#main::logger "DEBUG: dir = $node\n";
+			} elsif ( $node =~ m{$file_regex}i ) {
+				push @filelist, $node;
+				#main::logger "DEBUG: file = $node\n";
+			}
+		}
+	}
+	return @filelist;
+}
+
+
+
 # Usage: Programme::localfiles->get_links( $progref, 'localfiles' );
 sub get_links {
 	shift; # ignore obj ref
 	my $progref = shift;
 	my $prog_type = shift;
 
-	# Check if we have IPC::Open3 otherwise fallback on system()
+	# Check if we have MP3::Info
 	eval "use MP3::Info";
 	if ($@) {
-		main::logger "WARNING: Please install the MP3::Info perl module to use '$prog_type' plugin (this plugin isn't yet supported under win32)\n";
+		main::logger "WARNING: Please install the MP3::Info perl module to use '$prog_type' plugin\n";
 		#main::logger "WARNING: Please download and run latest installer or install the MP3::Info perl module to use '$prog_type' plugin\n";
 		return 0;
 	};
@@ -106,7 +132,7 @@ sub get_links {
 	my $ext = 'mp3';
 	for my $scandir ( split /,/, $opt->{localfilesdirs} ) {
 		main::logger "INFO: Scanning $scandir\n";
-		my @scan = `find $scandir -type f -iname '*.$ext' 2>/dev/null`;
+		my @scan = find_matching_files( $scandir, '.+\.'.$ext.'$' );
 		main::logger "INFO: Got ".($#scan+1)." $ext files\n";
 		push @files, @scan;
 	}
@@ -130,12 +156,18 @@ sub get_links {
 		# INFO: SIZE,OFFSET,MS,STEREO,SECS,PADDING,LAME,MM,COPYRIGHT,SS,LAYER,MODE,FREQUENCY,VBR,TIME,FRAMES,BITRATE,VBR_SCALE,VERSION,FRAME_LENGTH
 
 		# Skip if there is no track name
-		if ( ! $tag->{'TITLE'} ) {
-			# Maybe guess the metadata from the filename here?
-			main::logger "WARNING: $pid has no title - skipping\n" if $opt->{verbose};
-			next;
+		if ( ! ( $tag->{'TITLE'} && $tag->{'ALBUM'} && $tag->{'ARTIST'} ) ) {
+			## Maybe guess the metadata from the filename here?
+			#main::logger "WARNING: $pid has no title - skipping\n" if $opt->{verbose};
+			#next;
+			main::logger "WARNING: $pid has no title - guessing\n" if $opt->{verbose};
+			if ( basename( $file ) =~ m{^(\d*?)[\w\-]*?(.+?)\.(\w+)$} ) {
+				#$tag->{'TITLE'} = "$tag->{'TRACKNUM'}_$tag->{'ALBUM'}" if $tag->{'TRACKNUM'} && $tag->{'ALBUM'} && ! $tag->{'TITLE'};
+				$tag->{'TITLE'} = $tag->{'TITLE'} || $2;
+				$tag->{'ALBUM'} = $tag->{'ALBUM'} || $2;
+				$tag->{'ARTIST'} = $tag->{'ARTIST'} || $2;
+			}
 		}
-
 		main::logger '.';
 
 		my @category;
@@ -173,8 +205,14 @@ sub get_links {
 			'channel'	=> $tag->{'ARTIST'},
 			'categories'	=> join(',', @category),
 			'type'		=> $prog_type,
-			'web'		=> 'file://${file}',
+			'web'		=> "file://${file}",
 		);
+
+		# Sanitize element values
+		for ( values %{ $progref->{$pid} } ) {
+			s/[\n\r]/ /g;
+			s/(^[\s_,]+|[\s_,]+$)//g;
+		}
 	}
 
 	main::logger "\n";

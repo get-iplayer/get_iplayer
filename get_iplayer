@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.37;
+my $version = 2.38;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1269,7 +1269,7 @@ sub get_links {
 	}
 
 	# if a cache file doesn't exist/corrupted/empty, flush option is specified or original file is older than $cache_sec then download new data
-	my $cache_secs = main::progclass( $prog_type )->expiry() || 14400;
+	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
 	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && ! $opt->{flush};
 	if ( (! $only_load_from_cache) && ( 
 			(! keys %prog_old) || 
@@ -4616,6 +4616,7 @@ sub get_metadata {
 # Intelligently split name and episode from title string for BBC iPlayer metadata
 sub split_title {
 	my $title = shift;
+	my ( $name, $episode );
 	# <title type="text">The Sarah Jane Adventures: Series 1: Revenge of the Slitheen: Part 2</title>
 	# <title type="text">The Story of Tracy Beaker: Series 4 Compilation: Independence Day/Beaker Witch Project</title>
 	# <title type="text">The Sarah Jane Adventures: Series 1: The Lost Boy: Part 2</title>
