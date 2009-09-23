@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.52';
+my $VERSION = '0.53';
 
 use strict;
 use CGI ':all';
@@ -631,8 +631,8 @@ sub run_cgi {
 
 
 sub pvr_run {
-	print $fh "<strong><p>The cache will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
-	print $se "INFO: Starting Manual PVR Run\n";
+	print $fh "<strong><p>The PVR will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
+	print $se "INFO: Starting PVR Run\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nopurge',
@@ -2372,7 +2372,7 @@ sub flush {
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'flush=1', 'nopurge=1', "type=$typelist", "search=no search just flush" ),
+		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "search=no search just flush" ),
 	);
 	print $fh '<pre>';
 	run_cmd( $fh, $se, 1, @cmd );
@@ -3638,25 +3638,33 @@ sub begin_html {
 		-charset	=> 'utf-8',
 		-cookie		=> [@cookies],
 	);
-
 	print $se "\nHEADERS:\n$headers\n" if $opt_cmdline->{debug};
-	print $fh $headers;
 
-	print $fh "<html>";
-	print $fh "<HEAD><TITLE>get_iplayer Web PVR Manager</TITLE>\n";
-	insert_stylesheet();
-	print $fh "</HEAD>\n";
-	insert_javascript();
+	# Build body element and page title differently depending on the type of page
 	# Load the refresh tab if required
+	my $body_element;
+	my $title;
 	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
 	my $autopvrrun  = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
 	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'flush' ) {
-		print $fh "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
+		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
+		$title = 'Refreshing Cache: get_iplayer Web PVR Manager';
 	} elsif ( $autopvrrun && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
-		print $fh "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
+		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
+		$title = 'Running PVR: get_iplayer Web PVR Manager';
 	} else {
-		print $fh "<body>\n";
+		$body_element = "<body>\n";
+		$title = sprintf "get_iplayer Web PVR Manager v%.2f", $VERSION;
 	}
+
+	# Write out the page http and html headers
+	print $fh $headers;
+	print $fh "<html>";
+	print $fh "<HEAD><TITLE>$title</TITLE>\n";
+	insert_stylesheet();
+	print $fh "</HEAD>\n";
+	insert_javascript();
+	print $fh $body_element;
 }
 
 
