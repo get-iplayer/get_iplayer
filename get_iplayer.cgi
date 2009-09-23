@@ -657,8 +657,8 @@ sub pvr_run {
 				a(
 					{
 						-class=>'action',
-						-title => 'Close',
-						-onClick  => "RefreshTab( '?NEXTPAGE=flush&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun).", 1 );",
+						-title => 'Run PVR Now',
+						-onClick  => "RefreshTab( '?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun).", 1 );",
 					},
 					'PVR Run Now'
 				),
