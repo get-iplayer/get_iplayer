@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.38;
+my $version = 2.39;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -7106,7 +7106,7 @@ sub get {
 					main::tee($namedpipe, $prog->{filepart});
 					#system( "cat $namedpipe 2>/dev/null| $bin->{tee} $prog->{filepart}");
 				} else {
-					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null| $bin->{tee} \"$prog->{filepart}\"";
+					my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null| $bin->{tee} \"$prog->{filepart}\"";
 					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 					# Create symlink if required
 					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
@@ -7120,14 +7120,14 @@ sub get {
 					main::tee($namedpipe);
 					#system( "cat $namedpipe 2>/dev/null");
 				} else {
-					my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null";
+					my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null";
 					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-					system( "$bin->{lame} $binopts->{lame} $namedpipe - 2>/dev/null");
+					system( "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null");
 				}
 
 			# Stream mp3 to file directly
 			} elsif ( ! $opt->{stdout} ) {
-				my $cmd = "$bin->{lame} $binopts->{lame} $namedpipe \"$prog->{filepart}\" >/dev/null 2>/dev/null";
+				my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" \"$prog->{filepart}\" >/dev/null 2>/dev/null";
 				main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
 				# Create symlink if required
 				$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
