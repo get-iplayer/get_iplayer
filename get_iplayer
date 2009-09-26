@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.39;
+my $version = 2.40;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1026,6 +1026,8 @@ sub list_progs {
 				main::display_stream_info( $this, $this->{verpids}->{$version}, $version );
 				$opt->{quiet} = 0;
 			}
+			# remove offending metadata
+			delete $this->{filename}, $this->{filepart}, $this->{ext};
 		}
 	}
 	logger "\nINFO: ".($#matches + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
@@ -3847,7 +3849,7 @@ sub generate_filenames {
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	
 	# Don't override the {filename} if it is already set (i.e. for history info)
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ! $prog->{filename};
+	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if $prog->{filename} =~ /\.EXT$/ || ! $prog->{filename};
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
 
 	# Create symlink filename if required
