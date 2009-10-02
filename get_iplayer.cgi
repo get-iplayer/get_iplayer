@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.53';
+my $VERSION = '0.54';
 
 use strict;
 use CGI ':all';
@@ -2390,7 +2390,7 @@ sub flush {
 					{
 						-class=>'action',
 						-title => 'Refresh Cache Now',
-						-onClick  => "RefreshTab( '?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
+						-onClick  => "RefreshTab( '?NEXTPAGE=flush&PROGTYPES=$typelist&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
 					},
 					'Force Refresh'
 				),
