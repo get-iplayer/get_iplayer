@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.41;
+my $version = 2.42;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -619,6 +619,7 @@ sub find_matches {
 
 	# External Binaries
 	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
+	delete $binopts->{mplayer};
 	push @{ $binopts->{mplayer} }, '-nolirc';
 	push @{ $binopts->{mplayer} }, '-v' if $opt->{debug};
 	push @{ $binopts->{mplayer} }, '-really-quiet' if $opt->{quiet};
@@ -626,10 +627,12 @@ sub find_matches {
 	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'ffmpeg';
 
 	$bin->{lame}		= $opt->{lame} || 'lame';
+	delete $binopts->{lame};
 	$binopts->{lame}	= '-f';
 	$binopts->{lame}	.= ' --quiet ' if $opt->{quiet};
 
 	$bin->{vlc}		= $opt->{vlc} || 'cvlc';
+	delete $binopts->{vlc};
 	push @{ $binopts->{vlc} }, '-vv' if $opt->{debug};
 
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
@@ -637,6 +640,7 @@ sub find_matches {
 	$bin->{tee}		= 'tee';
 
 	$bin->{flvstreamer}	= $opt->{flvstreamer} || $opt->{rtmpdump} || 'flvstreamer';
+	delete $binopts->{flvstreamer};
 	push @{ $binopts->{flvstreamer} }, ( '--timeout', 10 );
 	push @{ $binopts->{flvstreamer}	}, '--quiet' if $opt->{quiet};
 	push @{ $binopts->{flvstreamer}	}, '--verbose' if $opt->{verbose};
