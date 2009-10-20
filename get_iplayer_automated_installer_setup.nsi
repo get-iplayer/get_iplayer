@@ -1,7 +1,7 @@
 ;Product Info
 Name "get_iplayer" ;Define your own software name here
 !define PRODUCT "get_iplayer" ;Define your own software name here
-!define VERSION "2.0+" ;Define your own software version here
+!define VERSION "2.2+" ;Define your own software version here
 
 ; Script create for version 2.0rc1/final (from 12.jan.04) with GUI NSIS (c) by Dirk Paehl. Thank you for use my program
 
@@ -77,16 +77,16 @@ Section "get_iplayer" section1
 
   ;startmenu
   CreateDirectory "$SMPROGRAMS\get_iplayer"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Run Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k get_iplayer.cmd" "$INSTDIR\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k get_iplayer.cmd --search dontshowanymatches && get_iplayer.cmd --help" "$INSTDIR\iplayer_logo.ico"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Update Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k Update_get_iplayer.cmd" "$INSTDIR\iplayer_logo.ico"
   WriteIniStr "$INSTDIR\get_iplayer.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Help.lnk" "$INSTDIR\get_iplayer.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Show Home Page.lnk" "$INSTDIR\get_iplayer.url" "" "$SYSDIR\SHELL32.dll" 175
   WriteIniStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/documentation/"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Example Commands.lnk" "$INSTDIR\command_examples.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Show Example Commands.lnk" "$INSTDIR\command_examples.url" "" "$SYSDIR\SHELL32.dll" 175
   CreateShortCut "$SMPROGRAMS\get_iplayer\Downloads Folder.lnk" "$INSTDIR\Downloads\"
   WriteIniStr "$INSTDIR\pvr_manager.url" "InternetShortcut" "URL" "http://127.0.0.1:1935"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Web PVR Manager (Experimental).lnk" "$SYSDIR\cmd.exe" "/c pvr_manager.cmd" "$INSTDIR\iplayer_logo.ico"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Run PVR.lnk" "$SYSDIR\cmd.exe" "/k run_pvr.bat" "$INSTDIR\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Web PVR Manager.lnk" "$SYSDIR\cmd.exe" "/c pvr_manager.cmd" "$INSTDIR\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Run PVR Now.lnk" "$SYSDIR\cmd.exe" "/k run_pvr.bat" "$INSTDIR\iplayer_logo.ico"
 
   ;uninstall info
   CreateShortCut "$SMPROGRAMS\get_iplayer\Uninstall.lnk" "$INSTDIR\uninst.exe" "" "$INSTDIR\uninst.exe" 0
@@ -143,7 +143,7 @@ Section "ffmpeg" section4
 SectionEnd
 LangString DESC_Section4 ${LANG_ENGLISH} "Download and install ffmpeg from http://linuxcentre.net/winredirect/ffmpeg (6.3MB)"
 
-Section /o "VLC" section5
+Section "VLC" section5
   Call ConnectInternet ;Make an internet connection (if no connection available)
   ;download vlc
   NSISdl::download http://linuxcentre.net/winredirect/vlc $INSTDIR\vlc.7z
