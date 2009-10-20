@@ -1,7 +1,7 @@
 ;Product Info
 Name "get_iplayer" ;Define your own software name here
 !define PRODUCT "get_iplayer" ;Define your own software name here
-!define VERSION "2.2+" ;Define your own software version here
+!define VERSION "2.4+" ;Define your own software version here
 
 ; Script create for version 2.0rc1/final (from 12.jan.04) with GUI NSIS (c) by Dirk Paehl. Thank you for use my program
 
@@ -157,7 +157,7 @@ Section "VLC" section5
 SectionEnd
 LangString DESC_Section5 ${LANG_ENGLISH} "Download and install VLC from http://linuxcentre.net/winredirect/vlc (15.0MB)"
 
-Section "flvstreamer" section6
+Section /o "flvstreamer (non-cygwin)" section6
   Call ConnectInternet ;Make an internet connection (if no connection available)
   ;download flvstreamer
   NSISdl::download http://linuxcentre.net/winredirect/flvstreamer "$INSTDIR\flvstreamer.exe"
@@ -168,14 +168,31 @@ Section "flvstreamer" section6
 SectionEnd
 LangString DESC_Section6 ${LANG_ENGLISH} "Download and install flvstreamer(win32) from http://linuxcentre.net/winredirect/flvstreamer (~300k)"
 
+Section "flvstreamer (using cygwin library)" section7
+  Call ConnectInternet ;Make an internet connection (if no connection available)
+  ;download flvstreamer-cygwin
+  NSISdl::download http://linuxcentre.net/winredirect/flvstreamer-cygwin "$INSTDIR\flvstreamer.exe"
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "success" +3
+    MessageBox MB_OK "Download of flvstreamer(cygwin) failed: $R0, Install it manually"
+    Return
+  NSISdl::download http://linuxcentre.net/winredirect/cygwindll "$INSTDIR\cygwin1.dll"
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "success" +3
+    MessageBox MB_OK "Download of cygwin library failed: $R0, Install it manually"
+    Return
+SectionEnd
+LangString DESC_Section7 ${LANG_ENGLISH} "Download and install flvstreamer(win32/cygwin) from http://linuxcentre.net/winredirect/flvstreamer-cygwin (~2500k)"
+
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${Section1} $(DESC_Section1)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section2} $(DESC_Section2)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section3} $(DESC_Section3)  
-  !insertmacro MUI_DESCRIPTION_TEXT ${Section4} $(DESC_Section4)  
-  !insertmacro MUI_DESCRIPTION_TEXT ${Section5} $(DESC_Section5)   
-  !insertmacro MUI_DESCRIPTION_TEXT ${Section6} $(DESC_Section6)   
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section4} $(DESC_Section4)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section5} $(DESC_Section5)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section6} $(DESC_Section6)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section7} $(DESC_Section7)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
  
@@ -190,15 +207,25 @@ Function un.onInit
 FunctionEnd
  
 Section "Uninstall" 
-  MessageBox MB_YESNO "Remove Downloaded Files?" IDYES true IDNO false
-  true:
+  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Remove Downloaded Files?" IDYES true1 IDNO false1
+  true1:
     Delete  "$INSTDIR\Downloads\*.*" 
     RMDir "$INSTDIR\Downloads"
-    Goto next
-  false:
+    Goto next1
+  false1:
     ;do nothing
-  next:
+  next1:
   
+  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Remove User Preferences, PVR Searches, Presets and Recording History?" IDYES true2 IDNO false2
+  true2:
+    ;delete the local user data
+    Delete $PROFILE\.get_iplayer\*
+    RmDir $PROFILE\.get_iplayer
+    Goto next2
+  false2:
+    ;do nothing
+  next2:
+
   ReadEnvStr $TempGlobalProfile "ALLUSERSPROFILE"
   RMDir /r "$INSTDIR\mplayer"  
   RMDir /r "$INSTDIR\lame"
@@ -215,11 +242,7 @@ Section "Uninstall"
   ;remove the global options file 
   Delete $TempGlobalProfile\get_iplayer\options
   RmDir $TempGlobalProfile\get_iplayer
-  
-  ;delete the local user data
-  Delete $PROFILE\.get_iplayer\*
-  RmDir $PROFILE\.get_iplayer
- 
+   
   DeleteRegKey HKEY_LOCAL_MACHINE "SOFTWARE\get_iplayer"
   DeleteRegKey HKEY_LOCAL_MACHINE "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer"
   RMDir "$INSTDIR"
