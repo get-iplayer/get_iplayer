@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.54';
+my $VERSION = '0.55';
 
 use strict;
 use CGI ':all';
@@ -1038,6 +1038,23 @@ sub get_opml {
 			push @playlist, "\t\t<outline URL=\"".encode_entities( build_url_stream( $request_host, $type, $pid, $modes, $outtype ) )."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
 		}
 
+	# Top-level Menu
+	} elsif ( lc($list) eq 'menu' ) {
+		my %menu = (
+			'BBC Live Radio (National)' 	=> "${request_host}?ACTION=opml&PROGTYPES=liveradio&SEARCH=%20\\d&OUTTYPE=wav",
+			'BBC Live Radio (All)' 		=> "${request_host}?ACTION=opml&PROGTYPES=liveradio&OUTTYPE=wav",
+			'BBC iPlayer Radio Listen Again'=> "${request_host}?ACTION=opml&PROGTYPES=radio&LIST=channel",
+		);
+
+		# Header
+		push @playlist, "\t<head title=\"GetIplayer\">\n\t\t\n\t</head>";
+		push @playlist, "\t<body>";
+		for my $item ( sort keys %menu ) {
+			my $item_url = $menu{ $item };
+			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
+			push @playlist, "\t\t<outline URL=\"".encode_entities( $item_url )."\" text=\"".encode_entities( "$item" )."\" />";
+		}
+		
 	# Channels/Names etc
 	} elsif ($list) {
 	
