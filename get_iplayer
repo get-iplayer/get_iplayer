@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.42;
+my $version = 2.43;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -123,7 +123,7 @@ my $opt_format = {
 	get		=> [ 2, "get|record|g", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash", 'Recording', '--hash', "Show recording progress as hashes"],
 	itvnothread	=> [ 1, "itvnothread", 'Recording', '--itvnothread', "Disable parallel threaded recording for itv"],
-	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaudio,realaudio,wma"],
+	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma"],
 	multimode	=> [ 1, "multimode", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
@@ -222,6 +222,7 @@ my $opt_format = {
 	warranty	=> [ 1, "Display", 'Display', '--warranty', 'Displays warranty section of GPLv3'],
 
 	# External Program
+	atomicparsley	=> [ 0, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley tagger binary"],
 	id3v2		=> [ 0, "id3tag|id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 
@@ -636,6 +637,7 @@ sub find_matches {
 	push @{ $binopts->{vlc} }, '-vv' if $opt->{debug};
 
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
+	$bin->{AtomicParsley}	= $opt->{AtomicParsley} || 'AtomicParsley';
 
 	$bin->{tee}		= 'tee';
 
@@ -3617,9 +3619,10 @@ sub report {
 sub tag_file {
 	my $prog = shift;
 
+	# Return if file does not exist
+	return if ! -f $prog->{filename};
+
 	if ( $prog->{filename} =~ /\.(aac|mp3|m4a)$/i ) {
-		# Return if file does not exist
-		return if ! -f $prog->{filename};
 		# Create ID3 tagging options for external tagger program (escape " for shell)
 		my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
 		s|"|\\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
@@ -3641,6 +3644,52 @@ sub tag_file {
 			}
 		} else {
 			main::logger "WARNING: Cannot tag $prog->{ext} file\n" if $opt->{verbose};
+		}
+
+	} elsif ( $prog->{filename} =~ /\.(mp4|m4v)$/i ) {
+		# Create mp4 tagging options for external tagging program.
+		my ( $tvnetwork, $description, $comment, $title, $tvshowname, $tvepisode, $artist, $year ) =
+			( $prog->{channel}, $prog->{desc}, $prog->{desc}, $prog->{title}, $prog->{longname},
+			  $prog->{pid}, $prog->{name}, $prog->{firstbcast} ) ;
+		s|"|\\"|g for ( $tvnetwork, $description, $comment, $title, $tvshowname, $tvepisode, $artist, $year );
+
+		# Only tag if the required tool exists
+		if ( main::exists_in_path( 'AtomicParsley' ) ) {
+			# Download Thubnail file as well for inclusion into MP4 stream.
+			# Apple TV/iTunes will use it.
+			main::logger "INFO: mp4 tagging $prog->{ext} file\n";
+
+			# extract year from firstbcast e.g. 2009-10-05T22:35:00+01:00
+			$year =~ s/^.*(20\d\d|19\d\d).*$/$1/g;
+			# If year isn't set correctly in the information, then assume today.
+			$year = (localtime())[5] + 1900 unless $year;
+
+			# Download the thumbnail if it doesn't already exist
+			$prog->download_thumbnail if ! -f $prog->{thumbfile};
+			my @cmd = (
+				$bin->{AtomicParsley}, $prog->{filename},
+				'--TVNetwork', $tvnetwork,
+				'--description', $description,
+				'--comment', $comment,
+				'--title', $title,
+				'--TVShowName', $tvshowname,
+				'--TVEpisode', $tvepisode,
+				'--artist', $artist,
+				'--year', $year,
+				'--stik','TV Show',	# Force to be recognised as such.
+				'--overWrite',		# Saves temp files being left around.
+			);
+			# Add the thumbnail if one was downloaded
+			if ( -f $prog->{thumbfile} ) {
+				push @cmd, "--artwork", $prog->{thumbfile};
+			}
+			# After running, clean up thumbnail file unless it is required using the thumbnail option.
+			if ( main::run_cmd( 'STDERR', @cmd ) ) {
+				main::logger "WARNING: Failed to tag $prog->{ext} file\n";
+				unlink $prog->{thumbfile} if ! $opt->{thumb};
+				return 2;
+			}
+			unlink $prog->{thumbfile} if ! $opt->{thumb};
 		}
 	}
 }
@@ -3885,11 +3934,20 @@ sub generate_filenames {
 		}
 	}
 
+	# Determine thumbnail filename
+	if ( $prog->{thumbnail} =~ /^http/i ) {
+		my $ext;
+		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
+		$ext = $opt->{thumbext} || $ext;
+		$prog->{thumbfile} = "$prog->{dir}/$prog->{fileprefix}.${ext}";
+	}
+
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
 	main::logger "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
 	main::logger "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
 	main::logger "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
 	main::logger "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
+	main::logger "DEBUG: Thumnail Filename:  $prog->{thumbfile}\n" if $opt->{debug};
 	main::logger "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
 
 	# Check path length is < 256 chars
@@ -4072,11 +4130,9 @@ sub download_thumbnail {
 	my $ext;
 	my $image;
 		
-	if ( $prog->{thumbnail} =~ /^http/i ) {
+	if ( $prog->{thumbnail} =~ /^http/i && $prog->{thumbfile} ) {
 		main::logger "INFO: Getting thumbnail from $prog->{thumbnail}\n" if $opt->{verbose};
-		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
-		$ext = $opt->{thumbext} || $ext;
-		$file = "$prog->{dir}/$prog->{fileprefix}.${ext}";
+		$file = $prog->{thumbfile};
 
 		# Download thumb
 		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
@@ -5042,7 +5098,18 @@ sub get_stream_data {
 				$mattribs->{type} eq 'audio/mp4' &&
 				$mattribs->{encoding} eq 'aac'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'flashaac', 'rtmp', 'aac' );
+			# flashaachigh
+			if (  $mattribs->{bitrate} >= 192 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashaachigh', 'rtmp', 'aac' );
+
+			# flashaacstd
+			} elsif ( $mattribs->{bitrate} >= 96 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashaacstd', 'rtmp', 'aac' );
+
+			# flashaaclow
+			} else {
+				get_stream_data_cdn( \%data, $mattribs, 'flashaaclow', 'rtmp', 'aac' );
+			}
 
 		# flashaudio modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
@@ -5771,7 +5838,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio Recording mode(s): iphone,flashaac,flashaudio,realaudio,wma (default: iphone,flashaac,flashaudio,realaudio)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio Recording mode(s): iphone,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma (default: iphone,flashaachigh,flashaacstd,flashaudio,realaudio,flashaaclow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Recording', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
@@ -5820,16 +5887,18 @@ sub modelist {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'iphone,realaudio,wma';
 		} else {
-			$mlist = 'iphone,flashaudio,flashaac,realaudio,wma';
+			$mlist = 'iphone,flashaachigh,flashaacstd,flashaudio,realaudio,flashaaclow,wma';
 		}
 	}
 	# Deal with BBC Radio fallback modes and expansions
 	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
 	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
-	# flashaac => flashaac1,flashaac2
-	$mlist = main::expand_list($mlist, 'best', 'flashaac,iphone,flashaudio,realaudio,wma');
+	# flashaac => flashaachigh,flashaacstd,flashaaclow
+	# flashaachigh => flashaachigh1,flashaachigh2
+	$mlist = main::expand_list($mlist, 'best', 'flashaachigh,flashaacstd,iphone,flashaudio,realaudio,flashaaclow,wma');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaudio,flashaac');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flashaudio,flashaac');
+	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaaclow');
 
 	return $mlist;
 }
@@ -6195,15 +6264,18 @@ sub modelist {
 			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'realaudio,wma';
 		} else {
-			$mlist = 'flashaac,realaudio,wma';
+			$mlist = 'flashaachigh,flashaacstd,realaudio,flashaaclow,wma';
 		}
 	}
 	# Deal with BBC Radio fallback modes and expansions
-	# Valid modes are iphone,rtmp,flashaac,flashaudio,realaudio,wmv
-	# 'rtmp' or 'flash' => 'flashaudio,flashaac'
-	$mlist = main::expand_list($mlist, 'best', 'flashaac,realaudio,wma');
+	# Valid modes are rtmp,flashaac,realaudio,wmv
+	# 'rtmp' or 'flash' => 'flashaac'
+	# flashaac => flashaachigh,flashaacstd,flashaaclow
+	# flashaachigh => flashaachigh1,flashaachigh2
+	$mlist = main::expand_list($mlist, 'best', 'flashaachigh,flashaacstd,realaudio,flashaaclow,wma');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaac');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flashaac');
+	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaaclow');
 
 	return $mlist;
 }
