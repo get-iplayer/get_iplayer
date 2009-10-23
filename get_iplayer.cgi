@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.55';
+my $VERSION = '0.56';
 
 use strict;
 use CGI ':all';
@@ -87,6 +87,7 @@ EOF
 
 
 # Some defaults
+my $default_modes = 'flashaachigh,flashaacstd,flash,iphone,realaudio,flashaaclow';
 $opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
@@ -680,7 +681,7 @@ sub pvr_run {
 sub stream_prog {
 	my ( $mimetype, $pid , $type, $modes, $ext, $notranscode, $abitrate, $vsize, $vfr ) = ( @_ );
 	# Default modes to try
-	$modes = 'flashaac,flash,iphone,realaudio' if ! $modes;
+	$modes = $default_modes if ! $modes;
 	
 	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video fram rate '$vfr'\n";
 
@@ -1981,7 +1982,7 @@ sub show_info {
 					{
 						-class => 'action',
 						-title => "Play '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now",
-						-href => build_url_playlist( '', 'playlist', 'pid', $pid, $prog{$pid}->{mode} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, $cgi->param( 'OUTTYPE' ) || 'out.flv', $cgi->param( 'STREAMTYPE' ), $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) ),
+						-href => build_url_playlist( '', 'playlist', 'pid', $pid, $prog{$pid}->{mode} || $default_modes, $prog{$pid}->{type}, $cgi->param( 'OUTTYPE' ) || 'out.flv', $cgi->param( 'STREAMTYPE' ), $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) ),
 					},
 					'Play'
 				),
@@ -2563,7 +2564,7 @@ sub search_progs {
 		if ( $pid =~ m{^/} ) {
 			if ( -f $pid ) {
 				# Play
-				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
+				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'PlayFile' ).'<br />';
 				# PlayDirect
@@ -2582,7 +2583,7 @@ sub search_progs {
 		# Search mode
 		} else {
 		# Play
-			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || 'flashaac,flash,iphone,realaudio', $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
+			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
 			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
 			# Add Series
@@ -3288,7 +3289,7 @@ sub process_params {
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'flashaac,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio', # default
+		default	=> 'flashaachigh,flashaacstd,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio,flashaaclow', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
