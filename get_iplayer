@@ -4335,22 +4335,16 @@ sub get_verpids {
 		# Treat live streams accordingly
 		# Live TV
 		if ( m{\s+simulcast="true"} ) {
-			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
 			$version = 'default';
-			# Now we lookup the http://www.bbc.co.uk/emp/simulcast/<verpid>.xml to get the correct verpid params
-			# If we use the params in the playlist then they are sometimes wrong
-			# send request
-			my $xml = main::request_url_retry( $ua, "http://www.bbc.co.uk/emp/simulcast/${verpid}.xml", 3 );
-			if ( ! $xml ) {
-				main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-				return 0;
-			}
-			# Flatten
-			$xml =~ s/\n/ /g;
-			# <connection kind="akamai" application="live" identifier="bbc1_simcast@s3173" server="cp56493.live.edgefcs.net" tokenIssuer="akamaiUk" />
-			# <connection kind="akamai" application="live" identifier="news_channel_1@s2677" server="cp52113.live.edgefcs.net" tokenIssuer="akamaiUk" />
-			# verpid = ?server=cp56493.live.edgefcs.net&identifier=bbc1_simcast@s3173&kind=akamai&application=live
-			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"\s+};
+			$verpid = "http://www.bbc.co.uk/emp/simulcast/".$1.".xml" if m{\s+live="true"\s+identifier="(.+?)"};
+			main::logger "INFO: Using Live TV: $verpid\n" if $opt->{verbose} && $verpid;
+
+		# Live/Non-live EMP tv/radio XML URL
+		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http.+xml$/ ) {
+			$version = 'default';
+			$verpid = $url;
+			main::logger "INFO: Using Live/Non-live EMP tv/radio XML URL: $verpid\n" if $opt->{verbose} && $verpid;
+
 		# Live/Non-live EMP tv/radio
 		} elsif ( $prog->{pid} =~ /^http/i ) {
 			$version = 'default';
@@ -4365,19 +4359,23 @@ sub get_verpids {
 			if ( ! $verpid ) {
 				$verpid = "?server=$3&identifier=$2&kind=$1&application=ondemand" if $xml =~ m{<connection\s+kind="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"};
 			}
+			main::logger "INFO: Using Live/Non-live EMP tv/radio: $verpid\n" if $opt->{verbose} && $verpid;
+
 		# Live radio
 		} elsif ( m{\s+live="true"\s} ) {
 			# Try to get live stream version and verpid
 			# <item kind="radioProgramme" live="true" identifier="bbc_radio_one" group="bbc_radio_one">
 			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
-			#$verpid = $prog->{pid};
 			$version = 'default';
+			main::logger "INFO: Using Live radio: $verpid\n" if $opt->{verbose} && $verpid;
+
 		# Not Live standard TV and Radio
 		} else {
 			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
 			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
 			# <alternate id="default" />
 			$version = lc($1) if m{<alternate\s+id="(.+?)"};
+			main::logger "INFO: Using Not Live standard TV and Radio: $verpid\n" if $opt->{verbose} && $verpid;
 		}
 		
 		next if ! ($verpid && $version);
@@ -4836,7 +4834,7 @@ sub get_stream_data_cdn {
 		# Common attributes
 		# swfurl = Default iPlayer swf version
 		my $conn = {
-			swfurl		=> "http://www.bbc.co.uk/emp/9player.swf?revision=10344_10753",
+			swfurl		=> "http://www.bbc.co.uk/emp/10player.swf?revision=14200_14320",
 			ext		=> $ext,
 			streamer	=> $streamer,
 			bitrate		=> $mattribs->{bitrate},
@@ -4852,6 +4850,19 @@ sub get_stream_data_cdn {
 			$conn->{live} = 1 if $cattribs->{application} =~ /^live/;
 			# Default appication is 'ondemand'
 			$cattribs->{application} = 'ondemand' if ! $cattribs->{application};
+
+			# if the authString is not set and this is a live (i.e. simulcast) then try to get an authstring
+			# Maybe should this be general for all CDNs?
+			if ( ! $cattribs->{authString} ) {
+				# Build URL
+				my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/';
+				my $url = ${media_stream_live_prefix}."?server=$cattribs->{server}&identifier=$cattribs->{identifier}&kind=$cattribs->{kind}&application=$cattribs->{application}";
+				my $xml = main::request_url_retry( main::create_ua(), $url, 3, undef, undef, 1 );
+				main::logger "\n$xml\n" if $opt->{debug};
+				$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
+				$conn->{authstring} = $cattribs->{authString};
+			}
+
 			if ( $cattribs->{authString} ) {
 				### ??? live and Live TV, Live EMP Video or Non-public EMP video:
 				$conn->{playpath} = "$cattribs->{identifier}?auth=$cattribs->{authString}&aifp=v001";
@@ -4974,7 +4985,8 @@ sub get_stream_data {
 	# BBC streams
 	my $xml;
 	my @medias;
-	# If this is a Live TV or EMP stream verpid
+
+	# If this is an EMP stream verpid
 	if ( $verpid =~ /^\?/ ) {
 		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
@@ -5009,9 +5021,17 @@ sub get_stream_data {
 		# Push into media data structure
 		push @{ $mattribs->{connections} }, $cattribs;
 		push @medias, $mattribs;
+
 	# Don't do this stream lookup if only iphone mode and neither info or subtitles options are specified - it is unneccesary
 	} elsif ( $prog->modelist() eq 'iphone' && (! $opt->{info}) && ! $opt->{subtitles} ) {
 		# skip mediaselector lookup
+
+	# Live simulcast verpid: http://www.bbc.co.uk/emp/simulcast/bbc_one_london.xml
+	} elsif ( $verpid =~ /http:/ ) {
+		$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
+		main::logger "\n$xml\n" if $opt->{debug};
+		@medias = parse_metadata( $xml );
+
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
 	} else {
 		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3, undef, undef, 1 );
@@ -5028,20 +5048,26 @@ sub get_stream_data {
 				$mattribs->{type} eq 'video/mp4' &&
 				$mattribs->{encoding} eq 'h264'
 		) {
+			# Determine classifications of modes based mainly on bitrate
+
 			# flashhd modes
-			get_stream_data_cdn( \%data, $mattribs, 'flashhd', 'rtmp', 'mp4' ) if $mattribs->{bitrate} =~ /3200/;
+			if ( $mattribs->{bitrate} > 3000 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashhd', 'rtmp', 'mp4' );
 
 			# flashvhigh modes
-			get_stream_data_cdn( \%data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[789]\d\d/;
+			} elsif ( $mattribs->{bitrate} > 1200 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' );
 
 			# flashhigh modes
-			get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/ && $mattribs->{bitrate} =~ /[78]\d\d/;
+			} elsif ( $mattribs->{bitrate} > 700 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' );
 
 			# flashstd modes
-			get_stream_data_cdn( \%data, $mattribs, 'flashstd', 'rtmp', 'mp4' ) if $mattribs->{width} =~ /[6]\d\d/ && $mattribs->{bitrate} =~ /[45]\d\d/;
+			} elsif ( $mattribs->{bitrate} > 400 && $mattribs->{width} >= 500 ) {
+				get_stream_data_cdn( \%data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
 
 			# iPhone modes
-			if ( $mattribs->{width} =~ /4\d\d/ ) {
+			} elsif ( $mattribs->{width} < 500 ) {
 				# Fix/remove some audio stream attribs
 				if ( $prog->{type} eq 'radio' ) {
 					$mattribs->{bitrate} = 128;
@@ -5051,12 +5077,26 @@ sub get_stream_data {
 				get_stream_data_cdn( \%data, $mattribs, 'iphone', 'iphone', 'mov' );
 			}
 
+#	width => 512
+#	bitrate => 500
+#	kind => video
+#	connections => ARRAY(0xa108874)
+#	type => video/x-flv
+#	height => 288
+#	CONNECTION-ELEMENT:
+#		identifier => news_channel_1@s2677
+#		kind => akamai
+#		tokenIssuer => akamaiUk
+#		application => live
+#		server => cp52113.live.edgefcs.net
+
+
 		# flashnormal modes (also live and EMP modes)
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
 				$mattribs->{encoding} eq 'vp6'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' ) if $mattribs->{width} =~ /[56]\d\d/;
+			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
 		# flashlow modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
@@ -5064,6 +5104,13 @@ sub get_stream_data {
 				$mattribs->{encoding} eq 'spark'
 		) {
 			get_stream_data_cdn( \%data, $mattribs, 'flashlow', 'rtmp', 'avi' );
+
+		# flashnormal modes without encoding specifed - assume vp6
+		} elsif (	$mattribs->{kind} eq 'video' &&
+				$mattribs->{type} eq 'video/x-flv'
+		) {
+			$mattribs->{encoding} = 'vp6';
+			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
 		# n95 modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
@@ -5157,7 +5204,7 @@ sub get_stream_data {
 
 	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
 	# Skip check if the modelist selected excludes iphone
-	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && grep /^iphone/, split ',', $prog->modelist() ) {
+	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && $verpid !~ /^http:/ && grep /^iphone/, split ',', $prog->modelist() ) {
 		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
 			my $mode = 'iphone1';
 			# Get iphone redirect
@@ -6017,13 +6064,6 @@ sub clean_pid {
 
 
 
-# get full episode metadata given pid and ua. Uses two different urls to get data
-sub get_metadata {
-	return 0;
-}
-
-
-
 # Usage: Programme::liveradio->get_links( \%prog, 'liveradio' );
 # Uses: %{ channels() }, \%prog
 sub get_links {
@@ -6115,6 +6155,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
+		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV Recoding modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal (default: flashhd,flashvhigh,flashhigh,flashstd,flashnormal)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings"],
 		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to flvstreamer/rtmpdump for livetv"],
 	};
@@ -6135,7 +6176,28 @@ sub init {
 
 # Returns the modes to try for this prog type
 sub modelist {
-	return 'flashnormal';
+	my $prog = shift;
+	my $mlist = $opt->{livetvmode} || $opt->{modes};
+	
+	# Defaults
+	if ( ! $mlist ) {
+		$mlist = 'flashhd,flashvhigh,flashhigh,flashstd,flashnormal';
+	}
+	# Deal with BBC TV fallback modes and expansions
+	# Valid modes are rtmp,flashhigh,flashstd
+	# 'rtmp' or 'flash' => 'flashhigh,flashnormal'
+	$mlist = main::expand_list($mlist, 'best', 'flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow');
+	$mlist = main::expand_list($mlist, 'flash', 'flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow');
+	$mlist = main::expand_list($mlist, 'rtmp', 'flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow');
+
+	return $mlist;
+}
+
+
+
+# Default minimum expected download size for a programme type
+sub min_download_size {
+	return 102400;
 }
 
 
