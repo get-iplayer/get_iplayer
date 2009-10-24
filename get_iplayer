@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.43;
+my $version = 2.44;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1048,7 +1048,7 @@ sub get_regex_matches {
 	my $download_regex = shift;
 
 	my %download_hash;
-	my ( $channel_regex, $category_regex, $versions_regex, $channel_exclude_regex, $category_exclude_regex );
+	my ( $channel_regex, $category_regex, $versions_regex, $channel_exclude_regex, $category_exclude_regex, $exclude_regex );
 
 	if ( $opt->{channel} ) {
 		$channel_regex = '('.(join '|', ( split /,/, $opt->{channel} ) ).')';
@@ -1075,7 +1075,11 @@ sub get_regex_matches {
 	} else {
 		$category_exclude_regex = '^ROGUE$';
 	}
-	my $exclude_regex = $opt->{exclude} || '^ROGUE$';
+	if ( $opt->{exclude} ) {
+		$exclude_regex = '('.(join '|', ( split /,/, $opt->{exclude} ) ).')';
+	} else {
+		$exclude_regex = '^ROGUE$';
+	}
 	my $since = $opt->{since} || 99999;
 	my $now = time();
 
