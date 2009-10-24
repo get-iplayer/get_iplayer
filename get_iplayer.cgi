@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.56';
+my $VERSION = '0.57';
 
 use strict;
 use CGI ':all';
@@ -453,6 +453,8 @@ sub run_cgi {
 
 		# If mimetype is defined
 		if ( $mimetypes{$ext} ) {
+			my $notranscode = 0;
+
 			# flv audio
 			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio|podcast)$};
 
@@ -466,6 +468,11 @@ sub run_cgi {
 
 			# Default Recipies
 			# Need to determine --type and then set the default --modes and default outtype for conversion if required
+			if ( $opt->{PROGTYPES}->{current} eq 'livetv' ) {
+				print $se "INFO: Transcoding disabled for livetv\n";
+				$notranscode = 1;
+				$ext = 'flv';
+			}
 			# No conversion for iphone radio as mp3
 			$ext = undef if $opt->{MODES}->{current} eq 'iphone' && $ext eq 'mp3';
 			# No conversion for realaudio radio as rm
@@ -476,7 +483,6 @@ sub run_cgi {
 			## $ext = undef if $ext eq 'flv';
 			# Disable transcoing if none is specified as OUTTYPE/STREAMTYPE - no point in doing this as we have then no idea of the mimetype
 			### Need a way to disable transcoding here - pass and check STREAMTYPE?
-			my $notranscode = 0;
 			if ( $opt->{STREAMTYPE}->{current} =~ /none/i ) {
 				print $se "INFO: Transcoding disabled (OUTTYPE=none)\n";
 				$ext = undef;
@@ -974,7 +980,7 @@ sub create_playlist_m3u_multi {
 		# playlist of proxied urls for streaming online prog via web server
 		} else {
 			my $suffix = "${pid}.${outtype}";
-			$url = build_url_stream( $request_host, $type, $pid, $mode, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
+			$url = build_url_stream( $request_host, $type, $pid, $mode || $opt->{MODES}->{current}, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} );
 		}
 
 		# Skip empty urls
@@ -2582,7 +2588,7 @@ sub search_progs {
 			}
 		# Search mode
 		} else {
-		# Play
+			# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
 			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
