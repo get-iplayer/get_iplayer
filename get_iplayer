@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.43;
+my $version = 2.44;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -141,6 +141,7 @@ my $opt_format = {
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
 
 	# Search
+	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
 	category 	=> [ 2, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
 	channel		=> [ 2, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
@@ -263,7 +264,7 @@ sub logger(@) {
 	# Make sure quiet can be overridden by verbose and debug options
 	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
 		# Only send messages to STDERR if pvr or stdout options are being used.
-		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} ) {
+		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} || $opt->{stream} ) {
 			print STDERR $msg;
 		} else {
 			print STDOUT $msg;
@@ -302,6 +303,11 @@ if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYERUSERPREFS};
 	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
 
+# Otherwise look for windows style file locations
+} elsif ( defined $ENV{USERPROFILE} ) {
+	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
+	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
@@ -309,10 +315,6 @@ if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
 	if ( -f '/etc/get_iplayer/options' ) {
 		logger "WARNING: System-wide options in /etc/get_iplayer/options are now ignored, please use /var/lib/get_iplayer/options instead\n";
 	}
-# Otherwise look for windows style file locations
-} elsif ( defined $ENV{USERPROFILE} ) {
-	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
-	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
 }
 # Make profile dir if it doesnt exist
 mkpath $profile_dir if ! -d $profile_dir;
@@ -637,7 +639,7 @@ sub find_matches {
 	push @{ $binopts->{vlc} }, '-vv' if $opt->{debug};
 
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
-	$bin->{AtomicParsley}	= $opt->{AtomicParsley} || 'AtomicParsley';
+	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
 
 	$bin->{tee}		= 'tee';
 
@@ -1080,7 +1082,8 @@ sub get_regex_matches {
 	} else {
 		$exclude_regex = '^ROGUE$';
 	}
-	my $since = $opt->{since} || 99999;
+	my $since = $opt->{since} || 999999;
+	my $before = $opt->{before} || -999999;
 	my $now = time();
 
 	if ( $opt->{verbose} ) {
@@ -1091,6 +1094,8 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search exclude_regex = $exclude_regex\n";
 		main::logger "DEBUG: Search channel_exclude_regex = $channel_exclude_regex\n";
 		main::logger "DEBUG: Search category_exclude_regex = $category_exclude_regex\n";
+		main::logger "DEBUG: Search since = $since\n";
+		main::logger "DEBUG: Search before = $before\n";
 	}
 	
 	# Determine search for fields
@@ -1107,6 +1112,7 @@ sub get_regex_matches {
 		  && $this->{name} !~ /$exclude_regex/i
 		  && $this->{categories} !~ /$category_exclude_regex/i
 		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
+		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
 		) {
 			# Custom search fields
 			if ( @searchfields ) {
@@ -3652,41 +3658,54 @@ sub tag_file {
 
 	} elsif ( $prog->{filename} =~ /\.(mp4|m4v)$/i ) {
 		# Create mp4 tagging options for external tagging program.
-		my ( $tvnetwork, $description, $comment, $title, $tvshowname, $tvepisode, $artist, $year ) =
-			( $prog->{channel}, $prog->{desc}, $prog->{desc}, $prog->{title}, $prog->{longname},
-			  $prog->{pid}, $prog->{name}, $prog->{firstbcast} ) ;
-		s|"|\\"|g for ( $tvnetwork, $description, $comment, $title, $tvshowname, $tvepisode, $artist, $year );
+		my $tags;
+		for my $tag ( keys %{ $prog } ) {
+			$tags->{ $tag } = $prog->{ $tag };
+			$tags->{ $tag } =~ s|"|\\"|g;
+		}
 
 		# Only tag if the required tool exists
-		if ( main::exists_in_path( 'AtomicParsley' ) ) {
+		if ( main::exists_in_path( 'atomicparsley' ) ) {
 			# Download Thubnail file as well for inclusion into MP4 stream.
 			# Apple TV/iTunes will use it.
 			main::logger "INFO: mp4 tagging $prog->{ext} file\n";
 
 			# extract year from firstbcast e.g. 2009-10-05T22:35:00+01:00
-			$year =~ s/^.*(20\d\d|19\d\d).*$/$1/g;
+			#$year =~ s/^.*(20\d\d|19\d\d).*$/$1/g;
 			# If year isn't set correctly in the information, then assume today.
-			$year = (localtime())[5] + 1900 unless $year;
+			$tags->{firstbcast} = (localtime())[5] + 1900 unless $tags->{firstbcast};
+
+			# Add guidance if set
+			$tags->{guidance} = 'clean';
+			$tags->{guidance} = 'explicit' if $prog->{guidance};
+
+			# Show type
+			my $stik = 'TV Show';
+			$stik = 'Movie' if $tags->{categories} =~ m{(film|movie)}i;
 
 			# Download the thumbnail if it doesn't already exist
 			$prog->download_thumbnail if ! -f $prog->{thumbfile};
+
+			# Build the command
 			my @cmd = (
-				$bin->{AtomicParsley}, $prog->{filename},
-				'--TVNetwork', $tvnetwork,
-				'--description', $description,
-				'--comment', $comment,
-				'--title', $title,
-				'--TVShowName', $tvshowname,
-				'--TVEpisode', $tvepisode,
-				'--artist', $artist,
-				'--year', $year,
-				'--stik','TV Show',	# Force to be recognised as such.
-				'--overWrite',		# Saves temp files being left around.
+				$bin->{atomicparsley}, $prog->{filename},
+				'--TVNetwork',	$tags->{channel},
+				'--description',$tags->{desc},
+				'--comment',	$tags->{desc},
+				'--title',	$tags->{title},
+				'--TVShowName',	$tags->{longname},
+				'--TVEpisode',	$tags->{pid},
+				'--artist',	$tags->{name},
+				'--year',	$tags->{firstbcast},
+				'--advisory',	$tags->{guidance},
+				'--genre',	$tags->{categories},
+				'--stik',	$stik,
+				'--overWrite',	# Saves temp files being left around.
 			);
+
 			# Add the thumbnail if one was downloaded
-			if ( -f $prog->{thumbfile} ) {
-				push @cmd, "--artwork", $prog->{thumbfile};
-			}
+			push @cmd, "--artwork", $prog->{thumbfile} if -f $prog->{thumbfile};
+
 			# After running, clean up thumbnail file unless it is required using the thumbnail option.
 			if ( main::run_cmd( 'STDERR', @cmd ) ) {
 				main::logger "WARNING: Failed to tag $prog->{ext} file\n";
