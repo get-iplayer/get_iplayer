@@ -1,7 +1,7 @@
 ;Product Info
 Name "get_iplayer" ;Define your own software name here
 !define PRODUCT "get_iplayer" ;Define your own software name here
-!define VERSION "2.4+" ;Define your own software version here
+!define VERSION "2.44+" ;Define your own software version here
 
 ; Script create for version 2.0rc1/final (from 12.jan.04) with GUI NSIS (c) by Dirk Paehl. Thank you for use my program
 
@@ -63,7 +63,7 @@ Section "get_iplayer" section1
   Rename "$INSTDIR\options" "$TempGlobalProfile\get_iplayer\options"
 
   FileOpen $pvr_file "$INSTDIR\run_pvr.bat" "w"
-  FileWrite $pvr_file "cd $\"C:\Program Files\get_iplayer$\"$\r$\n"
+  FileWrite $pvr_file "cd $INSTDIR$\r$\n"
   FileWrite $pvr_file "get_iplayer.cmd --pvr$\r$\n"
   FileWrite $pvr_file "$\r$\n"
   FileClose "$pvr_file"
