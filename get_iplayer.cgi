@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.57';
+my $VERSION = '0.58';
 
 use strict;
 use CGI ':all';
@@ -2141,7 +2141,13 @@ sub pvr_queue {
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
-			get_iplayer_webrequest_args( 'pvrqueue=1', "pid=$pid", "comment=$comment (queued: ".localtime().')', build_cmd_options( grep !/^(HISTORY|SINCE|SEARCH|SEARCHFIELDS|VERSIONLIST|EXCLUDEC.+)$/, @params ) ),
+			get_iplayer_webrequest_args(
+				'pvrqueue=1',
+				"pid=$pid",
+				"comment=$comment (queued: ".localtime().')',
+				"type=$type",
+				build_cmd_options( grep !/^(HISTORY|SINCE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
+			),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 		my $cmdout = join "", get_cmd_output( @cmd );
