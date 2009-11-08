@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.45;
+my $version = 2.46;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3462,8 +3462,9 @@ sub download_retry_loop {
 	my $ua = main::create_ua();
 
 	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
+	# Also need full metadata for AtomicParsley
 	$prog->get_metadata_general();
-	if ( $opt->{metadata} || $opt->{command} ) {
+	if ( $opt->{metadata} || $opt->{command} || main::exists_in_path( 'atomicparsley' ) ) {
 		$prog->get_metadata( $ua );
 	}
 
@@ -3659,9 +3660,14 @@ sub tag_file {
 	} elsif ( $prog->{filename} =~ /\.(mp4|m4v)$/i ) {
 		# Create mp4 tagging options for external tagging program.
 		my $tags;
-		for my $tag ( keys %{ $prog } ) {
-			$tags->{ $tag } = $prog->{ $tag };
-			$tags->{ $tag } =~ s|"|\\"|g;
+		for my $tag ( keys %{$prog} ) {
+			# Used for firstbcast etc which are a version based HASH
+			if ( ref$prog->{$tag} eq 'HASH' ) {
+				$tags->{$tag} = $prog->{$tag}->{$prog->{version}};
+			} else {
+				$tags->{$tag} = $prog->{$tag};
+			}
+			$tags->{$tag} =~ s|"|\\"|g;
 		}
 
 		# Only tag if the required tool exists
@@ -3673,7 +3679,7 @@ sub tag_file {
 			# extract year from firstbcast e.g. 2009-10-05T22:35:00+01:00
 			#$year =~ s/^.*(20\d\d|19\d\d).*$/$1/g;
 			# If year isn't set correctly in the information, then assume today.
-			$tags->{firstbcast} = (localtime())[5] + 1900 unless $tags->{firstbcast};
+			$tags->{firstbcast} = (localtime())[5] + 1900 if ! $tags->{firstbcast};
 
 			# Add guidance if set
 			$tags->{guidance} = 'clean';
@@ -3686,15 +3692,20 @@ sub tag_file {
 			# Download the thumbnail if it doesn't already exist
 			$prog->download_thumbnail if ! -f $prog->{thumbfile};
 
+			# Strip series and episode text from name, longname, episode
+			for my $tag ( qw/name longname episode/ ) {
+				$tags->{$tag} =~ s/(:\s*)?(Series|Episode)\s*\d+(:\s*)?//gi;
+			}
+
 			# Build the command
 			my @cmd = (
 				$bin->{atomicparsley}, $prog->{filename},
 				'--TVNetwork',	$tags->{channel},
 				'--description',$tags->{desc},
 				'--comment',	$tags->{desc},
-				'--title',	$tags->{title},
+				'--title',	"$tags->{longname} - $tags->{episode}",
 				'--TVShowName',	$tags->{longname},
-				'--TVEpisode',	$tags->{pid},
+				'--TVEpisode',	$tags->{episode},
 				'--artist',	$tags->{name},
 				'--year',	$tags->{firstbcast},
 				'--advisory',	$tags->{guidance},
@@ -3705,6 +3716,13 @@ sub tag_file {
 
 			# Add the thumbnail if one was downloaded
 			push @cmd, "--artwork", $prog->{thumbfile} if -f $prog->{thumbfile};
+
+			# Add the series and episode numbers if they are defined
+			push @cmd, "--TVSeasonNum", $prog->{seriesnum} if $prog->{seriesnum};
+			push @cmd, "--TVEpisodeNum", $prog->{episodenum} if $prog->{episodenum};
+
+			# time of recording
+			push @cmd, "--purchaseDate", "$prog->{dldate}T$prog->{dltime}Z" if $prog->{dldate} && $prog->{dltime};
 
 			# After running, clean up thumbnail file unless it is required using the thumbnail option.
 			if ( main::run_cmd( 'STDERR', @cmd ) ) {
@@ -4418,7 +4436,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail);
+	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum);
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -4682,6 +4700,10 @@ sub get_metadata {
 			$prog->{lastbcastrel}->{$version} = Programme::get_time_string( $last_string, time() );
 		}
 	}
+
+	# Extract the seriesnum and episode num
+	$prog->{seriesnum} = $1 if "$prog->{name} $prog->{episode}" =~ m{Series (\d+)};
+	$prog->{episodenum} = $1 if "$prog->{name} $prog->{episode}" =~ m{Episode (\d+)};
 
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
