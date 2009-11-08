@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.58';
+my $VERSION = '0.59';
 
 use strict;
 use CGI ':all';
@@ -95,6 +95,10 @@ if ( ! $opt_cmdline->{getiplayer} ) {
 	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
 		$opt_cmdline->{getiplayer} = $_ if -x $_;
 	}
+}
+if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
+	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
+	exit 2;
 }
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
@@ -202,7 +206,7 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
-my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE /;
+my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE /;
 my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
 my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE AUTOWEBREFRESH AUTOPVRRUN /;
 my @order_streaming_tab = qw/ BITRATE VSIZE VFR STREAMTYPE /;
@@ -2146,7 +2150,7 @@ sub pvr_queue {
 				"pid=$pid",
 				"comment=$comment (queued: ".localtime().')',
 				"type=$type",
-				build_cmd_options( grep !/^(HISTORY|SINCE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
+				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
 			),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -2253,7 +2257,7 @@ sub pvr_add {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE|HIDE|FORCE)$/, @params ) ),
+		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDE|FORCE)$/, @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -2446,6 +2450,7 @@ sub search_history {
 	$opt->{SORT}->{current} = 'timeadded';
 	$opt->{REVERSE}->{current} = 1;
 	$opt->{SINCE}->{current} = '';
+	$opt->{BEFORE}->{current} = '';
 	$opt->{CATEGORY}->{current} = '';
 	$opt->{EXCLUDECATEGORY}->{current} = '';
 	$opt->{CHANNEL}->{current} = '';
@@ -2603,7 +2608,7 @@ sub search_progs {
 				-id=>'nowrap', 
 				-class=>'search pointer_noul', 
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
-				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".CGI::escape("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
+				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".CGI::escape("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
 
 		# Add links to row
@@ -3472,6 +3477,17 @@ sub process_params {
 		tooltip	=> 'Only show programmes added to the local programmes cache in the past number of hours', # Tooltip
 		webvar	=> 'SINCE', # webvar
 		optkey	=> 'since', # option
+		type	=> 'text', # type
+		value	=> 3, # width values
+		default => '',
+		save	=> 1,
+	};
+
+	$opt->{BEFORE} = {
+		title	=> 'Added Before (hours)', # Title
+		tooltip	=> 'Only show programmes added to the local programmes cache over this number of hours ago', # Tooltip
+		webvar	=> 'BEFORE', # webvar
+		optkey	=> 'before', # option
 		type	=> 'text', # type
 		value	=> 3, # width values
 		default => '',
