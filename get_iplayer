@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.47;
+my $version = 2.48;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -157,6 +157,7 @@ my $opt_format = {
 
 	# Output
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
+	fatfilename	=> [ 1, "fatfilename", 'Output', '--fatfilename, -w', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
@@ -2454,6 +2455,7 @@ sub StringUtils::sanitize_path {
 	# Sanitize by default
 	$string =~ s/\s/_/g if (! $opt->{whitespace}) && (! $allow_fwd_slash);
 	$string =~ s/[^\w_\-\.\/\s]//gi if ! $opt->{whitespace};
+	$string =~ s/[\|\\\?\*\<\"\:\>\+\[\]\/]//gi if $opt->{fatfilename};
 	return $string;
 }
 
@@ -3696,6 +3698,9 @@ sub tag_file {
 			for my $tag ( qw/name longname episode/ ) {
 				$tags->{$tag} =~ s/(:\s*)?(Series|Episode)\s*\d+(:\s*)?//gi;
 			}
+			my $title = "$tags->{longname} - $tags->{episode}";
+			# strip any trailing '-' and whitespace
+			$title =~ s/[\s\-]*$//g;
 
 			# Build the command
 			my @cmd = (
@@ -3703,7 +3708,7 @@ sub tag_file {
 				'--TVNetwork',	$tags->{channel},
 				'--description',$tags->{desc},
 				'--comment',	$tags->{desc},
-				'--title',	"$tags->{longname} - $tags->{episode}",
+				'--title',	$title,
 				'--TVShowName',	$tags->{longname},
 				'--TVEpisode',	$tags->{pid},
 				'--artist',	$tags->{name},
@@ -3762,17 +3767,17 @@ sub create_metadata_file {
         </movie>
 	';
 
-	# XML templaye for XBMC
+	# XML template for XBMC
 	$filename->{xbmc} = "$prog->{dir}/$prog->{fileprefix}.nfo";
 	$template->{xbmc} = '
 	<episodedetails>
 		<title>[name] - [episode]</title>
 		<rating>10.00</rating>
-		<season></season>
-		<episode></episode>
+		<season>[seriesnum]</season>
+		<episode>[episodenum]</episode>
 		<plot>[desc]</plot>
 		<credits>[channel]</credits>
-		<aired>[available]</aired>
+		<aired>[firstbcast]</aired>
 	</episodedetails>
 	';
 
