@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.48;
+my $version = 2.49;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3726,8 +3726,8 @@ sub tag_file {
 			push @cmd, "--TVSeasonNum", $prog->{seriesnum} if $prog->{seriesnum};
 			push @cmd, "--TVEpisodeNum", $prog->{episodenum} if $prog->{episodenum};
 
-			# time of recording
-			push @cmd, "--purchaseDate", "$prog->{dldate}T$prog->{dltime}Z" if $prog->{dldate} && $prog->{dltime};
+			# time of recording - this messes up iTunes somewhat
+			#push @cmd, "--purchaseDate", "$prog->{dldate}T$prog->{dltime}Z" if $prog->{dldate} && $prog->{dltime};
 
 			# After running, clean up thumbnail file unless it is required using the thumbnail option.
 			if ( main::run_cmd( 'STDERR', @cmd ) ) {
@@ -3797,7 +3797,10 @@ sub create_metadata_file {
 	main::logger "INFO: Writing $opt->{metadata} metadata to file '$filename->{ $opt->{metadata} }'\n";
 
 	if ( open(XML, "> $filename->{ $opt->{metadata} }") ) {
-		print XML $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
+		my $text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
+		# Strip out unsubstituted tags
+		$text =~ s/<.+?>\[.+?\]<.+?>[\s\n\r]*//g;
+		print XML $text;
 		close XML;
 	} else {
 		main::logger "WARNING: Couldn't write to metadata file '$filename->{ $opt->{metadata} }'\n";
