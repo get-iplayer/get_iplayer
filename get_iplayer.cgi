@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.59';
+my $VERSION = '0.60';
 
 use strict;
 use CGI ':all';
@@ -173,7 +173,7 @@ for my $type ( @plugins ) {
 	if ( not $prog_types{$type} ) {
 		$prog_types{$type} = $type;
 		# Add to %prog_types_order hash
-		my $max = scalar( keys %prog_types_order ) + 1;
+		my $max = scalar( keys %prog_types_order ) + 2;
 		$prog_types_order{$max} = $type;
 	}
 }
