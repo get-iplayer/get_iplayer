@@ -5052,6 +5052,10 @@ sub get_stream_data_cdn {
 		# drm license - ignore
 		} elsif ( $cattribs->{kind} eq 'licence' ) {
 
+		# iphone new
+		} elsif ( $cattribs->{kind} eq 'securesis' ) {
+			$conn->{streamurl} = $cattribs->{href};
+
 		# Unknown CDN
 		} else {
 			new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -5173,8 +5177,19 @@ sub get_stream_data {
 	my $mode;
 	for my $mattribs ( @medias ) {
 		
+		# New iphone stream
+		if ( $mattribs->{service} eq 'iplayer_streaming_http_mp4' ) {
+			# Fix/remove some audio stream attribs
+			if ( $prog->{type} eq 'radio' ) {
+				$mattribs->{bitrate} = 128;
+				delete $mattribs->{width};
+				delete $mattribs->{height};
+			}
+			get_stream_data_cdn( \%data, $mattribs, 'iphone', 'iphone', 'mov' );
+		
+		
 		# flashhd modes
-		if (		$mattribs->{kind} eq 'video' &&
+		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/mp4' &&
 				$mattribs->{encoding} eq 'h264'
 		) {
@@ -5196,17 +5211,8 @@ sub get_stream_data {
 			} elsif ( $mattribs->{bitrate} > 400 && $mattribs->{width} >= 500 ) {
 				get_stream_data_cdn( \%data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
 
-			# iPhone modes
-			} elsif ( $mattribs->{width} < 500 ) {
-				# Fix/remove some audio stream attribs
-				if ( $prog->{type} eq 'radio' ) {
-					$mattribs->{bitrate} = 128;
-					delete $mattribs->{width};
-					delete $mattribs->{height};
-				}
-				get_stream_data_cdn( \%data, $mattribs, 'iphone', 'iphone', 'mov' );
 			}
-
+			
 		# flashnormal modes (also live and EMP modes)
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
@@ -5317,21 +5323,6 @@ sub get_stream_data {
 		} else {
 			new_stream_report($mattribs, undef) if $opt->{verbose};
 		}	
-	}
-
-	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
-	# Skip check if the modelist selected excludes iphone
-	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && $verpid !~ /^http:/ && grep /^iphone/, split ',', $prog->modelist() ) {
-		if ( my $streamurl = Streamer::iphone->get_url($ua, $verpid) ) {
-			my $mode = 'iphone1';
-			# Get iphone redirect
-			$data{$mode}{streamurl} = $streamurl;
-			$data{$mode}{streamer} = 'iphone';
-			$data{$mode}{ext} = 'mov';
-			get_stream_set_type( $data{$mode} ) if ! $data{$mode}{type};
-		} else {
-			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
-		}
 	}
 
 	# Report modes found
