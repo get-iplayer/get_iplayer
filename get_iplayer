@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.50;
+my $version = 2.51;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1454,7 +1454,7 @@ sub download_block {
 
 	# Use url prepend if required
 	if ( $opt->{proxy} =~ /^prepend:/ ) {
-		$url = $opt->{proxy}.$url;
+		$url = $opt->{proxy}.main::url_encode( $url );
 		$url =~ s/^prepend://g;
 	}
 
@@ -2159,7 +2159,7 @@ sub request_url_retry {
 
 	# Use url prepend if required
 	if ( $opt->{proxy} =~ /^prepend:/ ) {
-		$url = $opt->{proxy}.$url;
+		$url = $opt->{proxy}.main::url_encode( $url );
 		$url =~ s/^prepend://g;
 	}
 
@@ -5156,10 +5156,6 @@ sub get_stream_data {
 		push @{ $mattribs->{connections} }, $cattribs;
 		push @medias, $mattribs;
 
-	# Don't do this stream lookup if only iphone mode and neither info or subtitles options are specified - it is unneccesary
-	} elsif ( $prog->modelist() eq 'iphone' && (! $opt->{info}) && ! $opt->{subtitles} ) {
-		# skip mediaselector lookup
-
 	# Live simulcast verpid: http://www.bbc.co.uk/emp/simulcast/bbc_one_london.xml
 	} elsif ( $verpid =~ /http:/ ) {
 		$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
@@ -6546,7 +6542,7 @@ sub get_url {
 	# This doesn't work through url-prepend proxies
 	## Use url prepend if required
 	#if ( $opt->{proxy} =~ /^prepend:/ ) {
-	#	$url_1 = $opt->{proxy}.$url_1;
+	#	$url_1 = $opt->{proxy}.main::url_encode( $url_1 );
 	#	$url_1 =~ s/^prepend://g;
 	#}
 
@@ -6600,7 +6596,7 @@ sub get {
 		
 	# Use url prepend if required
 	if ( $opt->{proxy} =~ /^prepend:/ ) {
-		$url_2 = $opt->{proxy}.$url_2;
+		$url_2 = $opt->{proxy}.main::url_encode( $url_2 );
 		$url_2 =~ s/^prepend://g;
 	}
 
