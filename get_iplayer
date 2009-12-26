@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.51;
+my $version = 2.52;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -5283,8 +5283,8 @@ sub get_stream_data {
 
 		# flashaudio modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
-				$mattribs->{type} eq 'audio/mpeg' &&
-				$mattribs->{encoding} eq 'mp3'
+				$mattribs->{type} eq 'audio/mpeg' 
+				#&& $mattribs->{encoding} eq 'mp3'
 		) {
 			get_stream_data_cdn( \%data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
 
