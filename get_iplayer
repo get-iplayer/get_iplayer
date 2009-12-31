@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.52;
+my $version = 2.53;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -98,7 +98,7 @@ my %user_agent = (
 #	'episode'	=> <Episode info>,
 #	'desc'		=> <Long Description>,
 #	'available'	=> <Date/Time made available or remaining>,
-#	'duration'	=> <duration in HH:MM:SS>
+#	'duration'	=> <duration in free text form>
 #	'versions'	=> <comma separated list of versions, e.g default, signed, audiodescribed>
 #	'thumbnail'	=> <programme thumbnail url>
 #	'channel	=> <channel>
@@ -183,6 +183,7 @@ my $opt_format = {
 	# Config
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	flush		=> [ 2, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
+	ignorechannels	=> [ 1, "ignorechannels=s", 'Config', '--ignorechannels <string>', "Ignore matched channel(s) when refreshing cache (regex or comma separated values)"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
@@ -214,6 +215,7 @@ my $opt_format = {
 	pagesize	=> [ 1, "pagesize=n", 'Display', '--pagesize <number>', "Number of matches displayed on a page for multipage output"],
 	quiet		=> [ 1, "q|quiet|silent", 'Display', '--quiet, -q', "No logging output"],
 	series		=> [ 0, "series", 'Display', '--series', "Display Programme series names only with number of episodes"],
+	showcacheage	=> [ 1, "showcacheage|show-cache-age", 'Config', '--show-cache-age', "Displays the age of the selected programme caches then exit"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	sortmatches	=> [ 1, "sortmatches|sort=s", 'Display', '--sort <fieldname>', "Field to use to sort displayed matches"],
 	sortreverse	=> [ 1, "sortreverse", 'Display', '--sortreverse', "Reverse order of sorted matches"],
@@ -229,10 +231,7 @@ my $opt_format = {
 	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Deprecated
-	mp3audio	=> [ 0, "mp3audio", 'Deprecated', '--mp3audio', "Old way of specifying mp3 Radio radiomode"],
-	save 		=> [ 0, "save", 'Deprecated', '--save', "Save specified options as default"],
 
-	# Download
 };
 
 
@@ -288,12 +287,6 @@ $opt->{pvr} = 1 if $opt_pre->{pvr};
 $opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
 
 
-# Deal with legacy --save option
-if ( $opt_pre->{save} ) {
-	main::logger "ERROR: Please use --prefs-add, --prefs-del, --prefs-list to add, delete and list saved user options. --save is now deprecated. Also see --preset option\n";
-	exit 1;
-}
-
 # This is where all profile data/caches/cookies etc goes
 my $profile_dir;
 # This is where system-wide default options are specified
@@ -312,9 +305,10 @@ if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
-	$optfile_system = '/var/lib/get_iplayer/options';
-	if ( -f '/etc/get_iplayer/options' ) {
-		logger "WARNING: System-wide options in /etc/get_iplayer/options are now ignored, please use /var/lib/get_iplayer/options instead\n";
+	$optfile_system = '/etc/get_iplayer/options';
+	# Show warning if this deprecated location exists and is not a symlink
+	if ( -f '/var/lib/get_iplayer/options' && ! -l '/var/lib/get_iplayer/options' ) {
+		logger "WARNING: System-wide options file /var/lib/get_iplayer/options will be deprecated in future, please use /etc/get_iplayer/options instead\n";
 	}
 }
 # Make profile dir if it doesnt exist
@@ -377,7 +371,7 @@ Options->usage( 0 ) if not $opt_cmdline->parse();
 if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
 	# Load options from files into $opt_file
 	# system, Default, './.get_iplayer/options' and Preset options in that order should they exist
-	$opt_file->load( $opt, $optfile_system, $optfile_default, './.get_iplayer/options', $optfile_preset );
+	$opt_file->load( $opt, '/var/lib/get_iplayer/options', $optfile_system, $optfile_default, './.get_iplayer/options', $optfile_preset );
 	# Copy these loaded options into $opt
 	$opt->copy_set_options_from( $opt_file );
 }
@@ -518,6 +512,11 @@ if ( defined $opt->{search} ) {
 }
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0];
+
+# Auto-detect http:// url or <type>:http:// in a search term and set it as a --pid option (disable if --fields is used).
+if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fields} ) ) {
+	$opt->{pid} = $search_args[0];
+}
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
 my $lockfile;
@@ -697,15 +696,18 @@ sub find_matches {
 		}
 	}
 	
-	# Backward compatability options - to be removed eventually
-	$opt->{tvmode} = 'rtmp' if $opt->{rtmp};
-	$opt->{tvmode} = 'n95_wifi' if $opt->{n95};
-	$opt->{radiomode} = 'realaudio' if $opt->{realaudio};
-	$opt->{radiomode} = 'iphone' if $opt->{mp3audio};
-
 	# Web proxy
 	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
 	logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
+
+	# Display the ages of the selected caches in seconds
+	if ( $opt->{showcacheage} ) {
+		for ( keys %type ) {
+			my $cachefile = "${profile_dir}/${_}.cache";
+			main::logger "INFO: $_ cache age: ".( time() - stat($cachefile)->mtime )." secs\n" if -f $cachefile;
+		}
+		exit 0;
+	}
 
 	# Get prog by arbitrary '<type>:<pid>' or just '<pid>' (using the specified types)(then exit)
 	if ( $opt->{pid} ) {
@@ -791,7 +793,7 @@ sub find_matches {
 			get_links( \%prog, \%index_prog, $_ ) for keys %type;
 			$got_cache{$_} = 1 for keys %type;
 	}
-	
+
 	# Parse remaining args
 	my @match_list;
 	my @index_search_args;
@@ -2696,7 +2698,9 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--get\fR [<options>] <regex|index> ...',
 		'.br',
-		'\fBget_iplayer\fR \fB--pid\fR=<pid|url> \fB--type\fR=<type> [<options>]',
+		'\fBget_iplayer\fR <url> \fB--type\fR=<type> [<options>]',
+		'.PP',
+		'\fBget_iplayer\fR \fB--pid\fR=<pid|url> [\fB--type\fR=<type> <options>]',
 		'.PP',
 		'\fBget_iplayer\fR \fB--stream\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
@@ -2722,6 +2726,7 @@ sub usage {
 	push @usage, "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):";
 	push @usage, " Search Programmes:             get_iplayer [<options>] [<regex|index> ...]";
 	push @usage, " Record Programmes:             get_iplayer --get [<options>] <regex|index> ...";
+	push @usage, "                                get_iplayer <url> [--type=<type>]";
 	push @usage, "                                get_iplayer --pid=<pid|url> --type=<type>";
 	push @usage, " Stream Programme to Player:    get_iplayer --stream <index> | mplayer -cache 3072 -" if $helplevel == 1;
 	push @usage, " Stream BBC Embedded Media      get_iplayer --stream --type=<type> --url=<URL> | mplayer -cache 128 -" if $helplevel != 2;
@@ -3340,6 +3345,24 @@ sub opt_format {
 }
 
 
+# Filter out channel names matched with option --ignorechannels
+sub channels_filtered {
+	my $prog = shift;
+	my %channels = %{ $prog->channels() };
+	# Ignore matching channels as required
+	my $ignore_channel_regex = '^ROUGEVALUE$';
+	# Create a regex from any comma separated values
+	$ignore_channel_regex = '('.(join '|', ( split /,/, $opt->{ignorechannels} ) ).')' if $opt->{ignorechannels};
+	for my $channel ( keys %channels ) {
+		if ( $channels{$channel} =~ /$ignore_channel_regex/i ) {
+			main::logger "INFO: Ignoring channel $channels{$channel}\n" if $opt->{verbose};
+			delete $channels{$channel};
+		}
+	}
+	return \%channels;
+}
+
+
 sub channels {
 	return {};
 }
@@ -3545,9 +3568,9 @@ sub download_retry_loop {
 	my $ua = main::create_ua();
 
 	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
-	# Also need full metadata for AtomicParsley
+	# Also need full metadata for AtomicParsley or if --fileprefix is used
 	$prog->get_metadata_general();
-	if ( $opt->{metadata} || $opt->{command} || main::exists_in_path( 'atomicparsley' ) ) {
+	if ( $opt->{fileprefix} || $opt->{metadata} || $opt->{command} || main::exists_in_path( 'atomicparsley' ) ) {
 		$prog->get_metadata( $ua );
 	}
 
@@ -3597,7 +3620,14 @@ sub download_retry_loop {
 
 			# Check for no applicable modes - report which ones are available if none are specified
 			if ($#modes < 0) {
-				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version' (try modes: ".(join ',', @available_modes).")\n";
+				my %available_modes_short;
+				# Strip the number from the end of the mode name and make a unique array
+				for ( @available_modes ) {
+					my $modename = $_;
+					$modename =~ s/\d+$//g;
+					$available_modes_short{$modename}++;
+				}
+				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version' (try using --modes=".(join ',', sort keys %available_modes_short).")\n";
 				next;
 			}
 			main::logger "INFO: ".join(',', @modes)." modes will be tried for version $version\n";
@@ -3752,6 +3782,9 @@ sub tag_file {
 			}
 			$tags->{$tag} =~ s|"|\\"|g;
 		}
+
+		# Make 'duration' == 'length' for the selected version
+		$tags->{duration} = $prog->{durations}->{$prog->{version}} if $prog->{durations}->{$prog->{version}};
 
 		# Only tag if the required tool exists
 		if ( main::exists_in_path( 'atomicparsley' ) ) {
@@ -3908,6 +3941,9 @@ sub substitute {
 	my $version = $self->{version} || 'unknown';
 	my $replace;
 
+	# Make 'duration' == 'length' for the selected version
+	$self->{duration} = $self->{durations}->{$version} if $self->{durations}->{$version};
+
 	# Tokenize and substitute $format
 	for my $key ( keys %{$self} ) {
 
@@ -3921,7 +3957,7 @@ sub substitute {
 				$value = 'unprintable';
 			}
 		}
-		
+
 		# Join array elements if value is ARRAY type
 		if ( ref$value eq 'ARRAY' ) {
 			$value = join ',', @{ $value };
@@ -4446,14 +4482,12 @@ sub get_verpids {
 	my ( $title, $prog_type );
 	$title = $1 if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
 
-	# Get duration - sometimes this isn't set in other metadata
-	$prog->{duration} = $1 if $xml =~ m{duration="(\d+?)"};
-
 	# Get type
 	$prog_type = 'tv' if grep /kind="programme"/, $xml;
 	$prog_type = 'radio' if grep /kind="radioProgramme"/, $xml;
 
 	# Split into <item kind="programme"> sections
+	my $prev_version;
 	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
 		main::logger "DEBUG: Block: $_\n" if $opt->{debug};
 		my ($verpid, $version);
@@ -4500,13 +4534,36 @@ sub get_verpids {
 			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
 			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
 			# <alternate id="default" />
-			$version = lc($1) if m{<alternate\s+id="(.+?)"};
+			if ( m{<alternate\s+id="(.+?)"} ) {
+				my $curr_version = lc($1);
+				$version = lc($1);
+				# if current version is already defined, add a numeric suffix
+				if ( $prog->{verpids}->{$curr_version} ) {
+					my $vercount = 1;
+					# Search for the next free suffix
+					while ( $prog->{verpids}->{$curr_version} ) {
+						$vercount++;
+						$curr_version = $version.$vercount;
+					}
+					$version = $curr_version;
+				}
+			# If this item has no version name then append $count to previous version found (a hack but I think it works)
+			} else {
+				# determine version name and trailing count (if any)
+				$prev_version =~ m{^(.+)(\d*)$};
+				my $prev_count = $2 || 1;
+				$prev_version = $1 || 'default';
+				$prev_count++;
+				$version = $prev_version.$prev_count;
+			}
 			main::logger "INFO: Using Not Live standard TV and Radio: $verpid\n" if $opt->{verbose} && $verpid;
 		}
-		
+
 		next if ! ($verpid && $version);
+		$prev_version = $version;
 		$prog->{verpids}->{$version} = $verpid;
-		main::logger "INFO: Version: $version, VersionPid: $verpid\n" if $opt->{verbose};  
+		$prog->{durations}->{$version} = $1 if m{duration="(\d+?)"};
+		main::logger "INFO: Version: $version, VersionPid: $verpid, Duration: $prog->{durations}->{$version}\n" if $opt->{verbose};  
 	}
 
 	# Add to prog hash
@@ -4525,7 +4582,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $duration, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum);
+	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum);
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -4619,7 +4676,6 @@ sub get_metadata {
 			$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
 		}
 		$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
-		$duration = $1 if $entry =~ m{duration=\"(\d+?)\"};
 		$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
 		$prog_type = 'tv' if $prog_type eq 'video';
 		$prog_type = 'radio' if $prog_type eq 'audio';
@@ -4723,14 +4779,14 @@ sub get_metadata {
 	# populate version pid metadata if we don't have it already
 	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
 	$versions = join ',', sort keys %{ $prog->{verpids} };
-	# Get duration from verpid lookup xml if not already set
-	$duration = $prog->{duration} if ! $duration;
 	my $modes;
 	my $mode_sizes;
 	my $first_broadcast;
 	my $last_broadcast;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		# Set duration for this version if it is not defined
+		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
 		# Try to get stream data for this version if it isn't already populated
 		if ( not defined $prog->{streams}->{$version} ) {
 			my %all_stream_data = get_stream_data($prog, $prog->{verpids}->{$version} );
@@ -4741,8 +4797,8 @@ sub get_metadata {
 		# Estimate the file sizes for each mode
 		my @sizes;
 		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
-			next if ( ! $duration ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
-			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $duration / 8.0 / 1024.0 );
+			next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
+			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 / 1024.0 );
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
 		
@@ -4798,7 +4854,6 @@ sub get_metadata {
 	$prog->{name} 		= $name || $prog->{name};
 	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
 	$prog->{type}		= $prog_type || $prog->{type};
-	$prog->{duration}	= $duration || $prog->{duration};
 	$prog->{channel}	= $channel || $prog->{channel};
 	$prog->{expiry}		= $expiry || $prog->{expiry};
 	$prog->{versions}	= $versions;
@@ -5283,7 +5338,7 @@ sub get_stream_data {
 
 		# flashaudio modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
-				$mattribs->{type} eq 'audio/mpeg' 
+				$mattribs->{type} eq 'audio/mpeg'
 				#&& $mattribs->{encoding} eq 'mp3'
 		) {
 			get_stream_data_cdn( \%data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
@@ -5395,7 +5450,6 @@ sub channels {
 sub opt_format {
 	return {
 		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashstd,flashnormal)"],
-		n95		=> [ 0, "n95", 'Deprecated', '--n95', "Old way of specifying n95 tvmode"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer/rtmpdump for tv"],
@@ -5497,7 +5551,7 @@ sub get_links {
 	my $progref = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels() };
+	my %channels = %{ main::progclass($prog_type)->channels_filtered() };
 	my $channel_feed_url = 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
@@ -5997,7 +6051,6 @@ sub opt_format {
 		bandwidth 	=> [ 1, "bandwidth=n", 'Recording', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
-		realaudio	=> [ 0, "realaudio", 'Deprecated', '--realaudio', "Old way of specifying realaudio radiomode"],
 		wav		=> [ 1, "wav", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer/rtmpdump for radio"],
 	};
@@ -6175,9 +6228,8 @@ sub get_links {
 	my $progref = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels() };
+	my %channels = %{ main::progclass($prog_type)->channels_filtered() };
 
-	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
 	for ( sort keys %channels ) {
 
 			# Extract channel
@@ -6964,11 +7016,8 @@ use URI;
 sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
-		rtmp		=> [ 1, "rtmp", 'Deprecated', '--rtmp', "Old way of specifying flash tv and radio modes"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		flvstreamer	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
-		rtmpdump	=> [ 0, "", 'Deprecated', '', "Location of rtmpdump binary"],
-		usertmpdumpexit	=> [ 1, "usertmpdumpexit|use-rtmpdump-exitcode|use-flvstreamer-exitcode|useflvstreamerexitcode", 'Deprecated', '--use-rtmpdump-exitcode', "Use the flvstreamer/rtmpdump exit code to decide whether the stream completed OK"],
 	};
 }
 
@@ -7924,7 +7973,7 @@ sub opt_format {
 	return {
 		pvr		=> [ 0, "pvr|pvrrun|pvr-run", 'PVR', '--pvr', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)"],
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search"],
-		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Add the current search terms to the named PVR search"],
+		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Save the named PVR search with the specified search terms"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
 		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
 		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],

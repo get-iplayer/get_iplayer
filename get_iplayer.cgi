@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.60';
+my $VERSION = '0.59';
 
 use strict;
 use CGI ':all';
@@ -173,7 +173,7 @@ for my $type ( @plugins ) {
 	if ( not $prog_types{$type} ) {
 		$prog_types{$type} = $type;
 		# Add to %prog_types_order hash
-		my $max = scalar( keys %prog_types_order ) + 2;
+		my $max = scalar( keys %prog_types_order ) + 1;
 		$prog_types_order{$max} = $type;
 	}
 }
@@ -2732,7 +2732,7 @@ sub search_progs {
 				# Save as Default  button
 				label( {
 					-class		=> 'options_outer pointer_noul',
-					-title		=> 'Rememeber Current Options as Default',
+					-title		=> 'Remember Current Options as Default',
 					-onClick	=> "BackupFormVars(form); form.SAVE.value=1; submit(); RestoreFormVars(form);",
 					},
 					'Save As Default',
