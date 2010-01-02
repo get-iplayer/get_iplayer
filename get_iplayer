@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.54;
+my $version = 2.55;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -520,7 +520,7 @@ if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fi
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
 my $lockfile;
-$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle};
+$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
 
 # Create new PVR instance
 # $pvr->{searchname}->{<option>} = <value>;
@@ -560,10 +560,11 @@ if ( $opt->{pvradd} ) {
 	main::logger "INFO: Scheduling the PVR to run every $interval secs\n";
 	while ( 1 ) {
 		my $start_time = time();
+		$opt_cmdline->{pvr} = 1;
 		$pvr->run();
 		my $remaining = $interval - ( time() - $start_time );
 		if ( $remaining > 0 ) {
-			main::logger "INFO: Sleeping for $remaining secs\n" if $opt->{verbose};
+			main::logger "INFO: Sleeping for $remaining secs\n";
 			sleep $remaining;
 		}
 	}
