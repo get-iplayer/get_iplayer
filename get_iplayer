@@ -2,7 +2,7 @@
 #
 # get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes + other Programmes via 3rd-party plugins
 #
-#    Copyright (C) 2009 Phil Lewis
+#    Copyright (C) 2008-2010 Phil Lewis
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.53;
+my $version = 2.54;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -547,15 +547,38 @@ if ( $opt->{pvradd} ) {
 } elsif ( $opt->{pvrqueue} ) {
 	$pvr->queue( @search_args );
 
+} elsif ( $opt->{pvrscheduler} ) {
+	if ( $opt->{pvrscheduler} < 1800 ) {
+		main::logger "ERROR: PVR schedule duration must be at least 1800 seconds\n";
+		exit 5;
+	};
+	# PVR Lockfile detection (with 12 hrs stale lockfile check)
+	lockfile( 43200 ) if ! $opt->{test};
+	my $interval = $opt->{pvrscheduler};
+	# Ensure the caches refresh every run (assume cache refreshes take at most 300 seconds)
+	$opt_cmdline->{expiry} = $interval - 300;
+	main::logger "INFO: Scheduling the PVR to run every $interval secs\n";
+	while ( 1 ) {
+		my $start_time = time();
+		$pvr->run();
+		my $remaining = $interval - ( time() - $start_time );
+		if ( $remaining > 0 ) {
+			main::logger "INFO: Sleeping for $remaining secs\n" if $opt->{verbose};
+			sleep $remaining;
+		}
+	}
+
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
 	$pvr->run();
+	unlink $lockfile;
 
 } elsif ( $opt->{pvrsingle} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
 	$pvr->run( $opt->{pvrsingle} );
+	unlink $lockfile;
 
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
@@ -1291,7 +1314,7 @@ sub get_links {
 
 	# if a cache file doesn't exist/corrupted/empty, flush option is specified or original file is older than $cache_sec then download new data
 	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
-	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && ! $opt->{flush};
+	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{flush};
 	if ( (! $only_load_from_cache) && ( 
 			(! keys %prog_old) || 
 			(! -f $cachefile) || 
@@ -2665,7 +2688,7 @@ sub copyright_notice {
 	shift;
 	my $text = sprintf "get_iplayer v%.2f, ", $version;
 	$text .= <<'EOF';
-Copyright (C) 2009 Phil Lewis
+Copyright (C) 2008-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use --warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use --conditions for details.
@@ -2691,8 +2714,8 @@ sub usage {
 	my @man;
 	my @dump;
 	push @man, 
-		'.TH GET_IPLAYER "1" "September 2009" "Phil Lewis" "get_iplayer Manual"',
-		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer, ITV, BBC Podcasts and more',
+		'.TH GET_IPLAYER "1" "January 2010" "Phil Lewis" "get_iplayer Manual"',
+		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more',
 		'.SH SYNOPSIS',
 		'\fBget_iplayer\fR [<options>] [<regex|index> ...]',
 		'.PP',
@@ -4019,8 +4042,12 @@ sub generate_filenames {
 	}
 
 	# Determine direcotry and find it's absolute path
-	$prog->{dir} = abs_path( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
-
+	if ( $^O !~ /^MSWin32$/ ) {
+		$prog->{dir} = abs_path( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
+	} else {
+		$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
+	}
+	
 	# Add modename to default format string if multimode option is used
 	$format .= ' <mode>' if $opt->{multimode};
 
@@ -4582,7 +4609,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum);
+	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum, $seriestitle, $episodetitle, $nametitle );
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -4706,6 +4733,11 @@ sub get_metadata {
 		$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
 		$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
+
+		# Get the title from the atom link refs only to determine the episode and series number
+		$episodetitle = $1 if $entry =~ m{<link\s+rel="self"\s+href="http.+?/episode/.+?"\s+type="application/atom\+xml"\s+title="(.+?)"};
+		$seriestitle = $1 if $entry =~ m{<link\s+rel="parent"\s+href="http.+?/programme_set/.+?"\s+type="application/atom\+xml"\s+title="(.+?)"};
+		$nametitle = $1 if $entry =~ m{<link\s+rel="related"\s+href="http.+?/programmes/.+?"\s+type="text/html"\s+title="(.+?)"};
 
 		my @cats;
 		for (split /<media:category scheme=\".+?\"/, $entry) {
@@ -4846,9 +4878,21 @@ sub get_metadata {
 		}
 	}
 
-	# Extract the seriesnum and episode num
-	$prog->{seriesnum} = $1 if "$prog->{name} $prog->{episode}" =~ m{Series (\d+)};
-	$prog->{episodenum} = $1 if "$prog->{name} $prog->{episode}" =~ m{Episode (\d+)};
+	# Extract the seriesnum
+	if ( "$prog->{name} $prog->{episode}" =~ m{Series (\d+)} ) {
+		$prog->{seriesnum} = $1;
+	} elsif ( $seriestitle =~ m{Series (\d+)} ) {
+		$prog->{seriesnum} = $1;
+	}
+
+	# Extract the episode num
+	if ( "$prog->{name} $prog->{episode}" =~ m{Episode (\d+)} ) {
+		$prog->{episodenum} = $1;
+	} elsif ( $prog->{episode} =~ m{^(\d+)\.\s+} ) {
+		$prog->{episodenum} = $1;
+	} elsif ( $episodetitle =~ m{^(\d+)\.\s+} ) {
+		$prog->{episodenum} = $1;
+	}
 
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
@@ -7979,6 +8023,7 @@ sub opt_format {
 		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
 		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off recording using the --pvr option"],
+		pvrscheduler	=> [ 0, "pvrscheduler|pvr-scheduler=n", 'PVR', '--pvrscheduler <seconds>', "Runs the PVR using all saved PVR searches every <seconds>"],
 		comment		=> [ 1, "comment=s", 'PVR', '--comment <string>', "Adds a comment to a PVR search"],
 	};
 }
