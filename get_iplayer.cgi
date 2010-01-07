@@ -3,7 +3,7 @@
 # The Worlds most insecure web-based PVR Manager adn streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
 #
-#    Copyright (C) 2009 Phil Lewis
+#    Copyright (C) 2009-2010 Phil Lewis
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.59';
+my $VERSION = '0.60';
 
 use strict;
 use CGI ':all';
@@ -68,7 +68,7 @@ usage() if $opt_cmdline->{help} || @ARGV;
 sub usage {
 	my $text = sprintf "get_iplayer Web PVR Manager v%.2f, ", $VERSION;
 	$text .= <<'EOF';
-Copyright (C) 2009 Phil Lewis
+Copyright (C) 2009-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
   and you are welcome to redistribute it under certain conditions; 
   See the GPLv3 for details.
@@ -109,7 +109,7 @@ my @pids;
 my @displaycols;
 
 # Field names grabbed from get_iplayer
-my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web);
+my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web seriesnum episodenum );
 
 # Default Displayed headings
 my @headings_default = qw( thumbnail type name episode desc channel categories timeadded );
@@ -135,6 +135,8 @@ my %fieldname = (
 	comment			=> 'Comment',
 	filename		=> 'Filename',
 	mode			=> 'Mode',
+	seriesnum		=> 'Series Number',
+	episodenum		=> 'Episode Numer',
 	'name,episode'		=> 'Name+Episode',
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
@@ -1881,6 +1883,8 @@ sub get_sorted {
 		index		=> 'numeric',
 		duration	=> 'numeric',
 		timeadded	=> 'numeric',
+		seriesnum	=> 'numeric',
+		episodenum	=> 'numeric',
 	);
 
 	# Insert search '<key>~~~<sort_field>' for each prog in hash
@@ -3203,7 +3207,7 @@ sub form_footer {
 	#print $fh "<iframe src=\"about:blank\" height=\"0\" width=\"0\" name=\"dataframe\"></iframe>";
 	# <script type=\"text/javascript\">window.frames['dataframe'].window.location.replace('loadData.html');</script>
 	print $fh p( b({-class=>"footer"},
-		sprintf( "get_iplayer Web PVR Manager v%.2f, &copy;2009 Phil Lewis - Licensed under GPLv3", $VERSION )
+		sprintf( "get_iplayer Web PVR Manager v%.2f, &copy;2009-2010 Phil Lewis - Licensed under GPLv3", $VERSION )
 	));
 }
 
