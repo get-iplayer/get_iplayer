@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.55;
+my $version = 2.56;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -59,16 +59,16 @@ use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
-#use LWP::Debug qw(+);
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
+use POSIX qw(:termios_h);
 use strict;
 #use warnings;
 use Time::Local;
 use URI;
-use POSIX qw(:termios_h);
 my %SIGORIG;
-$SIGORIG{$_} = $SIG{$_} for keys %SIG; # Save default SIG actions
+# Save default SIG actions
+$SIGORIG{$_} = $SIG{$_} for keys %SIG;
 $|=1;
 
 # Hash of where plugin files were found so that the correct ones can be updated
@@ -157,12 +157,15 @@ my $opt_format = {
 
 	# Output
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
+	email		=> [ 1, "email=s", 'Output', '--email <address>', "Email HTML index of matching programmes to specified address"],
+	emailsmtp	=> [ 1, "emailsmtpserver|email-smtp=s", 'Output', '--email-smtp <hostname>', "SMTP server IP address to use to send email (default: localhost)"],
+	emailsender	=> [ 1, "emailsender|email-sender=s", 'Output', '--email-sender <address>', "Optional email sender address"],
 	fatfilename	=> [ 1, "fatfilename", 'Output', '--fatfilename, -w', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
-	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, generic"],
+	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, freevo, generic"],
 	metadataonly	=> [ 1, "metadataonly", 'Output', '--metadataonly', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
@@ -900,7 +903,8 @@ sub find_matches {
 	list_progs( \%type, @match_list );
 
 	# Write HTML and XML files if required (with search options applied)
-	create_html( @match_list ) if $opt->{html};
+	create_html_file( @match_list ) if $opt->{html};
+	create_html_email( (join ' ', @search_args), @match_list ) if $opt->{email};
 	create_xml( $opt->{fxd}, @match_list ) if $opt->{fxd};
 	create_xml( $opt->{mythtv}, @match_list ) if $opt->{mythtv};
 
@@ -1273,8 +1277,8 @@ sub get_links {
 	my $index_progref = shift;
 	my $prog_type = shift;
 	my $only_load_from_cache = shift;
-	# Define cache file format (maybe this is better determined from the header line of the cache file)
-	my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
+	# Define cache file format (this is overridden by the header line of the cache file)
+	my @cache_format = qw/index type name pid available episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
 	
 	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
@@ -2144,28 +2148,89 @@ sub create_xml {
 
 
 
-# Usage: create_html( @prog_objects )
-sub create_html {
-	my %name_channel;
+# Usage: create_html_file( @prog_objects )
+sub create_html_file {
 	# Create local web page
 	if ( open(HTML, "> $opt->{html}") ) {
-		print HTML '<html><head></head><body><table border=1>';
-		for my $this (@_) {
-			# Skip if pid isn't in index
-			my $pid = $this->{pid} || next;
-			# Skip if already recorded and --hide option is specified
-			if (! defined $name_channel{ "$this->{name}|$this->{channel}" }) {
-				print HTML $this->list_entry_html();
-			} else {
-				print HTML $this->list_entry_html( 1 );
-			}
-			$name_channel{ "$this->{name}|$this->{channel}" } = 1;
-		}
-		print HTML '</table></body>';
+		print HTML create_html( @_ );
 		close (HTML);
 	} else {
-		logger "Couldn't open html file $opt->{html} for writing\n";
+		logger "WARNING: Couldn't open html file $opt->{html} for writing\n";
 	}
+}
+
+
+
+# Usage: create_email( @prog_objects )
+# Reference: http://sial.org/howto/perl/Net-SMTP/
+sub create_html_email {
+	# Check if we have Net::SMTP installed - might not be for the windows installer
+	eval "use Net::SMTP";
+	if ($@) {
+		main::logger "WARNING: Please download and run latest installer or install the Net::SMTP perl module to use --email options\n";
+		return 0;
+	};
+	my $search_args = shift;
+	my $recipient = $opt->{email};
+	my $sender = $opt->{emailsender} || 'get_iplayer <>';
+	my $smtphost = $opt->{emailsmtp} || 'localhost';
+	my @mail_failure;
+	my @subject;
+	# Set the subject using the currently set cmdline options
+	push @subject, "get_iplayer Search Results for: $search_args ( ";
+	for my $optkey ( grep !/^email.*/, sort keys %{ $opt_cmdline } ) {
+		push @subject, "$optkey='$opt_cmdline->{$optkey}' " if $opt_cmdline->{$optkey};
+	}
+	push @subject, " )";
+
+	my $message = "MIME-Version: 1.0\n"
+		."Content-Type: text/html\n"
+		."From: $sender\n"
+		."To: $recipient\n"
+		."Subject: @subject\n\n\n"
+		.create_html( @_ )."\n";
+	main::logger "DEBUG: Email message to $recipient:\n$message\n\n" if $opt->{debug};
+
+	my $smtp = Net::SMTP->new($smtphost);
+	if ( ! $smtp ) {
+		main::logger "ERROR: Could not find or connect to specficied SMTP server\n";
+		return 1;
+	};
+
+	$smtp->mail( $sender ) || push @mail_failure, "MAIL FROM: $sender";
+	$smtp->to( $recipient ) || push @mail_failure, "RCPT TO: $recipient";
+	$smtp->data() || push @mail_failure, 'DATA';
+	$smtp->datasend( $message ) || push @mail_failure, 'Message Data';
+	$smtp->dataend() || push @mail_failure, 'End of DATA';
+	$smtp->quit() || push @mail_failure, 'QUIT';
+
+	if ( @mail_failure ) {
+		main::logger "ERROR: Sending of email failed with $mail_failure[0]\n";
+	}
+	return 0;
+}
+
+
+
+# Usage: create_html( @prog_objects )
+sub create_html {
+	my @html;
+	my %name_channel;
+	# Create local web page
+	push @html, '<html><head></head><body><table border=1>';
+	for my $this ( @_ ) {
+		# Skip if pid isn't in index
+		my $pid = $this->{pid} || next;
+		# Skip if already recorded and --hide option is specified
+		if (! defined $name_channel{ "$this->{name}|$this->{channel}" }) {
+			push @html, $this->list_entry_html();
+		} else {
+			push @html, $this->list_entry_html( 1 );
+		}
+		$name_channel{ "$this->{name}|$this->{channel}" } = 1;
+	}
+	push @html, '</table></body>';
+	return join "\n", @html;
 }
 
 
@@ -2615,6 +2680,75 @@ sub get_playlist_url {
 	}
 
 	return $url;
+}
+
+
+
+# Converts any number words (or numbers) 0 - 99 to a number
+sub convert_words_to_number {
+	my $text = shift;
+	$text = lc($text);
+	my $number = 0;
+	# Regex for mnemonic numbers
+	my %lookup_0_19 = qw(
+		zero		0
+		one		1
+		two		2
+		three		3
+		four		4
+		five		5
+		six		6
+		seven		7
+		eight		8
+		nine		9
+		ten		10
+		eleven		11
+		twelve		12
+		thirteen	13
+		fourteen	14
+		fifteen		15
+		sixteen		16
+		seventeen	17
+		eighteen	18
+		nineteen	19
+	);
+	my %lookup_tens = qw(
+		twenty	20
+		thirty	30
+		forty 	40
+		fifty	50
+		sixty	60
+		seventy	70
+		eighty	80
+		ninety	90
+	);
+	my $regex_units = '(zero|one|two|three|four|five|six|seven|eight|nine)';
+	my $regex_ten_to_nineteen = '(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)';
+	my $regex_tens = '(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)';
+	my $regex_numbers = '(\d+|'.$regex_units.'|'.$regex_ten_to_nineteen.'|'.$regex_tens.'((\s+|\-|)'.$regex_units.')?)';
+	#print "REGEX: $regex_numbers\n";
+	#my $text = 'seventy two'
+	$number += $text if $text =~ /^\d+$/;
+	my $regex = $regex_numbers.'$';
+	if ( $text =~ /$regex/ ) {
+		# trailing zero -> nineteen
+		$regex = '('.$regex_units.'|'.$regex_ten_to_nineteen.')$';
+		$number += $lookup_0_19{ $1 } if $text =~ /($regex)/;
+		# leading tens
+		$regex = '^('.$regex_tens.')(\s+|\-|_||$)';
+		$number += $lookup_tens{ $1 } if $text =~ /$regex/;
+	}
+	return $number;
+}
+
+
+
+# Returns a regex string that matches all number words (or numbers) 0 - 99
+sub regex_numbers {
+	my $regex_units = '(zero|one|two|three|four|five|six|seven|eight|nine)';
+	my $regex_ten_to_nineteen = '(ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen)';
+	my $regex_tens = '(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)';
+	return '(\d+|'.$regex_units.'|'.$regex_ten_to_nineteen.'|'.$regex_tens.'((\s+|\-|)'.$regex_units.')?)';
 }
 
 
@@ -3919,6 +4053,28 @@ sub create_metadata_file {
 	</episodedetails>
 	';
 
+	# XML template for Freevo
+	$filename->{freevo} = "$prog->{dir}/$prog->{fileprefix}.fxd";
+	$template->{freevo} = '<?xml version="1.0" ?>
+	<freevo>
+		<FREEVOTYPE title="[longname]">
+			<video>
+				<file id="f1">[filename]</file>
+			</video>
+			<info>
+				<rating></rating>
+				<userdate>[dldate] [dltime]</userdate>
+				<plot>[desc]</plot>
+				<tagline>[episode]</tagline>
+				<year>[firstbcast]</year>
+				<genre>[categories]</genre>
+				<runtime>[duration]</runtime>
+				<channel>[channel]</channel>
+			</info>
+		</FREEVOTYPE>
+	</freevo>
+	';
+
 	# Generic XML template for all info
 	$filename->{generic} = "$prog->{dir}/$prog->{fileprefix}.xml";
 	$template->{generic}  = '<?xml version="1.0" encoding="UTF-8" ?>'."\n";
@@ -3938,6 +4094,14 @@ sub create_metadata_file {
 		my $text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
 		# Strip out unsubstituted tags
 		$text =~ s/<.+?>\[.+?\]<.+?>[\s\n\r]*//g;
+		# Hack: substitute here because freevo needs either <audio> or <movie> depending on filetype
+		if ( $opt->{metadata} eq 'freevo' ) {
+			if ( $prog->{type} =~ /radio/i ) {
+				$text =~ s/FREEVOTYPE/audio/g;
+			} else {
+				$text =~ s/FREEVOTYPE/movie/g;
+			}
+		}
 		print XML $text;
 		close XML;
 	} else {
@@ -4060,7 +4224,6 @@ sub generate_filenames {
 	$prog->{episode} = $episode if $episode && ! $prog->{episode};
 	# store the name extracted from the title metadata in <longname> else just use the <name> field
 	$prog->{longname} = $name || $prog->{name};
-
 
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
@@ -4352,8 +4515,6 @@ sub download_thumbnail {
 
 	return 0;
 }
-
-
 
 
 
@@ -4880,20 +5041,33 @@ sub get_metadata {
 	}
 
 	# Extract the seriesnum
-	if ( "$prog->{name} $prog->{episode}" =~ m{Series (\d+)} ) {
-		$prog->{seriesnum} = $1;
-	} elsif ( $seriestitle =~ m{Series (\d+)} ) {
-		$prog->{seriesnum} = $1;
+	my $regex = 'Series\s+'.main::regex_numbers();
+	# Extract the seriesnum
+	if ( "$prog->{name} $prog->{episode}" =~ m{$regex}i ) {
+		$prog->{seriesnum} = main::convert_words_to_number( $1 );
+	} elsif ( $seriestitle =~ m{$regex}i ) {
+		$prog->{seriesnum} = main::convert_words_to_number( $1 );
 	}
 
 	# Extract the episode num
-	if ( "$prog->{name} $prog->{episode}" =~ m{Episode (\d+)} ) {
-		$prog->{episodenum} = $1;
-	} elsif ( $prog->{episode} =~ m{^(\d+)\.\s+} ) {
-		$prog->{episodenum} = $1;
-	} elsif ( $episodetitle =~ m{^(\d+)\.\s+} ) {
-		$prog->{episodenum} = $1;
+	my $regex_1 = 'Episode\s+'.main::regex_numbers();
+	my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+	if ( "$prog->{name} $prog->{episode}" =~ m{$regex_1}i ) { 
+		$prog->{episodenum} = main::convert_words_to_number( $1 );
+	} elsif ( $episode =~ m{$regex_2}i ) {
+		$prog->{episodenum} = main::convert_words_to_number( $1 );
+	} elsif ( $episodetitle =~ m{$regex_2}i ) {
+		$prog->{episodenum} = main::convert_words_to_number( $1 );
 	}
+
+	# Re-insert the episode number if the episode text doesn't have it
+	if ( $episodenum && $episodetitle =~ /^\d+\./ && $episode !~ /^(.+:\s+)?\d+\./ ) {
+		$episode =~ s/^(.+:\s+)?(.*)$/$1$episodenum. $2/;
+	}
+
+	# Use the longer of the episode texts
+	$episode = $episodetitle if length( $episodetitle ) > length( $episode );
+	$episode = $prog->{episode} if length( $prog->{episode} ) > length( $episode );
 
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
@@ -5701,7 +5875,7 @@ sub get_links {
 		shift @entries;
 
 		foreach my $entry (@entries) {
-			my ( $title, $name, $episode, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
+			my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
 			
 			my $entry_flat = $entry;
 			$entry_flat =~ s/\n/ /g;
@@ -5715,9 +5889,30 @@ sub get_links {
 
 			# determine name and episode from title
 			( $name, $episode ) = Programme::bbciplayer::split_title( $title );
-			# This is not the availability!
-			# <updated>2008-06-22T05:01:49Z</updated>
-			#$available = Programme::get_time_string( $1, time() ) if $entry =~ m{<updated>(\d{4}\-\d\d\-\d\dT\d\d:\d\d:\d\d.).*?</updated>};
+
+			# Get the title from the atom link refs only to determine the longer episode name
+			$episodetitle = $1 if $entry =~ m{<link\s+rel="self"\s+href="http.+?/episode/.+?"\s+type="application/atom\+xml"\s+title="(.+?)"};
+			$nametitle = $1 if $entry =~ m{<link\s+rel="related"\s+href="http.+?/programmes/.+?"\s+type="text/html"\s+title="(.+?)"};
+
+			# Extract the seriesnum
+			my $regex = 'Series\s+'.main::regex_numbers();
+			$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+
+			# Extract the episode num
+			my $regex_1 = 'Episode\s+'.main::regex_numbers();
+			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+			if ( "$name $episode" =~ m{$regex_1}i ) { 
+				$episodenum = main::convert_words_to_number( $1 );
+			} elsif ( $episode =~ m{$regex_2}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			} elsif ( $episodetitle =~ m{$regex_2}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			}
+
+			# Re-insert the episode number if the episode text doesn't have it
+			if ( $episodenum && $episodetitle =~ /^\d+\./ && $episode !~ /^(.+:\s+)?\d+\./ ) {
+				$episode =~ s/^(.+:\s+)?(.*)$/$1$episodenum. $2/;
+			}
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
@@ -5785,6 +5980,8 @@ sub get_links {
 				'name'		=> $name,
 				'versions'	=> $version,
 				'episode'	=> $episode,
+				'seriesnum'	=> $seriesnum,
+				'episodenum'	=> $episodenum,
 				'desc'		=> $desc,
 				'guidance'	=> $guidance,
 				'available'	=> 'Unknown',
@@ -7104,10 +7301,10 @@ sub get {
 		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
 	}
 
-	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5' or 'FLVStreamer v1.7a'
+	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5', 'FLVStreamer v1.7a', 'RTMPDump 2.1b'
 	my $rtmpver;
 	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `"$bin->{flvstreamer}" 2>&1`)[0] );
-	$rtmpver =~ s/^\w+\s+v([\.\d]+).*$/$1/g;
+	$rtmpver =~ s/^\w+\s+v?([\.\d]+).*$/$1/g;
 	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
