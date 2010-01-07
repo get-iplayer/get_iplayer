@@ -1,7 +1,7 @@
 ;Product Info
 Name "get_iplayer" ;Define your own software name here
 !define PRODUCT "get_iplayer" ;Define your own software name here
-!define VERSION "2.54+" ;Define your own software version here
+!define VERSION "2.56+" ;Define your own software version here
 
 ; Script create for version 2.0rc1/final (from 12.jan.04) with GUI NSIS (c) by Dirk Paehl. Thank you for use my program
 
@@ -24,8 +24,7 @@ SetCompressor /SOLID lzma
   ;get all user profile path
   Var TempGlobalProfile
   Var TempUserProfile
-  Var pvr_file
-  Var opt_file
+  Var fh
   Var DataDir
   Var InstallDir
 
@@ -79,23 +78,29 @@ Section "get_iplayer" section1
   CreateDirectory $DataDir
 
   ;create options file
-  FileOpen $opt_file "$TempGlobalProfile\get_iplayer\options" "w"
-  FileWrite $opt_file "lame .\lame\lame.exe$\r$\n"
-  FileWrite $opt_file "mplayer .\mplayer\MPlayer-1.0rc2\mplayer.exe$\r$\n"
-  ;;FileWrite $opt_file "output $TempUserProfile\Desktop\iPlayer Recordings\$\r$\n"
-  FileWrite $opt_file "output $DataDir$\r$\n"
-  FileWrite $opt_file "flvstreamer .\flvstreamer.exe$\r$\n"
-  FileWrite $opt_file "ffmpeg .\ffmpeg\bin\ffmpeg.exe$\r$\n"
-  FileWrite $opt_file "vlc .\vlc\vlc.exe$\r$\n"
-  FileWrite $opt_file "mmsnothread 1$\r$\n"
-  FileWrite $opt_file "nopurge 1$\r$\n"
-  FileClose "$opt_file"
+  FileOpen $fh "$TempGlobalProfile\get_iplayer\options" "w"
+  FileWrite $fh "lame .\lame\lame.exe$\r$\n"
+  FileWrite $fh "mplayer .\mplayer\MPlayer-1.0rc2\mplayer.exe$\r$\n"
+  ;;FileWrite $fh "output $TempUserProfile\Desktop\iPlayer Recordings\$\r$\n"
+  FileWrite $fh "output $DataDir$\r$\n"
+  FileWrite $fh "flvstreamer .\flvstreamer.exe$\r$\n"
+  FileWrite $fh "ffmpeg .\ffmpeg\bin\ffmpeg.exe$\r$\n"
+  FileWrite $fh "vlc .\vlc\vlc.exe$\r$\n"
+  FileWrite $fh "mmsnothread 1$\r$\n"
+  FileWrite $fh "nopurge 1$\r$\n"
+  FileClose "$fh"
 
-  FileOpen $pvr_file "$InstallDir\run_pvr.bat" "w"
-  FileWrite $pvr_file "cd $InstallDir$\r$\n"
-  FileWrite $pvr_file "get_iplayer.cmd --pvrschedule 14400$\r$\n"
-  FileWrite $pvr_file "$\r$\n"
-  FileClose "$pvr_file"
+  FileOpen $fh "$InstallDir\run_pvr_scheduler.bat" "w"
+  FileWrite $fh "cd $InstallDir$\r$\n"
+  FileWrite $fh "perl.exe get_iplayer.pl --pvrschedule 14400$\r$\n"
+  FileWrite $fh "$\r$\n"
+  FileClose "$fh"
+
+  FileOpen $fh "$InstallDir\get_iplayer--pvr.bat" "w"
+  FileWrite $fh "cd $InstallDir$\r$\n"
+  FileWrite $fh "perl.exe get_iplayer.pl --pvr$\r$\n"
+  FileWrite $fh "$\r$\n"
+  FileClose "$fh"
 
   ;download get_iplayer
   Delete $InstallDir\get_iplayer.pl
@@ -115,7 +120,7 @@ Section "get_iplayer" section1
   CreateShortCut "$SMPROGRAMS\get_iplayer\Recordings Folder.lnk" "$DataDir"
   WriteIniStr "$InstallDir\pvr_manager.url" "InternetShortcut" "URL" "http://127.0.0.1:1935"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Web PVR Manager.lnk" "$SYSDIR\cmd.exe" "/c pvr_manager.cmd" "$InstallDir\iplayer_logo.ico"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Run PVR Scheduler Now.lnk" "$SYSDIR\cmd.exe" "/k run_pvr.bat" "$InstallDir\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Run PVR Scheduler Now.lnk" "$SYSDIR\cmd.exe" "/k run_pvr_scheduler.bat" "$InstallDir\iplayer_logo.ico"
 
   ;uninstall info
   CreateShortCut "$SMPROGRAMS\get_iplayer\Uninstall.lnk" "$InstallDir\uninst.exe" "" "$InstallDir\uninst.exe" 0
