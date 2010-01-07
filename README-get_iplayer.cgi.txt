@@ -4,7 +4,7 @@ get_iplayer PVR Manager
 The Worlds most insecure web-based PVR Manager adn streaming proxy for get_iplayer
 ** WARNING ** Never run this in an untrusted environment or facing the internet
 
-    Copyright (C) 2009 Phil Lewis
+    Copyright (C) 2009-2010 Phil Lewis
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
