@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.56;
+my $version = 2.57;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -128,7 +128,7 @@ my $opt_format = {
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	pid		=> [ 2, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
-	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL spec"],
+	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs>', "Recording/streaming start offset (rtmp and realaudio only)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
@@ -144,14 +144,14 @@ my $opt_format = {
 	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
 	category 	=> [ 2, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
 	channel		=> [ 2, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
-	exclude		=> [ 1, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
-	excludecategory	=> [ 1, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched catogories (regex or comma separated values)"],
-	excludechannel	=> [ 1, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
+	exclude		=> [ 0, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
+	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched catogories (regex or comma separated values)"],
+	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
 	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
 	search		=> [ 1, "search=s", 'Search', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	history		=> [ 1, "history", 'Search', '--history', "Search/show recordings history"],
-	since		=> [ 1, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
+	since		=> [ 0, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record (e.g. '--versions signed,audiodescribed,default')"],
 
@@ -187,6 +187,7 @@ my $opt_format = {
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	flush		=> [ 2, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
 	ignorechannels	=> [ 1, "ignorechannels=s", 'Config', '--ignorechannels <string>', "Ignore matched channel(s) when refreshing cache (regex or comma separated values)"],
+	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
 	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
@@ -899,6 +900,12 @@ sub find_matches {
 		@match_list = @pruned;
 	}
 		
+	# Truncate the array of matches if --limit-matches is specified
+	if ( $opt->{limitmatches} && $#match_list > $opt->{limitmatches} - 1 ) {
+		$#match_list = $opt->{limitmatches} - 1;
+		main::logger "WARNING: The list of matching results was limited to $opt->{limitmatches} by --limit-matches\n";
+	}
+
 	# Display list for recording
 	list_progs( \%type, @match_list );
 
@@ -2163,6 +2170,7 @@ sub create_html_file {
 
 # Usage: create_email( @prog_objects )
 # Reference: http://sial.org/howto/perl/Net-SMTP/
+# Credit: Network Ned, andy <AT SIGN> networkned.co.uk, http://networkned.co.uk
 sub create_html_email {
 	# Check if we have Net::SMTP installed - might not be for the windows installer
 	eval "use Net::SMTP";
@@ -4059,7 +4067,7 @@ sub create_metadata_file {
 	<freevo>
 		<FREEVOTYPE title="[longname]">
 			<video>
-				<file id="f1">[filename]</file>
+				<file id="f1">[fileprefix].[ext]</file>
 			</video>
 			<info>
 				<rating></rating>
@@ -8217,8 +8225,8 @@ sub opt_format {
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Save the named PVR search with the specified search terms"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
-		pvrdisable	=> [ 0, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
-		pvrenable	=> [ 0, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
+		pvrdisable	=> [ 1, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search"],
+		pvrenable	=> [ 1, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list", 'PVR', '--pvrlist', "Show the PVR search list"],
 		pvrqueue	=> [ 0, "pvrqueue|pvr-queue", 'PVR', '--pvrqueue', "Add currently matched programmes to queue for later one-off recording using the --pvr option"],
 		pvrscheduler	=> [ 0, "pvrscheduler|pvr-scheduler=n", 'PVR', '--pvrscheduler <seconds>', "Runs the PVR using all saved PVR searches every <seconds>"],
@@ -8319,7 +8327,7 @@ sub run {
 		# Do the recording (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
 
-		# If this is a one-off queue pid entry then delete the PVR entry upon successful recoding(s)
+		# If this is a one-off queue pid entry then delete the PVR entry upon successful recording(s)
 		if ( $pvr->{$name}->{pid} ) {
 			my $failcount = main::find_matches( $hist );
 			$pvr->del( $name ) if not $failcount;
