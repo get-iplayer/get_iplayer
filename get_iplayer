@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.57;
+my $version = 2.58;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4900,8 +4900,7 @@ sub get_metadata {
 		}
 		# Use the default cache thumbnail unless --thumbsize=NNN is used where NNN is either the width or thumbnail index number
 		$thumbnail = $thumbnails{ $opt->{thumbsize} } if $thumbnails{ $opt->{thumbsize} };
-		$name = $1 if $entry =~ m{<title\s+type="text">(.+?)[:<]};
-		$episode = $1 if $entry =~ m{<title\s+type="text">.+?:\s+(.+?)<};
+		( $name, $episode ) = Programme::bbciplayer::split_title( $1 ) if $entry =~ m{<title\s+type="text">\s*(.+?)\s*<};
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
 		# Get the title from the atom link refs only to determine the episode and series number
