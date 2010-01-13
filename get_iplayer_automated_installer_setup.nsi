@@ -1,17 +1,22 @@
-;Product Info
-Name "get_iplayer" ;Define your own software name here
-!define PRODUCT "get_iplayer" ;Define your own software name here
-!define VERSION "2.56+" ;Define your own software version here
+;#######################################
+;# Product Info
+;#######################################
 
-; Script create for version 2.0rc1/final (from 12.jan.04) with GUI NSIS (c) by Dirk Paehl. Thank you for use my program
+  Name "get_iplayer"
 
- !include "MUI.nsh"
- !include "Sections.nsh"
+  !define PRODUCT "get_iplayer"
+  !define VERSION "2.59+"
+
+  !include "MUI.nsh"
+  !include "Sections.nsh"
+
+  SetCompressor /SOLID lzma
 
 
-SetCompressor /SOLID lzma
-;--------------------------------
-;Configuration
+
+;#######################################
+;# Configuration
+;#######################################
  
   OutFile "get_iplayer_setup_${VERSION}.exe"
 
@@ -27,44 +32,79 @@ SetCompressor /SOLID lzma
   Var fh
   Var DataDir
   Var InstallDir
+  Var Test
 
   ;Remember install folder
   InstallDirRegKey HKCU "Software\${PRODUCT}" ""
 
 
-;--------------------------------
-;Pages
+
+;#######################################
+;# Pages
+;#######################################
 
   !insertmacro MUI_PAGE_WELCOME
+
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE LicensePre
   !insertmacro MUI_PAGE_LICENSE "installer_files\LICENSE.txt"
+
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW ComponentsShow
   !insertmacro MUI_PAGE_COMPONENTS
 
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE DirectoryPre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW DirectoryShow
   !define MUI_PAGE_CUSTOMFUNCTION_LEAVE DirectoryLeave
   !insertmacro MUI_PAGE_DIRECTORY
 
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE RecordingsDirectoryPre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW RecordingsDirectoryShow
   !define MUI_PAGE_CUSTOMFUNCTION_LEAVE RecordingsDirectoryLeave
   !insertmacro MUI_PAGE_DIRECTORY
 
   !insertmacro MUI_PAGE_INSTFILES
   !insertmacro MUI_PAGE_FINISH
+
+
   !insertmacro MUI_UNPAGE_CONFIRM
+  !insertmacro MUI_UNPAGE_COMPONENTS
   !insertmacro MUI_UNPAGE_INSTFILES
 
- !define MUI_ABORTWARNING
+  !define MUI_ABORTWARNING
 
-;--------------------------------
- ;Language
+
+
+;#######################################
+;# Language
+;#######################################
  
   !insertmacro MUI_LANGUAGE "English"
-;--------------------------------
 
-     
+
+
+;#######################################
+;# Sections
+;#######################################     
+
 Section "get_iplayer" section1
+  ; Add 500k more than the installer files (i.e. perl)
+  AddSize 500
   ReadEnvStr $TempGlobalProfile "ALLUSERSPROFILE"
   ReadEnvStr $TempUserProfile "USERPROFILE"
-  SetOutPath "$InstallDir"
+  ;SetOutPath "$InstallDir"
+  Call SetInstallDir
+  ; pre-clear
+  RMDir /r "$INSTDIR\lib"
+  RMDir /r "$INSTDIR\perl-license"
+  Delete "$INSTDIR\get_iplayer*" 
+  Delete "$INSTDIR\*.bat" 
+  Delete "$INSTDIR\*.ico"
+  Delete "$INSTDIR\*.url"
+  Delete "$INSTDIR\perl.exe"
+  Delete "$INSTDIR\perl*.dll"
+  Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\*.cmd"
+  RmDir /r "$SMPROGRAMS\get_iplayer"
+  ; Copy files into place
   FILE /r "get_iplayer\*.*"
   
   ;clear the global files
@@ -74,13 +114,13 @@ Section "get_iplayer" section1
   CreateDirectory $TempGlobalProfile\get_iplayer
   
   ;create user download folder
-  ;;CreateDirectory "$TempUserProfile\Desktop\iPlayer Recordings\"
   CreateDirectory $DataDir
 
   ;create options file
   FileOpen $fh "$TempGlobalProfile\get_iplayer\options" "w"
   FileWrite $fh "lame .\lame\lame.exe$\r$\n"
   FileWrite $fh "mplayer .\mplayer\MPlayer-1.0rc2\mplayer.exe$\r$\n"
+  FileWrite $fh "atomicparsley .\atomicparsley\atomicparsley.exe$\r$\n"
   ;;FileWrite $fh "output $TempUserProfile\Desktop\iPlayer Recordings\$\r$\n"
   FileWrite $fh "output $DataDir$\r$\n"
   FileWrite $fh "flvstreamer .\flvstreamer.exe$\r$\n"
@@ -90,12 +130,14 @@ Section "get_iplayer" section1
   FileWrite $fh "nopurge 1$\r$\n"
   FileClose "$fh"
 
+  ; Create run_pvr_scheduler batch file
   FileOpen $fh "$InstallDir\run_pvr_scheduler.bat" "w"
   FileWrite $fh "cd $InstallDir$\r$\n"
   FileWrite $fh "perl.exe get_iplayer.pl --pvrschedule 14400$\r$\n"
   FileWrite $fh "$\r$\n"
   FileClose "$fh"
 
+  ; Create Windows scheduler batch file
   FileOpen $fh "$InstallDir\get_iplayer--pvr.bat" "w"
   FileWrite $fh "cd $InstallDir$\r$\n"
   FileWrite $fh "perl.exe get_iplayer.pl --pvr$\r$\n"
@@ -104,119 +146,287 @@ Section "get_iplayer" section1
 
   ;download get_iplayer
   Delete $InstallDir\get_iplayer.pl
+  download1:
   NSISdl::download http://linuxcentre.net/get_iplayer/get_iplayer $InstallDir\get_iplayer.pl
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "success" install1
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer failed: $R0, Do you wish to try again?" IDYES download1
+     Return
+  install1:
 
   ;download get_iplayer.cgi
+  Delete $InstallDir\get_iplayer.cgi
+  download2:
   NSISdl::download http://linuxcentre.net/winredirect/get_iplayer.cgi $InstallDir\get_iplayer.cgi
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "success" install2
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer Web PVR Manager failed: $R0, Do you wish to try again?" IDYES download2
+     Return
+  install2:
 
   ;startmenu
-  CreateDirectory "$SMPROGRAMS\get_iplayer"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k get_iplayer.cmd --search dontshowanymatches && get_iplayer.cmd --help" "$InstallDir\iplayer_logo.ico"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Update Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k Update_get_iplayer.cmd" "$InstallDir\iplayer_logo.ico"
-  WriteIniStr "$InstallDir\get_iplayer.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Show Home Page.lnk" "$InstallDir\get_iplayer.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateDirectory "$SMPROGRAMS\get_iplayer\Updates"
+  CreateDirectory "$SMPROGRAMS\get_iplayer\Help"
+  ; URLs
+  WriteIniStr "$InstallDir\linuxcentre.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/"
   WriteIniStr "$InstallDir\command_examples.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/documentation/"
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Show Example Commands.lnk" "$InstallDir\command_examples.url" "" "$SYSDIR\SHELL32.dll" 175
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Recordings Folder.lnk" "$DataDir"
+  WriteIniStr "$InstallDir\faq.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/documentation/"
   WriteIniStr "$InstallDir\pvr_manager.url" "InternetShortcut" "URL" "http://127.0.0.1:1935"
+  WriteIniStr "$InstallDir\download_latest_installer.url" "InternetShortcut" "URL" "http://linuxcentre.net/get_iplayer/contrib/get_iplayer_setup_latest.exe"
+
+  WriteIniStr "$InstallDir\mplayer_docs.url" "InternetShortcut" "URL" "http://www.mplayerhq.hu/DOCS/HTML/en/index.html"
+  WriteIniStr "$InstallDir\lame_docs.url" "InternetShortcut" "URL" "http://lame.sourceforge.net/using.php"
+  WriteIniStr "$InstallDir\vlc_docs.url" "InternetShortcut" "URL" "http://wiki.videolan.org/Documentation:Documentation"
+  WriteIniStr "$InstallDir\ffmpeg_docs.url" "InternetShortcut" "URL" "http://ffmpeg.org/ffmpeg-doc.html"
+  WriteIniStr "$InstallDir\flvstreamer_docs.url" "InternetShortcut" "URL" "http://savannah.nongnu.org/projects/flvstreamer/"
+  WriteIniStr "$InstallDir\atomicparsley_docs.url" "InternetShortcut" "URL" "http://atomicparsley.sourceforge.net/"
+  WriteIniStr "$InstallDir\strawberry_docs.url" "InternetShortcut" "URL" "http://strawberryperl.com/"
+  WriteIniStr "$InstallDir\nsis_docs.url" "InternetShortcut" "URL" "http://nsis.sourceforge.net/"
+
+  ; root startmenu items
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k get_iplayer.cmd --search dontshowanymatches && get_iplayer.cmd --help" "$InstallDir\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Recordings Folder.lnk" "$DataDir"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Web PVR Manager.lnk" "$SYSDIR\cmd.exe" "/c pvr_manager.cmd" "$InstallDir\iplayer_logo.ico"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Run PVR Scheduler Now.lnk" "$SYSDIR\cmd.exe" "/k run_pvr_scheduler.bat" "$InstallDir\iplayer_logo.ico"
 
-  ;uninstall info
-  CreateShortCut "$SMPROGRAMS\get_iplayer\Uninstall.lnk" "$InstallDir\uninst.exe" "" "$InstallDir\uninst.exe" 0
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "DisplayName" "${PRODUCT} ${VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "URLInfoAbout" "http://linuxcentre.net/getiplayer"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "Publisher" "Phil Lewis"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "UninstallString" "$InstallDir\Uninst.exe"
-  WriteRegStr HKCU "Software\${PRODUCT}" "" $InstallDir
-  WriteUninstaller "$InstallDir\Uninst.exe"
+  ; Help startmenu items
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\get_iplayer Home.lnk" "$InstallDir\linuxcentre.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\get_iplayer Example Commands.lnk" "$InstallDir\command_examples.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\get_iplayer FAQ.lnk" "$InstallDir\faq.url" "" "$SYSDIR\SHELL32.dll" 175
+
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\Lame Documentation.lnk" "$InstallDir\lame_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\MPlayer Documentation.lnk" "$InstallDir\mplayer_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\VLC Documentation.lnk" "$InstallDir\vlc_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\FFmpeg Documentation.lnk" "$InstallDir\ffmpeg_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\flvstreamer Documentation.lnk" "$InstallDir\flvstreamer_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\AtomicParsley Documentation.lnk" "$InstallDir\atomicparsley_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\Strawberry Perl Home.lnk" "$InstallDir\strawberry_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Help\NSIS Installer Home.lnk" "$InstallDir\nsis_docs.url" "" "$SYSDIR\SHELL32.dll" 175
+
+  ; Update startmenu items
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Updates\Update Get_iPlayer.lnk" "$SYSDIR\cmd.exe" "/k Update_get_iplayer.cmd" "$InstallDir\iplayer_logo.ico"
+  CreateShortCut "$SMPROGRAMS\get_iplayer\Updates\Download Latest Installer.lnk" "$InstallDir\download_latest_installer.url" "" "$SYSDIR\SHELL32.dll" 175
 SectionEnd
-LangString DESC_Section1 ${LANG_ENGLISH} "Install get_iplayer."
+
+Section "un.get_iplayer" un.section1
+  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Remove User Preferences, PVR Searches, Presets and Recording History?" IDYES true2 IDNO false2
+  true2:
+    ;delete the local user data
+    Delete $PROFILE\.get_iplayer\*
+    RmDir $PROFILE\.get_iplayer
+  false2:
+  RMDir /r "$INSTDIR\lib"
+  RMDir /r "$INSTDIR\perl-license"
+  Delete "$INSTDIR\get_iplayer*" 
+  Delete "$INSTDIR\*.bat" 
+  Delete "$INSTDIR\*.ico"
+  Delete "$INSTDIR\*.url"
+  Delete "$INSTDIR\perl.exe"
+  Delete "$INSTDIR\perl*.dll"
+  Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\*.cmd"
+  RmDir /r "$SMPROGRAMS\get_iplayer"
+  ;remove the global options file 
+  ReadEnvStr $TempGlobalProfile "ALLUSERSPROFILE"
+  Delete $TempGlobalProfile\get_iplayer\options
+  RmDir $TempGlobalProfile\get_iplayer
+SectionEnd
+
+LangString DESC_Section1 ${LANG_ENGLISH} "Install get_iplayer and required Strawberry Perl - Required for all recordings. Also bundled with Web PVR Manager (~6.5MB)"
    
+
+
 Section "Mplayer" section2
+  AddSize 10500
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download mplayer
+  download:
   NSISdl::download http://linuxcentre.net/winredirect/mplayer $InstallDir\mplayer.zip
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of Mplayer failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of Mplayer failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
+  ; pre-clear
+  RMDir /r "$InstallDir\mplayer"  
   CreateDirectory "$InstallDir\mplayer"
   ZipDLL::extractall $InstallDir\mplayer.zip $InstallDir\mplayer <ALL>
   Delete $InstallDir\mplayer.zip
 SectionEnd
-LangString DESC_Section2 ${LANG_ENGLISH} "Download and install Mplayer from http://linuxcentre.net/winredirect/mplayer (10.3MB)"
+
+Section "un.Mplayer" un.section2
+  RMDir /r "$INSTDIR\mplayer"  
+SectionEnd
+
+LangString DESC_Section2 ${LANG_ENGLISH} "Download and install Mplayer - Used for RealAudio and MMS recording modes (~10.5MB)"
+
+
 
 Section "Lame" section3
+  AddSize 550
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download lame
+  download:
   NSISdl::download http://linuxcentre.net/winredirect/lame $InstallDir\lame.zip
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of Lame failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of Lame failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
+  ; pre-clear
+  RMDir /r "$InstallDir\lame"
   CreateDirectory "$InstallDir\lame"
   ZipDLL::extractall $InstallDir\lame.zip $InstallDir\lame <ALL>
   Delete $InstallDir\lame.zip
 SectionEnd
-LangString DESC_Section3 ${LANG_ENGLISH} "Download and install Lame from http://linuxcentre.net/winredirect/lame (535k)"
+
+Section "un.Lame" un.section3
+  RMDir /r "$INSTDIR\lame"
+SectionEnd
+
+LangString DESC_Section3 ${LANG_ENGLISH} "Download and install Lame - Used for transcoding RealAudio recordings to MP3 (~550k)"
+
+
 
 Section "ffmpeg" section4
+  AddSize 6500
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download ffmpeg
-  CreateDirectory "$InstallDir\ffmpeg"
+  download:
   NSISdl::download http://linuxcentre.net/winredirect/ffmpeg "$InstallDir\ffmpeg.tbz"
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of ffmpeg.tar.bz2 failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of FFmpeg failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
+  ; pre-clear
+  RMDir /r "$InstallDir\ffmpeg"
+  CreateDirectory "$InstallDir\ffmpeg"
   untgz::extract  -zbz2  -d "$InstallDir\ffmpeg" "$InstallDir\ffmpeg.tbz" 
   DetailPrint "untgz returned ($R0)"
   Delete "$InstallDir\ffmpeg.tbz"
 SectionEnd
-LangString DESC_Section4 ${LANG_ENGLISH} "Download and install ffmpeg from http://linuxcentre.net/winredirect/ffmpeg (6.3MB)"
+
+Section "un.ffmpeg" un.section4
+  RMDir /r "$INSTDIR\ffmpeg"
+SectionEnd
+
+LangString DESC_Section4 ${LANG_ENGLISH} "Download and install ffmpeg - Used for losslessly converting Flash Video into useful video/audio files formats (~6.5MB)"
+
+
 
 Section "VLC" section5
+  AddSize 15000
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download vlc
-  NSISdl::download http://linuxcentre.net/winredirect/vlc $InstallDir\vlc.7z
+  download:
+  NSISdl::download http://linuxcentre.net/winredirect/vlc103 $InstallDir\vlc.7z
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of VLC failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of VLC failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
   Nsis7z::Extract "$InstallDir\vlc.7z"
   Delete $InstallDir\vlc.7z
-  Rename "$InstallDir\vlc-1.0.1" "$InstallDir\vlc"
+  ; pre-clear
+  RMDir /r "$InstallDir\vlc"
+  Rename "$InstallDir\vlc-1.0.3" "$InstallDir\vlc"
+  ; start menu
+  CreateShortCut "$SMPROGRAMS\VLC Media Player.lnk" "$InstallDir\vlc\vlc.exe" "" "$InstallDir\vlc\vlc.ico"
 SectionEnd
-LangString DESC_Section5 ${LANG_ENGLISH} "Download and install VLC from http://linuxcentre.net/winredirect/vlc (15.0MB)"
+
+Section "un.VLC" un.section5
+  ; start menu
+  Delete "$SMPROGRAMS\VLC Media Player.lnk"
+  RMDir /r "$INSTDIR\vlc"
+SectionEnd
+
+LangString DESC_Section5 ${LANG_ENGLISH} "Download and install VLC - Required for playback of playlists and content from Web PVR Manager (~15MB)"
+
+
 
 Section "flvstreamer (non-cygwin)" section6
+  AddSize 500
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download flvstreamer
+  ; pre-clear
+  Delete "$InstallDir\flvstreamer.exe"
+  download:
   NSISdl::download http://linuxcentre.net/winredirect/flvstreamer "$InstallDir\flvstreamer.exe"
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of flvstreamer failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of flvstreamer failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
 SectionEnd
-LangString DESC_Section6 ${LANG_ENGLISH} "Download and install flvstreamer(win32) from http://linuxcentre.net/winredirect/flvstreamer (~300k)"
 
-Section /o "flvstreamer (using cygwin library)" section7
+Section "un.flvstreamer (non-cygwin)" un.section6
+  Delete "$INSTDIR\flvstreamer.exe"
+SectionEnd
+
+LangString DESC_Section6 ${LANG_ENGLISH} "Download and install flvstreamer - Used for recording Flash video modes (~500k)"
+
+
+
+Section "flvstreamer (using cygwin library)" section7
+  AddSize 2500
+  Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
-  ;download flvstreamer-cygwin
+  ; pre-clear
+  Delete "$InstallDir\flvstreamer.exe"
+  download1:
   NSISdl::download http://linuxcentre.net/winredirect/flvstreamer-cygwin "$InstallDir\flvstreamer.exe"
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of flvstreamer(cygwin) failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install1
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of flvstreamer (cygwin) failed: $R0, Do you wish to try again?" IDYES download1
+     Return
+  install1:
+  ; pre-clear
+  Delete "$InstallDir\cygwin1.dll"
+  download2:
   NSISdl::download http://linuxcentre.net/winredirect/cygwindll "$InstallDir\cygwin1.dll"
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" +3
-    MessageBox MB_OK "Download of cygwin library failed: $R0, Install it manually"
-    Return
+  StrCmp $R0 "success" install2
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of cygwin DLL failed: $R0, Do you wish to try again?" IDYES download2
+     Return
+  install2:
 SectionEnd
-LangString DESC_Section7 ${LANG_ENGLISH} "Download and install flvstreamer(win32/cygwin) from http://linuxcentre.net/winredirect/flvstreamer-cygwin (~2500k)"
+
+Section "un.flvstreamer (using cygwin library)" un.section7
+  Delete "$INSTDIR\flvstreamer.exe"
+  Delete "$INSTDIR\cygwin1.dll"
+SectionEnd
+
+LangString DESC_Section7 ${LANG_ENGLISH} "Download and install flvstreamer(cygwin alternative) - Used for recording Flash video modes (~2.5M)"
+
+
+
+Section "AtomicParsley" section8
+  AddSize 500
+  Call SetInstallDir
+  Call ConnectInternet ;Make an internet connection (if no connection available)
+  download:
+  NSISdl::download http://linuxcentre.net/winredirect/atomicparsley $InstallDir\atomicparsley.zip
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "success" install
+     MessageBox MB_YESNO|MB_ICONQUESTION "Download of AtomicParsley failed: $R0, Do you wish to try again?" IDYES download
+     Return
+  install:
+  CreateDirectory "$InstallDir\atomicparsley-tmp"
+  ZipDLL::extractall $InstallDir\atomicparsley.zip $InstallDir\atomicparsley-tmp <ALL>
+  Delete $InstallDir\atomicparsley.zip
+  ; pre-clear
+  RMDir /r "$InstallDir\atomicparsley"  
+  Rename "$InstallDir\atomicparsley-tmp\AtomicParsley-win32-0.9.0" "$InstallDir\atomicparsley"
+  RMDir /r "$InstallDir\atomicparsley-tmp"
+SectionEnd
+
+Section "un.AtomicParsley" un.section8
+  RMDir /r "$INSTDIR\atomicparsley"  
+SectionEnd
+
+LangString DESC_Section8 ${LANG_ENGLISH} "Download and install AtomicParsley - Used for Tagging MP4 files (~500k)"
+
 
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
@@ -225,54 +435,224 @@ LangString DESC_Section7 ${LANG_ENGLISH} "Download and install flvstreamer(win32
   !insertmacro MUI_DESCRIPTION_TEXT ${Section3} $(DESC_Section3)  
   !insertmacro MUI_DESCRIPTION_TEXT ${Section4} $(DESC_Section4)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section5} $(DESC_Section5)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section8} $(DESC_Section8)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section6} $(DESC_Section6)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section7} $(DESC_Section7)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
+
+
+;#######################################
+;# Before Installation
+;#######################################
+
+Function .onInit
+  ; Must set $INSTDIR here to avoid adding ${PRODUCT} to the end of the
+  ; path when user selects a new directory using the 'Browse' button.
+  StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCT}"
+
+  ; skip uninstaller if not already installed
+  ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}" "UninstallString"
+  StrCmp $R0 "" done
+
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
+    "${PRODUCT} is already installed. $\n$\nClick `OK` to remove components of the previous version or `Cancel` to continue this upgrade without uninstalling." \
+    IDOK uninst
+  Goto done
  
+  ;Run the uninstaller
+  uninst:
+    ClearErrors
+    ; Read install dir from registry
+    ReadRegStr $InstallDir HKCU "Software\${PRODUCT}" ""
+    StrCpy $INSTDIR $InstallDir
+    ; set the installer path from this
+    SetOutPath "$INSTDIR"
+    ExecWait '$R0 _?=$INSTDIR' ;Do not copy the uninstaller to a temp file
+    ; cleanly remove uninstaller
+    SetOutPath "$INSTDIR\..\"
+    ; first check to see if all the components have been removed
+    IfFileExists "$INSTDIR\docleanup" 0 done
+      Delete "$R0"
+      Delete "$INSTDIR\docleanup"
+      RMDir "$INSTDIR"
+  done:
+
+  ; Detect Installed Components
+  SectionSetFlags ${Section1} ${SF_SELECTED}
+  SectionSetFlags ${Section2} ${SF_SELECTED}
+  SectionSetFlags ${Section3} ${SF_SELECTED}
+  SectionSetFlags ${Section4} ${SF_SELECTED}
+  SectionSetFlags ${Section5} ${SF_SELECTED}
+  SectionSetFlags ${Section6} ${SF_SELECTED}
+  SectionSetFlags ${Section7} ${SF_SELECTED}
+  # set section 'get_iplayer' as unselected if already installed
+  IfFileExists "$INSTDIR\get_iplayer.pl" 0 Next1
+    SectionSetFlags ${Section1} 0
+  Next1:
+  # set section 'Mplayer' as unselected if already installed
+  IfFileExists "$INSTDIR\mplayer\MPlayer-1.0rc2\mplayer.exe" 0 Next2
+    SectionSetFlags ${Section2} 0
+  Next2:
+  # set section 'Lame' as unselected if already installed
+  IfFileExists "$INSTDIR\lame\lame.exe" 0 Next3
+    SectionSetFlags ${Section3} 0
+  Next3:
+  # set section 'ffmpeg' as unselected if already installed
+  IfFileExists "$INSTDIR\ffmpeg\bin\ffmpeg.exe" 0 Next4
+    SectionSetFlags ${Section4} 0
+  Next4:
+  # set section 'VLC' as unselected if already installed
+  IfFileExists "$INSTDIR\vlc\vlc.exe" 0 Next5
+    SectionSetFlags ${Section5} 0
+  Next5:
+  # set section 'flvstreamer (non-cygwin)' as unselected if already installed
+  IfFileExists "$INSTDIR\flvstreamer.exe" 0 Next6
+    SectionSetFlags ${Section6} 0
+  Next6:
+  # set section 'flvstreamer (using cygwin library)' as unselected
+  SectionSetFlags ${Section7} 0
+  # set section 'AtomicParsley' as unselected if already installed
+  IfFileExists "$INSTDIR\atomicparsley\atomicparsley.exe" 0 Next8
+    SectionSetFlags ${Section8} 0
+  Next8:
+FunctionEnd
+
+
+
+;#######################################
+;# After Successful Installation
+;#######################################
+
+Function .onInstSuccess
+  ; Put uninstall info in registry
+  ;CreateShortCut "$SMPROGRAMS\get_iplayer\Uninstall.lnk" "$InstallDir\uninst.exe" "" "$InstallDir\uninst.exe" 0
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "DisplayName" "${PRODUCT} ${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "URLInfoAbout" "http://linuxcentre.net/getiplayer"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "Publisher" "Phil Lewis"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "UninstallString" "$InstallDir\Uninst.exe"
+  WriteRegStr HKCU "Software\${PRODUCT}" "" $InstallDir
+  WriteUninstaller "$InstallDir\Uninst.exe"
+FunctionEnd
+
+
+
+;#######################################
+;# Before Uninstallation
+;#######################################
+Function un.onInit 
+  ; Detect Installed Components
+  SectionSetFlags ${Section1} ${SF_RO}
+  SectionSetFlags ${Section2} ${SF_RO}
+  SectionSetFlags ${Section3} ${SF_RO}
+  SectionSetFlags ${Section4} ${SF_RO}
+  SectionSetFlags ${Section5} ${SF_RO}
+  SectionSetFlags ${Section6} ${SF_RO}
+  SectionSetFlags ${Section7} ${SF_RO}
+  # set section 'get_iplayer' as selected if already installed
+  IfFileExists "$INSTDIR\get_iplayer.pl" 0 Next1
+    SectionSetFlags ${Section1} ${SF_SELECTED}
+  Next1:
+  # set section 'Mplayer' as selected if already installed
+  IfFileExists "$INSTDIR\mplayer\MPlayer-1.0rc2\mplayer.exe" 0 Next2
+    SectionSetFlags ${Section2} ${SF_SELECTED}
+  Next2:
+  # set section 'Lame' as selected if already installed
+  IfFileExists "$INSTDIR\lame\lame.exe" 0 Next3
+    SectionSetFlags ${Section3} ${SF_SELECTED}
+  Next3:
+  # set section 'ffmpeg' as selected if already installed
+  IfFileExists "$INSTDIR\ffmpeg\bin\ffmpeg.exe" 0 Next4
+    SectionSetFlags ${Section4} ${SF_SELECTED}
+  Next4:
+  # set section 'VLC' as selected if already installed
+  IfFileExists "$INSTDIR\vlc\vlc.exe" 0 Next5
+    SectionSetFlags ${Section5} ${SF_SELECTED}
+  Next5:
+  # set section 'flvstreamer (using cygwin library)' as selected if already installed
+  IfFileExists "$INSTDIR\cygwin1.dll" 0 Next6
+    SectionSetFlags ${Section7} ${SF_SELECTED}
+    Goto Next7
+  Next6:
+  # set section 'flvstreamer (non-cygwin)' as selected if already installed
+  IfFileExists "$INSTDIR\flvstreamer.exe" 0 Next7
+    SectionSetFlags ${Section6} ${SF_SELECTED}
+  Next7:
+  # set section 'AtomicParsley' as selected if already installed
+  IfFileExists "$INSTDIR\atomicparsley\atomicparsley.exe" 0 Next8
+    SectionSetFlags ${Section8} ${SF_SELECTED}
+  Next8:
+
+FunctionEnd
+
+
+
+;#######################################
+;# After Successful Uninstallation
+;#######################################
+
 Function un.onUninstSuccess
+  ; Only remove the reg entry if all components are removed
+  IfFileExists "$INSTDIR\get_iplayer.pl" NoClean
+  IfFileExists "$INSTDIR\mplayer\MPlayer-1.0rc2\mplayer.exe" NoClean
+  IfFileExists "$INSTDIR\lame\lame.exe" NoClean
+  IfFileExists "$INSTDIR\ffmpeg\bin\ffmpeg.exe" NoClean
+  IfFileExists "$INSTDIR\vlc\vlc.exe" NoClean
+  IfFileExists "$INSTDIR\cygwin1.dll" NoClean
+  IfFileExists "$INSTDIR\flvstreamer.exe" NoClean
+
+  ; Remove installed status in registry 
+  DeleteRegKey HKCU "SOFTWARE\get_iplayer"
+  DeleteRegKey HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer"
+  RMDir "$INSTDIR"
+  ; Create file to indicate to cleanup afterwards
+  FileOpen $fh "$INSTDIR\docleanup" "w"
+  FileWrite $fh "This tells the installer to completely remove all files and this dir"
+  FileClose "$fh"
   HideWindow
   MessageBox MB_ICONINFORMATION|MB_OK "$(^Name) was successfully removed from your computer.."
+  Goto Done
+  NoClean:
+    HideWindow
+    MessageBox MB_ICONINFORMATION|MB_OK "$(^Name) selected components were successfully removed from your computer.."
+  Done:
 FunctionEnd
-  
-Function un.onInit 
-  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Are you sure you want to completely remove $(^Name) and all of its components?" IDYES +2
-  Abort
-FunctionEnd
-   
-Section "Uninstall"
-  MessageBox MB_ICONQUESTION|MB_YESNO|MB_DEFBUTTON2 "Remove User Preferences, PVR Searches, Presets and Recording History?" IDYES true2 IDNO false2
-  true2:
-    ;delete the local user data
-    Delete $PROFILE\.get_iplayer\*
-    RmDir $PROFILE\.get_iplayer
-    Goto next2
-  false2:
-    ;do nothing
-  next2:
 
-  ReadEnvStr $TempGlobalProfile "ALLUSERSPROFILE"
-  RMDir /r "$INSTDIR\mplayer"  
-  RMDir /r "$INSTDIR\lame"
-  RMDir /r "$INSTDIR\ffmpeg\Doc\ffpresets"
-  RMDir /r "$INSTDIR\ffmpeg\Doc"  
-  RMDir /r "$INSTDIR\ffmpeg"
-  RMDir /r "$INSTDIR\vlc"
-  RMDir /r "$INSTDIR\lib"
-  RMDir /r "$INSTDIR\perl-license"
-  Delete  "$INSTDIR\*.*" 
-  Delete "$SMPROGRAMS\get_iplayer\*.*"
-  RmDir "$SMPROGRAMS\get_iplayer"
   
-  ;remove the global options file 
-  Delete $TempGlobalProfile\get_iplayer\options
-  RmDir $TempGlobalProfile\get_iplayer
-   
-  DeleteRegKey HKEY_LOCAL_MACHINE "SOFTWARE\get_iplayer"
-  DeleteRegKey HKEY_LOCAL_MACHINE "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer"
-  RMDir "$INSTDIR"
-             
-SectionEnd
+
+;#######################################
+;# Custom Page Functions
+;#######################################
+
+Function LicensePre
+  ; skip license if already installed
+  ; Read install dir from registry
+  ReadRegStr $Test HKCU "Software\${PRODUCT}" ""
+  StrCmp $Test "" noSkip
+    Abort
+  noSkip:
+FunctionEnd
+
+
+
+Function ComponentsShow
+  !insertmacro MUI_HEADER_TEXT "Choose Components" "Choose Components for Installation or Updating"
+  !insertmacro MUI_INNERDIALOG_TEXT 1006 "Check the components you want to install and uncheck the components you don't want to install. You can update a component to the latest recommended version by checking it."
+FunctionEnd
+
+
+
+Function DirectoryPre
+  ; skip destination selection if already installed
+  ; Read install dir from registry
+  ReadRegStr $Test HKCU "Software\${PRODUCT}" ""
+  StrCmp $Test "" noSkip
+    StrCpy $InstallDir $INSTDIR
+    Abort
+  noSkip:
+FunctionEnd
+
 
 
 Function DirectoryShow
@@ -283,11 +663,27 @@ Function DirectoryShow
   !insertmacro MUI_INNERDIALOG_TEXT 1006 "${PRODUCT} will be installed into the following folder.$\r$\n$\r$\nTo use a different folder, click Browse and select another folder. Click Next to continue."
 FunctionEnd
 
+
+
 Function DirectoryLeave
   StrCpy $InstallDir $INSTDIR
 FunctionEnd
 
+
                
+Function RecordingsDirectoryPre
+  ; skip destination selection if get_iplayer is not a selected section
+  SectionGetFlags ${section1} $Test
+  ; bitwise AND
+  IntOp $Test $Test & ${SF_SELECTED}
+  ; test if equal
+  IntCmp $Test ${SF_SELECTED} noSkip
+    Abort
+  noSkip:
+FunctionEnd
+
+
+
 Function RecordingsDirectoryShow
   ReadEnvStr $TempUserProfile "USERPROFILE"
   !insertmacro MUI_HEADER_TEXT "Choose Recordings Location" "Choose the folder in which ${PRODUCT} will save all the recordings."
@@ -297,66 +693,37 @@ Function RecordingsDirectoryShow
 FunctionEnd
 
 
+
 Function RecordingsDirectoryLeave
   StrCpy $DataDir $INSTDIR
 FunctionEnd
 
-Function .onInit
-  ; Must set $INSTDIR here to avoid adding ${PRODUCT} to the end of the
-  ; path when user selects a new directory using the 'Browse' button.
-  StrCpy $INSTDIR "$PROGRAMFILES\${PRODUCT}"
- 
-  ReadRegStr $R0 HKLM \
-  "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}" \
-  "UninstallString"
-  StrCmp $R0 "" done
 
-  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION \
-  "${PRODUCT} is already installed. $\n$\nClick `OK` to remove the \
-  previous version or `Cancel` to continue this upgrade without uninstalling (not recomended for pre 1.4)." \
-  IDOK uninst
-  Return
- 
-;Run the uninstaller
-uninst:
-  ClearErrors
-  ; Read install dir from registry
-  ReadRegStr $InstallDir HKCU "Software\${PRODUCT}" ""
-  StrCpy $INSTDIR $InstallDir
-  ; set the installer path from this
-  SetOutPath "$INSTDIR"
-  ExecWait '$R0 _?=$INSTDIR' ;Do not copy the uninstaller to a temp file
-  ; cleanly remove uninstaller
-  SetOutPath "$INSTDIR\..\"
-  Delete "$R0"
-  RMDir "$INSTDIR"
-done:
- 
+
+;#######################################
+;# Misc Functions
+;#######################################
+
+Function SetInstallDir
+  SetOutPath "$InstallDir"
 FunctionEnd
 
 
-Function ConnectInternet
 
+Function ConnectInternet
   Push $R0
-    
     ClearErrors
     Dialer::AttemptConnect
     IfErrors noie3
-    
     Pop $R0
     StrCmp $R0 "online" connected
       MessageBox MB_OK|MB_ICONSTOP "Cannot connect to the internet."
       Quit
-    
     noie3:
-  
     ; IE3 not installed
     MessageBox MB_OK|MB_ICONINFORMATION "Please connect to the internet now."
-    
     connected:
-  
   Pop $R0
-  
 FunctionEnd
    
 ;eof
