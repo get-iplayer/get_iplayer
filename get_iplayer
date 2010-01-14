@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.58;
+my $version = 2.59;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -41,7 +41,6 @@ my $version = 2.58;
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # ** all global vars into a class???
 # ** Cut down 'use' clauses in each class
-# ** Globalise %prog, %got_cache so that they aren't repopulated for every PVR run
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * stdout streaming with mms
 #
@@ -148,7 +147,8 @@ my $opt_format = {
 	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched catogories (regex or comma separated values)"],
 	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
 	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
-	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search & display long programme descriptions / episode names"],
+	future		=> [ 1, "future", 'Search', '--future', "Search future programme schedule if it has been indexed (refresh cache with: --refresh --refresh-future)."],
+	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search in programme descriptions and episode names"],
 	search		=> [ 1, "search=s", 'Search', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	history		=> [ 1, "history", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 0, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
@@ -185,8 +185,7 @@ my $opt_format = {
 
 	# Config
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
-	flush		=> [ 2, "flush|refresh|f", 'Config', '--flush, --refresh, -f', "Refresh cache"],
-	ignorechannels	=> [ 1, "ignorechannels=s", 'Config', '--ignorechannels <string>', "Ignore matched channel(s) when refreshing cache (regex or comma separated values)"],
+	refresh		=> [ 2, "refresh|flush|f", 'Config', '--refresh, --flush, -f', "Refresh cache"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
@@ -198,6 +197,9 @@ my $opt_format = {
 	preset		=> [ 1, "preset|z=s", 'Config', '--preset, -z <name>', "Use specified user options preset"],
 	presetlist	=> [ 1, "listpresets|list-presets|presetlist|preset-list", 'Config', '--preset-list', "Show all valid presets"],
 	profiledir	=> [ 1, "profiledir|profile-dir=s", 'Config', '--profile-dir <dir>', "Override the user profile directory/folder"],
+	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values)"],
+	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
+	refreshfuture	=> [ 1, "refreshfuture", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
 	update		=> [ 2, "update|u", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
@@ -213,6 +215,7 @@ my $opt_format = {
 	list		=> [ 1, "list=s", 'Display', '--list <categories|channel>', "Show a list of available categories/channels for the selected type and exit"],
 	listformat	=> [ 1, "listformat=s", 'Display', '--listformat <format>', "Display programme data based on a user-defined format string (such as <pid>, <name> etc)"],
 	listplugins	=> [ 1, "listplugins", 'Display', '--listplugins', "Display a list of currently available plugins or programme types"],
+	_long		=> [ 0, "", 'Display', '--long, -l', "Show long programme info"],
 	manpage		=> [ 1, "manpage=s", 'Display', '--manpage <file>', "Create man page based on current help text"],
 	nocopyright	=> [ 1, "nocopyright", 'Display', '--nocopyright', "Don't display copyright header"],
 	page		=> [ 1, "page=n", 'Display', '--page <number>', "Page number to display for multipage output"],
@@ -470,8 +473,8 @@ my $proxy_save;
 # Option dependant var definitions
 my $bin;
 my $binopts;
+my $memcache;
 my @search_args = @ARGV;
-
 
 
 ########### Main processing ###########
@@ -554,24 +557,12 @@ if ( $opt->{pvradd} ) {
 } elsif ( $opt->{pvrscheduler} ) {
 	if ( $opt->{pvrscheduler} < 1800 ) {
 		main::logger "ERROR: PVR schedule duration must be at least 1800 seconds\n";
+		unlink $lockfile;
 		exit 5;
 	};
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	my $interval = $opt->{pvrscheduler};
-	# Ensure the caches refresh every run (assume cache refreshes take at most 300 seconds)
-	$opt_cmdline->{expiry} = $interval - 300;
-	main::logger "INFO: Scheduling the PVR to run every $interval secs\n";
-	while ( 1 ) {
-		my $start_time = time();
-		$opt_cmdline->{pvr} = 1;
-		$pvr->run();
-		my $remaining = $interval - ( time() - $start_time );
-		if ( $remaining > 0 ) {
-			main::logger "INFO: Sleeping for $remaining secs\n";
-			sleep $remaining;
-		}
-	}
+	$pvr->run_scheduler();
 
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
@@ -593,9 +584,6 @@ if ( $opt->{pvradd} ) {
 # Show history
 } elsif ( $opt->{history} ) {
 	my $hist = History->new();
-	$hist->load();
-	# ensure we don't change any recordings
-	$opt->{nowrite} = 1;
 	$hist->show( @search_args );
 
 # Else just process command line args
@@ -609,7 +597,7 @@ exit 0;
 
 
 # Use the specified options to process the matches in specified array
-# Usage: find_matches( \%pids_history, @search_args )
+# Usage: find_matches( $pids_history_ref, @search_args )
 # Returns: array of objects to be downloaded
 #      or: number of failed/remaining programmes to record using the match (excluding previously recorded progs) if --pid is specified
 sub find_matches {
@@ -624,9 +612,6 @@ sub find_matches {
 	# hash of prog types specified
 	my %type;
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
-
-	# Load history if we need it
-	$hist->load() if $opt->{hide};
 
 	# Ensure lowercase types
 	$opt->{type} = lc( $opt->{type} );
@@ -770,10 +755,10 @@ sub find_matches {
 		# Try to get pid using each speficied prog type
 		my $retcode;
 		for my $prog_type ( @try_types ) {
-			logger "INFO Trying to stream pid using type $prog_type\n";
 			# Force prog type and create new prog instance if it doesn't exist
 			my $this;
 			if ( not $prog{$pid}->{pid} ) {
+				logger "INFO Trying to stream pid using type $prog_type\n";
 				logger "INFO: pid not found in $prog_type cache\n";
 				$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
 				# if only one type is specified then we can clean up the pid which might actually be a url
@@ -787,8 +772,17 @@ sub find_matches {
 				$retcode = $this->download_retry_loop( $hist );
 				last if ! $retcode;
 			} else {
-				logger "INFO: pid found in cache\n";
 				$this = $prog{$pid};
+				# Prune future scheduled match if not specified
+				if ( (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
+					# If the prog object exists with pid in history delete it from the prog list
+					logger "INFO: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{verbose};
+					# Don't attempt to download
+					$retcode = 1;
+					last;
+				}
+				logger "INFO Trying to stream pid using type $prog_type\n";
+				logger "INFO: pid found in cache\n";
 				# Display pid for recording
 				list_progs( \%type, $this );
 				$retcode = $this->download_retry_loop( $hist );
@@ -891,13 +885,28 @@ sub find_matches {
 		my @pruned;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
-			if ( $hist->{ $this->{pid} } ) {
+			if ( $hist->check( $this->{pid}, undef, 1 ) ) {
 				logger "DEBUG: Ignoring Prog: '$this->{index}: $this->{name} - $this->{episode}'\n" if $opt->{debug};
 			} else {
 				push @pruned, $this;
 			}
 		}
 		@match_list = @pruned;
+	}
+
+	# Prune future scheduled matches if not specified
+	if ( ! $opt->{future} ) {
+		my $now = time();
+		my @pruned;
+		for my $this (@match_list) {
+			# If the prog object exists with pid in history delete it from the prog list
+			if ( Programme::get_time_string( $this->{available} ) > $now ) {
+				logger "DEBUG: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{debug};
+			} else {
+				push @pruned, $this;
+			}
+		}
+		@match_list = @pruned;		
 	}
 		
 	# Truncate the array of matches if --limit-matches is specified
@@ -1050,7 +1059,10 @@ sub list_progs {
 		# Get info, create metadata, subtitles and/or thumbnail file (i.e. don't stream/record)
 		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{streaminfo} ) {
 			$this->get_metadata_general();
-			$this->get_metadata( $ua );
+			if ( $this->get_metadata( $ua ) ) {
+				main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
+				return ();
+			}
 			# Search versions for versionlist versions
 			my @versions = $this->generate_version_list;
 			# Use first version in list if a version list is not specified
@@ -1236,7 +1248,7 @@ sub progclass {
 	} elsif ( not defined $prog_type ) {
 		return keys %prog_types;
 	} else {
-		main::logger "ERROR: Programe Type '$prog_type' does not exist. Try using --flush\n";
+		main::logger "ERROR: Programe Type '$prog_type' does not exist. Try using --refresh\n";
 		exit 3;
 	}
 }
@@ -1261,7 +1273,11 @@ sub is_prog_type {
 #	# TV schedules by date
 #	http://www.bbc.co.uk/iplayer/widget/schedule/service/cbeebies/date/20080704
 #	# TV schedules in JSON, Yaml or XML
-#	http://www.bbc.co.uk/cbbc/programmes/schedules.(json|yaml|xml)
+#	http://www.bbc.co.uk/<channel>/programmes/schedules.(json|yaml|xml)
+#	# prog schedules by channel / date
+#	http://www.bbc.co.uk/<channel>/programmes/schedules/(this_week|next_week|last_week|yesterday|today|tomorrow).(json|yaml|xml)
+#	http://www.bbc.co.uk/<channel>/programmes/schedules/<year>/<month>/<day>[/ataglance].(json|yaml|xml)
+#	http://www.bbc.co.uk/<channel>/programmes/schedules/<year>/<week>.(json|yaml|xml)
 #	# TV index on programmes tv
 #	http://www.bbc.co.uk/tv/programmes/a-z/by/*/player
 #	# TV + Radio
@@ -1269,6 +1285,8 @@ sub is_prog_type {
 #	# All TV (limit has effect of limiting to 2.? times number entries kB??)
 #	# seems that only around 50% of progs are available here compared to programmes site:
 #	http://feeds.bbc.co.uk/iplayer/categories/tv/list/limit/200
+#	# Search feed
+#	http://feeds.bbc.co.uk/iplayer/<channel>/<searchword>/list
 #	# All Radio
 #	http://feeds.bbc.co.uk/iplayer/categories/radio/list/limit/999
 #	# New:
@@ -1279,6 +1297,7 @@ sub is_prog_type {
 #	http://www.bbc.co.uk/programmes/genres/childrens/schedules/upcoming.ics
 #
 # Usage: get_links( \%prog, \%index_prog, <prog_type>, <only load from file flag> )
+# Globals: $memcache
 sub get_links {
 	my $progref = shift;
 	my $index_progref = shift;
@@ -1286,7 +1305,18 @@ sub get_links {
 	my $only_load_from_cache = shift;
 	# Define cache file format (this is overridden by the header line of the cache file)
 	my @cache_format = qw/index type name pid available episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
-	
+
+	# Read cache from global memcache
+	if ( keys %{ $memcache->{$prog_type} } ) {
+		main::logger "INFO: Reading ".( keys %{ $memcache->{$prog_type} } )." entries from global $prog_type memcache\n" if $opt->{verbose};
+		# Copy from global prog memory cache
+		for my $pid ( keys %{ $memcache->{$prog_type} } ) {
+			$progref->{$pid} = $memcache->{$prog_type}->{$pid};
+			$index_progref->{ $progref->{pid}->{index} } = $memcache->{$prog_type}->{$pid};
+		}
+		return 0;
+	}
+
 	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
 
@@ -1324,13 +1354,13 @@ sub get_links {
 		logger "INFO: No cache file exists for $prog_type\n" if $opt->{verbose};
 	}
 
-	# if a cache file doesn't exist/corrupted/empty, flush option is specified or original file is older than $cache_sec then download new data
+	# if a cache file doesn't exist/corrupted/empty, refresh option is specified or original file is older than $cache_sec then download new data
 	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
-	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{flush};
+	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{refresh};
 	if ( (! $only_load_from_cache) && ( 
 			(! keys %prog_old) || 
 			(! -f $cachefile) || 
-			$opt->{flush} || 
+			$opt->{refresh} || 
 			($now >= ( stat($cachefile)->mtime + $cache_secs ))
 			)
 		) {
@@ -1388,6 +1418,12 @@ sub get_links {
 		}
 		# Add prog objects to %index_prog hash
 		$index_progref->{$_} = $progref->{ $index_prog_old{$_} } for keys %index_prog_old;
+	}
+
+	# Copy cache to global memcache
+	main::logger "INFO: Writing ".( keys %{ $progref } )." entries into global $prog_type memcache\n" if $opt->{verbose};
+	for my $pid ( keys %{$progref} ) {
+		$memcache->{$prog_type}->{$pid} = $progref->{pid};
 	}
 	
 	return 0;
@@ -2322,14 +2358,11 @@ sub purge_downloaded_files {
 	my @proglist;
 	my $days = shift;
 			
-	# Load the history if it is empty
-	$hist->load() if ! keys %{ $hist };
-				
 	# Return if disabled or running in a typically non-interactive mode
 	return 0 if $opt->{nopurge} || $opt->{stdout} || $opt->{nowrite} || $opt->{quiet};
 	
-	for my $pid ( keys %{ $hist } ) {
-		my $record = $hist->{$pid};
+	for my $pid ( $hist->get_pids() ) {
+		my $record = $hist->get_record( $pid );
 		if ( $record->{timeadded} < (time() - $days*86400) && $record->{filename} && -f $record->{filename} ) {
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 			my @t = gmtime( time() - $record->{timeadded} );
@@ -2807,7 +2840,7 @@ sub parse {
 	# Build hash for passing to GetOptions module
 	my %get_opts;
 
-	for my $name (keys %{$opt_format_ref} ) {
+	for my $name ( grep !/^_/, keys %{$opt_format_ref} ) {
 		my $format = @{ $opt_format_ref->{$name} }[1];
 		$get_opts{ $format } = \$this->{$name};
 	}
@@ -2928,7 +2961,9 @@ sub usage {
 		# Each name in this section array
 		for my $name ( sort @{ $section_name{$section} } ) {
 			push @manlines, '.TP'."\n".'\fB'.$name_syntax{$name}."\n".$name_desc{$name} if $manpage;
-			push @dumplines, sprintf(" %-20s %-32s %s", $name, $name_syntax{$name}, $name_desc{$name} ) if $dumpopts;
+			my $dumpname = $name;
+			$dumpname =~ s/^_//g;
+			push @dumplines, sprintf(" %-20s %-32s %s", $dumpname, $name_syntax{$name}, $name_desc{$name} ) if $dumpopts;
 			push @lines, sprintf(" %-32s %s", $name_syntax{$name}, $name_desc{$name} );
 		}
 		push @usage, sort @lines;
@@ -3274,6 +3309,7 @@ sub opt {
 	return $opt->{$optname};
 }
 
+
 # Use to bind a new options ref to the class global $opt_ref var
 sub add_opt_object {
 	my $self = shift;
@@ -3283,7 +3319,6 @@ sub add_opt_object {
 
 # Uses global @history_format
 # Adds prog to history file (with a timestamp) so that it is not rerecorded after deletion
-# Does not require a load()
 sub add {
 	my $hist = shift;
 	my $prog = shift;
@@ -3298,15 +3333,17 @@ sub add {
 		main::logger "ERROR: Cannot write or append to $historyfile\n";
 		exit 11;
 	}
-	# Temporarily add timestamp then delete it later
-	#my $timeadded = $prog->{timeadded};
+	# Update timestamp
 	$prog->{timeadded} = time();
 	# Write each field into a line in the history file
 	print HIST $prog->{$_}.'|' for @history_format;
 	print HIST "\n";
 	close HIST;
-	#delete $prog->{timestamp};
-	#$prog->{timeadded} = $timeadded;
+
+	# (re)load whole hist
+	# Would be nicer to just add the entry to the history object but this is safer.
+	$hist->load();
+
 	return 0;
 }
 
@@ -3320,9 +3357,12 @@ sub load {
 	# Return if force option specified or stdout streaming only
 	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
 
-	main::logger "INFO: Loading download history\n" if $opt->{verbose};
+	# clear first
+	$hist->clear();
+
+	main::logger "INFO: Loading recordings history\n" if $opt->{verbose};
 	if ( ! open(HIST, "< $historyfile") ) {
-		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
+		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose} && -f $historyfile;
 		return 0;
 	}
 
@@ -3341,7 +3381,7 @@ sub load {
 		}
 		# Create new history entry
 		if ( defined $hist->{ $record_entries->{pid} } ) {
-			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
+ 			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
 			# Append filename and modes - could be a multimode entry
 			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode};
 			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename};
@@ -3360,13 +3400,62 @@ sub load {
 
 
 
-# Lists current history items (assumes loaded first)
+# Clear the history in %{$hist}
+sub clear {
+	my $hist = shift;
+	# There is probably a faster way
+	delete $hist->{$_} for keys %{ $pvr };
+	return 0;
+}
+
+
+
+# Loads hist from file if required
+sub conditional_load {
+	my $hist = shift;
+
+	# Load if empty
+	if ( ! keys %{ $hist } ) {
+		main::logger "INFO: Loaded history for first check.\n" if $opt->{verbose};
+		$hist->load();
+	}
+	return 0;
+}
+
+
+
+# Returns a history pid instance ref
+sub get_record {
+	my $hist = shift;
+	my $pid = shift;
+	$hist->conditional_load();
+	if ( defined $hist->{$pid} ) {
+		return $hist->{$pid};
+	}
+	return undef;
+}
+
+
+
+# Returns a list of current history pids
+sub get_pids {
+	my $hist = shift;
+	$hist->conditional_load();
+	return keys %{ $hist };
+}
+
+
+
+# Lists current history items
 # Requires a load()
 sub show {
 	my $hist = shift;
 	my %prog;
 	my ( @search_args ) = ( @_ );
 	my %progtypes = main::progclass();
+
+	# Load if empty
+	$hist->conditional_load();
 
 	# This is a 'well dirty' hack to allow all the Programme class methods to be used on the history objects
 	# Basically involves copying all history objects into prog objects and then calling the required method
@@ -3429,44 +3518,41 @@ sub show {
 
 # Generic
 # Checks history for previous download of this pid
-# Does not require a load()
 sub check {
 	my $hist = shift;
 	my $pid = shift;
 	my $mode = shift;
+	my $silent = shift;
 	return 0 if ! $pid;
 
 	# Return if force option specified or stdout streaming only
 	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
 
-	if ( ! open(HIST, "< $historyfile") ) {
-		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose};
-		return 0;
-	}
-	my @entries = grep /^$pid/, <HIST>;
-	close HIST;
+	# Load if empty
+	$hist->conditional_load();
 
-	# Find and parse first matching history lines
-	for my $entry ( @entries ) {
-		my ( $name, $episode, $histmode ) = ( split /\|/, $entry )[1,2,5];
-		chomp $name;
-		chomp $episode;
-		chomp $histmode;
+	if ( defined $hist->{ $pid } ) {
+		my ( $name, $episode, $histmode ) = ( $hist->{$pid}->{name}, $hist->{$pid}->{episode}, $hist->{$pid}->{mode} );
 		main::main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in download history\n" if $opt->{debug};
 		if ( $opt->{multimode} ) {
 			# Strip any number off the end of the mode names for the comparison
 			$mode =~ s/\d+$//g;
-			$histmode =~ s/\d+$//g;
-			if ( $mode eq $histmode ) {
-				main::logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n";
-				return 1;
+			# Check against all modes in the comma separated list
+			my @hmodes = split /,/, $histmode;
+			for ( @hmodes ) {
+				s/\d+$//g;
+				if ( $mode eq $_ ) {
+					main::logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n" if ! $silent;
+					return 1;
+				}
 			}
 		} else {
-			main::logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n";
+			main::logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n" if ! $silent;
 			return 1;
 		}
 	}
-	main::logger "INFO: Programme not in download history\n" if $opt->{verbose};
+
+	main::logger "INFO: Programme not in download history\n" if $opt->{verbose} && ! $silent;
 	return 0;
 }
 
@@ -3511,17 +3597,21 @@ sub opt_format {
 }
 
 
-# Filter out channel names matched with option --ignorechannels
+# Filter channel names matched with options --refreshexclude/--refreshinclude
 sub channels_filtered {
 	my $prog = shift;
-	my %channels = %{ $prog->channels() };
-	# Ignore matching channels as required
-	my $ignore_channel_regex = '^ROUGEVALUE$';
+	my $channelsref = shift;
+	my %channels = %{ $channelsref };
+	# include/exclude matching channels as required
+	my $include_regex = '.*';
+	my $exclude_regex = '^ROUGEVALUE$';
 	# Create a regex from any comma separated values
-	$ignore_channel_regex = '('.(join '|', ( split /,/, $opt->{ignorechannels} ) ).')' if $opt->{ignorechannels};
+	$exclude_regex = '('.(join '|', ( split /,/, $opt->{refreshexclude} ) ).')' if $opt->{refreshexclude};
+	$include_regex = '('.(join '|', ( split /,/, $opt->{refreshinclude} ) ).')' if $opt->{refreshinclude};
 	for my $channel ( keys %channels ) {
-		if ( $channels{$channel} =~ /$ignore_channel_regex/i ) {
-			main::logger "INFO: Ignoring channel $channels{$channel}\n" if $opt->{verbose};
+		if ( $channels{$channel} !~ /$exclude_regex/i && $channels{$channel} =~ /$include_regex/i ) {
+			main::logger "INFO: Will refresh channel $channels{$channel}\n" if $opt->{verbose};
+		} else {
 			delete $channels{$channel};
 		}
 	}
@@ -3531,6 +3621,11 @@ sub channels_filtered {
 
 sub channels {
 	return {};
+}
+
+
+sub channels_schedule {
+        return {};
 }
 
 
@@ -3610,8 +3705,14 @@ sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
 	$prog->{modes}->{default} = $prog->modelist();
-	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
+	if ( keys %{ $prog->{verpids} } == 0 ) {
+		if ( $prog->get_verpids( $ua ) ) {
+			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
+			return 1;
+		}
+	}
 	$prog->{versions} = join ',', sort keys %{ $prog->{verpids} };
+	return 0;
 }
 
 
@@ -3671,6 +3772,7 @@ sub display_metadata {
 sub get_verpids {
 	my $prog = shift;
 	$prog->{verpids}->{'default'} = 1;
+	return 0;
 }
 
 
@@ -3737,11 +3839,19 @@ sub download_retry_loop {
 	# Also need full metadata for AtomicParsley or if --fileprefix is used
 	$prog->get_metadata_general();
 	if ( $opt->{fileprefix} || $opt->{metadata} || $opt->{command} || main::exists_in_path( 'atomicparsley' ) ) {
-		$prog->get_metadata( $ua );
+		if ( $prog->get_metadata( $ua ) ) {
+			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
+			return 1;
+		}
 	}
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
-	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
+	if ( keys %{ $prog->{verpids} } == 0 ) {
+		if ( $prog->get_verpids( $ua ) ) {
+			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
+			return 1;
+		}
+	}
 
 	# if %{ $prog->{verpids} } is empty then skip this programme recording attempt
 	if ( (keys %{ $prog->{verpids} }) == 0 ) {
@@ -4210,7 +4320,10 @@ sub generate_filenames {
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
 	if ( ! $prog->{name} ) {
-		$prog->get_metadata($ua);
+		if ( $prog->get_metadata( $ua ) ) {
+			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
+			return 1;
+		}
 		$prog->get_metadata_general();
 	}
 
@@ -4271,8 +4384,8 @@ sub generate_filenames {
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	
-	# Don't override the {filename} if it is already set (i.e. for history info)
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if $prog->{filename} =~ /\.EXT$/ || ! $prog->{filename};
+	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
+	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if $prog->{filename} =~ /\.EXT$/ || $opt->{multimode} || ! $prog->{filename};
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
 
 	# Create symlink filename if required
@@ -4581,7 +4694,7 @@ sub get_verpids {
 		my $xml = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $xml ) {
 			main::logger "\rERROR: Failed to get EMP page from BBC site\n\n";
-			return;
+			return 1;
 		}
 		# flatten
 		$xml =~ s/\n/ /g;
@@ -4621,7 +4734,7 @@ sub get_verpids {
 	my $xml = main::request_url_retry( $ua, $url, 3 );
 	if ( ! $xml ) {
 		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-		return 0;
+		return 1;
 	}
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
 	#<?xml version="1.0" encoding="UTF-8"?>
@@ -4671,7 +4784,7 @@ sub get_verpids {
 	# Detect noItems or no programmes
 	if ( $xml =~ m{<noItems\s+reason="noMedia"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
 		main::logger "\rWARNING: No programmes are available for this pid\n";
-		return 0;
+		return 1;
 	}
 
 	# Get title
@@ -4978,7 +5091,12 @@ sub get_metadata {
 
 	# Get list of available modes for each version available
 	# populate version pid metadata if we don't have it already
-	$prog->get_verpids( $ua ) if keys %{ $prog->{verpids} } == 0;
+	if ( keys %{ $prog->{verpids} } == 0 ) {
+		if ( $prog->get_verpids( $ua ) ) {
+			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
+			return 1;
+		}
+	}
 	$versions = join ',', sort keys %{ $prog->{verpids} };
 	my $modes;
 	my $mode_sizes;
@@ -5648,26 +5766,46 @@ sub index_min { return 1 }
 sub index_max { return 9999 }
 sub channels {
 	return {
-		'bbc_one'			=> 'BBC One',
-		'bbc_two'			=> 'BBC Two',
-		'bbc_three'			=> 'BBC Three',
-		'bbc_four'			=> 'BBC Four',
+		'bbcone'			=> 'BBC One',
+		'bbctwo'			=> 'BBC Two',
+		'bbcthree'			=> 'BBC Three',
+		'bbcfour'			=> 'BBC Four',
+		'bbcnews'			=> 'BBC News 24',
 		'cbbc'				=> 'CBBC',
 		'cbeebies'			=> 'CBeebies',
-		'bbc_news24'			=> 'BBC News 24',
-		'bbc_parliament'		=> 'BBC Parliament',
-		'bbc_one_northern_ireland'	=> 'BBC One Northern Ireland',
-		'bbc_one_scotland'		=> 'BBC One Scotland',
-		'bbc_one_wales'			=> 'BBC One Wales',
-		'bbc_webonly'			=> 'BBC Web Only',
-		'bbc_hd'			=> 'BBC HD',
-		'bbc_alba'			=> 'BBC Alba',
+		'parliament'			=> 'BBC Parliament',
+		'bbcwebonly'			=> 'BBC Web Only',
+		'bbchd'				=> 'BBC HD',
+		'bbcalba'			=> 'BBC Alba',
 		'categories/news/tv'		=> 'BBC News',
 		'categories/sport/tv'		=> 'BBC Sport',
 		'categories/signed'		=> 'Signed',
 		'categories/audiodescribed'	=> 'Audio Described',
 		'popular/tv'			=> 'Popular',
 		'highlights/tv'			=> 'Highlights',
+	};
+}
+
+
+# channel ids be found on http://www.bbc.co.uk/bbcone/programmes/schedules/today
+sub channels_schedule {
+	return {
+		'bbcalba/programmes/schedules'		=> 'BBC Alba',
+		'bbcfour/programmes/schedules'		=> 'BBC Four',
+		'bbchd/programmes/schedules'		=> 'BBC HD',
+		'bbcnews/programmes/schedules'		=> 'BBC News 24',
+		'bbcone/programmes/schedules/london'	=> 'BBC One London',
+		'bbcone/programmes/schedules/ni'	=> 'BBC One Northern Ireland',
+		'bbcone/programmes/schedules/scotland'	=> 'BBC One Scotland',
+		'bbcone/programmes/schedules/wales'	=> 'BBC One Wales',
+		'parliament/programmes/schedules'	=> 'BBC Parliament',
+		'bbcthree/programmes/schedules'		=> 'BBC Three',
+		'bbctwo/programmes/schedules/england'	=> 'BBC Two England',
+		'bbctwo/programmes/schedules/ni'	=> 'BBC Two Northern Ireland',
+		'bbctwo/programmes/schedules/scotland'	=> 'BBC Two Scotland',
+		'bbctwo/programmes/schedules/wales'	=> 'BBC Two Wales',
+		'cbbc/programmes/schedules'		=> 'CBBC',
+		'cbeebies/programmes/schedules'		=> 'CBeebies',
 	};
 }
 
@@ -5777,7 +5915,7 @@ sub get_links {
 	my $progref = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels_filtered() };
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
 	my $channel_feed_url = 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
@@ -5801,7 +5939,6 @@ sub get_links {
 		my $url = "${channel_feed_url}/$_/list/limit/400";
 		main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme index feed for $_ from iplayer site\n");
-		main::logger "INFO: Got ".(grep /<entry/, split /\n/, $xml)." programmes\n" if $opt->{verbose};
 		decode_entities($xml);
 		
 		# Feed as of August 2008
@@ -5881,6 +6018,7 @@ sub get_links {
 		# Discard first element == header
 		shift @entries;
 
+		main::logger "INFO: Got ".($#entries + 1)." programmes\n" if $opt->{verbose};
 		foreach my $entry (@entries) {
 			my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
 			
@@ -5999,6 +6137,159 @@ sub get_links {
 				'type'		=> $prog_type,
 				'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
 			);
+		}
+	}
+
+	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
+	# Get future schedules if required
+	# http://www.bbc.co.uk/cbbc/programmes/schedules/this_week.xml
+	# http://www.bbc.co.uk/cbbc/programmes/schedules/next_week.xml
+	if ( $opt->{refreshfuture} ) {
+		# Only get schedules for real channels
+		@channel_list = keys %channels;
+		for my $channel_id ( @channel_list ) {
+			my @schedule_feeds = (
+				"http://www.bbc.co.uk/${channel_id}/this_week.xml",
+				"http://www.bbc.co.uk/${channel_id}/next_week.xml",
+			);
+			for my $url ( @schedule_feeds ) {
+				main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
+				$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme schedule feed for $channel_id from iplayer site\n");
+				decode_entities($xml);
+		
+				#      <broadcast>
+				#        <start>2010-01-11T11:25:00Z</start>
+				#        <end>2010-01-11T11:30:00Z</end>
+				#        <duration>300</duration>
+				#        <episode>
+				#          <pid>b00l6wjs</pid>
+				#          <title>Vampire Bats</title>
+				#          <short_synopsis>How to survive the most dangerous
+				#          situations that Mother Nature can chuck at
+				#          you.</short_synopsis>
+				#          <medium_synopsis>A light-hearted look at how to survive
+				#          the most dangerous situations that Mother Nature can
+				#          chuck at you.</medium_synopsis>
+				#          <long_synopsis></long_synopsis>
+				#          <iplayer>
+				#            <audio_expires />
+				#            <video_expires>2010-01-18T11:29:00Z</video_expires>
+				#          </iplayer>
+				#          <position>16</position>
+				#          <series>
+				#            <pid>b00kh5x3</pid>
+				#            <title>Shorts</title>
+				#          </series>
+				#          <brand>
+				#            <pid>b00kh5y8</pid>
+				#            <title>Sam and Mark's Guide to Dodging Disaster</title>
+				#          </brand>
+				#        </episode>
+				#      </broadcast>
+
+				# get list of entries within <broadcast> </broadcast> tags
+				my @entries = split /<broadcast>/, $xml;
+				# Discard first element == header
+				shift @entries;
+				main::logger "INFO: Got ".($#entries + 1)." programmes\n" if $opt->{verbose};
+				my $now = time();
+				foreach my $entry (@entries) {
+					my ( $title, $channel, $name, $episode, $episodetitle, $nametitle, $seriestitle, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance );
+
+					my $entry_flat = $entry;
+					$entry_flat =~ s/\n/ /g;
+
+					$pid = $1 if $entry =~ m{<episode>.*?<pid>\s*(.+?)\s*</pid>};
+
+					$episode = $1 if $entry =~ m{<episode>.*?<title>\s*(.*?)\s*</title>};
+					$nametitle = $1 if $entry =~ m{<brand>.*?<title>\s*(.*?)\s*</title>.*?</brand>};
+					$seriestitle = $1 if $entry =~ m{<series>.*?<title>\s*(.*?)\s*</title>.*?</series>};
+
+					# Set name
+					if ( $nametitle && $seriestitle ) {
+						$name = "$nametitle: $seriestitle";
+					} elsif ( $seriestitle && ! $nametitle ) {
+						$name = $seriestitle;
+					# Fallback to episade name if the BBC missed out both Series and Name
+					} elsif ( ( ! $seriestitle ) && ! $nametitle ) {
+						$name = $episode;
+					} else {
+						$name = $nametitle;
+					}
+
+					# Extract the seriesnum
+					my $regex = 'Series\s+'.main::regex_numbers();
+					$seriesnum = main::convert_words_to_number( $1 ) if $seriestitle =~ m{$regex}i;
+
+					# Extract the episode num
+					my $regex_1 = 'Episode\s+'.main::regex_numbers();
+					my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+					if ( $episode =~ m{$regex_1}i ) { 
+						$episodenum = main::convert_words_to_number( $1 );
+					} elsif ( $episode =~ m{$regex_2}i ) {
+						$episodenum = main::convert_words_to_number( $1 );
+					}
+
+					# extract desc
+					if ( $entry =~ m{<long_synopsis>\s*(.+?)\s*</long_synopsis>} ) {
+						$desc = $1;
+					} elsif ( $entry =~ m{<medium_synopsis>\s*(.+?)\s*</medium_synopsis>} ) {
+						$desc = $1;
+					} elsif ( $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>} ) {
+						$desc = $1;
+					};
+					# Remove unwanted html tags
+					$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
+
+					$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
+					$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
+
+					# Extract channel nice name
+					$channel = $channels{$channel_id};
+
+					main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
+
+					# Merge and Skip if this pid is a duplicate
+					if ( defined $progref->{$pid} ) {
+						main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+						# Update this info from schedule (not available in the usual iplayer channels feeds)
+						$progref->{$pid}->{duration} = $duration;
+						$progref->{$pid}->{episodenum} = $episodenum if ! $progref->{$pid}->{episodenum};
+						$progref->{$pid}->{seriesnum} = $seriesnum if ! $progref->{$pid}->{seriesnum};
+						# don't add this as some progs are already available
+						#$progref->{$pid}->{available} = $available;
+						next;
+					}
+
+					$version = 'default';
+
+					# Default to 150px width thumbnail;
+					my $thumbsize = $opt->{thumbsizecache} || 150;
+
+					# Don't create this prog instance if the availablity is in the past 
+					# this prevents programmes which never appear in iPlayer from being indexed
+					next if Programme::get_time_string( $available ) < $now;
+
+					# build data structure
+					$progref->{$pid} = main::progclass($prog_type)->new(
+						'pid'		=> $pid,
+						'name'		=> $name,
+						'versions'	=> $version,
+						'episode'	=> $episode,
+						'seriesnum'	=> $seriesnum,
+						'episodenum'	=> $episodenum,
+						'desc'		=> $desc,
+						'available'	=> $available,
+						'duration'	=> $duration,
+						'thumbnail'	=> "${thumbnail_prefix}/${pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize },
+						'channel'	=> $channel,
+						'type'		=> $prog_type,
+						'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
+					);
+				}
+			}		
+
 		}
 	}
 	main::logger "\n";
@@ -6274,12 +6565,11 @@ sub channels {
 		'bbc_radio_essex'			=> 'BBC Essex',
 		'bbc_london'				=> 'BBC London',
 		'bbc_radio_kent'			=> 'BBC Kent',
-		'bbc_southern_counties_radio'		=> 'BBC Southern Counties',
+		'bbc_radio_surrey'			=> 'BBC Surrey',
 		'bbc_radio_oxford'			=> 'BBC Oxford',
 		'bbc_radio_berkshire'			=> 'BBC Berkshire',
 		'bbc_radio_solent'			=> 'BBC Solent',
 		'bbc_radio_gloucestershire'		=> 'BBC Gloucestershire',
-		'bbc_radio_swindon'			=> 'BBC Swindon',
 		'bbc_radio_wiltshire'			=> 'BBC Wiltshire',
 		'bbc_radio_bristol'			=> 'BBC Bristol',
 		'bbc_radio_somerset_sound'		=> 'BBC Somerset',
@@ -6289,6 +6579,74 @@ sub channels {
 		'bbc_radio_jersey'			=> 'BBC Jersey',
 		'popular/radio'				=> 'Popular',
 		'highlights/radio'			=> 'Highlights',
+	};
+}
+
+
+# channel ids be found on http://www.bbc.co.uk/bbcone/programmes/schedules/today
+sub channels_schedule {
+	return {
+		'1xtra/programmes/schedules'		=> 'BBC 1Xtra',
+		'radio1/programmes/schedules/england'	=> 'BBC Radio 1 England',
+		'radio1/programmes/schedules/northernireland'=> 'BBC Radio 1 Northern Ireland',
+		'radio1/programmes/schedules/scotland'	=> 'BBC Radio 1 Scotland',
+		'radio1/programmes/schedules/wales'	=> 'BBC Radio 1 Wales',
+		'radio2/programmes/schedules'		=> 'BBC Radio 2',
+		'radio3/programmes/schedules'		=> 'BBC Radio 3',
+		'radio4/programmes/schedules/fm'	=> 'BBC Radio 4 FM',
+		'radio4/programmes/schedules/lw'	=> 'BBC Radio 4 LW',
+		'5live/programmes/schedules'		=> 'BBC Radio 5 live',
+		'5livesportsextra/programmes/schedules'	=> 'BBC 5 live Sports Extra',
+		'6music/programmes/schedules'		=> 'BBC 6 Music',
+		'radio7/programmes/schedules'		=> 'BBC 7',
+		'asiannetwork/programmes/schedules'	=> 'BBC Asian Network',
+		'radiofoyle/programmes/schedules'	=> 'BBC Radio Foyle',
+		'radioscotland/programmes/schedules/fm'	=> 'BBC Radio Scotland', # fm,mw,orkney,shetland,highlandsandislands
+		'radionangaidheal/programmes/schedules'	=> 'BBC Radio Nan Gaidheal',
+		'radioulster/programmes/schedules'	=> 'BBC Radio Ulster',
+		'radiowales/programmes/schedules/fm'	=> 'BBC Radio Wales FM',
+		'radiowales/programmes/schedules/mw'	=> 'BBC Radio Wales MW',
+		#'bbc_radio_cymru'			=> 'BBC Radio Cymru', # ????
+		'worldservice/programmes/schedules'	=> 'BBC World Service',
+		'cumbria/programmes/schedules'		=> 'BBC Cumbria',
+		'newcastle/programmes/schedules'	=> 'BBC Newcastle',
+		'tees/programmes/schedules'		=> 'BBC Tees',
+		'lancashire/programmes/schedules'	=> 'BBC Lancashire',
+		'merseyside/programmes/schedules'	=> 'BBC Merseyside',
+		'manchester/programmes/schedules'	=> 'BBC Manchester',
+		'leeds/programmes/schedules'		=> 'BBC Leeds',
+		'sheffield/programmes/schedules'	=> 'BBC Sheffield',
+		'york/programmes/schedules'		=> 'BBC York',
+		'humberside/programmes/schedules'	=> 'BBC Humberside',
+		'lincolnshire/programmes/schedules'	=> 'BBC Lincolnshire',
+		'nottingham/programmes/schedules'	=> 'BBC Nottingham',
+		'leicester/programmes/schedules'	=> 'BBC Leicester',
+		'derby/programmes/schedules'		=> 'BBC Derby',
+		'stoke/programmes/schedules'		=> 'BBC Stoke',
+		'shropshire/programmes/schedules'	=> 'BBC Shropshire',
+		'wm/programmes/schedules'		=> 'BBC WM',
+		'coventry/programmes/schedules'		=> 'BBC Coventry & Warwickshire',
+		'herefordandworcester/programmes/schedules'=> 'BBC Hereford & Worcester',
+		'northampton/programmes/schedules'	=> 'BBC Northampton',
+		'threecounties/programmes/schedules'	=> 'BBC Three Counties',
+		'cambridgeshire/programmes/schedules'	=> 'BBC Cambridgeshire',
+		'norfolk/programmes/schedules'		=> 'BBC Norfolk',
+		'suffolk/programmes/schedules'		=> 'BBC Suffolk',
+		'essex/programmes/schedules'		=> 'BBC Essex',
+		'london/programmes/schedules'		=> 'BBC London',
+		'kent/programmes/schedules'		=> 'BBC Kent',
+		'surrey/programmes/schedules'		=> 'BBC Surrey',
+		'oxford/programmes/schedules'		=> 'BBC Oxford',
+		'berkshire/programmes/schedules'	=> 'BBC Berkshire',
+		'solent/programmes/schedules'		=> 'BBC Solent',
+		'gloucestershire/programmes/schedules'	=> 'BBC Gloucestershire',
+		'wiltshire/programmes/schedules'	=> 'BBC Wiltshire',
+		'bristol/programmes/schedules'		=> 'BBC Bristol',
+		'somerset/programmes/schedules'		=> 'BBC Somerset',
+		'devon/programmes/schedules'		=> 'BBC Devon',
+		'cornwall/programmes/schedules'		=> 'BBC Cornwall',
+		'guernsey/programmes/schedules'		=> 'BBC Guernsey',
+		'jersey/programmes/schedules'		=> 'BBC Jersey',
 	};
 }
 
@@ -6477,7 +6835,7 @@ sub get_links {
 	my $progref = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels_filtered() };
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
 
 	for ( sort keys %channels ) {
 
@@ -8298,7 +8656,6 @@ sub run {
 
 	# Don't attempt to record programmes with pids in history
 	my $hist = History->new();
-	$hist->load();
 
 	# Load all PVR searches
 	$pvr->load_list();
@@ -8321,8 +8678,10 @@ sub run {
 
 		# Switch on --hide option
 		$opt->{hide} = 1;
-		# Dont allow --flush with --pvr
-		$opt->{flush} = '';
+		# Switch off --future option (no point in checking future programmes)
+		$opt->{future} = '';
+		# Dont allow --refresh with --pvr
+		$opt->{refresh} = '';
 		# Do the recording (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
 
@@ -8340,6 +8699,26 @@ sub run {
 
 
 
+sub run_scheduler {
+	my $pvr = shift;
+	my $interval = $opt->{pvrscheduler};
+	# Ensure the caches refresh every run (assume cache refreshes take at most 300 seconds)
+	$opt_cmdline->{expiry} = $interval - 300;
+	main::logger "INFO: Scheduling the PVR to run every $interval secs\n";
+	while ( 1 ) {
+		my $start_time = time();
+		$opt_cmdline->{pvr} = 1;
+		$pvr->run();
+		my $remaining = $interval - ( time() - $start_time );
+		if ( $remaining > 0 ) {
+			main::logger "INFO: Sleeping for $remaining secs\n";
+			sleep $remaining;
+		}
+	}
+}
+
+
+
 # If queuing, only add pids because the index number might change by the time the pvr runs
 # If --pid and --type <type> is specified then add this prog also
 sub queue {
@@ -8348,8 +8727,9 @@ sub queue {
 
 	# Switch on --hide option
 	$opt->{hide} = 1;
+	# Switch on --future option - we want to search upcoming programmes
+	$opt->{future} = 1;
 	my $hist = History->new();
-	$hist->load();
 
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
@@ -8390,7 +8770,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(webrequest|nocopyright|^test|metadataonly|subsonly|thumbonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|stdout|^get|update|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
@@ -8457,6 +8837,8 @@ sub display_list {
 # Load all the PVR searches into %{$pvr}
 sub load_list {
 	my $pvr = shift;
+	# Clear any previous data in $pvr
+	$pvr->clear_list();
 	# Make dir if not existing
 	mkpath $vars{pvr_dir} if ! -d $vars{pvr_dir};
 	# Get list of files in pvr_dir
@@ -8493,6 +8875,16 @@ sub load_list {
 		main::logger "INFO: Loaded PVR search '$name'\n" if $opt->{verbose};
 	}
 	main::logger "INFO: Loaded PVR search list\n" if $opt->{verbose};
+	return 0;
+}
+
+
+
+# Clear all the PVR searches in %{$pvr}
+sub clear_list {
+	my $pvr = shift;
+	# There is probably a faster way
+	delete $pvr->{$_} for keys %{ $pvr };
 	return 0;
 }
 
