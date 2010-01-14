@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.59;
+my $version = 2.60;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -82,13 +82,6 @@ my %prog_types = (
 	livetv		=> 'Programme::livetv',
 );
 
-# User Agents
-my %user_agent = (
-	coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
-	safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
-	update		=> "get_iplayer updater (v${version} - $^O - $^V)",
-	get_iplayer	=> "get_iplayer/$version $^O/$^V",
-);
 
 # Programme instance data
 # $prog{$pid} = Programme->new (
@@ -267,7 +260,7 @@ Streamer->new();
 
 # Print to STDERR/STDOUT if not quiet unless verbose or debug
 sub logger(@) {
-	my $msg = shift;
+	my $msg = shift || '';
 	# Make sure quiet can be overridden by verbose and debug options
 	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{quiet} ) {
 		# Only send messages to STDERR if pvr or stdout options are being used.
@@ -473,8 +466,8 @@ my $proxy_save;
 # Option dependant var definitions
 my $bin;
 my $binopts;
-my $memcache;
 my @search_args = @ARGV;
+my $memcache = {};
 
 
 ########### Main processing ###########
@@ -605,10 +598,10 @@ sub find_matches {
 	my @search_args = @_;
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
-	# $prog{pid}->object hash
-	my %prog;
-	# obtain prog object given index. e.g. $index_prog{$index_no}->{element};
-	my %index_prog;
+	# $prog->{pid}->object hash
+	my $prog = {};
+	# obtain prog object given index. e.g. $index_prog->{$index_no}->{element};
+	my $index_prog = {};
 	# hash of prog types specified
 	my %type;
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
@@ -749,7 +742,7 @@ sub find_matches {
 		my $load_from_file_only;
 		$load_from_file_only = 1 if $#try_types == 0;
 		for my $t ( @try_types ) {
-			get_links( \%prog, \%index_prog, $t, $load_from_file_only );
+			get_links( $prog, $index_prog, $t, $load_from_file_only );
 		}
 
 		# Try to get pid using each speficied prog type
@@ -757,7 +750,7 @@ sub find_matches {
 		for my $prog_type ( @try_types ) {
 			# Force prog type and create new prog instance if it doesn't exist
 			my $this;
-			if ( not $prog{$pid}->{pid} ) {
+			if ( not $prog->{$pid}->{pid} ) {
 				logger "INFO Trying to stream pid using type $prog_type\n";
 				logger "INFO: pid not found in $prog_type cache\n";
 				$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
@@ -772,7 +765,7 @@ sub find_matches {
 				$retcode = $this->download_retry_loop( $hist );
 				last if ! $retcode;
 			} else {
-				$this = $prog{$pid};
+				$this = $prog->{$pid};
 				# Prune future scheduled match if not specified
 				if ( (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
 					# If the prog object exists with pid in history delete it from the prog list
@@ -810,10 +803,11 @@ sub find_matches {
 
 	# Pre-populate caches if --list option used or there was a non-index specified
 	if ( $need_get_links || $opt->{list} ) {
-			### perl bug here too ???
-			# Get stream links from web site or from cache (also populates all hashes) specified in --type option
-			get_links( \%prog, \%index_prog, $_ ) for keys %type;
-			$got_cache{$_} = 1 for keys %type;
+		# Get stream links from web site or from cache (also populates all hashes) specified in --type option
+		for my $t ( keys %type ) {
+			get_links( $prog, $index_prog, $t );
+			$got_cache{ $t } = 1;
+		}
 	}
 
 	# Parse remaining args
@@ -824,9 +818,9 @@ sub find_matches {
 
 		# If Numerical value < $max_index and the object exists from loaded prog types
 		if ( /^[\d]+$/ && $_ <= $max_index ) {
-			if ( defined $index_prog{$_} ) {
+			if ( defined $index_prog->{$_} ) {
 				logger "INFO: Search term '$_' is an Index value\n" if $opt->{verbose};
-				push @match_list, $index_prog{$_};
+				push @match_list, $index_prog->{$_};
 			} else {
 				# Add to another list to search in other prog types
 				push @index_search_args, $_;
@@ -834,9 +828,9 @@ sub find_matches {
 
 		# If PID then find matching programmes with 'pid:<pid>'
 		} elsif ( m{^\s*pid:(.+?)\s*$}i ) {
-			if ( defined $prog{$1} ) {
+			if ( defined $prog->{$1} ) {
 				logger "INFO: Search term '$1' is a pid\n" if $opt->{verbose};
-				push @match_list, $prog{$1};
+				push @match_list, $prog->{$1};
 			} else {
 				logger "INFO: Search term '$1' is a non-existent pid, use --pid instead and/or specify the correct programme type\n";
 			}
@@ -844,7 +838,7 @@ sub find_matches {
 		# Else assume this is a programme name regex
 		} else {
 			logger "INFO: Search term '$_' is a substring\n" if $opt->{verbose};
-			push @match_list, get_regex_matches( \%prog, $_ );
+			push @match_list, get_regex_matches( $prog, $_ );
 		}
 	}
 	
@@ -865,13 +859,13 @@ sub find_matches {
 				# Add new prog types to the type list
 				$type{$prog_type} = 1;
 				# Get $prog_type stream links
-				get_links( \%prog, \%index_prog, $prog_type );
+				get_links( $prog, $index_prog, $prog_type );
 				$got_cache{$prog_type} = 1;
 			}
 		}
 		# Now check again if the index number exists in the cache before adding this prog to the match list
-		if ( defined $index_prog{$index}->{pid} ) {
-			push @match_list, $index_prog{$index} if defined $index_prog{$index}->{pid};
+		if ( defined $index_prog->{$index}->{pid} ) {
+			push @match_list, $index_prog->{$index} if defined $index_prog->{$index}->{pid};
 		} else {
 			logger "WARNING: Unmatched programme index '$index' specified - ignoring\n";
 		}
@@ -900,7 +894,8 @@ sub find_matches {
 		my @pruned;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
-			if ( Programme::get_time_string( $this->{available} ) > $now ) {
+			my $available = Programme::get_time_string( $this->{available} );
+			if ( $available && $available > $now ) {
 				logger "DEBUG: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{debug};
 			} else {
 				push @pruned, $this;
@@ -1032,7 +1027,7 @@ sub list_progs {
 	}
 	# loop through all programmes in match
 	for ( my $count=0; $count < $items; $count++ ) {
-		my $this = @matches[$count];
+		my $this = $matches[$count];
 		# Only display if the prog name is set
 		if ( ( ! $opt->{page} ) || ( $opt->{page} && $count >= $first && $count < $last ) ) {
 			if ( $this->{name} || ! ( $opt->{series} || $opt->{tree} ) ) {
@@ -1085,7 +1080,9 @@ sub list_progs {
 				$opt->{quiet} = 0;
 			}
 			# remove offending metadata
-			delete $this->{filename}, $this->{filepart}, $this->{ext};
+			delete $this->{filename};
+			delete $this->{filepart};
+			delete $this->{ext};
 		}
 	}
 	logger "\nINFO: ".($#matches + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
@@ -1096,7 +1093,7 @@ sub list_progs {
 # Returns matching programme objects using supplied regex
 # Usage: get_regex_matches ( \%prog, $regex )
 sub get_regex_matches {
-	my $progref = shift;
+	my $prog = shift;
 	my $download_regex = shift;
 
 	my %download_hash;
@@ -1153,7 +1150,7 @@ sub get_regex_matches {
 	@searchfields = split /\s*,\s*/, lc( $opt->{fields} ) if $opt->{fields};
 
 	# Loop through each prog object
-	for my $this ( values %{$progref} ) {
+	for my $this ( values %{ $prog } ) {
 		# Only include programmes matching channels and category regexes
 		if ( $this->{channel} =~ /$channel_regex/i
 		  && $this->{categories} =~ /$category_regex/i
@@ -1181,8 +1178,8 @@ sub get_regex_matches {
 
 	my @match_list;
 	# Add all matching prog objects to array
-	for my $this ( sort {$a <=> $b} keys %download_hash ) {
-		push @match_list, $download_hash{ $this };
+	for my $index ( sort {$a <=> $b} keys %download_hash ) {
+		push @match_list, $download_hash{ $index };
 	}
 
 	return @match_list;
@@ -1194,8 +1191,8 @@ sub get_regex_matches {
 # Populates the index if the prog hash as well as creating the %index_prog hash
 # Should be run after any number of get_links methods
 sub sort_index {
-	my $progref = shift;
-	my $index_progref = shift;
+	my $prog = shift;
+	my $index_prog = shift;
 	my $prog_type = shift;
 	my $sortfield = shift || 'name';
 	my $counter = 1;
@@ -1206,10 +1203,10 @@ sub sort_index {
 	$counter = progclass($prog_type)->index_min if defined $prog_type;
 
 	# Create unique array of '<$sortfield|pid>' for this prog type
-	for my $pid ( keys %{$progref} ) {
+	for my $pid ( keys %{$prog} ) {
 		# skip prog not of correct type and type is defined
-		next if defined $prog_type && $progref->{$pid}->{type} ne $prog_type;
-		push @sort_key, "$progref->{$pid}->{$sortfield}|$pid";
+		next if defined $prog_type && $prog->{$pid}->{type} ne $prog_type;
+		push @sort_key, "$prog->{$pid}->{$sortfield}|$pid";
 	}
 	# Sort by $sortfield and index 
 	for (sort @sort_key) {
@@ -1217,10 +1214,10 @@ sub sort_index {
 		my $pid = (split /\|/)[1];
 
 		# Insert prog instance var of the index number
-		$progref->{$pid}->{index} = $counter;
+		$prog->{$pid}->{index} = $counter;
 
 		# Add the object reference into %index_prog hash
-		$index_progref->{ $counter } = $progref->{$pid};
+		$index_prog->{ $counter } = $prog->{$pid};
 
 		# Increment the index counter for this prog type
 		$counter++;
@@ -1236,6 +1233,20 @@ sub make_array_unique_ordered {
 	my %seen = ();
 	my @unique = grep { ! $seen{ $_ }++ } @array;
 	return @unique;
+}
+
+
+
+# User Agents
+sub user_agent {
+	my $id = shift || '';
+	my %user_agent = (
+		coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
+		safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
+		update		=> "get_iplayer updater (v${version} - $^O - $^V)",
+		get_iplayer	=> "get_iplayer/$version $^O/$^V",
+	);
+	return $user_agent{ $id } || '';
 }
 
 
@@ -1299,30 +1310,33 @@ sub is_prog_type {
 # Usage: get_links( \%prog, \%index_prog, <prog_type>, <only load from file flag> )
 # Globals: $memcache
 sub get_links {
-	my $progref = shift;
-	my $index_progref = shift;
+	my $prog = shift;
+	my $index_prog = shift;
 	my $prog_type = shift;
 	my $only_load_from_cache = shift;
 	# Define cache file format (this is overridden by the header line of the cache file)
 	my @cache_format = qw/index type name pid available episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
 
-	# Read cache from global memcache
-	if ( keys %{ $memcache->{$prog_type} } ) {
-		main::logger "INFO: Reading ".( keys %{ $memcache->{$prog_type} } )." entries from global $prog_type memcache\n" if $opt->{verbose};
-		# Copy from global prog memory cache
-		for my $pid ( keys %{ $memcache->{$prog_type} } ) {
-			$progref->{$pid} = $memcache->{$prog_type}->{$pid};
-			$index_progref->{ $progref->{pid}->{index} } = $memcache->{$prog_type}->{$pid};
-		}
-		return 0;
-	}
-
 	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
 
-	# Read cache into %pid_old and %index_prog_old if cache exists
-	my %prog_old;
-	my %index_prog_old;
+	# Read cache into $pid_old and $index_prog_old hashes if cache exists
+	my $prog_old = {};
+	my $index_prog_old = {};
+
+	# By pass re-sorting and get straight from memcache if possible
+	if ( keys %{ $memcache->{$prog_type} } && -f $cachefile && ! $opt->{refresh} ) {
+		for my $pid ( keys %{ $memcache->{$prog_type} } ) {
+			# Create new prog instance
+			$prog->{$pid} = progclass( lc($memcache->{$prog_type}->{$pid}->{type}) )->new( 'pid' => $pid );
+			# Deep-copy of elements in memcache prog instance to %prog
+			$prog->{$pid}->{$_} = $memcache->{$prog_type}->{$pid}->{$_} for @cache_format;
+			# Copy pid into index_prog hash
+			$index_prog->{ $prog->{$pid}->{index} } = $pid;
+		}
+		logger "INFO: Got (quick) ".(keys %{ $memcache->{$prog_type} })." memcache entries for $prog_type\n" if $opt->{verbose};
+		return 0;
+	}
 
 	# Open cache file (need to verify we can even read this)
 	if ( -f $cachefile && open(CACHE, "< $cachefile") ) {
@@ -1342,53 +1356,56 @@ sub get_links {
 			# Populate %prog_old from cache
 			# Get cache line
 			my @record = split /\|/;
-			my %record_entries;
-			# Update fields in %prog hash for $pid
-			$record_entries{$_} = shift @record for @cache_format_old;
-			$prog_old{ $record_entries{pid} } = \%record_entries;
-			$index_prog_old{ $record_entries{index} }  = $record_entries{pid};
+			my $record_entries;
+			# Update fields in %prog_old hash for $pid
+			$record_entries->{$_} = shift @record for @cache_format_old;
+			$prog_old->{ $record_entries->{pid} } = $record_entries;
+			# Copy pid into index_prog_old hash
+			$index_prog_old->{ $record_entries->{index} }  = $record_entries->{pid};
 		}
 		close (CACHE);
-		logger "INFO: got ".(keys %prog_old)." cache entries for $prog_type\n" if $opt->{verbose};
+		logger "INFO: Got ".(keys %{ $prog_old })." file cache entries for $prog_type\n" if $opt->{verbose};
+
+	# Else no mem or file cache
 	} else {
-		logger "INFO: No cache file exists for $prog_type\n" if $opt->{verbose};
+		logger "INFO: No file cache exists for $prog_type\n" if $opt->{verbose};
 	}
 
+
+	# Do we need to refresh the cache ?
 	# if a cache file doesn't exist/corrupted/empty, refresh option is specified or original file is older than $cache_sec then download new data
 	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
 	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{refresh};
-	if ( (! $only_load_from_cache) && ( 
-			(! keys %prog_old) || 
-			(! -f $cachefile) || 
-			$opt->{refresh} || 
-			($now >= ( stat($cachefile)->mtime + $cache_secs ))
-			)
-		) {
+	if ( (! $only_load_from_cache) && 
+		( (! keys %{ $prog_old } ) || (! -f $cachefile) || $opt->{refresh} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) )
+	) {
 
-		# Get links for specific type of programme class
-		if ( progclass( $prog_type )->get_links( $progref, $prog_type ) != 0 ) {
+		# Get links for specific type of programme class into %prog 
+		if ( progclass( $prog_type )->get_links( $prog, $prog_type ) != 0 ) {
 			# failed - leave cache unchanged
 			main::logger "ERROR: Failed to retrieve programmes for $prog_type - skipping\n";
 			return 0;
 		}
 
-		# Sort index for this prog type
-		sort_index( $progref, $index_progref, $prog_type );
-		
+		# Sort index for this prog type from cache file
+		# sorts and references %prog objects into %index_prog
+		sort_index( $prog, $index_prog, $prog_type );
+
 		# Open cache file for writing
 		unlink $cachefile;
 		my $now = time();
 		if ( open(CACHE, "> $cachefile") ) {
 			print CACHE "#".(join '|', @cache_format)."\n";
-			for (sort {$a <=> $b} keys %{$index_progref}) {
+			# loop through all progs just obtained through get_links above (in numerical index order)
+			for my $index ( sort {$a <=> $b} keys %{$index_prog} ) {
 				# prog object
-				my $this = $index_progref->{$_};
+				my $this = $index_prog->{ $index };
 				# Only write entries for correct prog type
-				if ($this->{type} eq $prog_type) {
+				if ( $this->{type} eq $prog_type ) {
 					# Merge old and new data to retain timestamps
 					# if the entry was in old cache then retain timestamp from old entry
-					if ( $prog_old{ $this->{pid} }{timeadded} ) {
-						$this->{timeadded} = $prog_old{ $this->{pid} }{timeadded};
+					if ( $prog_old->{ $this->{pid} }->{timeadded} ) {
+						$this->{timeadded} = $prog_old->{ $this->{pid} }->{timeadded};
 					# Else this is a new entry
 					} else {
 						$this->{timeadded} = $now;
@@ -1404,28 +1421,41 @@ sub get_links {
 			logger "WARNING: Couldn't open cache file '$cachefile' for writing\n";
 		}
 
+		# Copy new progs into memcache
+		for my $index ( keys %{ $index_prog } ) {
+			my $pid = $index_prog->{ $index }->{pid};
+			# Update fields in memcache from %prog hash for $pid
+			$memcache->{$prog_type}->{$pid}->{$_} = $index_prog->{$index}->{$_} for @cache_format;
+		}
 
-	# Else copy data from existing cache file into new prog instances
-	} else {
-		for my $pid ( keys %prog_old ) {
-
-			# Create new prog instance
-			$progref->{$pid} = progclass( lc($prog_old{$pid}{type}) )->new( 'pid' => $pid );
-
-			for (@cache_format) {
-				$progref->{$pid}->{$_} = $prog_old{$pid}{$_};
+		# purge pids in memcache that aren't in %prog
+		for my $pid ( keys %{ $memcache->{$prog_type} } ) {
+			if ( ! defined $prog->{$pid} ) {
+				delete $memcache->{$prog_type}->{$pid};
+				main::logger "DEBUG: Removed PID $pid from memcache\n" if $opt->{debug};
 			}
 		}
+
+
+	# Else copy data from existing cache file into new prog instances and memcache
+	} else {
+		for my $pid ( keys %{ $prog_old } ) {
+
+			# Create new prog instance
+			$prog->{$pid} = progclass( lc($prog_old->{$pid}->{type}) )->new( 'pid' => $pid );
+
+			# Deep-copy the data from %prog_old into %prog and $memcache->{$prog_type}
+			for (@cache_format) {
+				$prog->{$pid}->{$_} = $prog_old->{$pid}->{$_};
+				# Update fields in memcache from %prog_old hash for $pid
+				$memcache->{$prog_type}->{$pid}->{$_} = $prog_old->{$pid}->{$_};
+			}
+
+		}
 		# Add prog objects to %index_prog hash
-		$index_progref->{$_} = $progref->{ $index_prog_old{$_} } for keys %index_prog_old;
+		$index_prog->{$_} = $prog->{ $index_prog_old->{$_} } for keys %{ $index_prog_old };
 	}
 
-	# Copy cache to global memcache
-	main::logger "INFO: Writing ".( keys %{ $progref } )." entries into global $prog_type memcache\n" if $opt->{verbose};
-	for my $pid ( keys %{$progref} ) {
-		$memcache->{$prog_type}->{$pid} = $progref->{pid};
-	}
-	
 	return 0;
 }
 
@@ -1520,13 +1550,13 @@ sub download_block {
 
 	# Setup request headers
 	my $h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{coremedia},
+		'User-Agent'	=> main::user_agent('coremedia'),
 		'Accept'	=> '*/*',
 		'Range'        => "bytes=${start}-${end}",
 	);
 
 	# Use url prepend if required
-	if ( $opt->{proxy} =~ /^prepend:/ ) {
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		$url = $opt->{proxy}.main::url_encode( $url );
 		$url =~ s/^prepend://g;
 	}
@@ -1704,9 +1734,10 @@ sub random_ua {
 #		1: no cookies
 #		2: retain cookies but discard if site requires it
 sub create_ua {
+	my $id = shift || '';
+	my $nocookiejar = shift || 0;
 	# Use either the key from the function arg if it exists or a random ua string
-	my $agent = $user_agent{ "$_[0]" } || random_ua();
-	my $nocookiejar = $_[1] || 0;
+	my $agent = main::user_agent( $id ) || random_ua();
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout( $lwp_request_timeout );
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
@@ -2293,7 +2324,7 @@ sub request_url_retry {
 
 
 	# Use url prepend if required
-	if ( $opt->{proxy} =~ /^prepend:/ ) {
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		$url = $opt->{proxy}.main::url_encode( $url );
 		$url =~ s/^prepend://g;
 	}
@@ -2324,7 +2355,7 @@ sub request_url_retry {
 
 	# Only return decoded content if gzip is used - otherwise this severely slows down stco scanning! Perl bug?
 	main::logger "DEBUG: ".($res->header('Content-Encoding') || 'No')." Encoding used on $url\n" if $opt->{debug};
-	return $res->decoded_content if $res->header('Content-Encoding') eq 'gzip';
+	return $res->decoded_content if defined $res->header('Content-Encoding') && $res->header('Content-Encoding') eq 'gzip';
 
 	return $res->content;
 }
@@ -2413,7 +2444,7 @@ sub url_encode {
 
 
 # list_unique_element_counts( \%type, $element_name, @matchlist);
-# Show channels for currently specified types in @matchlist - an array of progrefs
+# Show channels for currently specified types in @matchlist - an array of progs
 sub list_unique_element_counts {
 	my $typeref = shift;
 	my $element_name = shift;
@@ -3219,7 +3250,7 @@ sub get {
 			exit 10;
 		}
 		# Warn if it is listed as a deprecated internal option name
-		if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
+		if ( defined @{ $opt_format_ref->{$1} }[2] && @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
 			main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
 			main::logger "INFO: Use --dump-opts to display all valid options\n";
 		}
@@ -3284,7 +3315,6 @@ use strict;
 
 # Class vars
 # Global options
-my $opt_format_ref;
 
 # Constructor
 # Usage: $hist = History->new();
@@ -3297,7 +3327,6 @@ sub new {
 	}
 	## Ensure the subclass $opt var is pointing to the Superclass global optref
 	$opt = $History::optref;
-	# should this be $main::type ?
 	bless $self, $type;
 }
 
@@ -3377,19 +3406,19 @@ sub load {
 		my $record_entries;
 		# Update fields in %history hash for $pid
 		for ( @history_format ) {
-			$record_entries->{$_} = shift @record;
+			$record_entries->{$_} = ( shift @record ) || '';
 		}
 		# Create new history entry
 		if ( defined $hist->{ $record_entries->{pid} } ) {
  			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
 			# Append filename and modes - could be a multimode entry
-			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode};
-			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename};
+			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode} if defined $record_entries->{mode};
+			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename} if defined $record_entries->{filename};
 			main::logger "DEBUG: Loaded and merged '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
 		} else {
 			# workaround empty names
 			#$record_entries->{name} = 'pid:'.$record_entries->{pid} if ! $record_entries->{name};
-			$hist->{ $record_entries->{pid} } = History::new();
+			$hist->{ $record_entries->{pid} } = History->new();
 			$hist->{ $record_entries->{pid} } = $record_entries;
 			main::logger "DEBUG: Loaded '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
 		}
@@ -3450,9 +3479,8 @@ sub get_pids {
 # Requires a load()
 sub show {
 	my $hist = shift;
-	my %prog;
+	my $prog = {};
 	my ( @search_args ) = ( @_ );
-	my %progtypes = main::progclass();
 
 	# Load if empty
 	$hist->conditional_load();
@@ -3462,7 +3490,7 @@ sub show {
 
 	# Sort index by timestamp
 	my %index_hist;
-	main::sort_index( \%{ $hist }, \%index_hist, undef, 'timeadded' );
+	main::sort_index( $hist, \%index_hist, undef, 'timeadded' );
 
 	for my $index ( sort {$a <=> $b} keys %index_hist ) {
 		my $record = $index_hist{$index};
@@ -3477,7 +3505,7 @@ sub show {
 		for my $key ( keys %{ $record } ) {
 			$progrec->{$key} = $record->{$key};
 		}
-		$prog{ $progrec->{pid} } = $progrec;
+		$prog->{ $progrec->{pid} } = $progrec;
 	}
 
 	# Parse remaining args
@@ -3489,14 +3517,14 @@ sub show {
 		if ( /^[\d]+$/ && $_ <= $max_index ) {
 			if ( defined $index_hist{$_} ) {
 				main::logger "INFO: Search term '$_' is an Index value\n" if $opt->{verbose};
-				push @match_list, $prog{ $index_hist{$_}->{pid} };
+				push @match_list, $prog->{ $index_hist{$_}->{pid} };
 			}
 
 		# If PID then find matching programmes with 'pid:<pid>'
 		} elsif ( m{^\s*pid:(.+?)\s*$}i ) {
-			if ( defined $prog{$1} ) {
+			if ( defined $prog->{$1} ) {
 				main::logger "INFO: Search term '$1' is a pid\n" if $opt->{verbose};
-				push @match_list, $prog{$1};
+				push @match_list, $prog->{$1};
 			} else {
 				main::logger "INFO: Search term '$1' is a non-existent pid, use --pid instead\n";
 			}
@@ -3504,7 +3532,7 @@ sub show {
 		# Else assume this is a programme name regex
 		} else {
 			main::logger "INFO: Search term '$_' is a substring\n" if $opt->{verbose};
-			push @match_list, main::get_regex_matches( \%prog, $_ );
+			push @match_list, main::get_regex_matches( $prog, $_ );
 		}
 	}
 
@@ -3891,7 +3919,7 @@ sub download_retry_loop {
 			my @available_modes = sort keys %{ $prog->{streams}->{$version} };
 			for my $modename ( split /,/, $modelist ) {
 				# find all numbered modes starting with this modename
-				push @modes, sort { $a <=> $b } grep /^$modename(\d+)?$/, @available_modes;
+				push @modes, sort { $a cmp $b } grep /^$modename(\d+)?$/, @available_modes;
 			}
 
 			# Check for no applicable modes - report which ones are available if none are specified
@@ -4245,7 +4273,7 @@ sub substitute {
 	$tag_begin = '\<' if not defined $tag_begin;
 	$tag_end = '\>' if not defined $tag_end;
 	my $version = $self->{version} || 'unknown';
-	my $replace;
+	my $replace = '';
 
 	# Make 'duration' == 'length' for the selected version
 	$self->{duration} = $self->{durations}->{$version} if $self->{durations}->{$version};
@@ -4269,6 +4297,7 @@ sub substitute {
 			$value = join ',', @{ $value };
 		}
 
+		$value = '' if not defined $value;
 		main::logger "DEBUG: Substitute ($version): '$key' => '$value'\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
 		if ($sanitize_mode == 0) {
@@ -4385,7 +4414,7 @@ sub generate_filenames {
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	
 	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if $prog->{filename} =~ /\.EXT$/ || $opt->{multimode} || ! $prog->{filename};
+	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename};
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
 
 	# Create symlink filename if required
@@ -4555,7 +4584,11 @@ sub get_time_string {
 
 	# extract $year $mon $mday $hour $min $sec $tzhour $tzmin
 	my ($year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin);
-	($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6) if m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)};
+	if ( m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)} ) {
+		($year, $mon, $mday, $hour, $min, $sec) = ($1, $2, $3, $4, $5, $6);
+	} else {
+		return '';
+	}
 
 	# positive TZ offset
 	($tzhour, $tzmin) = ($1, $2) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\d\+(\d\d):(\d\d)};
@@ -4797,7 +4830,7 @@ sub get_verpids {
 	$prog_type = 'radio' if grep /kind="radioProgramme"/, $xml;
 
 	# Split into <item kind="programme"> sections
-	my $prev_version;
+	my $prev_version = '';
 	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
 		main::logger "DEBUG: Block: $_\n" if $opt->{debug};
 		my ($verpid, $version);
@@ -5012,7 +5045,7 @@ sub get_metadata {
 			$count++;
 		}
 		# Use the default cache thumbnail unless --thumbsize=NNN is used where NNN is either the width or thumbnail index number
-		$thumbnail = $thumbnails{ $opt->{thumbsize} } if $thumbnails{ $opt->{thumbsize} };
+		$thumbnail = $thumbnails{ $opt->{thumbsize} } if defined $opt->{thumbsize};
 		( $name, $episode ) = Programme::bbciplayer::split_title( $1 ) if $entry =~ m{<title\s+type="text">\s*(.+?)\s*<};
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
@@ -5376,7 +5409,7 @@ sub get_stream_data_cdn {
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Set the live flag if this is not an ondemand stream
-			$conn->{live} = 1 if $cattribs->{application} =~ /^live/;
+			$conn->{live} = 1 if defined $cattribs->{application} && $cattribs->{application} =~ /^live/;
 			# Default appication is 'ondemand'
 			$cattribs->{application} = 'ondemand' if ! $cattribs->{application};
 
@@ -5825,7 +5858,11 @@ sub opt_format {
 # Method to return optional list_entry format
 sub optional_list_entry_format {
 	my $prog = shift;
-	return ", $prog->{channel}, $prog->{categories}, $prog->{versions}";
+	my @format;
+	for ( qw/ channel categories versions / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
 }
 
 
@@ -5912,14 +5949,13 @@ sub clean_pid {
 # Uses: %{ channels() }, \%prog
 sub get_links {
 	shift; # ignore obj ref
-	my $progref = shift;
+	my $prog = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
 	my $channel_feed_url = 'http://feeds.bbc.co.uk/iplayer'; # /$channel/list
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
-
 	my $xml;
 	my $feed_data;
 	my $res;
@@ -6079,28 +6115,28 @@ sub get_links {
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
 			# Merge and Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+			if ( defined $prog->{$pid} ) {
+				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
 				# Since we use the 'Signed' (or 'Audio Described') channel to get sign zone/audio described data, merge the categories from this entry to the existing entry
-				if ( $progref->{$pid}->{categories} ne join(',', sort @category) ) {
+				if ( $prog->{$pid}->{categories} ne join(',', sort @category) ) {
 					my %cats;
-					$cats{$_} = 1 for ( @category, split /,/, $progref->{$pid}->{categories} );
-					main::logger "INFO: Merged categories for $pid from $progref->{$pid}->{categories} to ".join(',', sort keys %cats)."\n" if $opt->{verbose};
-					$progref->{$pid}->{categories} = join(',', sort keys %cats);
+					$cats{$_} = 1 for ( @category, split /,/, $prog->{$pid}->{categories} );
+					main::logger "INFO: Merged categories for $pid from $prog->{$pid}->{categories} to ".join(',', sort keys %cats)."\n" if $opt->{verbose};
+					$prog->{$pid}->{categories} = join(',', sort keys %cats);
 				}
 
 				# If this a popular or highlights programme then add these tags to categories
 				my %cats;
-				$cats{$_} = 1 for ( @category, split /,/, $progref->{$pid}->{categories} );
+				$cats{$_} = 1 for ( @category, split /,/, $prog->{$pid}->{categories} );
 				$cats{Popular} = 1 if $channel eq 'Popular';
 				$cats{Highlights} = 1 if $channel eq 'Highlights';
-				$progref->{$pid}->{categories} = join(',', sort keys %cats);
+				$prog->{$pid}->{categories} = join(',', sort keys %cats);
 
 				# If this is a dupicate pid and the channel is now Signed then both versions are available
 				$version = 'signed' if $channel eq 'Signed';
 				$version = 'audiodescribed' if $channel eq 'Audio Described';
 				# Add version to versions for existing prog
-				$progref->{$pid}->{versions} = join ',', main::make_array_unique_ordered( (split /,/, $progref->{$pid}->{versions}), $version );
+				$prog->{$pid}->{versions} = join ',', main::make_array_unique_ordered( (split /,/, $prog->{$pid}->{versions}), $version );
 				next;
 			}
 
@@ -6120,7 +6156,7 @@ sub get_links {
 			my $thumbsize = $opt->{thumbsizecache} || 150;
 
 			# build data structure
-			$progref->{$pid} = main::progclass($prog_type)->new(
+			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
 				'name'		=> $name,
 				'versions'	=> $version,
@@ -6137,15 +6173,16 @@ sub get_links {
 				'type'		=> $prog_type,
 				'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
 			);
+
 		}
 	}
 
-	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
 	# Get future schedules if required
 	# http://www.bbc.co.uk/cbbc/programmes/schedules/this_week.xml
 	# http://www.bbc.co.uk/cbbc/programmes/schedules/next_week.xml
 	if ( $opt->{refreshfuture} ) {
+		# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
+		my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
 		# Only get schedules for real channels
 		@channel_list = keys %channels;
 		for my $channel_id ( @channel_list ) {
@@ -6251,14 +6288,14 @@ sub get_links {
 					main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
 					# Merge and Skip if this pid is a duplicate
-					if ( defined $progref->{$pid} ) {
-						main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+					if ( defined $prog->{$pid} ) {
+						main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
 						# Update this info from schedule (not available in the usual iplayer channels feeds)
-						$progref->{$pid}->{duration} = $duration;
-						$progref->{$pid}->{episodenum} = $episodenum if ! $progref->{$pid}->{episodenum};
-						$progref->{$pid}->{seriesnum} = $seriesnum if ! $progref->{$pid}->{seriesnum};
+						$prog->{$pid}->{duration} = $duration;
+						$prog->{$pid}->{episodenum} = $episodenum if ! $prog->{$pid}->{episodenum};
+						$prog->{$pid}->{seriesnum} = $seriesnum if ! $prog->{$pid}->{seriesnum};
 						# don't add this as some progs are already available
-						#$progref->{$pid}->{available} = $available;
+						#$prog->{$pid}->{available} = $available;
 						next;
 					}
 
@@ -6272,7 +6309,7 @@ sub get_links {
 					next if Programme::get_time_string( $available ) < $now;
 
 					# build data structure
-					$progref->{$pid} = main::progclass($prog_type)->new(
+					$prog->{$pid} = main::progclass($prog_type)->new(
 						'pid'		=> $pid,
 						'name'		=> $name,
 						'versions'	=> $version,
@@ -6679,7 +6716,11 @@ sub init {
 # Method to return optional list_entry format
 sub optional_list_entry_format {
 	my $prog = shift;
-	return ", $prog->{channel}, $prog->{categories}";
+	my @format;
+	for ( qw/ channel categories / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
 }
 
 
@@ -6832,7 +6873,7 @@ sub clean_pid {
 # Uses: %{ channels() }, \%prog
 sub get_links {
 	shift; # ignore obj ref
-	my $progref = shift;
+	my $prog = shift;
 	my $prog_type = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
@@ -6847,7 +6888,7 @@ sub get_links {
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
 			# build data structure
-			$progref->{$pid} = main::progclass($prog_type)->new(
+			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
 				'name'		=> $name,
 				'versions'	=> 'default',
@@ -7208,7 +7249,7 @@ sub get_url {
 	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
 	#main::logger "\rGetting iplayer iphone URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
 	my $h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{coremedia},
+		'User-Agent'	=> main::user_agent('coremedia'),
 		'Accept'	=> '*/*',
 		'Range'		=> 'bytes=0-1',
 	);
@@ -7254,14 +7295,14 @@ sub get {
 	main::logger "DEBUG: Rearrang mov file mode = $rearrange (type: $prog->{type}, raw: $opt->{raw})\n" if $opt->{debug};
 		
 	# Use url prepend if required
-	if ( $opt->{proxy} =~ /^prepend:/ ) {
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		$url_2 = $opt->{proxy}.main::url_encode( $url_2 );
 		$url_2 =~ s/^prepend://g;
 	}
 
 	# Setup request header
 	my $h = new HTTP::Headers(
-		'User-Agent'	=> $user_agent{coremedia},
+		'User-Agent'	=> main::user_agent('coremedia'),
 		'Accept'	=> '*/*',
 		'Range'		=> 'bytes=0-1',
 	);
@@ -7371,7 +7412,8 @@ sub get {
 				create_qt_atom( chr(0xa9).'des', $prog->{desc}, 'string' ).
 				create_qt_atom( chr(0xa9).'cmt', 'Recorded using get_iplayer', 'string' ).
 				create_qt_atom( chr(0xa9).'req', 'QuickTime 6.0 or greater', 'string' ).
-				create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' )
+				create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' ),
+				''
 			);
 			# Insert new udta atom over the old one and get the new $moov_length (and update moov atom size field)
 			replace_moov_udta_atom ( $udta_new, $moovdata );
@@ -7474,7 +7516,7 @@ sub get {
 sub relocate_moov_chunk_offsets {
 	my $moovdata = $_[0];
 	# Change all the chunk offsets in moov->stco atoms and add moov_length to them all
-	# get moov atom length
+	# get moov atom length - same as length($moovdata)
 	my $moov_length = bytestring_to_int( substr($moovdata, 0, 4) );
 	# Use index() to search for a string within a string
 	my $i = -1;
@@ -7514,22 +7556,24 @@ sub replace_moov_udta_atom {
 	# Use index() to search for a string within a string ($i will point at the beginning of the atom)
 	my $i = index($moovdata, 'udta', -1) - 4;
 
-	# determine length of atom (4 bytes preceding the name)
-	my $udta_len = bytestring_to_int( substr($moovdata, $i, 4) );
-	main::logger "INFO: Found udta atom at moov atom offset: $i length $udta_len\n" if $opt->{verbose};
+	# determine length of old atom (4 bytes preceding the name)
+	my $udta_old_len = bytestring_to_int( substr($moovdata, $i, 4) );
+	main::logger "INFO: Found udta atom at moov atom offset: $i length $udta_old_len\n" if $opt->{verbose};
 
 	# Save the data before the udta atom
 	my $moovdata_before_udta = substr($moovdata, 0, $i);
 
 	# Save the remainder portion of data after the udta atom for later
-	my $moovdata_after_udta = substr($moovdata, $i, $moovdata - $i + $udta_len);
+	my $udta_new_len = length( $udta_new );
+	my $moovdata_after_udta = substr($moovdata, $i, $moov_length - ( $i + $udta_new_len ) );
 
 	# Old udta atom should we need it
 	### my $udta_old = substr($moovdata, $i, $udta_len);
 
 	# Create new moov atom
 	$moovdata = $moovdata_before_udta.$udta_new.$moovdata_after_udta;
-	
+	main::logger "INFO: Inserted new udta atom at moov atom offset: $i length $udta_new_len\n" if $opt->{verbose};
+
 	# Recalculate the moov size and insert into moovdata
 	write_msb_value_at_offset( $moovdata, 0, length($moovdata) );
 	
@@ -7579,7 +7623,7 @@ sub create_qt_atom {
 		exit 1;
 	}
 	# prepend string length if this is a string type
-	if ( $prog_type eq 'string' ) {
+	if ( defined $prog_type && $prog_type eq 'string' ) {
 		my $value = length($data);
 		$data = '1111'.$data;
 		# overwrite '1111' with total atom length in 2-byte MSB + 0x0 0x0
@@ -8942,7 +8986,7 @@ sub load_options {
 	# Clear search args
 	@search_args = ();
 	# Set each option from the search
-	for ( sort {$a <=> $b} keys %{ $pvr->{$name} } ) {
+	for ( sort {$a cmp $b} keys %{ $pvr->{$name} } ) {
 		# Add to list of search args if this is not an option
 		if ( /^search\d+$/ ) {
 			main::logger "INFO: $_ = $pvr->{$name}->{$_}\n" if $opt->{verbose};

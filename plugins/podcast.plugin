@@ -69,7 +69,11 @@ sub opt_format {
 # Method to return optional list_entry format
 sub optional_list_entry_format {
 	my $prog = shift;
-	return ", $prog->{available}, $prog->{channel}, $prog->{categories}";
+	my @format;
+	for ( qw/ available channel categories / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
 }
 
 
@@ -92,10 +96,10 @@ sub modelist {
 #	# aod by channel see http://docs.google.com/View?docid=d9sxx7p_38cfsmxfcq
 #	# http://www.bbc.co.uk/radio/aod/availability/<channel>.xml
 
-# Usage: Programme::podcast->get_links( $progref, 'podcast' );
+# Usage: Programme::podcast->get_links( $prog, 'podcast' );
 sub get_links {
 	shift; # ignore obj ref
-	my $progref = shift;
+	my $prog = shift;
 	my $prog_type = shift;
 	my $podcast_index_feed_url = 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
 
@@ -256,8 +260,8 @@ sub get_links {
 			$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
 	
 			# Skip if this pid is a duplicate
-			if ( defined $progref->{$pid} ) {
-				main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
+			if ( defined $prog->{$pid} ) {
+				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
 				next;
 			}
 	
@@ -275,7 +279,7 @@ sub get_links {
 			$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
 	
 			# build data structure
-			$progref->{$pid} = Programme::podcast->new(
+			$prog->{$pid} = Programme::podcast->new(
 				'pid'		=> $pid,
 				'name'		=> $name,
 				'versions'	=> 'default',

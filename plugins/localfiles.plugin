@@ -62,7 +62,11 @@ sub opt_format {
 # Method to return optional list_entry format
 sub optional_list_entry_format {
 	my $prog = shift;
-	return ", $prog->{channel}, $prog->{categories}";
+	my @format;
+	for ( qw/ channel categories / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
 }
 
 
