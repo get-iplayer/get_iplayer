@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.60;
+my $version = 2.61;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1240,13 +1240,13 @@ sub make_array_unique_ordered {
 # User Agents
 sub user_agent {
 	my $id = shift || '';
-	my %user_agent = (
+	my $user_agent = {
 		coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
 		safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
 		update		=> "get_iplayer updater (v${version} - $^O - $^V)",
 		get_iplayer	=> "get_iplayer/$version $^O/$^V",
-	);
-	return $user_agent{ $id } || '';
+	};
+	return $user_agent->{ $id } || '';
 }
 
 
@@ -1486,11 +1486,9 @@ sub display_stream_info {
 	# default version is 'default'
 	$version = 'default' if not defined $verpid;
 	# Get stream data if not defined
-	my %data;
 	if ( not defined $prog->{streams}->{$version} ) {
 		logger "INFO: Getting media stream metadata for $prog->{name} - $prog->{episode}, $verpid ($version)\n" if $prog->{pid};
-		%data = $prog->get_stream_data( $verpid );
-		$prog->{streams}->{$version} = \%data;
+		$prog->{streams}->{$version} = $prog->get_stream_data( $verpid );
 	}
 	for my $prog_type ( sort keys %{ $prog->{streams}->{$version} } ) {
 		logger "stream:     $prog_type\n";
@@ -2616,9 +2614,11 @@ sub StringUtils::sanitize_path {
 	# Replace backslashes with _ regardless
 	$string =~ s/\\/_/g;
 	# Sanitize by default
-	$string =~ s/\s/_/g if (! $opt->{whitespace}) && (! $allow_fwd_slash);
+	$string =~ s/\s+/_/g if (! $opt->{whitespace}) && (! $allow_fwd_slash);
 	$string =~ s/[^\w_\-\.\/\s]//gi if ! $opt->{whitespace};
 	$string =~ s/[\|\\\?\*\<\"\:\>\+\[\]\/]//gi if $opt->{fatfilename};
+	# Truncate multiple '_'
+	$string =~ s/_+/_/g;
 	return $string;
 }
 
@@ -3881,6 +3881,9 @@ sub download_retry_loop {
 		}
 	}
 
+	# Re-check history because get_verpids() can update the pid (e.g. BBC /programmes/ URLs)
+	return 0 if ( ! $opt->{multimode} ) && $hist->check( $prog->{pid} );
+
 	# if %{ $prog->{verpids} } is empty then skip this programme recording attempt
 	if ( (keys %{ $prog->{verpids} }) == 0 ) {
 		main::logger "INFO: No versions exist for this programme\n";
@@ -3907,8 +3910,7 @@ sub download_retry_loop {
 
 			# Try to get stream data for this version if not already populated
 			if ( not defined $prog->{streams}->{$version} ) {
-				my %streamdata = $prog->get_stream_data( $prog->{verpids}->{$version} );
-				$prog->{streams}->{$version} = \%streamdata;
+				$prog->{streams}->{$version} = $prog->get_stream_data( $prog->{verpids}->{$version} );
 			}
 
 			########## mode loop ########
@@ -3939,11 +3941,12 @@ sub download_retry_loop {
 			# Expand the modes into a loop
 			for my $mode ( @modes ) {
 				chomp( $mode );
-				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 				$prog->{mode} = $mode;
 
 				# If multimode is used, skip only modes which are in the history
 				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
+
+				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
@@ -4025,8 +4028,7 @@ sub mode_ver_download_retry_loop {
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
 			main::logger "WARNING: Retry recording for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
-			my %streamdata = $prog->get_stream_data( $version_pid );
-			$prog->{streams}->{$version} = \%streamdata;
+			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid );
 		}
 	}
 	return 1;
@@ -4063,7 +4065,7 @@ sub tag_file {
 				'--album', $id3_name,
 				'--song', $id3_episode,
 				'--comment', 'Description:'.$id3_desc,
-				'--year', (localtime())[5] + 1900,
+				'--year', substr( $prog->{firstbcast}->{$prog->{version}}, 0, 4 ) || ((localtime())[5] + 1900),
 				$prog->{filename},
 			);
 			if ( main::run_cmd( 'STDERR', @cmd ) ) {
@@ -4092,6 +4094,9 @@ sub tag_file {
 
 		# Only tag if the required tool exists
 		if ( main::exists_in_path( 'atomicparsley' ) ) {
+			# Download the thumbnail if it doesn't already exist
+			$prog->download_thumbnail if ! -f $prog->{thumbfile};
+
 			# Download Thubnail file as well for inclusion into MP4 stream.
 			# Apple TV/iTunes will use it.
 			main::logger "INFO: mp4 tagging $prog->{ext} file\n";
@@ -4109,9 +4114,6 @@ sub tag_file {
 			my $stik = 'TV Show';
 			$stik = 'Movie' if $tags->{categories} =~ m{(film|movie)}i;
 
-			# Download the thumbnail if it doesn't already exist
-			$prog->download_thumbnail if ! -f $prog->{thumbfile};
-
 			# Strip series and episode text from name, longname, episode
 			for my $tag ( qw/name longname episode/ ) {
 				$tags->{$tag} =~ s/(:\s*)?(Series|Episode)\s*\d+(:\s*)?//gi;
@@ -4124,8 +4126,8 @@ sub tag_file {
 			my @cmd = (
 				$bin->{atomicparsley}, $prog->{filename},
 				'--TVNetwork',	$tags->{channel},
-				'--description',$tags->{desc},
-				'--comment',	$tags->{desc},
+				'--description',$tags->{descshort},
+				'--comment',	$tags->{descshort},
 				'--title',	$title,
 				'--TVShowName',	$tags->{longname},
 				'--TVEpisode',	$tags->{pid},
@@ -4166,14 +4168,14 @@ sub create_metadata_file {
 	my $template;
 	my $filename;
 
-	# XML templaye for XBMC movies
+	# XML templaye for XBMC movies - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#Movies
 	$filename->{xbmc_movie} = "$prog->{dir}/$prog->{fileprefix}.nfo";
 	$template->{xbmc_movie} = '
 	<movie>
 		<title>[name] - [episode]</title>
 		<outline>[desc]</outline>
 		<plot>[desc]</plot>
-		<tagline></tagline>
+		<tagline>[descshort]</tagline>
 		<runtime>[duration]</runtime>
 		<thumb>[thumbnail]</thumb>
 		<id>[pid]</id>
@@ -4185,7 +4187,7 @@ sub create_metadata_file {
         </movie>
 	';
 
-	# XML template for XBMC
+	# XML template for XBMC - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#TV_Episodes
 	$filename->{xbmc} = "$prog->{dir}/$prog->{fileprefix}.nfo";
 	$template->{xbmc} = '
 	<episodedetails>
@@ -4199,7 +4201,7 @@ sub create_metadata_file {
 	</episodedetails>
 	';
 
-	# XML template for Freevo
+	# XML template for Freevo - Ref: http://doc.freevo.org/MovieFxd
 	$filename->{freevo} = "$prog->{dir}/$prog->{fileprefix}.fxd";
 	$template->{freevo} = '<?xml version="1.0" ?>
 	<freevo>
@@ -4316,8 +4318,13 @@ sub substitute {
 		$string =~ s|$key|$replace|gi;
 	}
 
-	# Remove/replace all non-nice-filename chars if required except for fwd slashes
 	if ( $sanitize_mode == 0 || $sanitize_mode == 1 ) {
+		# Remove empty tags
+		my $key = $tag_begin.'.*?'.$tag_end;
+		$string =~ s|$key||m;
+		# Strip whitespace if required
+		$string =~ s/[\s_]+/_/g if ! $opt->{whitespace};
+		# Remove/replace all non-nice-filename chars if required except for fwd slashes
 		return StringUtils::sanitize_path( $string, 1 );
 	} else {
 		return $string;
@@ -4372,8 +4379,17 @@ sub generate_filenames {
 	my ( $name, $episode ) = Programme::bbciplayer::split_title( $prog->{title} ) if $prog->{title};
 	$prog->{name} = $name if $name && ! $prog->{name};
 	$prog->{episode} = $episode if $episode && ! $prog->{episode};
+
 	# store the name extracted from the title metadata in <longname> else just use the <name> field
 	$prog->{longname} = $name || $prog->{name};
+
+	# Set some common metadata fallbacks
+	$prog->{nameshort} = $prog->{name} if ! defined $prog->{nameshort};
+	$prog->{episodeshort} = $prog->{episode} if ! defined $prog->{episodeshort};
+
+	# Create descmedium, descshort by truncation of desc if they don't already exist
+	$prog->{descmedium} = substr( $prog->{desc}, 0, 1024 ) if ! defined $prog->{descmedium};
+	$prog->{descshort} = substr( $prog->{desc}, 0, 255 ) if ! defined $prog->{descshort};
 
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
@@ -4382,9 +4398,6 @@ sub generate_filenames {
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, 240 );
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
-
-	# Spaces
-	$prog->{fileprefix} =~ s/\s+/_/g if ! $opt->{whitespace};
 
 	# Change the date in the filename to ISO8601 format if required
 	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
@@ -5141,9 +5154,8 @@ sub get_metadata {
 		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
 		# Try to get stream data for this version if it isn't already populated
 		if ( not defined $prog->{streams}->{$version} ) {
-			my %all_stream_data = get_stream_data($prog, $prog->{verpids}->{$version} );
 			# Add streamdata to object
-			$prog->{streams}->{$version} = \%all_stream_data;
+			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version} );
 		}
 		$modes->{$version} = join ',', sort keys %{ $prog->{streams}->{$version} };
 		# Estimate the file sizes for each mode
@@ -5227,6 +5239,16 @@ sub get_metadata {
 	$episode = $episodetitle if length( $episodetitle ) > length( $episode );
 	$episode = $prog->{episode} if length( $prog->{episode} ) > length( $episode );
 
+	# Create a stripped episode and series with numbers removed + senum s##e## element.
+	$prog->{episodeshort} = $prog->{episode};
+	$prog->{episodeshort} =~ s/(^|:(\s+))\d+\.\s+/$1/i;
+	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
+	$prog->{nameshort} = $prog->{name};
+	$prog->{nameshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
+	$prog->{senum} = sprintf "s%02se%02s", $prog->{seriesnum}, $prog->{episodenum} if defined $prog->{seriesnum} && defined $prog->{episodenum};
+
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
 	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
@@ -5237,6 +5259,8 @@ sub get_metadata {
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
 	$prog->{desc}		= $longdesc || $meddesc || $desc || $prog->{desc} || $summary;
+	$prog->{descmedium}	= $meddesc;
+	$prog->{descshort}	= $summary;
 	$prog->{player}		= $player;
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
@@ -5385,11 +5409,11 @@ sub get_stream_data_cdn {
 
 	# Public Non-Live EMP Video without auth
 	#if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
-	#	$data{$mode}{bitrate} = 480; # ??
-	#	$data{$mode}{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
+	#	$data->{$mode}->{bitrate} = 480; # ??
+	#	$data->{$mode}->{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
 	# Live TV, Live EMP Video or Non-public EMP video
 	#} elsif ( $cattribs->{kind} eq 'akamai' ) {
-	#	$data{$mode}{bitrate} = 480; # ??
+	#	$data->{$mode}->{bitrate} = 480; # ??
 
 	my $count = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
@@ -5540,7 +5564,7 @@ sub get_stream_set_type {
 # $media = undef|<modename>
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
-	my %data;
+	my $data = {};
 	my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
 	my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 
@@ -5613,7 +5637,7 @@ sub get_stream_data {
 				delete $mattribs->{width};
 				delete $mattribs->{height};
 			}
-			get_stream_data_cdn( \%data, $mattribs, 'iphone', 'iphone', 'mov' );
+			get_stream_data_cdn( $data, $mattribs, 'iphone', 'iphone', 'mov' );
 		
 		
 		# flashhd modes
@@ -5625,19 +5649,19 @@ sub get_stream_data {
 
 			# flashhd modes
 			if ( $mattribs->{bitrate} > 3000 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashhd', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashhd', 'rtmp', 'mp4' );
 
 			# flashvhigh modes
 			} elsif ( $mattribs->{bitrate} > 1200 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' );
 
 			# flashhigh modes
 			} elsif ( $mattribs->{bitrate} > 700 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashhigh', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashhigh', 'rtmp', 'mp4' );
 
 			# flashstd modes
 			} elsif ( $mattribs->{bitrate} > 400 && $mattribs->{width} >= 500 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
 
 			}
 			
@@ -5646,21 +5670,21 @@ sub get_stream_data {
 				$mattribs->{type} eq 'video/x-flv' &&
 				$mattribs->{encoding} eq 'vp6'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
+			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
 		# flashlow modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv' &&
 				$mattribs->{encoding} eq 'spark'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'flashlow', 'rtmp', 'avi' );
+			get_stream_data_cdn( $data, $mattribs, 'flashlow', 'rtmp', 'avi' );
 
 		# flashnormal modes without encoding specifed - assume vp6
 		} elsif (	$mattribs->{kind} eq 'video' &&
 				$mattribs->{type} eq 'video/x-flv'
 		) {
 			$mattribs->{encoding} = 'vp6';
-			get_stream_data_cdn( \%data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
+			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
 		# n95 modes
 		} elsif (	$mattribs->{kind} eq 'video' &&
@@ -5671,13 +5695,13 @@ sub get_stream_data {
 			if ( $mattribs->{bitrate} > 140 ) {
 				$mattribs->{width} = $mattribs->{width} || 320;
 				$mattribs->{height} = $mattribs->{height} || 176;
-				get_stream_data_cdn( \%data, $mattribs, 'n95_wifi', '3gp', '3gp' );
+				get_stream_data_cdn( $data, $mattribs, 'n95_wifi', '3gp', '3gp' );
 
 			# n95_3g modes
 			} else {
 				$mattribs->{width} = $mattribs->{width} || 176;
 				$mattribs->{height} = $mattribs->{height} || 96;
-				get_stream_data_cdn( \%data, $mattribs, 'n95_3g', '3gp', '3gp' );
+				get_stream_data_cdn( $data, $mattribs, 'n95_3g', '3gp', '3gp' );
 			}
 
 		# WMV drm modes - still used?
@@ -5686,13 +5710,13 @@ sub get_stream_data {
 		) {
 			$mattribs->{width} = $mattribs->{width} || 320;
 			$mattribs->{height} = $mattribs->{height} || 176;
-			get_stream_data_cdn( \%data, $mattribs, 'mobile_wmvdrm', 'http', 'wmv' );
+			get_stream_data_cdn( $data, $mattribs, 'mobile_wmvdrm', 'http', 'wmv' );
 			# Also DRM (same data - just remove _mobile from href and identfier)
 			$mattribs->{width} = 672;
 			$mattribs->{height} = 544;
-			get_stream_data_cdn( \%data, $mattribs, 'wmvdrm', 'http', 'wmv' );
-			$data{wmvdrm}{identifier} =~ s/_mobile//g;
-			$data{wmvdrm}{streamurl} =~ s/_mobile//g;
+			get_stream_data_cdn( $data, $mattribs, 'wmvdrm', 'http', 'wmv' );
+			$data->{wmvdrm}->{identifier} =~ s/_mobile//g;
+			$data->{wmvdrm}->{streamurl} =~ s/_mobile//g;
 
 		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
@@ -5702,15 +5726,15 @@ sub get_stream_data {
 		) {
 			# flashaachigh
 			if (  $mattribs->{bitrate} >= 192 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashaachigh', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaachigh', 'rtmp', 'aac' );
 
 			# flashaacstd
 			} elsif ( $mattribs->{bitrate} >= 96 ) {
-				get_stream_data_cdn( \%data, $mattribs, 'flashaacstd', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaacstd', 'rtmp', 'aac' );
 
 			# flashaaclow
 			} else {
-				get_stream_data_cdn( \%data, $mattribs, 'flashaaclow', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaaclow', 'rtmp', 'aac' );
 			}
 
 		# flashaudio modes
@@ -5718,19 +5742,19 @@ sub get_stream_data {
 				$mattribs->{type} eq 'audio/mpeg'
 				#&& $mattribs->{encoding} eq 'mp3'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
+			get_stream_data_cdn( $data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
 
 		# RealAudio modes
 		} elsif (	$mattribs->{type} eq 'audio/real' &&
 				$mattribs->{encoding} eq 'real'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'realaudio', 'rtsp', 'mp3' );
+			get_stream_data_cdn( $data, $mattribs, 'realaudio', 'rtsp', 'mp3' );
 
 		# wma modes
 		} elsif (	$mattribs->{type} eq 'audio/wma' &&
 				$mattribs->{encoding} eq 'wma'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'wma', 'mms', 'wma' );
+			get_stream_data_cdn( $data, $mattribs, 'wma', 'mms', 'wma' );
 
 		# aac3gp modes
 		} elsif (	$mattribs->{kind} eq '' &&
@@ -5739,13 +5763,13 @@ sub get_stream_data {
 		) {
 			# Not sure how to stream these yet
 			#$mattribs->{kind} = 'sis';
-			#get_stream_data_cdn( \%data, $mattribs, 'aac3gp', 'http', 'aac' );
+			#get_stream_data_cdn( $data, $mattribs, 'aac3gp', 'http', 'aac' );
 
 		# Subtitles modes
 		} elsif (	$mattribs->{kind} eq 'captions' &&
 				$mattribs->{type} eq 'application/ttaf+xml'
 		) {
-			get_stream_data_cdn( \%data, $mattribs, 'subtitles', 'http', 'srt' );
+			get_stream_data_cdn( $data, $mattribs, 'subtitles', 'http', 'srt' );
 
 		# Catch unknown
 		} else {
@@ -5755,16 +5779,16 @@ sub get_stream_data {
 
 	# Report modes found
 	if ( $opt->{verbose} ) {
-		main::logger "INFO: Found mode $_: $data{$_}{type}\n" for sort keys %data;
+		main::logger "INFO: Found mode $_: $data->{$_}->{type}\n" for sort keys %{ $data };
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
 	if ( ! $media ) {
-		return %data;
+		return $data;
 	} else {
 		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
+		$data->{$media}->{exists} = 0 if not defined $data->{$media};
+		return $data->{$media};
 	}
 }
 
@@ -7403,18 +7427,20 @@ sub get {
 			$moovdata = main::download_block( undef, $url_2, $ua, $moov_start, (${download_len}-1) );
 			main::logger "                                                                                                         \r" if $opt->{hash};
 			# Create new udta atom with child atoms for metadata
+			# Ref: http://atomicparsley.sourceforge.net/mpeg-4files.html
 			my $udta_new = create_qt_atom('udta',
 				create_qt_atom( chr(0xa9).'nam', $prog->{name}.' - '.$prog->{episode}, 'string' ).
 				create_qt_atom( chr(0xa9).'alb', $prog->{name}, 'string' ).
 				create_qt_atom( chr(0xa9).'trk', $prog->{episode}, 'string' ).
 				create_qt_atom( chr(0xa9).'aut', $prog->{channel}, 'string' ).
 				create_qt_atom( chr(0xa9).'ART', $prog->{channel}, 'string' ).
-				create_qt_atom( chr(0xa9).'des', $prog->{desc}, 'string' ).
+				create_qt_atom( chr(0xa9).'cpy', $prog->{channel}, 'string' ).
+				create_qt_atom( chr(0xa9).'des', $prog->{descshort}, 'string' ).
+				create_qt_atom( chr(0xa9).'gen', $prog->{categories}, 'string' ).
 				create_qt_atom( chr(0xa9).'cmt', 'Recorded using get_iplayer', 'string' ).
 				create_qt_atom( chr(0xa9).'req', 'QuickTime 6.0 or greater', 'string' ).
-				create_qt_atom( chr(0xa9).'day', (localtime())[5] + 1900, 'string' ),
-				''
-			);
+				create_qt_atom( chr(0xa9).'day', substr( $prog->{firstbcast}->{$prog->{version}}, 0, 4 ) || ((localtime())[5] + 1900), 'string' )
+			, '' );
 			# Insert new udta atom over the old one and get the new $moov_length (and update moov atom size field)
 			replace_moov_udta_atom ( $udta_new, $moovdata );
 
@@ -8990,7 +9016,7 @@ sub load_options {
 		# Add to list of search args if this is not an option
 		if ( /^search\d+$/ ) {
 			main::logger "INFO: $_ = $pvr->{$name}->{$_}\n" if $opt->{verbose};
-			push @search_args, $pvr->{$name}{$_};
+			push @search_args, $pvr->{$name}->{$_};
 		# Else populate options, ignore disable option
 		} elsif ( $_ ne 'disable' ) {
 			main::logger "INFO: Option: $_ = $pvr->{$name}->{$_}\n" if $opt->{verbose};
