@@ -5,8 +5,8 @@
   Name "get_iplayer"
 
   !define PRODUCT "get_iplayer"
-  !define VERSION "2.59+"
-
+  !define VERSION "2.61"
+  !define USERAGENT "Mozilla/5.0 (X11; U; Linux i686; en-GB; rv:1.9.0.17) Gecko/2010010604 Ubuntu/9.04 (jaunty) Firefox/3.0.17"
   !include "MUI.nsh"
   !include "Sections.nsh"
 
@@ -147,9 +147,9 @@ Section "get_iplayer" section1
   ;download get_iplayer
   Delete $InstallDir\get_iplayer.pl
   download1:
-  NSISdl::download http://linuxcentre.net/get_iplayer/get_iplayer $InstallDir\get_iplayer.pl
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/get_iplayer/get_iplayer" "$InstallDir\get_iplayer.pl" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install1
+  StrCmp $R0 "OK" install1
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer failed: $R0, Do you wish to try again?" IDYES download1
      Return
   install1:
@@ -157,9 +157,9 @@ Section "get_iplayer" section1
   ;download get_iplayer.cgi
   Delete $InstallDir\get_iplayer.cgi
   download2:
-  NSISdl::download http://linuxcentre.net/winredirect/get_iplayer.cgi $InstallDir\get_iplayer.cgi
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/get_iplayer.cgi" "$InstallDir\get_iplayer.cgi" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install2
+  StrCmp $R0 "OK" install2
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer Web PVR Manager failed: $R0, Do you wish to try again?" IDYES download2
      Return
   install2:
@@ -241,9 +241,9 @@ Section "Mplayer" section2
   Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/mplayer $InstallDir\mplayer.zip
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/mplayer" "$InstallDir\mplayer.zip" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of Mplayer failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
@@ -267,9 +267,9 @@ Section "Lame" section3
   Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/lame $InstallDir\lame.zip
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/lame" "$InstallDir\lame.zip" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of Lame failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
@@ -293,16 +293,16 @@ Section "ffmpeg" section4
   Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/ffmpeg "$InstallDir\ffmpeg.tbz"
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/ffmpeg" "$InstallDir\ffmpeg.tbz" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of FFmpeg failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
   ; pre-clear
   RMDir /r "$InstallDir\ffmpeg"
   CreateDirectory "$InstallDir\ffmpeg"
-  untgz::extract  -zbz2  -d "$InstallDir\ffmpeg" "$InstallDir\ffmpeg.tbz" 
+  untgz::extract -zbz2 -d "$InstallDir\ffmpeg" "$InstallDir\ffmpeg.tbz" 
   DetailPrint "untgz returned ($R0)"
   Delete "$InstallDir\ffmpeg.tbz"
 SectionEnd
@@ -320,9 +320,9 @@ Section "VLC" section5
   Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/vlc103 $InstallDir\vlc.7z
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/vlc103" "$InstallDir\vlc.7z" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of VLC failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
@@ -352,9 +352,9 @@ Section "flvstreamer (non-cygwin)" section6
   ; pre-clear
   Delete "$InstallDir\flvstreamer.exe"
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/flvstreamer "$InstallDir\flvstreamer.exe"
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/flvstreamer" "$InstallDir\flvstreamer.exe" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of flvstreamer failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
@@ -375,18 +375,18 @@ Section "flvstreamer (using cygwin library)" section7
   ; pre-clear
   Delete "$InstallDir\flvstreamer.exe"
   download1:
-  NSISdl::download http://linuxcentre.net/winredirect/flvstreamer-cygwin "$InstallDir\flvstreamer.exe"
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/flvstreamer-cygwin" "$InstallDir\flvstreamer.exe" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install1
+  StrCmp $R0 "OK" install1
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of flvstreamer (cygwin) failed: $R0, Do you wish to try again?" IDYES download1
      Return
   install1:
   ; pre-clear
   Delete "$InstallDir\cygwin1.dll"
   download2:
-  NSISdl::download http://linuxcentre.net/winredirect/cygwindll "$InstallDir\cygwin1.dll"
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/cygwindll" "$InstallDir\cygwin1.dll" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install2
+  StrCmp $R0 "OK" install2
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of cygwin DLL failed: $R0, Do you wish to try again?" IDYES download2
      Return
   install2:
@@ -406,9 +406,9 @@ Section "AtomicParsley" section8
   Call SetInstallDir
   Call ConnectInternet ;Make an internet connection (if no connection available)
   download:
-  NSISdl::download http://linuxcentre.net/winredirect/atomicparsley $InstallDir\atomicparsley.zip
+  inetc::get /USERAGENT "${USERAGENT}" "http://linuxcentre.net/winredirect/atomicparsley" "$InstallDir\atomicparsley.zip" /END
   Pop $R0 ;Get the return value
-  StrCmp $R0 "success" install
+  StrCmp $R0 "OK" install
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of AtomicParsley failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
@@ -435,9 +435,9 @@ LangString DESC_Section8 ${LANG_ENGLISH} "Download and install AtomicParsley - U
   !insertmacro MUI_DESCRIPTION_TEXT ${Section3} $(DESC_Section3)  
   !insertmacro MUI_DESCRIPTION_TEXT ${Section4} $(DESC_Section4)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section5} $(DESC_Section5)
-  !insertmacro MUI_DESCRIPTION_TEXT ${Section8} $(DESC_Section8)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section6} $(DESC_Section6)
   !insertmacro MUI_DESCRIPTION_TEXT ${Section7} $(DESC_Section7)
+  !insertmacro MUI_DESCRIPTION_TEXT ${Section8} $(DESC_Section8)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 
@@ -478,6 +478,37 @@ Function .onInit
       RMDir "$INSTDIR"
   done:
 
+  ; Check for newer installer
+  ClearErrors
+  Delete "$INSTDIR\Installer-ver.txt"
+  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" /SILENT "http://linuxcentre.net/winredirect/installerver" "$INSTDIR\Installer-ver.txt" /END
+  Pop $R0 ;Get the return value
+  ; abort checking new installer and just continue if not OK
+  StrCmp $R0 "OK" 0 nonew
+  ClearErrors
+  ; Read contents of version file and compare with this one
+  FileOpen $fh "$INSTDIR\Installer-ver.txt" r
+  IfErrors nonew
+  ; only read 4 bytes x.xx - this avoids getting the problematic \r\n
+  FileRead $fh $Test 4
+  FileClose $fh
+  Delete "$INSTDIR\Installer-ver.txt"
+  ; if version matches then don't download
+  StrCmp $Test "${VERSION}" nonew
+  MessageBox MB_YESNO|MB_ICONQUESTION "A newer installer version $Test is available, Do you wish to download and run it?" IDYES download IDNO nonew
+  download:
+  ClearErrors
+  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" "http://linuxcentre.net/winredirect/newinstaller" "$DESKTOP\get_iplayer_Setup_$Test.exe" /END
+  Pop $R0 ;Get the return value
+  StrCmp $R0 "OK" newinstall
+    MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer installer failed: $R0, Do you wish to try again?" IDYES download
+    Goto nonew
+  newinstall:
+    MessageBox MB_OK "New Installer will now run."
+    Exec '"$DESKTOP\get_iplayer_setup_$Test.exe"'
+    Quit
+  nonew:
+
   ; Detect Installed Components
   SectionSetFlags ${Section1} ${SF_SELECTED}
   SectionSetFlags ${Section2} ${SF_SELECTED}
@@ -486,6 +517,7 @@ Function .onInit
   SectionSetFlags ${Section5} ${SF_SELECTED}
   SectionSetFlags ${Section6} ${SF_SELECTED}
   SectionSetFlags ${Section7} ${SF_SELECTED}
+  SectionSetFlags ${Section8} ${SF_SELECTED}
   # set section 'get_iplayer' as unselected if already installed
   IfFileExists "$INSTDIR\get_iplayer.pl" 0 Next1
     SectionSetFlags ${Section1} 0
@@ -550,6 +582,7 @@ Function un.onInit
   SectionSetFlags ${Section5} ${SF_RO}
   SectionSetFlags ${Section6} ${SF_RO}
   SectionSetFlags ${Section7} ${SF_RO}
+  SectionSetFlags ${Section8} ${SF_RO}
   # set section 'get_iplayer' as selected if already installed
   IfFileExists "$INSTDIR\get_iplayer.pl" 0 Next1
     SectionSetFlags ${Section1} ${SF_SELECTED}
@@ -680,6 +713,7 @@ Function RecordingsDirectoryPre
   IntCmp $Test ${SF_SELECTED} noSkip
     Abort
   noSkip:
+  ;DirText text subtext browse_button_text browse_dlg_text
 FunctionEnd
 
 
