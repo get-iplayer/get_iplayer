@@ -305,23 +305,23 @@ sub get_links {
 # $media = http|undef
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
-	my %data;
+	my $data = {};
 
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
-	$data{podcast}{ext} = $prog->{pid};
-	$data{podcast}{ext} =~ s|^.*\.(\w+)$|$1|g;
-	$data{podcast}{streamer} = 'http';
-	$data{podcast}{streamurl} = $prog->{pid};
-	$data{podcast}{type} = 'Podcast stream';
+	$data->{podcast}->{ext} = $prog->{pid};
+	$data->{podcast}->{ext} =~ s|^.*\.(\w+)$|$1|g;
+	$data->{podcast}->{streamer} = 'http';
+	$data->{podcast}->{streamurl} = $prog->{pid};
+	$data->{podcast}->{type} = 'Podcast stream';
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
 	if ( ! $media ) {
-		return %data;
+		return $data;
 	} else {
 		# Make sure this hash exists before we pass it back...
-		$data{$media}{exists} = 0 if not defined $data{$media};
-		return $data{$media};
+		$data->{$media}->{exists} = 0 if not defined $data->{$media};
+		return $data->{$media};
 	}
 }
 

@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.61;
+my $version = 2.62;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -167,6 +167,7 @@ my $opt_format = {
 	stdout		=> [ 1, "stdout|x", 'Output', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	stream		=> [ 0, "stream", 'Output', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	subdir		=> [ 1, "subdirs|subdir|s", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
+	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
 	thumbext	=> [ 1, "thumbext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
@@ -4405,7 +4406,7 @@ sub generate_filenames {
 	# Don't create subdir if we are only testing recordings
 	# Create a subdir for programme sorting option
 	if ( $opt->{subdir} ) {
-		my $subdir = $prog->substitute( '<longname>' );
+		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
 		$prog->{dir} .= "/${subdir}";
 		$prog->{dir} =~ s|\/\/|\/|g;
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
@@ -5247,7 +5248,7 @@ sub get_metadata {
 	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{name};
 	$prog->{nameshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
-	$prog->{senum} = sprintf "s%02se%02s", $prog->{seriesnum}, $prog->{episodenum} if defined $prog->{seriesnum} && defined $prog->{episodenum};
+	$prog->{senum} = sprintf "s%02se%02s", $prog->{seriesnum}, $prog->{episodenum} if defined $prog->{seriesnum} && defined $prog->{episodenum} && ( $prog->{seriesnum} != 0 || $prog->{episodenum} != 0 );
 
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
