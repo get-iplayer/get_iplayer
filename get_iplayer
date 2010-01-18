@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.62;
+my $version = 2.63;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -108,18 +108,20 @@ my %prog_types = (
 # Define general 'option names' => ( <help mask>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # <help mask>: 0 for normal help, 1 for advanced help, 2 for basic help
 # If you want the option to be hidden then don't specify <option help section>, use ''
+# Entries with keys starting with '_' are not parsed only displayed as help and in man pages.
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
 	force		=> [ 1, "force|force-download", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
 	get		=> [ 2, "get|record|g", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash", 'Recording', '--hash', "Show recording progress as hashes"],
-	mmsnothread	=> [ 1, "mmsnothread|itvnothread", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
+	mmsnothread	=> [ 1, "mmsnothread", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma"],
 	multimode	=> [ 1, "multimode", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	overwrite	=> [ 1, "overwrite|over-write", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
-	pid		=> [ 2, "pid|url=s", 'Recording', '--pid, --url [<type>:]<pid|URL>', "Record an arbitrary pid that does not necessarily appear in the index. Also used to stream live programmes"],
+	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
+	pid		=> [ 2, "pid|url=s", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'"],
 	raw		=> [ 0, "raw", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs>', "Recording/streaming start offset (rtmp and realaudio only)"],
@@ -134,14 +136,14 @@ my $opt_format = {
 
 	# Search
 	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
-	category 	=> [ 2, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
-	channel		=> [ 2, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
+	category 	=> [ 0, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values)"],
+	channel		=> [ 0, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	exclude		=> [ 0, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
 	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched catogories (regex or comma separated values)"],
 	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
-	fields		=> [ 1, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
+	fields		=> [ 0, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	future		=> [ 1, "future", 'Search', '--future', "Search future programme schedule if it has been indexed (refresh cache with: --refresh --refresh-future)."],
-	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search in programme descriptions and episode names"],
+	long		=> [ 0, "long|l", 'Search', '--long, -l', "Additionally search in programme descriptions and episode names (same as --fields=name,episode,desc )"],
 	search		=> [ 1, "search=s", 'Search', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	history		=> [ 1, "history", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 0, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
@@ -162,7 +164,7 @@ my $opt_format = {
 	metadataonly	=> [ 1, "metadataonly", 'Output', '--metadataonly', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
-	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Default Recording output directory"],
+	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	stdout		=> [ 1, "stdout|x", 'Output', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	stream		=> [ 0, "stream", 'Output', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
@@ -183,7 +185,7 @@ my $opt_format = {
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 0, "no-purge|nopurge", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
-	pluginsupdate	=> [ 0, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
+	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
 	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
@@ -215,7 +217,7 @@ my $opt_format = {
 	page		=> [ 1, "page=n", 'Display', '--page <number>', "Page number to display for multipage output"],
 	pagesize	=> [ 1, "pagesize=n", 'Display', '--pagesize <number>', "Number of matches displayed on a page for multipage output"],
 	quiet		=> [ 1, "q|quiet|silent", 'Display', '--quiet, -q', "No logging output"],
-	series		=> [ 0, "series", 'Display', '--series', "Display Programme series names only with number of episodes"],
+	series		=> [ 1, "series", 'Display', '--series', "Display Programme series names only with number of episodes"],
 	showcacheage	=> [ 1, "showcacheage|show-cache-age", 'Config', '--show-cache-age', "Displays the age of the selected programme caches then exit"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	sortmatches	=> [ 1, "sortmatches|sort=s", 'Display', '--sort <fieldname>', "Field to use to sort displayed matches"],
@@ -224,12 +226,13 @@ my $opt_format = {
 	terse		=> [ 0, "terse", 'Display', '--terse', "Only show terse programme info (does not affect searching)"],
 	tree		=> [ 0, "tree", 'Display', '--tree', "Display Programme listings in a tree view"],
 	verbose		=> [ 1, "verbose|v", 'Display', '--verbose, -v', "Verbose"],
+	showver		=> [ 1, "V", 'Display', '-V', "Show get_iplayer version and exit."],
 	warranty	=> [ 1, "Display", 'Display', '--warranty', 'Displays warranty section of GPLv3'],
 
 	# External Program
-	atomicparsley	=> [ 0, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley tagger binary"],
-	id3v2		=> [ 0, "id3tag|id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
-	mplayer		=> [ 0, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
+	atomicparsley	=> [ 1, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley tagger binary"],
+	id3v2		=> [ 1, "id3tag|id3v2=s", 'External Program', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
+	mplayer		=> [ 1, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Deprecated
 
@@ -410,9 +413,13 @@ if ( $opt->{listplugins} ) {
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
 
+# Exit if only to show version
+exit 0 if $opt_cmdline->{showver};
+
 # Display prefs dirs if required
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
 main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
+
 
 # Display Usage
 Options->usage( 2 ) if $opt_cmdline->{helpbasic};
@@ -1146,9 +1153,18 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search before = $before\n";
 	}
 	
-	# Determine search for fields
+	# Determine fields to search
 	my @searchfields;
-	@searchfields = split /\s*,\s*/, lc( $opt->{fields} ) if $opt->{fields};
+	# User-defined fields list
+	if ( $opt->{fields} ) {
+		@searchfields = split /\s*,\s*/, lc( $opt->{fields} );
+	# Also search long descriptions and episode data if -l is specified
+	} elsif ( $opt->{long} ) {
+		@searchfields = ( 'name', 'episode', 'desc' );
+	# Default to name search only
+	} else {
+		@searchfields = ( 'name' );
+	}
 
 	# Loop through each prog object
 	for my $this ( values %{ $prog } ) {
@@ -1157,30 +1173,27 @@ sub get_regex_matches {
 		  && $this->{categories} =~ /$category_regex/i
 		  && ( ( not defined $this->{versions} ) || $this->{versions} =~ /$versions_regex/i )
 		  && $this->{channel} !~ /$channel_exclude_regex/i
-		  && $this->{name} !~ /$exclude_regex/i
 		  && $this->{categories} !~ /$category_exclude_regex/i
 		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
 		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
 		) {
-			# Custom search fields
-			if ( @searchfields ) {
-				for my $field ( @searchfields ) {
-					$download_hash{ $this->{index} } = $this if $this->{$field} =~ /$download_regex/i;
-				}
-			# Normal name / long search
-			} else {
-				# Search prognames/pids while excluding channel_regex and category_regex
-				$download_hash{ $this->{index} } = $this if $this->{name} =~ /$download_regex/i;
-				# Also search long descriptions and episode data if -l is specified
-				$download_hash{ $this->{index} } = $this if $opt->{long} && ( $this->{desc} =~ /$download_regex/i || $this->{episode} =~ /$download_regex/i );
+			# Add included matches
+			for my $field ( @searchfields ) {
+				$download_hash{ $this->{index} } = $this if $this->{$field} =~ /$download_regex/i;
 			}
 		}
 	}
-
+	# Remove excluded matches
+	for my $field ( @searchfields ) {
+		for my $index ( keys %download_hash ) {
+			my $this = $download_hash{$index};
+			delete $download_hash{$index} if $this->{ $field } =~ /$exclude_regex/i;
+		}
+	}
 	my @match_list;
 	# Add all matching prog objects to array
 	for my $index ( sort {$a <=> $b} keys %download_hash ) {
-		push @match_list, $download_hash{ $index };
+		push @match_list, $download_hash{$index};
 	}
 
 	return @match_list;
@@ -2931,11 +2944,11 @@ sub usage {
 		'.br',
 		'\fBget_iplayer\fR <url> \fB--type\fR=<type> [<options>]',
 		'.PP',
-		'\fBget_iplayer\fR \fB--pid\fR=<pid|url> [\fB--type\fR=<type> <options>]',
+		'\fBget_iplayer\fR <pid|url> [\fB--type\fR=<type> <options>]',
 		'.PP',
 		'\fBget_iplayer\fR \fB--stream\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
-		'\fBget_iplayer\fR \fB--stream\fR [<options>] \fB--type\fR=<type> \fB--pid\fR=<pid|url> | mplayer \fB-cache\fR 3072 -',
+		'\fBget_iplayer\fR \fB--stream\fR [<options>] \fB--type\fR=<type> <pid|url> | mplayer \fB-cache\fR 3072 -',
 		'.PP',
 		'\fBget_iplayer\fR \fB--stream\fR [<options>] \fB--type\fR=livetv,liveradio <regex|index> \fB--player\fR="mplayer -cache 128 -"',
 		'.PP',
@@ -2954,18 +2967,22 @@ sub usage {
 		'.PP',
 		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
 		'.SH "OPTIONS"' if $manpage;
-	push @usage, "Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):";
-	push @usage, " Search Programmes:             get_iplayer [<options>] [<regex|index> ...]";
-	push @usage, " Record Programmes:             get_iplayer --get [<options>] <regex|index> ...";
-	push @usage, "                                get_iplayer <url> [--type=<type>]";
-	push @usage, "                                get_iplayer --pid=<pid|url> --type=<type>";
-	push @usage, " Stream Programme to Player:    get_iplayer --stream <index> | mplayer -cache 3072 -" if $helplevel == 1;
-	push @usage, " Stream BBC Embedded Media      get_iplayer --stream --type=<type> --url=<URL> | mplayer -cache 128 -" if $helplevel != 2;
-	push @usage, " Stream Live iPlayer Programme  get_iplayer --stream --type=livetv,liveradio <regex|index> --player='mplayer -cache 128 -'" if $helplevel != 2;
-	push @usage, " Update get_iplayer:            get_iplayer --update [--force]";
-	push @usage, " Basic Help:                    get_iplayer --basic-help" if $helplevel != 2;
-	push @usage, " Intermediate Help:             get_iplayer --help" if $helplevel == 2;
-	push @usage, " Advanced Help:                 get_iplayer --long-help" if $helplevel != 1;
+	push @usage, 'Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):';
+	push @usage, ' List All Programmes:            get_iplayer [--type=<TYPE>]';
+	push @usage, ' Search Programmes:              get_iplayer <REGEX>';
+	push @usage, ' Record Programmes by Search:    get_iplayer <REGEX> --get';
+	push @usage, ' Record Programmes by Index:     get_iplayer <INDEX> --get';
+	push @usage, ' Record Programmes by URL:       get_iplayer [--type=<TYPE>] "<URL>"';
+	push @usage, ' Record Programmes by PID:       get_iplayer [--type=<TYPE>] --pid=<PID>';
+	push @usage, ' Stream Programme to Player:     get_iplayer --stream <INDEX> | mplayer -cache 3072 -' if $helplevel == 1;
+	push @usage, ' Stream BBC Embedded Media URL:  get_iplayer --stream --type=<TYPE> "<URL>" | mplayer -cache 128 -' if $helplevel != 2;
+	push @usage, ' Stream Live iPlayer Programme:  get_iplayer --stream --type=livetv,liveradio <REGEX|INDEX> --player="mplayer -cache 128 -"' if $helplevel != 2;
+	push @usage, '';
+	push @usage, ' Update get_iplayer:             get_iplayer --update [--force]';
+	push @usage, '';
+	push @usage, ' Basic Help:                     get_iplayer --basic-help' if $helplevel != 2;
+	push @usage, ' Intermediate Help:              get_iplayer --help' if $helplevel == 2;
+	push @usage, ' Advanced Help:                  get_iplayer --long-help' if $helplevel != 1;
 
 	for my $name (keys %{$opt_format_ref} ) {
 		next if not $opt_format_ref->{$name};
@@ -3246,9 +3263,10 @@ sub get {
 		next if not defined $1;
 		# Error if the option is not valid
 		if ( not defined $optname->{$1} ) {
-			main::logger "ERROR: Invalid option in $optfile: '$1 = $2'\n";
-			main::logger "INFO: Please remove and use --dump-options to display all valid options\n";
-			exit 10;
+			# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
+			$opt->{stderr} = 1;
+			main::logger "WARNING: Ignoring invalid option in $optfile: '$1 = $2'\n";
+			main::logger "INFO: Please remove and use 'get_iplayer --dump-options' to display all valid options\n";
 		}
 		# Warn if it is listed as a deprecated internal option name
 		if ( defined @{ $opt_format_ref->{$1} }[2] && @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
@@ -5873,7 +5891,7 @@ sub opt_format {
 	return {
 		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashstd,flashnormal)"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
-		vlc		=> [ 0, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
+		vlc		=> [ 1, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer/rtmpdump for tv"],
 	};
 }
