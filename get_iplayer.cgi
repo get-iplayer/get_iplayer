@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.60';
+my $VERSION = '0.61';
 
 use strict;
 use CGI ':all';
@@ -2883,8 +2883,9 @@ sub search_progs {
 	);
 
 	# Render action bar
+	my @actionbar;
 	if ( $opt->{HISTORY}->{current} ) {
-		print $fh div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -2897,7 +2898,7 @@ sub search_progs {
 			),
 		);
 	} else {
-		print $fh div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -2911,9 +2912,11 @@ sub search_progs {
 		);
 	}
 	
+	print $fh @actionbar;
 	print $fh @pagetrail;
 	print $fh table( {-class=>'search' }, @html );
 	print $fh @pagetrail;
+	print $fh @actionbar;
 
 	print $fh div( {id=>'status'} );
 
