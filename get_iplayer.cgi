@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.61';
+my $VERSION = '0.62';
 
 use strict;
 use CGI ':all';
@@ -890,7 +890,7 @@ sub create_playlist_m3u_single {
 	);
 	# Only add history search if the request is of this type or is a PlayFile from localfiles type
 	if ( ( $request eq 'playlistfiles' || $request eq 'playlistdirect' ) && ! ( $search =~ m{^/} && $searchfields eq 'pid' ) ) {
-		push @cmd, '--history';
+		push @cmd, '--history', '--skipdeleted';
 	}
 	my @out = get_cmd_output( @cmd );
 
@@ -1960,9 +1960,8 @@ sub show_info {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'info=1', 'fields=pid', "search=$pid" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
 	);
-	push @cmd, '--history' if $opt->{HISTORY}->{current};
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
@@ -2593,7 +2592,7 @@ sub search_progs {
 			}
 		# History mode
 		} elsif ( $opt->{HISTORY}->{current} ) {
-			if ( -f $prog{$pid}->{filename} ) {
+			if ( $opt->{HIDEDELETED}->{current} || -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
@@ -2621,6 +2620,10 @@ sub search_progs {
 		for ( @displaycols ) {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
 			if ( /^thumbnail$/ ) {
+				# Assume a thumbnail prefix if one is missing for BBC iPlayer
+				if ( $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
+					$prog{$pid}->{thumbnail} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
+				}
 				if ( $prog{$pid}->{thumbnail} =~ m{^http://} ) {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 				} else {
@@ -3073,14 +3076,6 @@ sub get_progs {
 
 		# get the real path if file is defined
 		$record->{filename} = search_absolute_path( $record->{filename} ) if $record->{filename};
-
-		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
-		if ( $opt->{HISTORY}->{current} && $opt->{HIDEDELETED}->{current} ) {
-			if ( ( $record->{filename} && ! -f $record->{filename} ) || ! $record->{filename} ) {
-				# set line to be greyed-out if the file doesn't exist
-				next;
-			}
-		}
 
 		# store record in the prog global hash (prog => pid)
 		$prog{ $record->{'pid'} } = $record;
@@ -3551,6 +3546,7 @@ sub process_params {
 		title	=> 'Hide Deleted Recordings', # Title
 		tooltip	=> 'Whether to hide deleted programmes from the recordings history list', # Tooltip
 		webvar	=> 'HIDEDELETED', # webvar
+		optkey	=> 'skipdeleted', # option
 		type	=> 'radioboolean', # type
 		default	=> 0, # value
 		save	=> 1,
