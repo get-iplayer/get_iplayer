@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.64;
+my $version = 2.65;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -45,7 +45,8 @@ my $version = 2.64;
 # * stdout streaming with mms
 #
 # Known Issues:
-
+# * CAVEAT: The filenames and modes in the history are comma-separated if there was a multimode download. For now it just uses the first one.
+#
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -115,6 +116,7 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
+	metadataonly	=> [ 1, "metadataonly!", 'Recording', '--metadataonly', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mmsnothread	=> [ 1, "mmsnothread!", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma"],
 	multimode	=> [ 1, "multimode!", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
@@ -161,7 +163,6 @@ my $opt_format = {
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, freevo, generic"],
-	metadataonly	=> [ 1, "metadataonly!", 'Output', '--metadataonly', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n!", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
@@ -171,7 +172,7 @@ my $opt_format = {
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
 	symlink		=> [ 1, "symlink|freevo=s", 'Output', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
-	thumbext	=> [ 1, "thumbext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
+	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata (see --info for thumbnailN: to get size/index)"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
@@ -196,6 +197,7 @@ my $opt_format = {
 	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshfuture	=> [ 1, "refreshfuture!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
+	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
 	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
@@ -218,7 +220,7 @@ my $opt_format = {
 	pagesize	=> [ 1, "pagesize=n", 'Display', '--pagesize <number>', "Number of matches displayed on a page for multipage output"],
 	quiet		=> [ 1, "q|quiet|silent!", 'Display', '--quiet, -q', "No logging output"],
 	series		=> [ 1, "series!", 'Display', '--series', "Display Programme series names only with number of episodes"],
-	showcacheage	=> [ 1, "showcacheage|show-cache-age!", 'Config', '--show-cache-age', "Displays the age of the selected programme caches then exit"],
+	showcacheage	=> [ 1, "showcacheage|show-cache-age!", 'Display', '--show-cache-age', "Displays the age of the selected programme caches then exit"],
 	showoptions	=> [ 1, "showoptions|showopts|show-options!", 'Display', '--show-options', 'Shows options which are set and where they are defined'],
 	sortmatches	=> [ 1, "sortmatches|sort=s", 'Display', '--sort <fieldname>', "Field to use to sort displayed matches"],
 	sortreverse	=> [ 1, "sortreverse!", 'Display', '--sortreverse', "Reverse order of sorted matches"],
@@ -290,6 +292,11 @@ $opt->{quiet} = 1 if $opt_pre->{quiet};
 $opt->{pvr} = 1 if $opt_pre->{pvr};
 $opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
 
+# show version and exit
+if ( $opt_pre->{showver} ) {
+	print STDERR Options->copyright_notice;
+	exit 0;
+}
 
 # This is where all profile data/caches/cookies etc goes
 my $profile_dir;
@@ -412,9 +419,6 @@ if ( $opt->{listplugins} ) {
 
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
-
-# Exit if only to show version
-exit 0 if $opt_cmdline->{showver};
 
 # Display prefs dirs if required
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
@@ -585,7 +589,7 @@ if ( $opt->{pvradd} ) {
 # Show history
 } elsif ( $opt->{history} ) {
 	my $hist = History->new();
-	$hist->show( @search_args );
+	$hist->list_progs( @search_args );
 
 # Else just process command line args
 } else {
@@ -741,8 +745,8 @@ sub find_matches {
 			@try_types = (keys %type);
 		}
 		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if ( ! $opt->{multimode} ) && $hist->check( $pid );
-	
+		return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{subsonly} ) ) && $hist->check( $pid );	
+
 		# Maybe we don't want to populate caches - this slows down --pid recordings ...
 		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
 		# only get links and possibly refresh caches if > 1 type is specified
@@ -768,9 +772,16 @@ sub find_matches {
 					$this->clean_pid;
 					logger " New: '$this->{pid}'\n" if $opt->{verbose};
 				}
-				# Display pid for recording
-				list_progs( \%type, $this );
-				$retcode = $this->download_retry_loop( $hist );
+				# Display pid match for recording
+				if ( $opt->{history} ) {
+					$hist->list_progs( 'pid:'.$pid );
+				} else {
+					list_progs( \%type, $this );
+				}
+				# Don't do a pid recording if metadataonly or thumbonly were specified
+				if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+					$retcode = $this->download_retry_loop( $hist );
+				}
 				last if ! $retcode;
 			} else {
 				$this = $prog->{$pid};
@@ -784,10 +795,16 @@ sub find_matches {
 				}
 				logger "INFO Trying to stream pid using type $prog_type\n";
 				logger "INFO: pid found in cache\n";
-				# Display pid for recording
-				list_progs( \%type, $this );
-				$retcode = $this->download_retry_loop( $hist );
-				last if ! $retcode;
+				# Display pid match for recording
+				if ( $opt->{history} ) {
+					$hist->list_progs( 'pid:'.$pid );
+				} else {
+					list_progs( \%type, $this );
+				}
+				# Don't do a pid recording if metadataonly or thumbonly were specified
+				if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+					$retcode = $this->download_retry_loop( $hist );
+				}
 				# If it is in the cache then we'll not need to try the other types regardless of success
 				last;
 			}
@@ -1064,7 +1081,7 @@ sub list_progs {
 			$this->get_metadata_general();
 			if ( $this->get_metadata( $ua ) ) {
 				main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
-				return ();
+				next;
 			}
 			# Search versions for versionlist versions
 			my @versions = $this->generate_version_list;
@@ -3404,7 +3421,7 @@ sub load {
 	my $hist = shift;
 
 	# Return if force option specified or stdout streaming only
-	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
+	return 0 if ( $opt->{force} && ! $opt->{pid} ) || $opt->{stdout} || $opt->{nowrite};
 
 	# clear first
 	$hist->clear();
@@ -3497,7 +3514,7 @@ sub get_pids {
 
 # Lists current history items
 # Requires a load()
-sub show {
+sub list_progs {
 	my $hist = shift;
 	my $prog = {};
 	my ( @search_args ) = ( @_ );
@@ -3526,6 +3543,11 @@ sub show {
 			$progrec->{$key} = $record->{$key};
 		}
 		$prog->{ $progrec->{pid} } = $progrec;
+		# CAVEAT: The filename is comma-separated if there is a multimode download. For now just use the first one
+		if ( $prog->{ $progrec->{pid} }->{mode} =~ /\w+,\w+/ ) {
+			$prog->{ $progrec->{pid} }->{mode} =~ s/,.+$//g;
+			$prog->{ $progrec->{pid} }->{filename} =~ s/,.+$//g;
+		}
 	}
 
 	# Parse remaining args
@@ -3546,7 +3568,7 @@ sub show {
 				main::logger "INFO: Search term '$1' is a pid\n" if $opt->{verbose};
 				push @match_list, $prog->{$1};
 			} else {
-				main::logger "INFO: Search term '$1' is a non-existent pid, use --pid instead\n";
+				main::logger "INFO: Search term '$1' is a non-existent pid in the history\n";
 			}
 
 		# Else assume this is a programme name regex
@@ -3554,6 +3576,23 @@ sub show {
 			main::logger "INFO: Search term '$_' is a substring\n" if $opt->{verbose};
 			push @match_list, main::get_regex_matches( $prog, $_ );
 		}
+	}
+	
+	# Prune list of history entries with non-existant media files
+	if ( $opt->{skipdeleted} ) {
+		my @pruned = ();
+		for my $this ( @match_list ) {
+			# Skip if no filename in history
+			if ( defined $this->{filename} && $this->{filename} ) {
+				# Skip if the originally recorded file no longer exists
+				if ( ! -f $this->{filename} ) {
+					main::logger "DEBUG: Skipping metadata/thumbnail - file no longer exists: '$this->{filename}'\n" if $opt->{verbose};
+				} else {
+					push @pruned, $this;
+				}
+			}
+		}
+		@match_list = @pruned;
 	}
 
 	# De-dup matches and retain order then list matching programmes in history
@@ -3767,10 +3806,22 @@ sub get_metadata {
 # Return metadata which is generic such as time and date
 sub get_metadata_general {
 	my $prog = shift;
-	my @t = localtime();
+	my @t;
+
+	# Special case for history mode, use {timeadded} to generate these two fields as this represents the time of recording
+	if ( $opt->{history} && $prog->{timeadded} ) {
+		@t = localtime( $prog->{timeadded} );
+
+	# Else use current time
+	} else {
+		@t = localtime();
+	}
+
 	#($second, $minute, $hour, $dayOfMonth, $month, $yearOffset, $dayOfWeek, $dayOfYear, $daylightSavings) = localtime();
 	$prog->{dldate} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
 	$prog->{dltime} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];
+
+	return 0;
 }
 
 
@@ -4422,6 +4473,11 @@ sub generate_filenames {
 	# Change the date in the filename to ISO8601 format if required
 	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
 
+	# Special case for history mode, parse the fileprefix and dir from filename if it is already defined
+	if ( $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
+		( $prog->{dir}, $prog->{fileprefix}, $prog->{ext} ) = ( $1, $3, $4 ) if $prog->{filename} =~ m{^((.*)[\//]+)?([^\//]+?)\.(\w+)$};
+	}
+
 	# Don't create subdir if we are only testing recordings
 	# Create a subdir for programme sorting option
 	if ( $opt->{subdir} ) {
@@ -4462,6 +4518,9 @@ sub generate_filenames {
 	# overwrite/error if the file already exists and is going to be written to
 	if (
 		( ! $opt->{nowrite} )
+		&& ( ! $opt->{metadataonly} )
+		&& ( ! $opt->{thumbonly} )
+		&& ( ! $opt->{subsonly} )
 		&& -f $prog->{filename} 
 		&& stat($prog->{filename})->size > $prog->min_download_size()
 	) {
@@ -4958,7 +5017,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriesnum, $episodenum, $seriestitle, $episodetitle, $nametitle );
+	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriestitle, $episodetitle, $nametitle, $seriesnum, $episodenum );
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -5083,9 +5142,9 @@ sub get_metadata {
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
 		# Get the title from the atom link refs only to determine the episode and series number
-		$episodetitle = $1 if $entry =~ m{<link\s+rel="self"\s+href="http.+?/episode/.+?"\s+type="application/atom\+xml"\s+title="(.+?)"};
-		$seriestitle = $1 if $entry =~ m{<link\s+rel="parent"\s+href="http.+?/programme_set/.+?"\s+type="application/atom\+xml"\s+title="(.+?)"};
-		$nametitle = $1 if $entry =~ m{<link\s+rel="related"\s+href="http.+?/programmes/.+?"\s+type="text/html"\s+title="(.+?)"};
+		$episodetitle = $2 if $entry =~ m{<link\s+rel="self"\s+href="http[^"]+?/episode/[^"]+?"\s+type="(application/atom\+xml|text/html)"\s+title="(.+?)"};
+		$seriestitle = $2 if $entry =~ m{<link\s+rel="parent"\s+href="http[^"]+?/programme_set/[^"]+?"\s+type="(application/atom\+xml|text/html)"\s+title="(.+?)"};
+		$nametitle = $2 if $entry =~ m{<link\s+rel="related"\s+href="http[^"]+?/programmes/[^"]+?"\s+type="(application/atom\+xml|text/html)"\s+title="(.+?)"};
 
 		my @cats;
 		for (split /<media:category scheme=\".+?\"/, $entry) {
@@ -5160,7 +5219,8 @@ sub get_metadata {
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
-			return 1;
+			# Only return at this stage unless we want metadata only for various reasons
+			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} )
 		}
 	}
 	$versions = join ',', sort keys %{ $prog->{verpids} };
@@ -5234,20 +5294,22 @@ sub get_metadata {
 	my $regex = 'Series\s+'.main::regex_numbers();
 	# Extract the seriesnum
 	if ( "$prog->{name} $prog->{episode}" =~ m{$regex}i ) {
-		$prog->{seriesnum} = main::convert_words_to_number( $1 );
+		$seriesnum = main::convert_words_to_number( $1 );
 	} elsif ( $seriestitle =~ m{$regex}i ) {
-		$prog->{seriesnum} = main::convert_words_to_number( $1 );
+		$seriesnum = main::convert_words_to_number( $1 );
 	}
 
 	# Extract the episode num
 	my $regex_1 = 'Episode\s+'.main::regex_numbers();
 	my $regex_2 = '^'.main::regex_numbers().'\.\s+';
-	if ( "$prog->{name} $prog->{episode}" =~ m{$regex_1}i ) { 
-		$prog->{episodenum} = main::convert_words_to_number( $1 );
+	if ( "$prog->{name} $prog->{episode}" =~ m{$regex_1}i ) {
+		$episodenum = main::convert_words_to_number( $1 );
+	} elsif ( "$name $episode" =~ m{$regex_1}i ) {
+		$episodenum = main::convert_words_to_number( $1 );
 	} elsif ( $episode =~ m{$regex_2}i ) {
-		$prog->{episodenum} = main::convert_words_to_number( $1 );
+		$episodenum = main::convert_words_to_number( $1 );
 	} elsif ( $episodetitle =~ m{$regex_2}i ) {
-		$prog->{episodenum} = main::convert_words_to_number( $1 );
+		$episodenum = main::convert_words_to_number( $1 );
 	}
 
 	# Re-insert the episode number if the episode text doesn't have it
@@ -5267,7 +5329,13 @@ sub get_metadata {
 	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{name};
 	$prog->{nameshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
-	$prog->{senum} = sprintf "s%02se%02s", $prog->{seriesnum}, $prog->{episodenum} if defined $prog->{seriesnum} && defined $prog->{episodenum} && ( $prog->{seriesnum} != 0 || $prog->{episodenum} != 0 );
+
+	# Conditionally set the senum
+	$prog->{senum} = sprintf "s%02se%02s", $seriesnum, $episodenum if $seriesnum != 0 || $episodenum != 0;
+
+	# Default to 150px width thumbnail;
+	my $thumbsize = $opt->{thumbsizecache} || 150;
+	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
 
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
@@ -5282,9 +5350,12 @@ sub get_metadata {
 	$prog->{descmedium}	= $meddesc;
 	$prog->{descshort}	= $summary;
 	$prog->{player}		= $player;
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail} || "${thumbnail_prefix}/$prog->{pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
 	$prog->{modes}		= $modes;
 	$prog->{modesizes}	= $mode_sizes;
+	$prog->{episodenum}	= $episodenum;
+	$prog->{seriesnum}	= $seriesnum;
+
 	return 0;
 }
 
