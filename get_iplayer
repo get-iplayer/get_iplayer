@@ -5337,6 +5337,9 @@ sub get_metadata {
 	my $thumbsize = $opt->{thumbsizecache} || 150;
 	my $thumbnail_prefix = 'http://www.bbc.co.uk/iplayer/images/episode';
 
+	# Thumbnail fallback if normal short pid (i.e. not URL)
+	$thumbnail = "${thumbnail_prefix}/$prog->{pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize } if ! ( $thumbnail || $prog->{thumbnail} ) && $prog->{pid} !~ /^http/;
+	
 	# Fill in from cache if not got from metadata
 	$prog->{name} 		= $name || $prog->{name};
 	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
@@ -5350,7 +5353,7 @@ sub get_metadata {
 	$prog->{descmedium}	= $meddesc;
 	$prog->{descshort}	= $summary;
 	$prog->{player}		= $player;
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail} || "${thumbnail_prefix}/$prog->{pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
 	$prog->{modesizes}	= $mode_sizes;
 	$prog->{episodenum}	= $episodenum;
