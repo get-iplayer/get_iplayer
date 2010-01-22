@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.62';
+my $VERSION = '0.63';
 
 use strict;
 use CGI ':all';
@@ -109,7 +109,7 @@ my @pids;
 my @displaycols;
 
 # Field names grabbed from get_iplayer
-my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web seriesnum episodenum );
+my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web seriesnum episodenum filename mode );
 
 # Default Displayed headings
 my @headings_default = qw( thumbnail type name episode desc channel categories timeadded );
@@ -140,6 +140,9 @@ my %fieldname = (
 	'name,episode'		=> 'Name+Episode',
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
+
+my %cols_order = ();
+my %cols_names = ();
 
 my %prog_types = (
 	tv	=> 'BBC TV',
@@ -197,7 +200,7 @@ my %nextpages = (
 	'pvr_add'			=> \&pvr_add,
 	'pvr_run'			=> \&pvr_run,
 	'show_info'			=> \&show_info,
-	'flush'				=> \&flush,
+	'refresh'				=> \&refresh,
 	'update_script'			=> \&update_script,
 );
 
@@ -208,11 +211,12 @@ my $opt;
 
 # Options Ordering on page
 my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
-my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE /;
+my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE /;
 my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
-my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE AUTOWEBREFRESH AUTOPVRRUN /;
+my @order_columns_tab = qw/ COLS /;
+my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE /;
 my @order_streaming_tab = qw/ BITRATE VSIZE VFR STREAMTYPE /;
-my @hidden_opts = qw/ SAVE SEARCHTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
+my @hidden_opts = qw/ SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
 
@@ -384,7 +388,8 @@ sub parse_post_form_string {
 		next if ! $1;
 		$val =~ s/[\r\n]//g;
 		$val =~ s/\+/ /g;
-		$val =~ s/%(..)/chr(hex($1))/eg;
+		# Caused entities to be parsed wrongly
+		#$val =~ s/%(..)/chr(hex($1))/eg;
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
@@ -410,12 +415,6 @@ sub run_cgi {
 
 	# Get next page
 	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
-
-	# Add some default headings for history mode
-	if ( $cgi->param( 'HISTORY' ) || $nextpage eq 'search_history' ) {
-		push @headings, ( 'filename', 'mode' );
-		push @headings_default, ( 'mode' );	
-	}
 
 	# Process All options
 	process_params();
@@ -1960,7 +1959,7 @@ sub show_info {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "future=$opt->{FUTURE}->{current}", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
 	);
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
@@ -2153,7 +2152,7 @@ sub pvr_queue {
 				"pid=$pid",
 				"comment=$comment (queued: ".localtime().')',
 				"type=$type",
-				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
+				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDEDELETED|FUTURE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
 			),
 		);
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -2189,14 +2188,30 @@ sub recordings_delete {
 		my ( $type, $pid, $name, $episode, $mode ) = (split /\|/)[0,1,2,3,4];
 		next if ! ($mode && $pid );
 		my $filename = get_direct_filename( $pid, $mode, $type );
-		if ( -f $filename ) {
-			if ( unlink( $filename ) ) {
-				print $fh p("Deleted: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
-			} else {
-				print $fh p("ERROR: Failed to Delete: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
+		my $dir = dirname( $filename );
+		my $fileregex = basename( $filename );
+		# get the filename less the ext
+		$fileregex =~ s/\.\w+$//g;
+		$fileregex .= '\.\w+$';
+		# Find matching files <filename>.*
+		if ( opendir DIR, $dir ) {
+			for my $file ( grep { /$fileregex/ } readdir(DIR) ) {
+				# Use absolute path
+				$file = "${dir}/${file}";
+				if ( -f $file ) {
+					if ( unlink( $file ) ) {
+						print $fh p("INFO: Deleted $file");
+					} else {
+						print $fh p("ERROR: Failed to delete $file");
+					}
+				} else {
+					print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
+				}
 			}
+			print $fh p("INFO: Successfully deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
+			closedir(DIR);
 		} else {
-			print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
+			print $fh p("ERROR: Cannot open dir '$dir' for file deletion\n");
 		}
 	}
 	print $fh "<pre>$out</pre>";
@@ -2260,7 +2275,7 @@ sub pvr_add {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDE|FORCE)$/, @params ) ),
+		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|HIDEDELETED|SINCE|BEFORE|HIDE|FORCE|FUTURE)$/, @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
@@ -2335,7 +2350,7 @@ sub build_option_html {
 		# values in hash of $value->{<order>} => value
 		# labels in hash of $label->{$value}
 		# selected status in $status->{$value}
-		my @keylist = sort keys %{ $value };
+		my @keylist = sort { $a <=> $b } keys %{ $value };
 		my $count = 0;
 		while ( @keylist ) {
 			my $val = $value->{shift @keylist};
@@ -2401,15 +2416,16 @@ sub build_option_html {
 
 
 
-sub flush {
+sub refresh {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	my $refreshfuture = $cgi->param( 'REFRESHFUTURE' ) || 0;
 	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
-	print $se "INFO: Flushing\n";
+	print $se "INFO: Refreshing\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "search=no search just flush" ),
+		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
 	);
 	print $fh '<pre>';
 	run_cmd( $fh, $se, 1, @cmd );
@@ -2427,7 +2443,7 @@ sub flush {
 					{
 						-class=>'action',
 						-title => 'Refresh Cache Now',
-						-onClick  => "RefreshTab( '?NEXTPAGE=flush&PROGTYPES=$typelist&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
+						-onClick  => "RefreshTab( '?NEXTPAGE=refresh&PROGTYPES=$typelist&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
 					},
 					'Force Refresh'
 				),
@@ -2470,7 +2486,7 @@ sub search_progs {
 	$type{$_} = 1 for split /,/, $opt->{PROGTYPES}->{current};
 	$opt->{PROGTYPES}->{status} = \%type;
 
-	# Determine which cols to display
+	# Determine which cols to display and Set default status for cols
 	get_display_cols();
 
 	#for my $key (sort keys %ENV) {
@@ -2519,17 +2535,6 @@ sub search_progs {
 								-onClick	=> $onclick,
 								},
 								$fieldname{$heading},
-							)
-						).
-						th({ -class => 'search' },
-							checkbox(
-								-class		=> 'search',
-								-name		=> 'COLS',
-								-label		=> '',
-								-value 		=> $heading,
-								-checked	=> 1,
-								-override	=> 1,
-								-onChange	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);"
 							)
 						)
 					]
@@ -2617,28 +2622,73 @@ sub search_progs {
 		# Add links to row
 		push @row, td( {-class=>$search_class}, $links );
 
+		# This builds each row in turn
 		for ( @displaycols ) {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
 			if ( /^thumbnail$/ ) {
 				# Assume a thumbnail prefix if one is missing for BBC iPlayer
 				if ( $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
-					$prog{$pid}->{thumbnail} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
+					$prog{$pid}->{$_} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
 				}
-				if ( $prog{$pid}->{thumbnail} =~ m{^http://} ) {
+				if ( $prog{$pid}->{$_} =~ m{^http://} ) {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 				} else {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, 'Open URL' ) );
 				}
+			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 			} elsif ( /^timeadded$/ ) {
-				# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-				my @t = gmtime( $time - $prog{$pid}->{timeadded} );
+				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
+			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
-				# truncate the description if it is too long
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $text ) );
+			# Name / Series link
+			} elsif ( /^name$/ ) {
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
+					-onClick=>"
+						BackupFormVars(form);
+						form.NEXTPAGE.value='search_progs';
+						form.SEARCHFIELDS.value='name';
+						form.SEARCH.value='".CGI::escape('^'.$prog{$pid}->{$_}.'$')."';
+						submit();
+						RestoreFormVars(form);
+					"}, $prog{$pid}->{$_} )
+				);
+			# Channel link
+			} elsif ( /^channel$/ ) {
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
+					-onClick=>"
+						BackupFormVars(form);
+						form.NEXTPAGE.value='search_progs';
+						form.CHANNEL.value='".CGI::escape('^'.$prog{$pid}->{$_}.'$')."';
+						form.EXCLUDECHANNEL.value='';
+						form.SEARCH.value='.*';
+						submit();
+						RestoreFormVars(form);
+					"}, $prog{$pid}->{$_} )
+				);
+			# Category links
+			} elsif ( /^categories$/ ) {
+				my @cats = split /,/, $prog{$pid}->{$_};
+				for ( @cats ) {
+					my $category = $_;
+					$_ = label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$category'", 
+						-onClick=>"
+							BackupFormVars(form);
+							form.NEXTPAGE.value='search_progs';
+							form.CATEGORY.value='".CGI::escape($category)."';
+							form.EXCLUDECATEGORY.value='';
+							form.SEARCH.value='.*';
+							submit();
+							RestoreFormVars(form);
+						"},
+					$category );
+				}
+				push @row, td( {-class=>$search_class}, @cats );
+			# Every other column type
 			} else {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
 			}
@@ -2673,6 +2723,16 @@ sub search_progs {
 		$display_label = 'Display Options';
 	}
 
+	my $columns_style;
+	my $columns_label;
+	if ( $opt->{COLUMNSTAB}->{current} eq 'no' || not $opt->{COLUMNSTAB}->{current} ) {
+		$columns_style = "display: none;";
+		$columns_label = 'Columns Options';
+	} else {
+		$columns_style = "display: table;";
+		$columns_label = 'Columns Options';
+	}
+
 	my $recording_style;
 	my $recording_label;
 	if ( $opt->{RECORDINGTAB}->{current} eq 'no' || not $opt->{RECORDINGTAB}->{current} ) {
@@ -2705,7 +2765,7 @@ sub search_progs {
 					-class		=> 'options_outer pointer_noul',
 					-id		=> 'button_SEARCHTAB',
 					-title		=> 'Show Advanced Search Options tab',
-					-onClick	=> "show_options_tab( 'SEARCHTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					-onClick	=> "show_options_tab( 'SEARCHTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 					},
 					$search_label,
 				),
@@ -2714,16 +2774,25 @@ sub search_progs {
 					-class		=> 'options_outer pointer_noul',
 					-id		=> 'button_DISPLAYTAB',
 					-title		=> 'Show Display Options tab',
-					-onClick	=> "show_options_tab( 'DISPLAYTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					-onClick	=> "show_options_tab( 'DISPLAYTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 					},
 					$display_label,
+				),
+				# Columns button
+				label( {
+					-class		=> 'options_outer pointer_noul',
+					-id		=> 'button_COLUMNSTAB',
+					-title		=> 'Show Columns Options tab',
+					-onClick	=> "show_options_tab( 'COLUMNSTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					},
+					$columns_label,
 				),
 				# Recording Options button
 				label( {
 					-class		=> 'options_outer pointer_noul',
 					-id		=> 'button_RECORDINGTAB',
 					-title		=> 'Show Recording Options tab',
-					-onClick	=> "show_options_tab( 'RECORDINGTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					-onClick	=> "show_options_tab( 'RECORDINGTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 					},
 					$recording_label,
 				),
@@ -2732,7 +2801,7 @@ sub search_progs {
 					-class		=> 'options_outer pointer_noul',
 					-id		=> 'button_STREAMINGTAB',
 					-title		=> 'Show Streaming Options tab',
-					-onClick	=> "show_options_tab( 'STREAMINGTAB', [ 'SEARCHTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
+					-onClick	=> "show_options_tab( 'STREAMINGTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
 					},
 					$streaming_label,
 				),
@@ -2772,6 +2841,16 @@ sub search_progs {
 		}
 	}
 
+	# Build Columns Options table cells
+	my @optrows_columns;
+	push @optrows_columns, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Show These Columns:' ) );
+	if ( @order_columns_tab ) {
+		#push @optrows_columns, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Column Options:' ) );
+		for ( @order_columns_tab ) {
+			push @optrows_columns, build_option_html( $opt->{$_} );
+		}
+	}
+
 	# Build Recording Options table cells
 	my @optrows_recording;
 	if ( @order_recording_tab ) {
@@ -2801,6 +2880,9 @@ sub search_progs {
 			).
 			td( { -class=>'options_outer', -id=>'tab_SEARCHTAB', -style=>"$search_style" },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_advanced ] ) )
+			).
+			td( { -class=>'options_outer', -id=>'tab_COLUMNSTAB', -style=>"$columns_style" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_columns ] ) )
 			).
 			td( { -class=>'options_outer', -id=>'tab_DISPLAYTAB', -style=>"$display_style" },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_display ] ) )
@@ -2879,8 +2961,8 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Refresh the list of programmes - can take a while',
-			-onClick => "BackupFormVars(form); form.target='_newtab_refresh'; form.NEXTPAGE.value='flush'; form.submit(); RestoreFormVars(form); form.target=''; form.NEXTPAGE.value=''; ",
-			#-onClick => "window.frames['dataframe'].window.location.replace('?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh')",
+			-onClick => "BackupFormVars(form); form.target='_newtab_refresh'; form.NEXTPAGE.value='refresh'; form.submit(); RestoreFormVars(form); form.target=''; form.NEXTPAGE.value=''; ",
+			#-onClick => "window.frames['dataframe'].window.location.replace('?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh')",
 		},
 		'Refresh Cache'
 	);
@@ -2922,31 +3004,6 @@ sub search_progs {
 	print $fh @actionbar;
 
 	print $fh div( {id=>'status'} );
-
-	my @columnselect;
-	for my $heading (@headings) {
-		next if grep(/$heading/i, @displaycols);
-		push @columnselect, (
-			Tr( { -class=>'colselect' }, 
-				td( { -class=>'colselect' }, [
-					checkbox(
-						-class		=> 'colselect',
-						-name		=> 'COLS',
-						-label		=> $fieldname{$heading},
-						-value 		=> $heading,
-						-checked	=> 0,
-						-override	=> 1,
-						-onChange	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
-					)
-				])
-			)
-		);
-	}
-	unshift @columnselect, Tr( { -class=>'colselect' }, th( { -class=>'colselect' }, "Enable these columns:" ) ) if @columnselect;
-
-	# Display drop down menu with multiple select for columns shown
-	print $fh table( { -class => 'colselect' }, @columnselect );
-
 
 	print $fh end_form();
 
@@ -3090,19 +3147,44 @@ sub get_progs {
 # Get the columns to display
 #
 sub get_display_cols {
-        @displaycols = ();
 
-        # Determine which columns to display (all if $cols not defined)
-        my $cols = join(",", $cgi->param( 'COLS' )) || '';
+	@displaycols = ();
+	# Set default status for columns options tab checkboxes
+	my %cols_status;
 
-        # Re-sort selected display columns into original header order
-        my @columns = split /,/, $cols;
-        for my $heading (@headings) {
-          push @displaycols, $heading if grep /^$heading$/, @columns;
-        }
+	# Add some default headings for history mode
+	push @headings_default, 'mode' if $opt->{HISTORY}->{current};
+
+	# Determine which columns to display (all if $cols not defined)
+	my $cols = join(",", $opt->{COLS}->{current} ) || join ',', @headings_default;
+	my @columns = split /,/, $cols;
+
+	# Re-sort selected display columns into original header order
+	for my $heading (@headings) {
+		if ( grep /^$heading$/, @columns ) {
+			# Remove display of mode and filename if not history mode
+			if ( ( ! $opt->{HISTORY}->{current} ) && $heading =~ /^(mode|filename)$/ ) {
+				# skip
+			} else {
+				push @displaycols, $heading;
+			}
+			$cols_status{$heading} = 1;
+		}
+	}
 
 	# Make sure we select all if no cols are specified
 	@displaycols = @headings_default if $#displaycols < 0;
+
+	# Set defaults for checkboxes
+	$opt->{COLS}->{status} = \%cols_status;
+
+	# Rebuild the hash for the checkboxes
+	%cols_order = ();
+	%cols_names = ();
+	for ( my $i = 0; $i <= $#headings; $i++ ) {
+		$cols_names{$headings[$i]} = $fieldname{$headings[$i]};
+		$cols_order{$i} = $headings[$i];
+	}
 
 	return 0;
 }
@@ -3410,6 +3492,16 @@ sub process_params {
 		save	=> 1,
 	};
 
+	$opt->{REFRESHFUTURE} = {
+		title	=> 'Refresh Future Schedule', # Title
+		tooltip	=> "When Refresh is clicked also get the future programme schedule. This will take a longer time to index.", # Tooltip
+		webvar	=> 'REFRESHFUTURE', # webvar
+		optkey	=> 'refreshfuture', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
+	};
+
 	my %metadata_labels = ( ''=>'Off', xbmc=>'XBMC Episode nfo format', xbmc_movie=>'XBMC Movie nfo format', generic=>'Generic XML' );
 	$opt->{METADATA} = {
 		title	=> 'Download Meta-data', # Title
@@ -3472,6 +3564,16 @@ sub process_params {
 		type	=> 'boolean', # type
 		default	=> '0', # value
 		save	=> 0,
+	};
+
+	$opt->{FUTURE} = {
+		title	=> 'Search Future Schedule', # Title
+		tooltip	=> 'Whether to additionally display and search programmes in the future programmes schedule (will only work if Refresh future schedule option is enable and refreshed)', # Tooltip
+		webvar	=> 'FUTURE', # webvar
+		optkey	=> 'future', # option
+		type	=> 'radioboolean', # type
+		default	=> '0', # value
+		save	=> 1,
 	};
 
 	$opt->{SINCE} = {
@@ -3552,11 +3654,17 @@ sub process_params {
 		save	=> 1,
 	};
 
-	### Non-visible options ##
+	# Which columns to display
 	$opt->{COLS} = {
+		title	=> 'Enable Columns', # Title
+		tooltip	=> 'Select the columns you wish to display', # Tooltip
 		webvar	=> 'COLS', # webvar
-		default	=> undef, # width values
-		save	=> 0,
+		#optkey	=> 'type', # option
+		type	=> 'multiboolean', # type
+		label	=> \%cols_names, # labels
+		#status	=> \%cols_status, # default status
+		value	=> \%cols_order, # order of values
+		save	=> 1,
 	};
 
 	# Make sure we go to the correct nextpage for processing
@@ -3586,6 +3694,14 @@ sub process_params {
 	# Remeber the status of the Advanced options display
 	$opt->{SEARCHTAB} = {
 		webvar	=> 'SEARCHTAB', # webvar
+		type	=> 'hidden', # type
+		default	=> 'no', # value
+		save	=> 1,
+	};
+
+	# Remeber the status of the prefs display
+	$opt->{COLUMNSTAB} = {
+		webvar	=> 'COLUMNSTAB', # webvar
 		type	=> 'hidden', # type
 		default	=> 'no', # value
 		save	=> 1,
@@ -3695,8 +3811,8 @@ sub begin_html {
 	my $title;
 	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
 	my $autopvrrun  = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
-	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'flush' ) {
-		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=flush&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
+	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'refresh' ) {
+		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
 		$title = 'Refreshing Cache: get_iplayer Web PVR Manager';
 	} elsif ( $autopvrrun && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
 		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
@@ -3890,6 +4006,7 @@ sub insert_stylesheet {
 
 	.darker			{ color: #7D7D7D; }
 	#logo			{ width: 190px; }
+	#underline		{ text-decoration: underline; }
 	#nowrap			{ white-space: nowrap; }
 	#smaller80pc		{ font-size: 80%; }
 
