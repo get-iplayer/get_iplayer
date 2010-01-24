@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.63';
+my $VERSION = '0.64';
 
 use strict;
 use CGI ':all';
@@ -200,7 +200,7 @@ my %nextpages = (
 	'pvr_add'			=> \&pvr_add,
 	'pvr_run'			=> \&pvr_run,
 	'show_info'			=> \&show_info,
-	'refresh'				=> \&refresh,
+	'refresh'			=> \&refresh,
 	'update_script'			=> \&update_script,
 );
 
@@ -209,18 +209,41 @@ my %nextpages = (
 ##### Options #####
 my $opt;
 
-# Options Ordering on page
-my @order_basic_opts = qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /;
-my @order_search_tab = qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE /;
-my @order_display_tab = qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED /;
-my @order_columns_tab = qw/ COLS /;
-my @order_recording_tab = qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE /;
-my @order_streaming_tab = qw/ BITRATE VSIZE VFR STREAMTYPE /;
-my @hidden_opts = qw/ SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION /;
+# Options Layout on page tabs
+my $layout;
+$layout->{BASICTAB}->{title} = 'Search Options',
+$layout->{BASICTAB}->{heading} = 'Search Options:',
+$layout->{BASICTAB}->{order} = [ qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL / ];
+
+$layout->{SEARCHTAB}->{title} = 'Advanced Search';
+$layout->{SEARCHTAB}->{heading} = 'Advanced Search Options:';
+$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
+
+$layout->{DISPLAYTAB}->{title} = 'Display Options';
+$layout->{DISPLAYTAB}->{heading} = 'Display Options:';
+$layout->{DISPLAYTAB}->{order} = [ qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED / ];
+
+$layout->{COLUMNSTAB}->{title} = 'Column Options';
+$layout->{COLUMNSTAB}->{heading} = 'Column Options:';
+$layout->{COLUMNSTAB}->{order} = [ qw/ COLS / ];
+
+$layout->{RECORDINGTAB}->{title} = 'Recording Options';
+$layout->{RECORDINGTAB}->{heading} = 'Recording Options:';
+$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE / ];
+
+$layout->{STREAMINGTAB}->{title} = 'Streaming Options';
+$layout->{STREAMINGTAB}->{heading} = 'Streaming Options:';
+$layout->{STREAMINGTAB}->{order} = [ qw/ BITRATE VSIZE VFR STREAMTYPE / ];
+
+$layout->{HIDDENTAB}->{title} = '';
+$layout->{HIDDENTAB}->{heading} = '';
+$layout->{HIDDENTAB}->{order} = [ qw/ SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION / ];
+
+# Order of displayed tab buttoms (BASICTAB and HIDDEN are always displayed regardless of order)
+$layout->{taborder} = [ qw/ BASICTAB SEARCHTAB DISPLAYTAB COLUMNSTAB RECORDINGTAB STREAMINGTAB HIDDENTAB / ];
+
 # Any params that should never get into the get_iplayer pvr-add search
 my @nosearch_params = qw/ /;
-
-
 
 ### Perl CGI Web Server ###
 use Socket;
@@ -388,8 +411,10 @@ sub parse_post_form_string {
 		next if ! $1;
 		$val =~ s/[\r\n]//g;
 		$val =~ s/\+/ /g;
-		# Caused entities to be parsed wrongly
-		#$val =~ s/%(..)/chr(hex($1))/eg;
+		# Decode entities first
+		decode_entities($val);
+		# url encode each entry
+		$val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
@@ -1472,86 +1497,6 @@ sub run_cmd {
 
 
 
-#  closing browser does not kill stream  i.e. flvstreamer - no SIGPIPE caught???
-sub run_cmd_win32_orig {
-	# Define what to do with STDOUT and STDERR of the child process
-	use Symbol qw(gensym);
-	my $fh_child_out = shift;
-	my $fh_child_err = shift;
-	my $size = shift;
-	my $from = new IO::Handle;
-	my $err = new IO::Handle;
-	my @cmd = ( @_ );
-	# eek! - works around win32 inability to redirect STDERR nicely
-	# If the stderr is supposed to go to the same fh and stdout then add '2>&1'
-	push @cmd, '2>&1' if fileno($fh_child_out) == fileno($fh_child_err);
-	my $rtn;
-
-	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
-
-	# Check if we have IPC::Open3 otherwise fallback on system()
-	eval "use IPC::Open3";
-	
-	# probably only likely in win32
-	if ($@) {
-		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		exit 1;
-
-	# Use open3()
-	} else {
-		my $procid;
-		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
-		local $SIG{PIPE} = sub {
-			my $signal = shift;
-			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
-			for my $sig ( qw/INT PIPE TERM KILL/ ) {
-				# Kill process with SIGs
-				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
-				kill $sig, $procid;
-				sleep 1;
-				if ( ! kill 0, $procid ) {
-					print $se "INFO: $$ killed cmd PID=$procid\n";
-					last;
-				}
-				sleep 4;
-			}
-			exit 0;
-		};
-
-		$procid = open3( gensym, $from, '>&2', @cmd );
-
-		# Not sure if these are necessary:
-		$fh_child_out->autoflush(1);
-		$from->autoflush(1);
-
-		# Read each char from command output and push to socket fh
-		my $char;
-		my $bytes;
-		while ( $bytes = read( $from, $char, $size ) ) {
-			if ( $bytes <= 0 ) {
-				print $se "DEBUG: STDOUT fd closed - killing thread\n";
-				exit 0;
-			} else {
-				print $fh_child_out $char;
-			}
-			last if $bytes < $size;
-		}
-		#print $se "CMD STDOUT FH EMPTY\n";
-		
-		# Wait for child to complete
-		waitpid( $procid, 0 );
-		$rtn = $?;
-
-		# Restore sigpipe handler for reader and writer processes
-		$SIG{PIPE} = 'DEFAULT';
-	}
-
-	# Interpret return code	      
-	return interpret_return_code( $rtn );
-}
-
-
-
 # Works except for where both from and err go to fh - does not die when browser closes.
 # Also the browser does not get closed after cmd completes...
 # Uses shell when stderr needs to be redirected to stdout
@@ -2291,6 +2236,7 @@ sub pvr_add {
 }
 
 
+
 # Build templated HTML for an option specified by passed hashref
 sub build_option_html {
 	my $arg = shift;
@@ -2479,7 +2425,6 @@ sub search_history {
 
 
 
-
 sub search_progs {
 	# Set default status for progtypes
 	my %type;
@@ -2610,13 +2555,13 @@ sub search_progs {
 			# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".CGI::escape("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
 			# Add Series
 			$links .= label( {
 				-id=>'nowrap', 
 				-class=>'search pointer_noul', 
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
-				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".CGI::escape("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
+				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
 
 		# Add links to row
@@ -2639,12 +2584,12 @@ sub search_progs {
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
 			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $text ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $text ) );
 			# Name / Series link
 			} elsif ( /^name$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
@@ -2652,7 +2597,7 @@ sub search_progs {
 						BackupFormVars(form);
 						form.NEXTPAGE.value='search_progs';
 						form.SEARCHFIELDS.value='name';
-						form.SEARCH.value='".CGI::escape('^'.$prog{$pid}->{$_}.'$')."';
+						form.SEARCH.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
 						submit();
 						RestoreFormVars(form);
 					"}, $prog{$pid}->{$_} )
@@ -2663,7 +2608,7 @@ sub search_progs {
 					-onClick=>"
 						BackupFormVars(form);
 						form.NEXTPAGE.value='search_progs';
-						form.CHANNEL.value='".CGI::escape('^'.$prog{$pid}->{$_}.'$')."';
+						form.CHANNEL.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
 						form.EXCLUDECHANNEL.value='';
 						form.SEARCH.value='.*';
 						submit();
@@ -2679,7 +2624,7 @@ sub search_progs {
 						-onClick=>"
 							BackupFormVars(form);
 							form.NEXTPAGE.value='search_progs';
-							form.CATEGORY.value='".CGI::escape($category)."';
+							form.CATEGORY.value='".encode_entities($category)."';
 							form.EXCLUDECATEGORY.value='';
 							form.SEARCH.value='.*';
 							submit();
@@ -2690,7 +2635,7 @@ sub search_progs {
 				push @row, td( {-class=>$search_class}, @cats );
 			# Every other column type
 			} else {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".CGI::escape("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>$search_class}, @row );
@@ -2702,109 +2647,40 @@ sub search_progs {
 		-method => "POST",
 	);
 
-	# Set  cell status and label for each tab
-	my $search_style;
-	my $search_label;
-	if ( $opt->{SEARCHTAB}->{current} eq 'no' || not $opt->{SEARCHTAB}->{current} ) {
-		$search_style = "display: none;";
-		$search_label = 'Advanced Search';
-	} else {
-		$search_style = "display: table;";
-		$search_label = 'Advanced Search';
+	# Create options tabs and buttons
+
+	# Build tab 'buttons' (actually list labels)
+	my @opt_nav_td;
+	my @tablist = grep !/(BASICTAB|HIDDENTAB)/, @{ $layout->{taborder} };
+	for my $tabname ( @tablist ) {
+		my $label = $layout->{$tabname}->{title};
+
+		# Set the colour to grey if it is selected
+		my $style;
+		$style = "color: #ADADAD;" if defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes';
+		push @opt_nav_td, label( {
+				-class		=> 'options_outer pointer_noul',
+				-id		=> 'button_'.$tabname,
+				-title		=> "Show $label tab",
+				-style		=> $style,
+				-onClick	=> "show_options_tab( '$tabname', [ '".(join "', '", @tablist )."' ] );",
+			},
+			$label,
+		),
 	}
 
-	my $display_style;
-	my $display_label;
-	if ( $opt->{DISPLAYTAB}->{current} eq 'no' || not $opt->{DISPLAYTAB}->{current} ) {
-		$display_style = "display: none;";
-		$display_label = 'Display Options';
-	} else {
-		$display_style = "display: table;";
-		$display_label = 'Display Options';
-	}
-
-	my $columns_style;
-	my $columns_label;
-	if ( $opt->{COLUMNSTAB}->{current} eq 'no' || not $opt->{COLUMNSTAB}->{current} ) {
-		$columns_style = "display: none;";
-		$columns_label = 'Columns Options';
-	} else {
-		$columns_style = "display: table;";
-		$columns_label = 'Columns Options';
-	}
-
-	my $recording_style;
-	my $recording_label;
-	if ( $opt->{RECORDINGTAB}->{current} eq 'no' || not $opt->{RECORDINGTAB}->{current} ) {
-		$recording_style = "display: none;";
-		$recording_label = 'Recording Options';
-	} else {
-		$recording_style = "display: table;";
-		$recording_label = 'Recording Options';
-	}
-
-	my $streaming_style;
-	my $streaming_label;
-	if ( $opt->{STREAMINGTAB}->{current} eq 'no' || not $opt->{STREAMINGTAB}->{current} ) {
-		$streaming_style = "display: none;";
-		$streaming_label = 'Streaming Options';
-	} else {
-		$streaming_style = "display: table;";
-		$streaming_label = 'Streaming Options';
-	}
-
-	# Generate the html for all these options in THIS ORDER
-
-	# Add pink prefs/options/save options buttons
+	# Add options buttons into the list + add a save button
 	my @optrows_nav;
 	push @optrows_nav,
 		ul( { -class=>'options' },
 			li( { -class=>'options' }, [
-				# Search Options button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-id		=> 'button_SEARCHTAB',
-					-title		=> 'Show Advanced Search Options tab',
-					-onClick	=> "show_options_tab( 'SEARCHTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-					},
-					$search_label,
-				),
-				# Display Options button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-id		=> 'button_DISPLAYTAB',
-					-title		=> 'Show Display Options tab',
-					-onClick	=> "show_options_tab( 'DISPLAYTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-					},
-					$display_label,
-				),
-				# Columns button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-id		=> 'button_COLUMNSTAB',
-					-title		=> 'Show Columns Options tab',
-					-onClick	=> "show_options_tab( 'COLUMNSTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-					},
-					$columns_label,
-				),
-				# Recording Options button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-id		=> 'button_RECORDINGTAB',
-					-title		=> 'Show Recording Options tab',
-					-onClick	=> "show_options_tab( 'RECORDINGTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-					},
-					$recording_label,
-				),
-				# Streaming Options button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-id		=> 'button_STREAMINGTAB',
-					-title		=> 'Show Streaming Options tab',
-					-onClick	=> "show_options_tab( 'STREAMINGTAB', [ 'SEARCHTAB', 'COLUMNSTAB', 'DISPLAYTAB', 'RECORDINGTAB', 'STREAMINGTAB' ] );",
-					},
-					$streaming_label,
-				),
+				@opt_nav_td,
+			] ) # end li
+		).
+		# spacer
+		p('').
+		ul( { -class=>'options' },
+			li( { -class=>'options' }, [
 				# Save as Default  button
 				label( {
 					-class		=> 'options_outer pointer_noul',
@@ -2815,58 +2691,27 @@ sub search_progs {
 				),
 			] ) # end li
 		);
-		
-	# Build basic options tables + hidden
-	my @optrows_basic;
-	push @optrows_basic, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Search Options:' ) );
-	for ( @order_basic_opts, @hidden_opts ) {
-		push @optrows_basic, build_option_html( $opt->{$_} );
-	}
 
-	# Build Advanced Search table cells
-	my @optrows_advanced;
-	if ( @order_search_tab ) {
-		push @optrows_advanced, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Advanced Search Options:' ) );
-		for ( @order_search_tab ) {
-			push @optrows_advanced, build_option_html( $opt->{$_} );
-		}
-	}
+	# Build each tab with it's contained options tables
+	my @opt_table;
+	for my $tabname ( @{ $layout->{taborder} } ) {
+		my $tab = $layout->{$tabname};
+		my @order = @{ $tab->{order} };
+		my $heading = $tab->{heading};
 
-	# Build Display Options table cells
-	my @optrows_display;
-	if ( @order_display_tab ) {
-		push @optrows_display, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Display Options:' ) );
-		for ( @order_display_tab ) {
-			push @optrows_display, build_option_html( $opt->{$_} );
-		}
-	}
+		# Set displayed tab status (i.e. style) based on posted/cookie vars (always display basic tab)
+		$tab->{style} = "display: none;";
+		$tab->{style} = "display: table-cell;" if $tabname eq 'BASICTAB' || ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' );
 
-	# Build Columns Options table cells
-	my @optrows_columns;
-	push @optrows_columns, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Show These Columns:' ) );
-	if ( @order_columns_tab ) {
-		#push @optrows_columns, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Column Options:' ) );
-		for ( @order_columns_tab ) {
-			push @optrows_columns, build_option_html( $opt->{$_} );
+		# Each option within the tab
+		my @optrows;
+		push @optrows, td( { -class=>'options' }, label( { -class => 'options_heading' }, $heading ) ) if $heading;
+		for my $optname ( @order ) {
+			push @optrows, build_option_html( $opt->{$optname} );
 		}
-	}
-
-	# Build Recording Options table cells
-	my @optrows_recording;
-	if ( @order_recording_tab ) {
-		push @optrows_recording, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Recording Options:' ) );
-		for ( @order_recording_tab ) {
-			push @optrows_recording, build_option_html( $opt->{$_} );
-		}
-	}
-
-	# Build Streaming Options table cells
-	my @optrows_streaming;
-	if ( @order_streaming_tab ) {
-		push @optrows_streaming, td( { -class=>'options' }, label( { -class => 'options_heading' }, 'Remote Streaming Options:' ) );
-		for ( @order_streaming_tab ) {
-			push @optrows_streaming, build_option_html( $opt->{$_} );
-		}
+		push @opt_table, td( { -class=>'options_outer', -id=>"tab_${tabname}", -style=>"$tab->{style}" },
+			table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
+		);
 	}
 
 	# Render outer options table frame (keeping some tabs hidden)
@@ -2875,27 +2720,10 @@ sub search_progs {
 			td( { -class=>'options_outer' },
 				@optrows_nav
 			).
-			td( { -class=>'options_outer' },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_basic ] ) )
-			).
-			td( { -class=>'options_outer', -id=>'tab_SEARCHTAB', -style=>"$search_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_advanced ] ) )
-			).
-			td( { -class=>'options_outer', -id=>'tab_COLUMNSTAB', -style=>"$columns_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_columns ] ) )
-			).
-			td( { -class=>'options_outer', -id=>'tab_DISPLAYTAB', -style=>"$display_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_display ] ) )
-			).
-			td( { -class=>'options_outer', -id=>'tab_RECORDINGTAB', -style=>"$recording_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_recording ] ) )
-			).
-			td( { -class=>'options_outer', -id=>'tab_STREAMINGTAB', -style=>"$streaming_style" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows_streaming ] ) )
-			)
+			(join '', @opt_table)
 		),
 	);
-
+	
 	# Grey-out 'Add Current Search to PVR' button if too many programme matches
 	my $add_search_class_suffix;
 	$add_search_class_suffix = ' darker' if $matchcount > 30;
@@ -3093,7 +2921,7 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 
-	my ( @webrequest_args ) = ( build_cmd_options( @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
+	my ( @webrequest_args ) = ( build_cmd_options( grep !/^(PVRHOLDOFF)$/, @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
 	# Page params
 	if ( $opt->{PAGENO}->{current} && $opt->{PAGESIZE}->{current} ) {
 		push @webrequest_args, ( "page=$opt->{PAGENO}->{current}", "pagesize=$opt->{PAGESIZE}->{current}" );
@@ -3502,7 +3330,7 @@ sub process_params {
 		save	=> 1,
 	};
 
-	my %metadata_labels = ( ''=>'Off', xbmc=>'XBMC Episode nfo format', xbmc_movie=>'XBMC Movie nfo format', generic=>'Generic XML' );
+	my %metadata_labels = ( ''=>'Off', xbmc=>'XBMC Episode nfo format', xbmc_movie=>'XBMC Movie nfo format', generic=>'Generic XML', freevo=>'Freevo FXD' );
 	$opt->{METADATA} = {
 		title	=> 'Download Meta-data', # Title
 		tooltip	=> 'Format of metadata file to create when recording', # Tooltip
@@ -3591,6 +3419,17 @@ sub process_params {
 		title	=> 'Added Before (hours)', # Title
 		tooltip	=> 'Only show programmes added to the local programmes cache over this number of hours ago', # Tooltip
 		webvar	=> 'BEFORE', # webvar
+		optkey	=> 'before', # option
+		type	=> 'text', # type
+		value	=> 3, # width values
+		default => '',
+		save	=> 1,
+	};
+
+	$opt->{PVRHOLDOFF} = {
+		title	=> 'PVR Hold off period (hours)', # Title
+		tooltip	=> 'Wait this number of hours before allowing the PVR to record a programme. This sometimes helps when the flashhd version is delayed in being made available.', # Tooltip
+		webvar	=> 'PVRHOLDOFF', # webvar
 		optkey	=> 'before', # option
 		type	=> 'text', # type
 		value	=> 3, # width values
@@ -3691,45 +3530,15 @@ sub process_params {
 		save	=> 0,
 	};
 
-	# Remeber the status of the Advanced options display
-	$opt->{SEARCHTAB} = {
-		webvar	=> 'SEARCHTAB', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
-
-	# Remeber the status of the prefs display
-	$opt->{COLUMNSTAB} = {
-		webvar	=> 'COLUMNSTAB', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
-
-	# Remeber the status of the prefs display
-	$opt->{DISPLAYTAB} = {
-		webvar	=> 'DISPLAYTAB', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
-
-	# Remeber the status of the Advanced options display
-	$opt->{RECORDINGTAB} = {
-		webvar	=> 'RECORDINGTAB', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
-
-	# Remeber the status of the Advanced options display
-	$opt->{STREAMINGTAB} = {
-		webvar	=> 'STREAMINGTAB', # webvar
-		type	=> 'hidden', # type
-		default	=> 'no', # value
-		save	=> 1,
-	};
+	# Remeber the status of the tab options display
+	for my $tabname ( grep !/BASICTAB/, @{ $layout->{taborder} } ) {
+		$opt->{$tabname} = {
+			webvar	=> $tabname, # webvar
+			type	=> 'hidden', # type
+			default	=> 'yes', # value
+			save	=> 0,
+		};
+	}
 
 	# Save the status of the Advanced Search options and preferences settings
 	$opt->{SAVE} = {
@@ -3908,7 +3717,7 @@ sub insert_javascript {
 			var option = document.getElementById( 'option_' + tabs[i] );
 			var button = document.getElementById( 'button_' + tabs[i] );
 			if ( tab == selected_tab ) {
-				tab.style.display = '';
+				tab.style.display = 'table-cell';
 				option.value = 'yes';
 				//button.innerHTML = '- ' + button.innerHTML.substring(2);
 				button.style.color = '#ADADAD';
@@ -4051,7 +3860,7 @@ sub insert_stylesheet {
 	INPUT.options		{ font-size: 100%; } 
 	SELECT.options		{ font-size: 100%; } 
 
-	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; }
+	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
 	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
 	TH.options_outer	{ }
 	TD.options_outer	{ padding-right: 10px; }
