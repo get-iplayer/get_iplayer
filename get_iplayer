@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.65;
+my $version = 2.66;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -116,7 +116,7 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
-	metadataonly	=> [ 1, "metadataonly!", 'Recording', '--metadataonly', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
+	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mmsnothread	=> [ 1, "mmsnothread!", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma"],
 	multimode	=> [ 1, "multimode!", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
@@ -129,8 +129,8 @@ my $opt_format = {
 	start		=> [ 1, "start=s", 'Recording', '--start <secs>', "Recording/streaming start offset (rtmp and realaudio only)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> [ 2, "subtitles!", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
-	subsonly	=> [ 1, "subtitlessonly|subsonly!", 'Recording', '--subtitles-only', "Only download the subtitles, not the programme"],
+	subtitles	=> [ 2, "subtitles|subs!", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
+	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Recording', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subsraw!", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
@@ -157,7 +157,7 @@ my $opt_format = {
 	email		=> [ 1, "email=s", 'Output', '--email <address>', "Email HTML index of matching programmes to specified address"],
 	emailsmtp	=> [ 1, "emailsmtpserver|email-smtp=s", 'Output', '--email-smtp <hostname>', "SMTP server IP address to use to send email (default: localhost)"],
 	emailsender	=> [ 1, "emailsender|email-sender=s", 'Output', '--email-sender <address>', "Optional email sender address"],
-	fatfilename	=> [ 1, "fatfilename!", 'Output', '--fatfilename, -w', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
+	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
@@ -456,7 +456,7 @@ update_script() if $opt->{update} || $opt->{pluginsupdate};
 ########## Global vars ###########
 
 #my @cache_format = qw/index type name pid available episode versions duration desc channel categories thumbnail timeadded guidance web/;
-my @history_format = qw/pid name episode type timeadded mode filename versions duration desc channel categories thumbnail guidance web/;
+my @history_format = qw/pid name episode type timeadded mode filename versions duration desc channel categories thumbnail guidance web episodenum seriesnum/;
 # Ranges of numbers used in the indicies for each programme type
 my $max_index = 0;
 for ( progclass() ) {
@@ -3284,6 +3284,7 @@ sub get {
 			$opt->{stderr} = 1;
 			main::logger "WARNING: Ignoring invalid option in $optfile: '$1 = $2'\n";
 			main::logger "INFO: Please remove and use 'get_iplayer --dump-options' to display all valid options\n";
+			delete $opt->{stderr};
 			next;
 		}
 		# Warn if it is listed as a deprecated internal option name
