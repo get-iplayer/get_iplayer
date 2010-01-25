@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.64';
+my $VERSION = '0.65';
 
 use strict;
 use CGI ':all';
@@ -108,8 +108,28 @@ my %prog;
 my @pids;
 my @displaycols;
 
-# Field names grabbed from get_iplayer
-my @headings = qw( index thumbnail pid available type name episode versions duration desc channel categories timeadded guidance web seriesnum episodenum filename mode );
+# Field names to be grabbed from get_iplayer
+my @headings = qw( 
+	index
+	thumbnail
+	pid
+	available
+	type
+	name
+	episode
+	versions
+	duration
+	desc
+	channel
+	categories
+	timeadded
+	guidance
+	web
+	seriesnum
+	episodenum
+	filename
+	mode
+);
 
 # Default Displayed headings
 my @headings_default = qw( thumbnail type name episode desc channel categories timeadded );
@@ -191,17 +211,17 @@ my $nextpage;
 
 # Page routing based on NEXTPAGE CGI parameter
 my %nextpages = (
-	'search_progs'			=> \&search_progs,	# Main Programme Listings
-	'search_history'		=> \&search_history,	# Recorded Programme Listings
-	'pvr_queue'			=> \&pvr_queue,		# Queue Recording of Selected Progs
-	'recordings_delete'		=> \&recordings_delete,	# Delete Files for Selected Recordings
-	'pvr_list'			=> \&show_pvr_list,	# Show all current PVR searches
-	'pvr_del'			=> \&pvr_del,		# Delete selected PVR searches
-	'pvr_add'			=> \&pvr_add,
-	'pvr_run'			=> \&pvr_run,
-	'show_info'			=> \&show_info,
-	'refresh'			=> \&refresh,
-	'update_script'			=> \&update_script,
+	'search_progs'		=> \&search_progs,	# Main Programme Listings
+	'search_history'	=> \&search_history,	# Recorded Programme Listings
+	'pvr_queue'		=> \&pvr_queue,		# Queue Recording of Selected Progs
+	'recordings_delete'	=> \&recordings_delete,	# Delete Files for Selected Recordings
+	'pvr_list'		=> \&show_pvr_list,	# Show all current PVR searches
+	'pvr_del'		=> \&pvr_del,		# Delete selected PVR searches
+	'pvr_add'		=> \&pvr_add,
+	'pvr_run'		=> \&pvr_run,
+	'show_info'		=> \&show_info,
+	'refresh'		=> \&refresh,
+	'update_script'		=> \&update_script,
 );
 
 
@@ -219,19 +239,19 @@ $layout->{SEARCHTAB}->{title} = 'Advanced Search';
 $layout->{SEARCHTAB}->{heading} = 'Advanced Search Options:';
 $layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
 
-$layout->{DISPLAYTAB}->{title} = 'Display Options';
+$layout->{DISPLAYTAB}->{title} = 'Display';
 $layout->{DISPLAYTAB}->{heading} = 'Display Options:';
 $layout->{DISPLAYTAB}->{order} = [ qw/ SORT REVERSE PAGESIZE HIDE HIDEDELETED / ];
 
-$layout->{COLUMNSTAB}->{title} = 'Column Options';
+$layout->{COLUMNSTAB}->{title} = 'Columns';
 $layout->{COLUMNSTAB}->{heading} = 'Column Options:';
 $layout->{COLUMNSTAB}->{order} = [ qw/ COLS / ];
 
-$layout->{RECORDINGTAB}->{title} = 'Recording Options';
+$layout->{RECORDINGTAB}->{title} = 'Recording';
 $layout->{RECORDINGTAB}->{heading} = 'Recording Options:';
 $layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE / ];
 
-$layout->{STREAMINGTAB}->{title} = 'Streaming Options';
+$layout->{STREAMINGTAB}->{title} = 'Streaming';
 $layout->{STREAMINGTAB}->{heading} = 'Streaming Options:';
 $layout->{STREAMINGTAB}->{order} = [ qw/ BITRATE VSIZE VFR STREAMTYPE / ];
 
@@ -2647,81 +2667,91 @@ sub search_progs {
 		-method => "POST",
 	);
 
+
 	# Create options tabs and buttons
 
 	# Build tab 'buttons' (actually list labels)
-	my @opt_nav_td;
+	# Add options buttons into the list
+	my @optrows_nav;
 	my @tablist = grep !/(BASICTAB|HIDDENTAB)/, @{ $layout->{taborder} };
 	for my $tabname ( @tablist ) {
 		my $label = $layout->{$tabname}->{title};
 
-		# Set the colour to grey if it is selected
-		my $style;
-		$style = "color: #ADADAD;" if defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes';
-		push @opt_nav_td, label( {
+		# Set the colour to grey and change tab appearance if it is selected
+		my $style = 'color: #ADADAD;';
+		my $class = 'options_tab';
+		if ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' ) {
+			$style = 'color: #F54997;';
+			$class = 'options_tab_sel';
+		}
+		push @optrows_nav, li( { -class=>$class, -id=>"li_${tabname}" },
+			label( {
 				-class		=> 'options_outer pointer_noul',
 				-id		=> 'button_'.$tabname,
 				-title		=> "Show $label tab",
 				-style		=> $style,
 				-onClick	=> "show_options_tab( '$tabname', [ '".(join "', '", @tablist )."' ] );",
 			},
-			$label,
-		),
+			$label ),
+		)
 	}
 
-	# Add options buttons into the list + add a save button
-	my @optrows_nav;
-	push @optrows_nav,
-		ul( { -class=>'options' },
-			li( { -class=>'options' }, [
-				@opt_nav_td,
-			] ) # end li
-		).
-		# spacer
-		p('').
-		ul( { -class=>'options' },
-			li( { -class=>'options' }, [
-				# Save as Default  button
-				label( {
-					-class		=> 'options_outer pointer_noul',
-					-title		=> 'Remember Current Options as Default',
-					-onClick	=> "BackupFormVars(form); form.SAVE.value=1; submit(); RestoreFormVars(form);",
-					},
-					'Save As Default',
-				),
-			] ) # end li
-		);
+	# add a save button on to end of list
+	my $options_buttons = ul( { -class=>'options_tab' },
+		li( { -class=>'options_button' }, [
+			# Apply button (same as 'Search')
+			label( {
+				-class		=> 'options_outer pointer_noul',
+				-title		=> 'Apply Current Options',
+				-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
+				},
+				'Apply Settings',
+			),
+			# Save as Default  button
+			label( {
+				-class		=> 'options_outer pointer_noul',
+				-title		=> 'Remember Current Options as Default',
+				-onClick	=> "BackupFormVars(form); form.SAVE.value=1; submit(); RestoreFormVars(form);",
+				},
+				'Save As Default',
+			),
+		] )
+	);
 
 	# Build each tab with it's contained options tables
-	my @opt_table;
+	my @opt_td;
+	my @opt_td_basic;
 	for my $tabname ( @{ $layout->{taborder} } ) {
 		my $tab = $layout->{$tabname};
 		my @order = @{ $tab->{order} };
 		my $heading = $tab->{heading};
-
 		# Set displayed tab status (i.e. style) based on posted/cookie vars (always display basic tab)
 		$tab->{style} = "display: none;";
 		$tab->{style} = "display: table-cell;" if $tabname eq 'BASICTAB' || ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' );
 
 		# Each option within the tab
 		my @optrows;
-		push @optrows, td( { -class=>'options' }, label( { -class => 'options_heading' }, $heading ) ) if $heading;
+		#push @optrows, td( { -class=>'options' }, label( { -class => 'options_heading' }, $heading ) ) if $heading;
 		for my $optname ( @order ) {
 			push @optrows, build_option_html( $opt->{$optname} );
 		}
-		push @opt_table, td( { -class=>'options_outer', -id=>"tab_${tabname}", -style=>"$tab->{style}" },
-			table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
-		);
+		# Set the basic search tab to be rowspan=3
+		if ( $tabname eq 'BASICTAB' ) {
+			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
+			);
+		} else {
+			push @opt_td, td( { -class=>'options_outer', -id=>"tab_${tabname}", -style=>"$tab->{style}" },
+				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
+			);		
+		}
 	}
 
 	# Render outer options table frame (keeping some tabs hidden)
 	print $fh table( { -class=>'options_outer' },
-		Tr( { -class=>'options_outer' }, 
-			td( { -class=>'options_outer' },
-				@optrows_nav
-			).
-			(join '', @opt_table)
-		),
+		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab' }, @optrows_nav ) ) ).
+		Tr( { -class=>'options_outer' }, (join '', @opt_td) ).
+		Tr( { -class=>'options_outer' }, td( { -class=>'options_outer' }, $options_buttons ) )
 	);
 	
 	# Grey-out 'Add Current Search to PVR' button if too many programme matches
@@ -3043,9 +3073,22 @@ sub form_header {
 		},
 		'Update Software' ) if -w $0;
 
+	# set $class for tab selection in nav bar
+	my $class = {};
+	$class->{search}     = 'nav_tab';
+	$class->{recordings} = 'nav_tab';
+	$class->{pvrlist}    = 'nav_tab';
+	$class->{pvrrun}     = 'nav_tab';
+	$class->{update}     = 'nav_tab';
+	$class->{search}     = 'nav_tab_sel' if $nextpage eq 'search_progs' || ! $nextpage;
+	$class->{recordings} = 'nav_tab_sel' if $nextpage eq 'search_history';
+	$class->{pvrlist}    = 'nav_tab_sel' if $nextpage eq 'pvr_list';
+	$class->{pvrrun}     = 'nav_tab_sel' if $nextpage eq 'pvr_run';
+	$class->{update}     = 'nav_tab_sel' if $nextpage eq 'update_script';
+
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
-			li( { -id=>'logo', -class=>'nav' },
+			li( { -id=>'logo', -class=>'nav_tab' },
 				a( { -class=>'nav', -href=>$request_host },
 					img({
 						-class => 'nav',
@@ -3056,50 +3099,13 @@ sub form_header {
 						-href => $request_host,
 					}),
 				),
-			),
-			li( { -class=>'nav' }, [
-				a(
-					{
-						-class=>'nav',
-						-title=>'Main search page',
-						-href => $request_host,
-					},
-					'Search'
-				),
-				a(
-					{
-						-class=>'nav',
-						-title=>'History search page',
-						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);",
-					},
-					'Recordings'
-				),
-				a(
-					{
-						-class=>'nav',
-						-title=>'List all saved PVR searches',
-						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);",
-					},
-					'PVR List'
-				),
-				a(
-					{
-						-class=>'nav',
-						-title=>'Run the PVR now - wait for the PVR to complete',
-						-onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';",
-					},
-					'Run PVR'
-				),
-				$update_element,
-				a( 
-					{ 
-						-class=>'nav', 
-						-title=>'Show help and instructions', 
-						-href => "http://linuxcentre.net/projects/get_iplayer-pvr-manager/",
-					},
-					'Help'
-				),
-			]),
+			).
+			li( { -class=>$class->{search} }, a( { -class=>'nav', -title=>'Main search page', -href => $request_host }, 'Search' ) ).
+			li( { -class=>$class->{recordings} }, a( { -class=>'nav', -title=>'History search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);" }, 'Recordings' ) ).
+			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
+			li( { -class=>$class->{pvrrun} }, a( { -class=>'nav', -title=>'Run the PVR now - wait for the PVR to complete', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';" }, 'Run PVR' ) ).
+			li( { -class=>$class->{update} }, $update_element ).
+			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "http://linuxcentre.net/projects/get_iplayer-pvr-manager/" }, 'Help' ) )
 		),
 	);
 	print $fh hidden( -name => 'AUTOPVRRUN', -value => $opt->{AUTOPVRRUN}->{current}, -override => 1 );
@@ -3338,9 +3344,9 @@ sub process_params {
 		optkey	=> 'metadata', # option
 		type	=> 'popup', # type
 		#label	=> \%fieldname, # labels
-		label	=> , \%metadata_labels, # labels
+		label	=> \%metadata_labels, # labels
 		default	=> '', # default
-		value	=> [ ( '', 'xbmc', 'xbmc_movie', 'generic' ) ], # values
+		value	=> [ ( '', 'xbmc', 'xbmc_movie', 'generic', 'freevo' ) ], # values
 		save	=> 1,
 	};
 
@@ -3532,10 +3538,13 @@ sub process_params {
 
 	# Remeber the status of the tab options display
 	for my $tabname ( grep !/BASICTAB/, @{ $layout->{taborder} } ) {
+		my $default = 'no';
+		# By default only show advanced search tab
+		$default = 'yes' if $tabname eq 'SEARCHTAB';
 		$opt->{$tabname} = {
 			webvar	=> $tabname, # webvar
 			type	=> 'hidden', # type
-			default	=> 'yes', # value
+			default	=> $default, # value
 			save	=> 0,
 		};
 	}
@@ -3713,6 +3722,7 @@ sub insert_javascript {
 
 		// Loop through the above tab elements
 		for(var i = 0; i < tabs.length; i++) {
+			var li     = document.getElementById( 'li_' + tabs[i] );
 			var tab    = document.getElementById( 'tab_' + tabs[i] );
 			var option = document.getElementById( 'option_' + tabs[i] );
 			var button = document.getElementById( 'button_' + tabs[i] );
@@ -3720,12 +3730,16 @@ sub insert_javascript {
 				tab.style.display = 'table-cell';
 				option.value = 'yes';
 				//button.innerHTML = '- ' + button.innerHTML.substring(2);
-				button.style.color = '#ADADAD';
+				button.style.color = '#F54997';
+				//li.style.borderBottom = '0px solid #666';
+				li.className = 'options_tab_sel';
 			} else {
 				tab.style.display = 'none';
 				option.value = 'no';
 				//button.innerHTML = '+ ' + button.innerHTML.substring(2);
-				button.style.color = '#F54997';
+				button.style.color = '#ADADAD';
+				//li.style.borderBottom = '1px solid #666';
+				li.className = 'options_tab';
 			}
 		}
 		return true;
@@ -3813,8 +3827,11 @@ sub insert_stylesheet {
 
 	.pointer_noul		{ cursor: pointer; cursor: hand; }
 
+	.extra_border		{ border-left: 2px solid #666; }
+	.all_borders		{ border-left: 2px solid #666; border-right: 2px solid #666; border-top: 2px solid #666; border-bottom: 2px solid #666; }
+
 	.darker			{ color: #7D7D7D; }
-	#logo			{ width: 190px; }
+	#logo			{ width: 190px; border-width: 0 0 1px 0; }
 	#underline		{ text-decoration: underline; }
 	#nowrap			{ white-space: nowrap; }
 	#smaller80pc		{ font-size: 80%; }
@@ -3830,8 +3847,9 @@ sub insert_stylesheet {
 
 	/* Nav bar */
 	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
-	UL.nav			{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 42px; margin: 0; margin-left: 2px; width: 13%; }
+	UL.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	LI.nav_tab		{ padding-left: 0px; border-top: 1px solid #444; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
+	LI.nav_tab_sel		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
 	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; }
 	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.nav:hover		{ color: #ADADAD; }
@@ -3850,8 +3868,15 @@ sub insert_stylesheet {
 	TD.options_embedded	{ width: 20px }
 
 	/*DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }*/
-	UL.options		{ list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.options		{ text-align: left; cursor: pointer; cursor: hand; padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; margin: 0; margin-left: 0px; margin-bottom: 5px; }
+	/* options_tab */
+	UL.options_tab		{ text-align: left; cursor: pointer; cursor: hand; list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	/* selected tab button */
+	LI.options_tab_sel	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
+	/* unselected tab button */
+	LI.options_tab		{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #444; display: inline; float: left; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
+	/* unselected tab button */
+	LI.options_button	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 1px solid #888; margin: 0; margin-right: 5px; margin-bottom: 5px; }
+
 	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TR.options		{ white-space: nowrap; }
 	TH.options		{ width: 20px }
@@ -3863,7 +3888,7 @@ sub insert_stylesheet {
 	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
 	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
 	TH.options_outer	{ }
-	TD.options_outer	{ padding-right: 10px; }
+	TD.options_outer	{ padding-right: 50px; }
 	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
 	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
 	
