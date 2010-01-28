@@ -2618,7 +2618,7 @@ sub search_progs {
 						form.NEXTPAGE.value='search_progs';
 						form.SEARCHFIELDS.value='name';
 						form.SEARCH.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
-						form.PAGENO.value='0';
+						form.PAGENO.value=1;
 						submit();
 						RestoreFormVars(form);
 					"}, $prog{$pid}->{$_} )
@@ -2632,7 +2632,7 @@ sub search_progs {
 						form.CHANNEL.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
 						form.EXCLUDECHANNEL.value='';
 						form.SEARCH.value='.*';
-						form.PAGENO.value='0';
+						form.PAGENO.value=1;
 						submit();
 						RestoreFormVars(form);
 					"}, $prog{$pid}->{$_} )
@@ -2649,7 +2649,7 @@ sub search_progs {
 							form.CATEGORY.value='".encode_entities($category)."';
 							form.EXCLUDECATEGORY.value='';
 							form.SEARCH.value='.*';
-							form.PAGENO.value='0';
+							form.PAGENO.value=1;
 							submit();
 							RestoreFormVars(form);
 						"},
