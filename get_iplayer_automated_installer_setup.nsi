@@ -5,7 +5,7 @@
   Name "get_iplayer"
 
   !define PRODUCT "get_iplayer"
-  !define VERSION "2.66"
+  !define VERSION "2.67"
   !define USERAGENT "Mozilla/5.0 (X11; U; Linux i686; en-GB; rv:1.9.0.17) Gecko/2010010604 Ubuntu/9.04 (jaunty) Firefox/3.0.17"
   !include "MUI.nsh"
   !include "Sections.nsh"
@@ -110,6 +110,25 @@ Section "get_iplayer" section1
   Delete "$InstallDir\get_iplayer_setup.nsi"
   Delete "$InstallDir\get_iplayer-ver.txt"
 
+  ; now rename ANY existing VirtualStore folder for Win7 / Vista
+  ; IfFileExists "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\" 0 novirtclean
+    RMDir /r "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\lib"
+    RMDir /r "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\perl-license"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\perl*.dll"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\LICENSE.txt"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\perl.exe"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\run_pvr_scheduler.bat" 
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer--pvr.bat" 
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer.cmd"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer.cgi"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer.pl"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer.cgi.cmd"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\pvr_manager.cmd"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\iplayer_logo.ico"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer_setup.nsi"
+    Delete "$TempUserProfile\AppData\Local\VirtualStore\Program Files\get_iplayer\get_iplayer-ver.txt"
+  ; novirtclean:
+
   ; Copy files into place
   FILE /r "get_iplayer\*.*"
   
@@ -133,7 +152,8 @@ Section "get_iplayer" section1
   FileWrite $fh "vlc .\vlc\vlc.exe$\r$\n"
   FileWrite $fh "mmsnothread 1$\r$\n"
   FileWrite $fh "nopurge 1$\r$\n"
-  FileWrite $fh "packagemanager Windows Installer$\r$\n"
+  ; prevents initial plugin downloads...
+  ;FileWrite $fh "packagemanager Windows Installer$\r$\n"
   FileClose "$fh"
 
   ; Create run_pvr_scheduler batch file
@@ -159,6 +179,10 @@ Section "get_iplayer" section1
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer failed: $R0, Do you wish to try again?" IDYES download1
      Return
   install1:
+
+  ; Update the plugins (with installer privs)
+  SetOutPath "$InstallDir"
+  ExecWait '"perl.exe" get_iplayer.pl --plugins-update'
 
   ; Get the current ver into this ver file
   inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" /SILENT "http://linuxcentre.net/get_iplayer/VERSION-get_iplayer" "$InstallDir\get_iplayer-ver.txt" /END
