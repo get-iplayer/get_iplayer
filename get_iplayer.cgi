@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.65';
+my $VERSION = '0.66';
 
 use strict;
 use CGI ':all';
@@ -3063,7 +3063,7 @@ sub form_header {
 			-method => "POST",
 	);
 	
-	# Only highlight the 'Update Software' option if the script is writable
+	# Only highlight the 'Update Software' option if the script is writable or is not win32
 	my $update_element = a( { -class=>'nav darker' }, 'Update Software' );
 	$update_element = a(
 		{
@@ -3071,7 +3071,7 @@ sub form_header {
 			-title=>'Update the Web PVR Manager and get_iplayer software - please restart Web PVR Manager after updating',
 			-onClick => "if (! confirm('Please restart the Web PVR Manager service once the update has completed') ) { return false; } BackupFormVars(formheader); formheader.NEXTPAGE.value='update_script'; formheader.submit(); RestoreFormVars(formheader);",
 		},
-		'Update Software' ) if -w $0;
+		'Update Software' ) if -w $0 && ! IS_WIN32;
 
 	# set $class for tab selection in nav bar
 	my $class = {};
