@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.67';
+my $VERSION = '0.68';
 
 use strict;
 use CGI ':all';
@@ -3078,16 +3078,16 @@ sub form_header {
 
 	# set $class for tab selection in nav bar
 	my $class = {};
-	$class->{search}     = 'nav_tab';
-	$class->{recordings} = 'nav_tab';
-	$class->{pvrlist}    = 'nav_tab';
-	$class->{pvrrun}     = 'nav_tab';
-	$class->{update}     = 'nav_tab';
-	$class->{search}     = 'nav_tab_sel' if $nextpage eq 'search_progs' || ! $nextpage;
-	$class->{recordings} = 'nav_tab_sel' if $nextpage eq 'search_history';
-	$class->{pvrlist}    = 'nav_tab_sel' if $nextpage eq 'pvr_list';
-	$class->{pvrrun}     = 'nav_tab_sel' if $nextpage eq 'pvr_run';
-	$class->{update}     = 'nav_tab_sel' if $nextpage eq 'update_script';
+	$class->{search}	= 'nav_tab';
+	$class->{recordings}	= 'nav_tab';
+	$class->{pvrlist}	= 'nav_tab';
+	$class->{pvrrun}	= 'nav_tab';
+	$class->{update}	= 'nav_tab';
+	$class->{search}	= 'nav_tab_sel' if ( $nextpage eq 'search_progs' || ! $nextpage ) && ! $opt->{HISTORY}->{current};
+	$class->{recordings}	= 'nav_tab_sel' if $nextpage eq 'search_history' || $opt->{HISTORY}->{current};
+	$class->{pvrrun}	= 'nav_tab_sel' if $nextpage eq 'pvr_run';
+	$class->{pvrlist}	= 'nav_tab_sel' if $nextpage =~ m{^(pvr_list|pvr_queue|pvr_del)$};
+	$class->{update}	= 'nav_tab_sel' if $nextpage eq 'update_script';
 
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
