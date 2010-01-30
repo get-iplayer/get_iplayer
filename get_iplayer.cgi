@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.68';
+my $VERSION = '0.69';
 
 use strict;
 use CGI ':all';
@@ -218,6 +218,8 @@ my %nextpages = (
 	'pvr_list'		=> \&show_pvr_list,	# Show all current PVR searches
 	'pvr_del'		=> \&pvr_del,		# Delete selected PVR searches
 	'pvr_add'		=> \&pvr_add,
+	'pvr_edit'		=> \&pvr_edit,
+	'pvr_save'		=> \&pvr_save,
 	'pvr_run'		=> \&pvr_run,
 	'show_info'		=> \&show_info,
 	'refresh'		=> \&refresh,
@@ -1773,7 +1775,15 @@ sub show_pvr_list {
 			)
 		);
 		for ( @displaycols ) {
-			push @row, td( {-class=>'search'}, $pvrsearch->{$name}->{$_} );
+			push @row, td( {-class=>'search'}, 
+				label( {
+					-title		=> "Click to Edit",
+					-class		=> 'search',
+					-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='pvr_edit'; form.PVRSEARCH.value='$name'; submit(); RestoreFormVars(form);",
+					},
+					$pvrsearch->{$name}->{$_},
+				)
+			);
 		}
 		push @html, Tr( {-class=>'search'}, @row );
 	}
@@ -1824,6 +1834,96 @@ sub show_pvr_list {
 	print $fh hidden(
 		-name		=> "PVRSORT",
 		-value		=> $sort_field,
+		-override	=> 1,
+	);
+	print $fh hidden(
+		-name		=> "PVRSEARCH",
+		-value		=> '',
+		-override	=> 1,
+	);
+	print $fh end_form();
+
+	return 0;
+}
+
+
+
+# Edits a single record indicated by PVRSELECT
+sub pvr_edit {
+	my %fields;
+	my $pvrsearch = get_pvr_list();
+	my @html;
+
+	my $pvrname = $cgi->param( 'PVRSEARCH' );
+
+	# Determine max field length
+	my $maxwidth = 30;
+	for ( values %{ $pvrsearch->{$pvrname} } ) {
+		$maxwidth = length($_) if length($_) > $maxwidth && $maxwidth < 200;
+	}
+	# Get each element
+	for my $key ( keys %{ $pvrsearch->{$pvrname} } ) {
+		my $val = $pvrsearch->{$pvrname}->{$key};
+		# Put INPUT field here
+		my $element;
+		#if ( $key eq 'pvrsearch' ) {
+		#	$element = $val;
+		#} else {
+			$element = hidden(
+				-name		=> "EDITKEYS",
+				-value		=> $key,
+				-override	=> 1,
+			).
+			textfield(
+				-class		=> 'edit',
+				-name		=> "EDITVALUES",
+				-value		=> $val,
+				-size		=> $maxwidth + 20,
+			);
+		#}
+		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $element ) );
+	}
+
+	# Editing form
+	print $fh start_form(
+		-name   => "form",
+		-method => "POST",
+	);
+
+	print $fh table( { -class => 'info' }, @html );
+
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+				a(
+					{
+						-class => 'action',
+						-title => 'Save changes',
+						-onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_save'; form.submit(); RestoreFormVars(form);",
+					},
+					'Save Changes'
+				),
+			]),
+		),
+	);
+	# Make sure we go to the correct nextpage for processing
+	print $fh hidden(
+		-name		=> "NEXTPAGE",
+		-value		=> "pvr_add",
+		-override	=> 1,
+	);
+	print $fh hidden(
+		-name		=> "PVRSEARCH",
+		-value		=> $pvrname,
 		-override	=> 1,
 	);
 	print $fh end_form();
@@ -2247,6 +2347,76 @@ sub pvr_add {
 	$out = join "", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
+	print $fh "<pre>$out</pre>";
+
+	# Show list below
+	show_pvr_list();
+
+	return $out;
+}
+
+
+
+# Delete then add again - just in case user has edited name of pvr search
+sub pvr_save {
+	my $out;
+	my @keys = $cgi->param( 'EDITKEYS' );
+	my @values = $cgi->param( 'EDITVALUES' );
+	my @params;
+	my @search_args;
+	my $newsearchname;
+
+	# Convert the two keys and values arrays into a KEY=VALUE params array
+	for ( @keys ) {
+		my $val = shift @values;
+		if ( $_ eq 'pvrsearch' ) {
+			$newsearchname = $val;
+		# append search terms to cmdline
+		} elsif ( /^search\d+$/ && $val !~ /^\-/ ) {
+			push @search_args, $val;
+		} else {
+			push @params, $_.'='.$val;
+		}
+	}
+
+	#print STDERR "ELEMENTS for save: ".(join ',', @params)."\n\n";
+
+	# Sanity check
+	if ( $newsearchname eq '' ) {
+		print $fh p("No PVR Search Name Specified - not updated");
+		return;
+	}
+
+	# Delete the original pvr entry
+	my $searchname = $cgi->param( 'PVRSEARCH' );
+	my @cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--expiry=999999999',
+		'--webrequest',
+		get_iplayer_webrequest_args( "pvrdel=$searchname" ),
+	);
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	my $cmdout = join "", get_cmd_output( @cmd );
+	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+	print $fh p("Deleted: $searchname");
+	$out .= $cmdout;
+
+	# Add the new pvr entry
+	@cmd = (
+		$opt_cmdline->{getiplayer},
+		'--nocopyright',
+		'--expiry=999999999',
+		'--webrequest',
+		get_iplayer_webrequest_args( "pvradd=$newsearchname", @params ),
+		'--',
+		@search_args,
+	);
+	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	$out = join "", get_cmd_output( @cmd );
+	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
+	print $fh p("Added Updated PVR Search '$newsearchname'\n");
 	print $fh "<pre>$out</pre>";
 
 	# Show list below
@@ -3568,6 +3738,7 @@ sub process_params {
 		save	=> 0,
 	};
 
+
 	# Go through each of the options defined above
 	for ( keys %{ $opt } ) {
 		# Ignore cookies if we are saving new ones
@@ -3926,6 +4097,7 @@ sub insert_stylesheet {
 	LABEL.sorted            { color: #CFC; }
 	LABEL.unsorted          { color: #FFF; }
 	LABEL.sorted_reverse    { color: #FCC; }
+	INPUT.edit		{ font-size: 100%; background: #DDD; }
 
 	TABLE.info		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
 	TR.info			{ background: #444; }
