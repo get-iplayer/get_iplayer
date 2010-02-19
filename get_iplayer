@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.66;
+my $version = 2.67;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -43,6 +43,9 @@ my $version = 2.66;
 # ** Cut down 'use' clauses in each class
 # * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * stdout streaming with mms
+# * Add podcast links to web pvr manager
+# * Add PVR search src to recording history
+# * Fix unicode / wide chars in rdf
 #
 # Known Issues:
 # * CAVEAT: The filenames and modes in the history are comma-separated if there was a multimode download. For now it just uses the first one.
@@ -124,6 +127,7 @@ my $opt_format = {
 	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
 	pid		=> [ 2, "pid|url=s", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
+	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "When used with --pid record all the embedded pids if the pid is a series or brand pid."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'"],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv, iphone/mov)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs>', "Recording/streaming start offset (rtmp and realaudio only)"],
@@ -584,7 +588,7 @@ if ( $opt->{pvradd} ) {
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
-	find_matches( $hist );
+	find_pid_matches( $hist );
 
 # Show history
 } elsif ( $opt->{history} ) {
@@ -601,13 +605,7 @@ exit 0;
 
 
 
-# Use the specified options to process the matches in specified array
-# Usage: find_matches( $pids_history_ref, @search_args )
-# Returns: array of objects to be downloaded
-#      or: number of failed/remaining programmes to record using the match (excluding previously recorded progs) if --pid is specified
-sub find_matches {
-	my $hist = shift;
-	my @search_args = @_;
+sub init_search {
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
 	# $prog->{pid}->object hash
@@ -615,14 +613,14 @@ sub find_matches {
 	# obtain prog object given index. e.g. $index_prog->{$index_no}->{element};
 	my $index_prog = {};
 	# hash of prog types specified
-	my %type;
+	my $type = {};
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
 	# Ensure lowercase types
 	$opt->{type} = lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
-	$type{$_} = 1 for split /,/, $opt->{type};
+	$type->{$_} = 1 for split /,/, $opt->{type};
 	# --stream is the same as --stdout --nowrite
 	if ( $opt->{stream} ) {
 		$opt->{nowrite} = 1;
@@ -636,7 +634,7 @@ sub find_matches {
 		binmode STDOUT;
 	}
 	# Default to type=tv if no type option is set
-	$type{tv}		= 1 if keys %type == 0;
+	$type->{tv}		= 1 if keys %{ $type } == 0;
 
 	# External Binaries
 	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
@@ -707,7 +705,7 @@ sub find_matches {
 	}
 
 	# Sanity check valid --type specified
-	for (keys %type) {
+	for (keys %{ $type }) {
 		if ( not progclass($_) ) {
 			logger "ERROR: Invalid type '$_' specified. Valid types are: ".( join ',', progclass() )."\n";
 			exit 3;
@@ -720,98 +718,158 @@ sub find_matches {
 
 	# Display the ages of the selected caches in seconds
 	if ( $opt->{showcacheage} ) {
-		for ( keys %type ) {
+		for ( keys %{ $type } ) {
 			my $cachefile = "${profile_dir}/${_}.cache";
 			main::logger "INFO: $_ cache age: ".( time() - stat($cachefile)->mtime )." secs\n" if -f $cachefile;
 		}
 		exit 0;
 	}
+	return ( $type, $prog, $index_prog );
+}
+
+
+
+sub find_pid_matches {
+	my $hist = shift;
+	my @search_args = @_;
+	my ( $type, $prog, $index_prog ) = init_search( @search_args );
 
 	# Get prog by arbitrary '<type>:<pid>' or just '<pid>' (using the specified types)(then exit)
-	if ( $opt->{pid} ) {
-		my @try_types;
-		my $pid;
+	my @try_types;
+	my $pid;
 
-		# If $opt->{pid} is in the form of '<type>:<pid>' and <type> is a valid type
-		if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && progclass(lc($1)) ) {
-			my $prog_type;
-			( $prog_type, $pid )= ( lc($1), $2 );
-			# Only try to recording using this prog type
-			@try_types = ($prog_type);
+	# If $opt->{pid} is in the form of '<type>:<pid>' and <type> is a valid type
+	if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && progclass(lc($1)) ) {
+		my $prog_type;
+		( $prog_type, $pid )= ( lc($1), $2 );
+		# Only try to recording using this prog type
+		@try_types = ($prog_type);
 			
-		# $opt->{pid} is in the form of '<pid>'
-		} else {
-			$pid = $opt->{pid};
-			@try_types = (keys %type);
-		}
-		logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-		return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{subsonly} ) ) && $hist->check( $pid );	
+	# $opt->{pid} is in the form of '<pid>'
+	} else {
+		$pid = $opt->{pid};
+		@try_types = (keys %{ $type });
+	}
+	logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
+	return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{subsonly} ) ) && $hist->check( $pid );	
 
-		# Maybe we don't want to populate caches - this slows down --pid recordings ...
-		# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
-		# only get links and possibly refresh caches if > 1 type is specified
-		# else only load cached data from file if it exists.
-		my $load_from_file_only;
-		$load_from_file_only = 1 if $#try_types == 0;
-		for my $t ( @try_types ) {
-			get_links( $prog, $index_prog, $t, $load_from_file_only );
-		}
+	# Maybe we don't want to populate caches - this slows down --pid recordings ...
+	# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
+	# only get links and possibly refresh caches if > 1 type is specified
+	# else only load cached data from file if it exists.
+	my $load_from_file_only;
+	$load_from_file_only = 1 if $#try_types == 0;
+	for my $t ( @try_types ) {
+		get_links( $prog, $index_prog, $t, $load_from_file_only );
+	}
+
+	# Simply record pid if we find it in the caches
+	if ( $prog->{$pid}->{pid} ) {
+		return download_pid_in_cache( $hist, $prog->{$pid} );
+	}
+
+	my $totalretcode = 1;
+	my $quit_attempt = 0;
+	my %done_pids;
+	for my $prog_type ( @try_types ) {
+		last if $quit_attempt;
+	
+		# See if the specified pid has other episode pids embedded - results in another list of pids.
+		my $dummy = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
+		my @pids = $dummy->get_pids_recursive();
 
 		# Try to get pid using each speficied prog type
-		my $retcode;
-		for my $prog_type ( @try_types ) {
-			# Force prog type and create new prog instance if it doesn't exist
-			my $this;
+		# process all pids in @pids
+		for my $pid ( @pids ) {
+			# skip this pid if we have already completed it
+			next if $done_pids{$pid};
+			main::logger "INFO: Trying pid: $pid using type: $prog_type\n";
+			my $retcode;
 			if ( not $prog->{$pid}->{pid} ) {
-				logger "INFO Trying to stream pid using type $prog_type\n";
-				logger "INFO: pid not found in $prog_type cache\n";
-				$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
-				# if only one type is specified then we can clean up the pid which might actually be a url
-				if ( $#try_types == 0 ) {
-					logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
-					$this->clean_pid;
-					logger " New: '$this->{pid}'\n" if $opt->{verbose};
-				}
-				# Display pid match for recording
-				if ( $opt->{history} ) {
-					$hist->list_progs( 'pid:'.$pid );
-				} else {
-					list_progs( \%type, $this );
-				}
-				# Don't do a pid recording if metadataonly or thumbonly were specified
-				if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
-					$retcode = $this->download_retry_loop( $hist );
-				}
-				last if ! $retcode;
+				$retcode = download_pid_not_in_cache( $hist, $pid, $prog_type );
+				# don't try again for other types because it was recorded successfully
+				$done_pids{$pid} = 1 if ! $retcode;
 			} else {
-				$this = $prog->{$pid};
-				# Prune future scheduled match if not specified
-				if ( (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
-					# If the prog object exists with pid in history delete it from the prog list
-					logger "INFO: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{verbose};
-					# Don't attempt to download
-					$retcode = 1;
-					last;
-				}
-				logger "INFO Trying to stream pid using type $prog_type\n";
-				logger "INFO: pid found in cache\n";
-				# Display pid match for recording
-				if ( $opt->{history} ) {
-					$hist->list_progs( 'pid:'.$pid );
-				} else {
-					list_progs( \%type, $this );
-				}
-				# Don't do a pid recording if metadataonly or thumbonly were specified
-				if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
-					$retcode = $this->download_retry_loop( $hist );
-				}
-				# If it is in the cache then we'll not need to try the other types regardless of success
-				last;
+				$retcode = download_pid_in_cache( $hist, $prog->{$pid} );
+				# if it's in the cache then there is no need to try this pid for other types
+				$done_pids{$pid} = 1;
 			}
+			$totalretcode += $retcode;
 		}
-		# return zero on success
-		return $retcode;
 	}
+
+	# return zero on success of all pid recordings (used for PVR queue)
+	return $totalretcode;
+}
+
+
+
+sub download_pid_not_in_cache {
+	my $hist = shift;
+	my $pid = shift;
+	my $prog_type = shift;
+	my $retcode;
+
+	# Force prog type and create new prog instance if it doesn't exist
+	my $this;
+	logger "INFO Trying to stream pid using type $prog_type\n";
+	logger "INFO: pid not found in $prog_type cache\n";
+	$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
+	# if only one type is specified then we can clean up the pid which might actually be a url
+	#if ( $#try_types == 0 ) {
+		logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
+		$this->clean_pid;
+		logger " New: '$this->{pid}'\n" if $opt->{verbose};
+	#}
+	# Display pid match for recording
+	if ( $opt->{history} ) {
+		$hist->list_progs( 'pid:'.$pid );
+	}
+	# Don't do a pid recording if metadataonly or thumbonly were specified
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+		return $this->download_retry_loop( $hist );
+	}
+}
+
+
+
+sub download_pid_in_cache {
+	my $hist = shift;
+	my $this = shift;
+	my $retcode;
+
+	# Prune future scheduled match if not specified
+	if ( (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
+		# If the prog object exists with pid in history delete it from the prog list
+		logger "INFO: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{verbose};
+		# Don't attempt to download
+		return 1;
+	}
+	logger "INFO Trying to stream pid using type $this->{type}\n";
+	logger "INFO: pid found in cache\n";
+	# Display pid match for recording
+	if ( $opt->{history} ) {
+		$hist->list_progs( 'pid:'.$this->{pid} );
+	} else {
+		list_progs( { $this->{type} => 1 }, $this );
+	}
+	# Don't do a pid recording if metadataonly or thumbonly were specified
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+		$retcode = $this->download_retry_loop( $hist );
+	}
+	return $retcode;
+}
+
+
+
+# Use the specified options to process the matches in specified array
+# Usage: find_matches( $pids_history_ref, @search_args )
+# Returns: array of objects to be downloaded
+#      or: number of failed/remaining programmes to record using the match (excluding previously recorded progs) if --pid is specified
+sub find_matches {
+	my $hist = shift;
+	my @search_args = @_;
+	my ( $type, $prog, $index_prog ) = init_search( @search_args );
 
 	# We don't actually need to get the links first for the specifiied type(s) if we have only index number specified (and not --list)
 	my %got_cache;
@@ -829,7 +887,7 @@ sub find_matches {
 	# Pre-populate caches if --list option used or there was a non-index specified
 	if ( $need_get_links || $opt->{list} ) {
 		# Get stream links from web site or from cache (also populates all hashes) specified in --type option
-		for my $t ( keys %type ) {
+		for my $t ( keys %{ $type } ) {
 			get_links( $prog, $index_prog, $t );
 			$got_cache{ $t } = 1;
 		}
@@ -869,7 +927,7 @@ sub find_matches {
 	
 	# List elements (i.e. 'channel' 'categories') if required and exit
 	if ( $opt->{list} ) {
-		list_unique_element_counts( \%type, $opt->{list}, @match_list );
+		list_unique_element_counts( $type, $opt->{list}, @match_list );
 		exit 0;
 	}
 
@@ -882,7 +940,7 @@ sub find_matches {
 				# Get extra required programme caches
 				logger "INFO: Additionally getting cached programme data for $prog_type\n" if $opt->{verbose};
 				# Add new prog types to the type list
-				$type{$prog_type} = 1;
+				$type->{$prog_type} = 1;
 				# Get $prog_type stream links
 				get_links( $prog, $index_prog, $prog_type );
 				$got_cache{$prog_type} = 1;
@@ -936,7 +994,7 @@ sub find_matches {
 	}
 
 	# Display list for recording
-	list_progs( \%type, @match_list );
+	list_progs( $type, @match_list );
 
 	# Write HTML and XML files if required (with search options applied)
 	create_html_file( @match_list ) if $opt->{html};
@@ -1195,9 +1253,9 @@ sub get_regex_matches {
 		  && ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
 		) {
 			# Add included matches
-			for my $field ( @searchfields ) {
-				$download_hash{ $this->{index} } = $this if $this->{$field} =~ /$download_regex/i;
-			}
+			my @compund_fields;
+			push @compund_fields, $this->{$_} for @searchfields;
+			$download_hash{ $this->{index} } = $this if (join ' ', @compund_fields) =~ /$download_regex/i;
 		}
 	}
 	# Remove excluded matches
@@ -1272,8 +1330,8 @@ sub make_array_unique_ordered {
 sub user_agent {
 	my $id = shift || '';
 	my $user_agent = {
-		coremedia	=> 'Apple iPhone v1.1.1 CoreMedia v1.0.0.3A110a',
-		safari		=> 'Mozilla/5.0 (iPhone; U; CPU like Mac OS X; en) AppleWebKit/420.1 (KHTML, like Gecko) Version/3.0 Mobile/3A110a Safari/419.3',
+		coremedia	=> 'Apple iPhone OS v3.1.2 CoreMedia v1.0.0.7D11',
+		safari		=> 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_2 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7D11 Safari/528.16',
 		update		=> "get_iplayer updater (v${version} - $^O - $^V)",
 		get_iplayer	=> "get_iplayer/$version $^O/$^V",
 	};
@@ -3621,7 +3679,7 @@ sub check {
 
 	if ( defined $hist->{ $pid } ) {
 		my ( $name, $episode, $histmode ) = ( $hist->{$pid}->{name}, $hist->{$pid}->{episode}, $hist->{$pid}->{mode} );
-		main::main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in download history\n" if $opt->{debug};
+		main::main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in history\n" if $opt->{debug};
 		if ( $opt->{multimode} ) {
 			# Strip any number off the end of the mode names for the comparison
 			$mode =~ s/\d+$//g;
@@ -3630,17 +3688,17 @@ sub check {
 			for ( @hmodes ) {
 				s/\d+$//g;
 				if ( $mode eq $_ ) {
-					main::logger "INFO: $name - $episode ($pid / $mode) Already in download history ($historyfile) - use --force to override\n" if ! $silent;
+					main::logger "INFO: $name - $episode ($pid / $mode) Already in history ($historyfile) - use --force to override\n" if ! $silent;
 					return 1;
 				}
 			}
 		} else {
-			main::logger "INFO: $name - $episode ($pid) Already in download history ($historyfile) - use --force to override\n" if ! $silent;
+			main::logger "INFO: $name - $episode ($pid) Already in history ($historyfile) - use --force to override\n" if ! $silent;
 			return 1;
 		}
 	}
 
-	main::logger "INFO: Programme not in download history\n" if $opt->{verbose} && ! $silent;
+	main::logger "INFO: Programme not in history\n" if $opt->{verbose} && ! $silent;
 	return 0;
 }
 
@@ -3863,6 +3921,14 @@ sub display_metadata {
 	}
 	main::logger "\n";
 	return 0;
+}
+
+
+
+# Return a list of episode pids from the given contents page/pid
+sub get_pids_recursive {
+	my $prog = shift;
+	return '';
 }
 
 
@@ -5212,6 +5278,9 @@ sub get_metadata {
 		# Flatten
 		$entry =~ s|[\n\r]| |g;
 		$longdesc = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>};
+		# Detect if this is just a series pid and report other episodes in the
+		# form of <po:episode rdf:resource="/programmes/b00fyl5z#programme" />
+		my $rdftitle = $1 if $entry =~ m{<dc:title>(.+?)<};
 	}
 
 
@@ -5361,6 +5430,138 @@ sub get_metadata {
 	$prog->{seriesnum}	= $seriesnum;
 
 	return 0;
+}
+
+
+
+sub get_pids_recursive {
+	my $prog = shift;
+	my $ua = main::create_ua();
+	my @pids = ();
+
+	eval "use XML::Simple";
+	if ($@) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::Simple perl module to use the Series and Brand pid parsing functionality\n";
+		push @pids, $prog->{pid};
+	} else {
+		#use Data::Dumper qw(Dumper);
+		my $rdf = get_rdf_data( $ua, $prog->{pid} );
+		# an episode-only pid page
+		if ( $rdf->{'po:Episode'} ) {
+			main::logger "INFO: Episode-only pid detected\n";
+			# No need to lookup - we already are an episode pid
+			push @pids, $prog->{pid};
+		# a series pid page
+		} elsif ( $rdf->{'po:Series'} ) {
+			main::logger "INFO: Series pid detected\n";
+			push @pids, parse_rdf_series( $ua, $prog->{pid} );
+			if ( ! $opt->{pidrecursive} ) {
+				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
+				return ();
+			}
+		# a brand pid page
+		} elsif ( $rdf->{'po:Brand'} ) {
+			main::logger "INFO: Brand pid detected\n";
+			push @pids, parse_rdf_brand( $ua, $prog->{pid} );
+			if ( ! $opt->{pidrecursive} ) {
+				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
+				return ();
+			}
+		}
+	}
+	return @pids;
+}
+
+
+
+# Gets the episode data from a given episode pid
+sub parse_rdf_episode {
+	my $ua = shift;
+	my $uri = shift;
+	my $rdf = get_rdf_data( $ua, $uri );
+
+	main::logger "INFO:      Episode Title: '".$rdf->{'po:Episode'}->{'dc:title'}."'\n" if $opt->{debug};
+	# We don't really need the ver pids from here
+	if ( ref$rdf->{'po:Episode'}->{'po:version'} eq 'ARRAY' ) {
+		for my $verpid_element ( @{ $rdf->{'po:Episode'}->{'po:version'} } ) {
+			main::logger "INFO:        With Version PID '".extract_pid( %{ $verpid_element }->{'rdf:resource'} )."'\n" if $opt->{debug};
+		}
+	} else {
+		main::logger "INFO:        With Version PID '".extract_pid( $rdf->{'po:Episode'}->{'po:version'}->{'rdf:resource'} )."'\n" if $opt->{debug};
+	}
+	main::logger "INFO:        From Series PID '".extract_pid( $rdf->{'po:Series'}->{'rdf:about'} )."'\n" if $opt->{debug};
+	main::logger "INFO:        From Brand PID '".extract_pid( $rdf->{'po:Brand'}->{'rdf:about'} )."'\n" if $opt->{debug};
+}
+
+
+
+sub parse_rdf_series {
+	my $ua = shift;
+	my $uri = shift;
+	my $rdf = get_rdf_data( $ua, $uri );
+	my @pids = ();
+	my $spid = extract_pid( $rdf->{'po:Series'}->{'rdf:about'} );
+	main::logger "INFO:    Series: '".$rdf->{'po:Series'}->{'dc:title'}."' ($spid)\n";
+	main::logger "INFO:      From Brand PID '".$rdf->{'po:Brand'}->{'rdf:about'}."'\n" if $opt->{debug};
+	for my $episode_element ( @{ $rdf->{'po:Series'}->{'po:episode'} } ) {
+		my $pid = extract_pid( %{ $episode_element }->{'po:Episode'}->{'rdf:about'} );
+		main::logger "INFO:      Episode '".%{ $episode_element }->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
+		push @pids, $pid;
+		#parse_rdf_episode( $ua, $pid );
+	}
+	return @pids;
+}
+
+
+
+sub parse_rdf_brand {
+	my $ua = shift;
+	my $uri = shift;
+	my $rdf = get_rdf_data( $ua, $uri );
+	my @pids = ();
+	my $bpid = extract_pid( $uri );
+	main::logger "INFO:  Brand: '".$rdf->{'po:Brand'}->{'dc:title'}."' ($bpid)\n";
+	for my $series_element ( @{ $rdf->{'po:Brand'}->{'po:series'} } ) {
+		main::logger "INFO: With Series pid '".%{ $series_element }->{'rdf:resource'}."'\n" if $opt->{debug};
+		push @pids, parse_rdf_series( $ua, %{ $series_element }->{'rdf:resource'} );
+	}
+	for my $episode_element ( @{ $rdf->{'po:Brand'}->{'po:episode'} } ) {
+		main::logger "INFO:      Episode pid: ".%{ $episode_element }->{'rdf:resource'}."\n" if $opt->{debug};
+		push @pids, extract_pid( %{ $episode_element }->{'rdf:resource'} );
+		#parse_rdf_episode( $ua, %{ $episode_element }->{'rdf:resource'} );
+	}
+	return @pids;
+}
+
+
+
+# Extracts and returns a pid from a URI/URL
+sub extract_pid {
+	return $1 if $_[0] =~ m{/?([wpb]0[a-z0-9]{6})};
+	return '';
+}
+
+
+
+# Given a pid, gets the rdf URL and returns an XML::Simple object
+sub get_rdf_data {
+	eval "use XML::Simple";
+	if ($@) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::Simple perl module to use the Series and Brand pid parsing functionality\n";
+		return;
+	}
+	#use Data::Dumper qw(Dumper);
+	my $ua = shift;
+	my $uri = shift;
+	my $pid = extract_pid( $uri );
+	my $entry = main::request_url_retry($ua, 'http://www.bbc.co.uk/programmes/'.$pid.'.rdf', 3, '', '');
+	decode_entities( $entry );
+	# Flatten
+	$entry =~ s|[\n\r]| |g;
+	my $simple = new XML::Simple();
+	my $rdf = $simple->XMLin( $entry );
+	#main::logger Dumper ( $rdf )."\n" if $opt->{debug};
+	return $rdf;
 }
 
 
@@ -5515,7 +5716,7 @@ sub get_stream_data_cdn {
 		# Common attributes
 		# swfurl = Default iPlayer swf version
 		my $conn = {
-			swfurl		=> "http://www.bbc.co.uk/emp/10player.swf?revision=14200_14320",
+			swfurl		=> "http://www.bbc.co.uk/emp/10player.swf?revision=15501_15796",
 			ext		=> $ext,
 			streamer	=> $streamer,
 			bitrate		=> $mattribs->{bitrate},
@@ -5870,6 +6071,27 @@ sub get_stream_data {
 		} else {
 			new_stream_report($mattribs, undef) if $opt->{verbose};
 		}	
+	}
+
+	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
+	# Skip check if the modelist selected excludes iphone
+	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && $verpid !~ /^http:/ && grep /^iphone/, split ',', $prog->modelist() ) {
+		if ( my $streamurl = Streamer::iphone->get_url($ua, $prog->{pid}) ) {
+			my $mode = 'iphone1';
+			if ( $prog->{type} eq 'radio' ) {
+				$data->{$mode}->{bitrate} = 128;
+				$data->{$mode}->{type} = "(iplayer_streaming_http_mp3) http mp3 128kbps stream";
+			} else {
+				$data->{$mode}->{bitrate} = 480;
+				$data->{$mode}->{type} = "(iplayer_streaming_http_mp4) http h264 480x272 480kbps stream";
+			}
+			$data->{$mode}->{streamurl} = $streamurl;
+			$data->{$mode}->{streamer} = 'iphone';
+			$data->{$mode}->{ext} = 'mov';
+			get_stream_set_type( $data->{$mode} ) if ! $data->{$mode}->{type};
+		} else {
+			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
+		}
 	}
 
 	# Report modes found
@@ -7091,7 +7313,7 @@ sub init {
 	# Force certain options for Live 
 	# Force only one try if live and recording to file
 	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
-	# Force to skip checking download history if live
+	# Force to skip checking history if live
 	$opt->{force} = 1;
 }
 
@@ -7236,7 +7458,7 @@ sub init {
 	$opt->{raw} = 1 if $opt->{stdout} && $opt->{nowrite};
 	# Force only one try if live and recording to file
 	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
-	# Force to skip checking download history if live
+	# Force to skip checking history if live
 	$opt->{force} = 1;
 }
 
@@ -7352,46 +7574,39 @@ sub get_url {
 	my $ua = shift;
 	my $pid = shift;
 
-	# Create url with appended 12 digit random number /mediaselector/3/auth/iplayer_streaming_http_mp4/b0067vmx?r=101477348958
-	# http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4
-	my $iphone_download_prefix = 'http://www.bbc.co.uk/mediaselector/3/auth/iplayer_streaming_http_mp4';
-	my $url_1 = ${iphone_download_prefix}.'/'.${pid}.'?r='.(sprintf "%012.0f", 999999999999*rand(0) );
-	main::logger "INFO: iphone stream URL = $url_1\n" if $opt->{verbose};
-
-	# This doesn't work through url-prepend proxies
-	## Use url prepend if required
-	#if ( $opt->{proxy} =~ /^prepend:/ ) {
-	#	$url_1 = $opt->{proxy}.main::url_encode( $url_1 );
-	#	$url_1 =~ s/^prepend://g;
-	#}
-
-	# Stage 2: e.g. "Location: http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/121285241910131406.mp4?token=iVXexp1yQt4jalB2Hkl%2BMqI25nz2WKiSsqD7LzRmowrwXGe%2Bq94k8KPsm7pI8kDkLslodvHySUyU%0ApM76%2BxEGtoQTF20ZdFjuqo1%2B3b7Qmb2StOGniozptrHEVQl%2FYebFKVNINg%3D%3D%0A"
-	#main::logger "\rGetting iplayer iphone URL         " if (! $opt->{verbose}) && ! $opt->{streaminfo};
-	my $h = new HTTP::Headers(
-		'User-Agent'	=> main::user_agent('coremedia'),
-		'Accept'	=> '*/*',
-		'Range'		=> 'bytes=0-1',
-	);
-	my $req = HTTP::Request->new ('GET', $url_1, $h);
-	# send request (use simple_request here because that will not allow redirects)
-	my $res = $ua->simple_request($req);
-	# Get resulting Location header (i.e. redirect URL)
-	my $url = $res->header("location");
-	if ( ! $res->is_redirect ) {
-		main::logger "ERROR: Failed to get iphone redirect from iplayer site\n\n";
-		return '';
+	# Look for href="http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/5439950172312621205.mp4?token=iVX.lots.of.text.x9Z%2F2GNBdQKl0%3D%0A&amp;pid=b00qhs36"
+	my $url;
+	my $iphone_download_prefix = 'http://www.bbc.co.uk/mobile/iplayer/episode';
+	my $url_0 = ${iphone_download_prefix}.'/'.${pid};
+	main::logger "INFO: iphone stream URL = $url\n" if $opt->{verbose};
+	my $safari_ua = main::create_ua('safari');
+	my $html = main::request_url_retry( $safari_ua, $url_0, 3, undef, undef, 1 );
+	$html =~ s/\n/ /g;
+	# Check for guidance warning
+	my $guidance_post;
+	$guidance_post = $1 if $html =~ m{(isOver\d+)};
+	if ( $guidance_post ) {
+		my $h = new HTTP::Headers(
+			'User-Agent'		=> main::user_agent('coremedia'),
+			'Accept'		=> '*/*',
+			'Accept-Language'	=> 'en',
+			'Connection'		=> 'keep-alive',
+ 			'Pragma'		=> 'no-cache',
+		);
+		main::logger "INFO: Guidance '$guidance_post' Warning Detected\n" if $opt->{verbose};
+		# Now post this var and get html again
+		my $req = HTTP::Request->new('POST', $url_0, $h);
+		$req->content_type('application/x-www-form-urlencoded');
+		$req->content('form=guidanceprompt&'.$guidance_post.'=1');
+		my $res = $ua->request($req);
+		$html = $res->as_string;
 	}
-	# Extract redirection Location URL
-	$url =~ s/^Location: (.*)$/$1/g;
-	# If we get a Redirection containing statuscode=404 then this prog is not yet ready
-	if ( $url =~ /statuscode=404/ ) {
-		main::logger "\rERROR: iphone stream is not yet ready\n" if $opt->{verbose};
-		return '';
-	} elsif ( $url =~ /statuscode=403/ ) {
-		main::logger "\rERROR: iphone stream is not permitted for recording\n" if $opt->{verbose};
-		return '';
+	$url = decode_entities($1) if $html =~ m{href="(http.//download\.iplayer\.bbc\.co\.uk/iplayer_streaming_http_mp4.+?)"};
+	main::logger "DEBUG: Got iphone mediaselector URL: $url\n" if $opt->{verbose};
+	
+	if ( ! $url ) {
+		main::logger "ERROR: Failed to get iphone URL from iplayer site\n\n";
 	}
-
 	return $url;
 }
 
@@ -7833,7 +8048,7 @@ sub get {
 
 	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5', 'FLVStreamer v1.7a', 'RTMPDump 2.1b'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/, `"$bin->{flvstreamer}" 2>&1`)[0] );
+	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/i, `"$bin->{flvstreamer}" 2>&1`)[0] );
 	$rtmpver =~ s/^\w+\s+v?([\.\d]+).*$/$1/g;
 	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
@@ -8851,8 +9066,8 @@ sub run {
 		$opt->{get} = 1 if ! $opt->{test};
 
 		# If this is a one-off queue pid entry then delete the PVR entry upon successful recording(s)
-		if ( $pvr->{$name}->{pid} ) {
-			my $failcount = main::find_matches( $hist );
+		if ( $pvr->{$name}->{pid} && $name =~ /^ONCE_/ ) {
+			my $failcount = main::find_pid_matches( $hist );
 			$pvr->del( $name ) if not $failcount;
 
 		# Just make recordings of matching progs
@@ -8900,7 +9115,7 @@ sub queue {
 	if ( $opt_cmdline->{pid} ) {
 		# ensure we only have one prog type defined
 		if ( $opt->{type} && $opt->{type} !~ /,/ ) {
-			# Add to PVR if not already in download history (unless multimode specified)
+			# Add to PVR if not already in history (unless multimode specified)
 			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) ) || $opt->{multimode};
 		} else {
 			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
