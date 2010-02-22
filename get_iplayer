@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.67;
+my $version = 2.68;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -576,13 +576,13 @@ if ( $opt->{pvradd} ) {
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	$pvr->run();
+	$pvr->run( @search_args );
 	unlink $lockfile;
 
 } elsif ( $opt->{pvrsingle} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	$pvr->run( $opt->{pvrsingle} );
+	$pvr->run( '^'.$opt->{pvrsingle}.'$' );
 	unlink $lockfile;
 
 # Record prog specified by --pid option
@@ -5469,6 +5469,8 @@ sub get_pids_recursive {
 			}
 		}
 	}
+	# now make list unique
+	@pids = main::make_array_unique_ordered( @pids );
 	return @pids;
 }
 
@@ -5480,7 +5482,8 @@ sub parse_rdf_episode {
 	my $uri = shift;
 	my $rdf = get_rdf_data( $ua, $uri );
 
-	main::logger "INFO:      Episode Title: '".$rdf->{'po:Episode'}->{'dc:title'}."'\n" if $opt->{debug};
+	my $pid = extract_pid( $uri );
+	main::logger "INFO:      Episode '".$rdf->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
 	# We don't really need the ver pids from here
 	if ( ref$rdf->{'po:Episode'}->{'po:version'} eq 'ARRAY' ) {
 		for my $verpid_element ( @{ $rdf->{'po:Episode'}->{'po:version'} } ) {
@@ -5525,10 +5528,11 @@ sub parse_rdf_brand {
 		main::logger "INFO: With Series pid '".%{ $series_element }->{'rdf:resource'}."'\n" if $opt->{debug};
 		push @pids, parse_rdf_series( $ua, %{ $series_element }->{'rdf:resource'} );
 	}
+	main::logger "INFO:    Series: <None>\n" if $#{ $rdf->{'po:Brand'}->{'po:episode'} };
 	for my $episode_element ( @{ $rdf->{'po:Brand'}->{'po:episode'} } ) {
 		main::logger "INFO:      Episode pid: ".%{ $episode_element }->{'rdf:resource'}."\n" if $opt->{debug};
 		push @pids, extract_pid( %{ $episode_element }->{'rdf:resource'} );
-		#parse_rdf_episode( $ua, %{ $episode_element }->{'rdf:resource'} );
+		parse_rdf_episode( $ua, %{ $episode_element }->{'rdf:resource'} );
 	}
 	return @pids;
 }
@@ -8958,7 +8962,8 @@ my $opt_cmdline;
 # Class cmdline Options
 sub opt_format {
 	return {
-		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)"],
+		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr [pvr search name]', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command."],
+		pvrexclude	=> [ 0, "pvrexclude|pvr-exclude=s", 'PVR', '--pvr-exclude <string>', "Exclude the PVR searches to run by seacrh name (regex or comma separated values)"],
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvradd <search name>', "Save the named PVR search with the specified search terms"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvrdel <search name>', "Remove the named search from the PVR searches"],
@@ -9032,7 +9037,8 @@ sub opt {
 # Usage: $pvr->run( [pvr search name] )
 sub run {
 	my $pvr = shift;
-	my $single = shift;
+	my $pvr_name_regex = shift || '.*';
+	my $exclude_regex = '_ROUGE_VALUE_';
 
 	# Don't attempt to record programmes with pids in history
 	my $hist = History->new();
@@ -9040,8 +9046,13 @@ sub run {
 	# Load all PVR searches
 	$pvr->load_list();
 
+	if ( $opt->{pvrexclude} ) {
+		$exclude_regex = '('.(join '|', ( split /,/, $opt->{pvrexclude} ) ).')';
+	}
+
 	# For each PVR search (or single one if specified)
-	my @names = ( $single ) || ( sort {lc $a cmp lc $b} keys %{$pvr} );
+	my @names = ( grep !/$exclude_regex/i, grep /$pvr_name_regex/i, sort {lc $a cmp lc $b} keys %{$pvr} );
+
 	main::logger "Running PVR Searches:\n";
 	for my $name ( @names ) {
 		# Ignore if this search is disabled
