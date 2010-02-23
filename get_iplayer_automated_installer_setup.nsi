@@ -5,8 +5,8 @@
   Name "get_iplayer"
 
   !define PRODUCT "get_iplayer"
-  !define VERSION "2.67"
-  !define USERAGENT "Mozilla/5.0 (X11; U; Linux i686; en-GB; rv:1.9.0.17) Gecko/2010010604 Ubuntu/9.04 (jaunty) Firefox/3.0.17"
+  !define VERSION "2.68"
+  !define USERAGENT "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9.2) Gecko/20100115 Firefox/3.6"
   !include "MUI.nsh"
   !include "Sections.nsh"
 
@@ -24,7 +24,7 @@
   InstallDir "$PROGRAMFILES\${PRODUCT}\"
    
   ;DEFINE THE SETUP exe LOGO
-  !define MUI_ICON "installer_files\iplayer_logo.ico"
+  !define MUI_ICON "get_iplayer\iplayer_logo.ico"
 
   ;get all user profile path
   Var TempGlobalProfile
@@ -47,7 +47,7 @@
   !insertmacro MUI_PAGE_WELCOME
 
   !define MUI_PAGE_CUSTOMFUNCTION_PRE LicensePre
-  !insertmacro MUI_PAGE_LICENSE "installer_files\LICENSE.txt"
+  !insertmacro MUI_PAGE_LICENSE "get_iplayer\LICENSE.txt"
 
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW ComponentsShow
   !insertmacro MUI_PAGE_COMPONENTS
