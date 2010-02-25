@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.68;
+my $version = 2.69;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -4114,7 +4114,7 @@ sub mode_ver_download_retry_loop {
 	my $retcode;
 
 	# Use different number of retries for flash modes
-	$retries = $opt->{attempts} || 20 if $mode =~ /^flash/;
+	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
@@ -5439,6 +5439,12 @@ sub get_pids_recursive {
 	my $ua = main::create_ua();
 	my @pids = ();
 
+	# Clean up the pid
+	$prog->clean_pid();
+
+	# Skip RDF retrieval if a web URL
+	return $prog->{pid} if $prog->{pid} =~ '^http';
+
 	eval "use XML::Simple";
 	if ($@) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple perl module to use the Series and Brand pid parsing functionality\n";
@@ -5446,6 +5452,10 @@ sub get_pids_recursive {
 	} else {
 		#use Data::Dumper qw(Dumper);
 		my $rdf = get_rdf_data( $ua, $prog->{pid} );
+		if ( ! $rdf ) {
+			main::logger "WARNING: PID URL contained no RDF data. Trying to record PID directly.\n";
+			return $prog->{pid};
+		}
 		# an episode-only pid page
 		if ( $rdf->{'po:Episode'} ) {
 			main::logger "INFO: Episode-only pid detected\n";
@@ -5481,7 +5491,10 @@ sub parse_rdf_episode {
 	my $ua = shift;
 	my $uri = shift;
 	my $rdf = get_rdf_data( $ua, $uri );
-
+	if ( ! $rdf ) {
+		main::logger "WARNING: Episode PID rdf URL contained no RDF data.\n";
+		return '';
+	}
 	my $pid = extract_pid( $uri );
 	main::logger "INFO:      Episode '".$rdf->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
 	# We don't really need the ver pids from here
@@ -5502,6 +5515,10 @@ sub parse_rdf_series {
 	my $ua = shift;
 	my $uri = shift;
 	my $rdf = get_rdf_data( $ua, $uri );
+	if ( ! $rdf ) {
+		main::logger "WARNING: Series PID rdf URL contained no RDF data.\n";
+		return '';
+	}
 	my @pids = ();
 	my $spid = extract_pid( $rdf->{'po:Series'}->{'rdf:about'} );
 	main::logger "INFO:    Series: '".$rdf->{'po:Series'}->{'dc:title'}."' ($spid)\n";
@@ -5521,6 +5538,10 @@ sub parse_rdf_brand {
 	my $ua = shift;
 	my $uri = shift;
 	my $rdf = get_rdf_data( $ua, $uri );
+	if ( ! $rdf ) {
+		main::logger "WARNING: Brand PID rdf URL contained no RDF data.\n";
+		return '';
+	}
 	my @pids = ();
 	my $bpid = extract_pid( $uri );
 	main::logger "INFO:  Brand: '".$rdf->{'po:Brand'}->{'dc:title'}."' ($bpid)\n";
@@ -5559,6 +5580,10 @@ sub get_rdf_data {
 	my $uri = shift;
 	my $pid = extract_pid( $uri );
 	my $entry = main::request_url_retry($ua, 'http://www.bbc.co.uk/programmes/'.$pid.'.rdf', 3, '', '');
+	if ( ! $entry ) {
+		main::logger "WARNING: rdf URL contained no data\n";
+		return '';
+	}
 	decode_entities( $entry );
 	# Flatten
 	$entry =~ s|[\n\r]| |g;
@@ -6268,11 +6293,12 @@ sub clean_pid {
 		main::logger "DEBUG: Final expanded short URL is '$prog->{pid}'\n" if $opt->{debug};
 	}
 		
-	# If this is an iPlayer pid (not a pid page on BBC programmes site)
+	# If this is an iPlayer pid
 	if ( $prog->{pid} =~ m{^([pb]0[a-z0-9]{6})$} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
 
+	# If this an URL containing a PID (except for BBC programmes URLs)
 	} elsif ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} && $prog->{pid} !~ m{/programmes/} ) {
 		# extract b??????? format from any URL containing it
 		$prog->{pid} = $1;
@@ -6948,6 +6974,7 @@ sub channels {
 		'bbc_london'				=> 'BBC London',
 		'bbc_radio_kent'			=> 'BBC Kent',
 		'bbc_radio_surrey'			=> 'BBC Surrey',
+		'bbc_radio_sussex'			=> 'BBC Sussex',
 		'bbc_radio_oxford'			=> 'BBC Oxford',
 		'bbc_radio_berkshire'			=> 'BBC Berkshire',
 		'bbc_radio_solent'			=> 'BBC Solent',
@@ -7018,6 +7045,7 @@ sub channels_schedule {
 		'london/programmes/schedules'		=> 'BBC London',
 		'kent/programmes/schedules'		=> 'BBC Kent',
 		'surrey/programmes/schedules'		=> 'BBC Surrey',
+		'sussex/programmes/schedules'		=> 'BBC Sussex',
 		'oxford/programmes/schedules'		=> 'BBC Oxford',
 		'berkshire/programmes/schedules'	=> 'BBC Berkshire',
 		'solent/programmes/schedules'		=> 'BBC Solent',
@@ -7422,6 +7450,7 @@ sub channels {
 		'bbc_radio_cambridge'			=> 'BBC Cambridgeshire',
 		'bbc_radio_norfolk'			=> 'BBC Norfolk',
 		'bbc_radio_suffolk'			=> 'BBC Suffolk',
+		'bbc_radio_sussex'			=> 'BBC Sussex',
 		'bbc_radio_essex'			=> 'BBC Essex',
 		'bbc_london'				=> 'BBC London',
 		'bbc_radio_kent'			=> 'BBC Kent',
