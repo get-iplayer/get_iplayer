@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.70;
+my $version = 2.71;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -41,7 +41,6 @@ my $version = 2.70;
 # * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # ** all global vars into a class???
 # ** Cut down 'use' clauses in each class
-# * Correctly handle connection priorities in mediaselector metadata for each mode for iplayer
 # * stdout streaming with mms
 # * Add podcast links to web pvr manager
 # * Add PVR search src to recording history
@@ -443,7 +442,7 @@ Options->usage( 1, $opt_cmdline->{manpage} ) if $opt_cmdline->{manpage};
 # Display GPLv3 stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
-	logger request_url_retry( create_ua( 'get_iplayer' ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
+	logger request_url_retry( create_ua( 'get_iplayer', 1 ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
 
@@ -473,7 +472,7 @@ $SIG{INT} = $SIG{PIPE} = \&cleanup;
 
 # Other Non option-dependant vars
 my $historyfile		= "${profile_dir}/download_history";
-my $cookiejar		= "${profile_dir}/cookies";
+my $cookiejar		= "${profile_dir}/cookies.";
 my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
@@ -537,6 +536,11 @@ if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fi
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
 my $lockfile;
 $lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
+
+# Delete cookies each session
+unlink($cookiejar.'desktop');
+unlink($cookiejar.'safari');
+unlink($cookiejar.'coremedia');
 
 # Create new PVR instance
 # $pvr->{searchname}->{<option>} = <value>;
@@ -1030,7 +1034,7 @@ sub list_progs {
 	my $typeref = shift;
 	# Use a rogue value if undefined
 	my $number_of_types = keys %{$typeref} || 2;
-	my $ua = create_ua();
+	my $ua = create_ua( 'desktop', 1 );
 	my %names;
 	my ( @matches ) = ( @_ );
 	
@@ -1327,15 +1331,61 @@ sub make_array_unique_ordered {
 
 
 # User Agents
+# Uses global $ua_cache
+my $ua_cache = {};
 sub user_agent {
-	my $id = shift || '';
+	my $id = shift || 'desktop';
+
+	# Create user agents lists
 	my $user_agent = {
-		coremedia	=> 'Apple iPhone OS v3.1.2 CoreMedia v1.0.0.7D11',
-		safari		=> 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_2 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7D11 Safari/528.16',
-		update		=> "get_iplayer updater (v${version} - $^O - $^V)",
-		get_iplayer	=> "get_iplayer/$version $^O/$^V",
+		update		=> [ "get_iplayer updater (v${version} - $^O - $^V)" ],
+		get_iplayer	=> [ "get_iplayer/$version $^O/$^V" ],
+		desktop		=> [
+				'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
+				'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; YPC 3.2.0; SLCC1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04<RAND>)',
+				'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; WOW64; Trident/4.0; SLCC2; .NET CLR 2.0.50<RAND>; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>; Media Center PC 6.0; InfoPath.2; MS-RTC LM 8)',
+				'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.8 (KHTML, like Gecko) Chrome/2.0.178.0 Safari/<RAND>.8',
+				'Mozilla/5.0 (compatible; MSIE 7.0; Windows NT 6.0; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; c .NET CLR 3.0.0<RAND>6; .NET CLR 3.5.30<RAND>; InfoPath.1; el-GR)',
+				'Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_4_11; tr) AppleWebKit/<RAND>.4+ (KHTML, like Gecko) Version/4.0dp1 Safari/<RAND>.11.2',
+				'Mozilla/6.0 (Windows; U; Windows NT 7.0; en-US; rv:1.9.0.8) Gecko/2009032609 Firefox/3.0.9 (.NET CLR 3.5.30<RAND>)',
+				'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
+				],
+		safari		=> [
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 2_0 like Mac OS X; en-us) AppleWebKit/525.18.1 (KHTML, like Gecko) Version/3.1.1 Mobile/5A345 Safari/525.20',
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 2_0_1 like Mac OS X; en-us) AppleWebKit/525.18.1 (KHTML, like Gecko) Version/3.1.1 Mobile/5B108 Safari/525.20',
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A341 Safari/528.16',
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0_1 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A400 Safari/528.16',
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_2 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7D11 Safari/528.16',
+				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16',
+				],
+		coremedia	=> [
+				'Apple iPhone v1.1.4 CoreMedia v1.0.0.4A102',
+				'Apple iPhone v1.1.5 CoreMedia v1.0.0.4B1',
+				'Apple iPhone OS v2.0 CoreMedia v1.0.0.5A347',
+				'Apple iPhone OS v2.0.1 CoreMedia v1.0.0.5B108',
+				'Apple iPhone OS v2.1 CoreMedia v1.0.0.5F136',
+				'Apple iPhone OS v2.1 CoreMedia v1.0.0.5F137',
+				'Apple iPhone OS v2.1.1 CoreMedia v1.0.0.5F138',
+				'Apple iPhone OS v2.2 CoreMedia v1.0.0.5G77',
+				'Apple iPhone OS v2.2 CoreMedia v1.0.0.5G77a',
+				'Apple iPhone OS v2.2.1 CoreMedia v1.0.0.5H11',
+				'Apple iPhone OS v3.0 CoreMedia v1.0.0.7A341',
+				'Apple iPhone OS v3.1.2 CoreMedia v1.0.0.7D11',
+				],
 	};
-	return $user_agent->{ $id } || '';
+
+	# Remember the ua string for the entire session
+	my $uas = $ua_cache->{$id};
+	if ( ! $uas ) {
+		# Randomize strings
+		my @ualist = @{ $user_agent->{$id} };
+		$uas = $ualist[rand @ualist];
+		my $code = sprintf( "%03d", int(rand(1000)) );
+		$uas =~ s/<RAND>/$code/g;
+		$ua_cache->{$id} = $uas;
+	}
+	logger "DEBUG: Using $id user-agent string: '$uas'\n" if $opt->{debug};
+	return $uas || '';
 }
 
 
@@ -1637,7 +1687,7 @@ sub download_block {
 
 	# Setup request headers
 	my $h = new HTTP::Headers(
-		'User-Agent'	=> main::user_agent('coremedia'),
+		'User-Agent'	=> main::user_agent( 'coremedia' ),
 		'Accept'	=> '*/*',
 		'Range'        => "bytes=${start}-${end}",
 	);
@@ -1791,30 +1841,6 @@ sub download_block {
 
 
 
-# Returns a random user agent string
-sub random_ua {
-	# Create user agents list
-	my @user_agent_list = (
-		'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US) AppleWebKit/<RAND>.8 (KHTML, like Gecko) Chrome/2.0.178.0 Safari/<RAND>.8',
-		'Mozilla/5.0 (compatible; MSIE 7.0; Windows NT 6.0; SLCC1; .NET CLR 2.0.50<RAND>; Media Center PC 5.0; c .NET CLR 3.0.0<RAND>6; .NET CLR 3.5.30<RAND>; InfoPath.1; el-GR)',
-		'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30<RAND>; InfoPath.1)',
-		'Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0; YPC 3.2.0; SLCC1; .NET CLR 2.0.50<RAND>; .NET CLR 3.0.04<RAND>)',
-		'Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_4_11; tr) AppleWebKit/<RAND>.4+ (KHTML, like Gecko) Version/4.0dp1 Safari/<RAND>.11.2',
-		'Opera/9.64 (X11; Linux i686; U; en) Presto/2.1.1',
-		'Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; WOW64; Trident/4.0; SLCC2; .NET CLR 2.0.50<RAND>; .NET CLR 3.5.30<RAND>; .NET CLR 3.0.30<RAND>; Media Center PC 6.0; InfoPath.2; MS-RTC LM 8)',
-		'Mozilla/6.0 (Windows; U; Windows NT 7.0; en-US; rv:1.9.0.8) Gecko/2009032609 Firefox/3.0.9 (.NET CLR 3.5.30<RAND>)',
-	);
-
-	# Randomize strings
-	my $code = sprintf( "%03d", int(rand(1000)) );
-	my $uas = $user_agent_list[rand @user_agent_list];
-	$uas =~ s/<RAND>/$code/g;
-	logger "DEBUG: Using user-agent string: '$uas'\n" if $opt->{debug};
-	return $uas;
-}
-
-
-
 # Generic
 # create_ua( <agentname>|'', [<cookie mode>] )
 # cookie mode:	0: retain cookies
@@ -1824,18 +1850,18 @@ sub create_ua {
 	my $id = shift || '';
 	my $nocookiejar = shift || 0;
 	# Use either the key from the function arg if it exists or a random ua string
-	my $agent = main::user_agent( $id ) || random_ua();
+	my $agent = main::user_agent( $id ) || main::user_agent( 'desktop' );
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout( $lwp_request_timeout );
 	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$ua->agent( $agent );
-	main::logger "DEBUG: Using user-agent '$agent'\n" if $opt->{debug};
 	# Using this slows down stco parsing!!
 	#$ua->default_header( 'Accept-Encoding', 'gzip,deflate' );
 	$ua->conn_cache(LWP::ConnCache->new());
 	#$ua->conn_cache->total_capacity(50);
-	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1, ignore_discard => 1 ) ) if not $nocookiejar;
-	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 1 ) ) if $nocookiejar == 2;
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar.$id, autosave => 1, ignore_discard => 1 ) ) if not $nocookiejar;
+	$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar.$id, autosave => 1 ) ) if $nocookiejar == 2;
+	main::logger "DEBUG: Using ".($nocookiejar ? "NoCookies " : "cookies.$id " )."user-agent '$agent'\n" if $opt->{debug};
 	return $ua;
 };	
 
@@ -1930,7 +1956,7 @@ sub update_script {
 	my $script_file = $0;
 	my $script_url;
 	my %plugin_url;
-	my $ua = create_ua('update');
+	my $ua = create_ua( 'update', 1 );
 
 	# Are we flagged as installed using a pkg manager?
 	if ( $opt->{packagemanager} ) {
@@ -3999,7 +4025,7 @@ sub download_retry_loop {
 	}
 
 	# Setup user-agent
-	my $ua = main::create_ua();
+	my $ua = main::create_ua( 'desktop' );
 
 	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
 	# Also need full metadata for AtomicParsley or if --fileprefix is used
@@ -4080,6 +4106,9 @@ sub download_retry_loop {
 			for my $mode ( @modes ) {
 				chomp( $mode );
 				$prog->{mode} = $mode;
+				# Keep short mode name for substitutions
+				$prog->{modeshort} = $mode;
+				$prog->{modeshort} =~ s/\d+$//g;
 
 				# If multimode is used, skip only modes which are in the history
 				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
@@ -4531,6 +4560,8 @@ sub generate_filenames {
 
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
+	# Don't allow <mode> in fileprefix as it can break when resumes fallback on differently numbered modes of the same type change for <modeshort>
+	$prog->{fileprefix} =~ s/<mode>/<modeshort>/g;
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
 
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
@@ -4805,7 +4836,7 @@ sub download_thumbnail {
 		$file = $prog->{thumbfile};
 
 		# Download thumb
-		$image = main::request_url_retry( main::create_ua('get_iplayer'), $prog->{thumbnail}, 1);
+		$image = main::request_url_retry( main::create_ua( 'desktop', 1 ), $prog->{thumbnail}, 1);
 		if (! $image ) {
 			main::logger "ERROR: Thumbnail Download failed\n";
 			return 1;
@@ -5436,7 +5467,7 @@ sub get_metadata {
 
 sub get_pids_recursive {
 	my $prog = shift;
-	my $ua = main::create_ua();
+	my $ua = main::create_ua( 'desktop' );
 	my @pids = ();
 
 	# Clean up the pid
@@ -5731,6 +5762,7 @@ sub parse_attributes {
 
 sub get_stream_data_cdn {
 	my ( $data, $mattribs, $mode, $streamer, $ext ) = ( @_ );
+	my $data_pri = {};
 
 	# Public Non-Live EMP Video without auth
 	#if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
@@ -5768,7 +5800,7 @@ sub get_stream_data_cdn {
 				# Build URL
 				my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/';
 				my $url = ${media_stream_live_prefix}."?server=$cattribs->{server}&identifier=$cattribs->{identifier}&kind=$cattribs->{kind}&application=$cattribs->{application}";
-				my $xml = main::request_url_retry( main::create_ua(), $url, 3, undef, undef, 1 );
+				my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
 				main::logger "\n$xml\n" if $opt->{debug};
 				$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
 				$conn->{authstring} = $cattribs->{authString};
@@ -5845,22 +5877,27 @@ sub get_stream_data_cdn {
 
 		get_stream_set_type( $conn, $mattribs, $cattribs );
 
-                # Add to data structure
-                # Find the next free mode name
-                while ( defined $data->{$mode.$count} ) {
-                        $count++;
-                };
-                $data->{$mode.$count} = $conn;
-
-		# Add to data structure - including priority
-		#$count = 1;
-		#$count = $cattribs->{priority} if defined $cattribs->{priority};
 		# Find the next free mode name
-		#while ( defined $data->{ sprintf('%s%03d', $mode, $count) } ) {
-		#	$count++;
-		#};
-		#$data->{ sprintf('%s%03d', $mode, $count) } = $conn;
-		
+		while ( defined $data->{$mode.$count} ) {
+			$count++;
+		}
+		# Add to data structure
+		$data->{$mode.$count} = $conn;
+		$count++;
+	}
+
+	# Add to data structure hased by priority
+	$count = 1;
+	while ( defined $data->{$mode.$count} ) {
+		$data_pri->{ $data->{$mode.$count}->{priority} } = $data->{$mode.$count};
+		$count++;
+	}
+	# Sort mode number according to priority
+	$count = 1;
+	for my $priority ( reverse sort {$a <=> $b} keys %{ $data_pri } ) {
+		# Add to data structure hashed by priority
+		$data->{$mode.$count} = $data_pri->{ $priority };
+		main::logger "DEBUG: Mode $mode$count = priority $priority\n" if $opt->{debug};
 		$count++;
 	}
 }
@@ -5894,7 +5931,7 @@ sub get_stream_data {
 	my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 
 	# Setup user agent with redirection enabled
-	my $ua = main::create_ua();
+	my $ua = main::create_ua( 'desktop' );
 	$opt->{quiet} = 0 if $opt->{streaminfo};
 
 	# BBC streams
@@ -5943,9 +5980,9 @@ sub get_stream_data {
 		main::logger "\n$xml\n" if $opt->{debug};
 		@medias = parse_metadata( $xml );
 
-	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid
+	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid?cb=NNNNN
 	} else {
-		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid, 3, undef, undef, 1 );
+		$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
 		@medias = parse_metadata( $xml );
 	}
@@ -6277,7 +6314,7 @@ sub clean_pid {
 	# e.g. http://bbc.co.uk/i/lnc8s/
 	if ( $prog->{pid} =~ m{bbc\.co\.uk\/i\/[a-z0-9]{5}\/.*$}i ) {
 		# Do a recursive redirect lookup to get the final URL
-		my $ua = main::create_ua();
+		my $ua = main::create_ua( 'desktop' );
 		main::proxy_disable($ua) if $opt->{partialproxy};
 		my $res;
 		do {
@@ -6332,7 +6369,7 @@ sub get_links {
 	my $res;
 	main::logger "INFO: Getting $prog_type Index Feeds\n";
 	# Setup User agent
-	my $ua = main::create_ua();
+	my $ua = main::create_ua( 'desktop', 1 );
 
 	# Download index feed
 	# Sort feeds so that category based feeds are done last - this makes sure that the channels get defined correctly if there are dups
@@ -7611,8 +7648,8 @@ sub get_url {
 	my $url;
 	my $iphone_download_prefix = 'http://www.bbc.co.uk/mobile/iplayer/episode';
 	my $url_0 = ${iphone_download_prefix}.'/'.${pid};
-	main::logger "INFO: iphone stream URL = $url\n" if $opt->{verbose};
-	my $safari_ua = main::create_ua('safari');
+	main::logger "INFO: iphone stream URL = $url_0\n" if $opt->{verbose};
+	my $safari_ua = main::create_ua( 'safari' );
 	my $html = main::request_url_retry( $safari_ua, $url_0, 3, undef, undef, 1 );
 	$html =~ s/\n/ /g;
 	# Check for guidance warning
@@ -7620,7 +7657,7 @@ sub get_url {
 	$guidance_post = $1 if $html =~ m{(isOver\d+)};
 	if ( $guidance_post ) {
 		my $h = new HTTP::Headers(
-			'User-Agent'		=> main::user_agent('coremedia'),
+			'User-Agent'		=> main::user_agent( 'coremedia' ),
 			'Accept'		=> '*/*',
 			'Accept-Language'	=> 'en',
 			'Connection'		=> 'keep-alive',
@@ -7669,7 +7706,7 @@ sub get {
 
 	# Setup request header
 	my $h = new HTTP::Headers(
-		'User-Agent'	=> main::user_agent('coremedia'),
+		'User-Agent'	=> main::user_agent( 'coremedia' ),
 		'Accept'	=> '*/*',
 		'Range'		=> 'bytes=0-1',
 	);
@@ -7756,8 +7793,8 @@ sub get {
 		# Sanity check this moov length - chances are that were being served up a duff file if this is > 10% of the file size or < 64k
 		if ( $moov_length > (${moov_start}/9.0) || $moov_length < 65536 ) {
 			main::logger "WARNING: Bad file recording, deleting cookie                 \n";
-			$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar, autosave => 0, ignore_discard => 0 ) );
-			unlink $cookiejar;
+			$ua->cookie_jar( HTTP::Cookies->new( file => $cookiejar.'coremedia', autosave => 0, ignore_discard => 0 ) );
+			unlink $cookiejar.'coremedia';
 			unlink $prog->{filepart};
 			return 'retry';
 		}
