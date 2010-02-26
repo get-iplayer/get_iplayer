@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.69';
+my $VERSION = '0.70';
 
 use strict;
 use CGI ':all';
@@ -221,6 +221,7 @@ my %nextpages = (
 	'pvr_edit'		=> \&pvr_edit,
 	'pvr_save'		=> \&pvr_save,
 	'pvr_run'		=> \&pvr_run,
+	'record_now'		=> \&record_now,
 	'show_info'		=> \&show_info,
 	'refresh'		=> \&refresh,
 	'update_script'		=> \&update_script,
@@ -732,6 +733,79 @@ sub pvr_run {
 			]),
 		),
 	);
+}
+
+
+
+sub record_now {
+	my @record;
+	# The 'Record' action button uses SEARCH to pass it's pvr_queue data
+	if ( $cgi->param( 'SEARCH' ) ) {
+		push @record, $cgi->param( 'SEARCH' );
+	} else {
+		@record = ( $cgi->param( 'PROGSELECT' ) );
+	}
+
+	my @params = get_search_params();
+	my $out;
+
+	# If a URL was specified by the User (assume auto mode list is OK):
+	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
+	}
+
+	print $fh "<strong><p>Please leave this page open until the recording completes</p></strong>";
+	# Render options actions
+	print $fh div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Close',
+						-onClick  => "window.close()",
+					},
+					'Close'
+				),
+			]),
+		),
+	);
+	print $fh "<p>Recording The Following Programmes</p><ul>\n";
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
+		next if ! ($type && $pid );
+		print $fh "<li>$name - $episode ($pid)</li>\n";
+	}
+	print $fh "</ul><br />\n";
+	print $se "INFO: Starting Recording Now\n";
+	# Queue all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
+		next if ! ($type && $pid );
+		my $comment = "$name - $episode";
+		my @cmd = (
+			$opt_cmdline->{getiplayer},
+			'--nopurge',
+			'--nocopyright',
+			'--expiry=999999999',
+			'--hash',
+			'--webrequest',
+			get_iplayer_webrequest_args(
+				"pid=$pid",
+				"type=$type",
+				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDEDELETED|FUTURE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
+			),
+		);
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		print $fh '<pre>';
+		# Redirect both STDOUT and STDERR to client browser socket
+		run_cmd( $fh, $fh, 1, @cmd );
+		print $fh '</pre>';
+	}
+	print $fh p("Recording complete");
+	return 0;
 }
 
 
@@ -1732,6 +1806,30 @@ sub show_pvr_list {
 		}
 	}
 
+	# Render options actions
+	my $buttons = div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+				a(
+					{
+						-class => 'action',
+						-title => 'Delete selected programmes from PVR search list',
+						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_del'; form.submit(); RestoreFormVars(form);",
+					},
+					'Delete'
+				),
+			]),
+		),
+	);
+	
 	my @html;
 	my @displaycols = ( 'pvrsearch', ( grep !/pvrsearch/, ( sort keys %fields ) ) );
 	# Build header row
@@ -1794,31 +1892,12 @@ sub show_pvr_list {
 		-name   => "form",
 		-method => "POST",
 	);
-
+	print $fh p("Click to Edit any PVR Search");
 	# Render options actions
-	print $fh div( { -class=>'action' },
-		ul( { -class=>'action' },
-			li( { -class=>'action' }, [
-				a(
-					{
-						-class=>'action',
-						-title => 'Go Back',
-						-onClick  => "history.back()",
-					},
-					'Back'
-				),
-				a(
-					{
-						-class => 'action',
-						-title => 'Delete selected programmes from PVR search list',
-						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_del'; form.submit(); RestoreFormVars(form);",
-					},
-					'Delete'
-				),
-			]),
-		),
-	);
+	print $fh $buttons;
+	# Render table
 	print $fh table( {-class=>'search'} , @html );
+	print $fh $buttons;
 	# Make sure we go to the correct nextpage for processing
 	print $fh hidden(
 		-name		=> "NEXTPAGE",
@@ -2063,14 +2142,6 @@ sub show_info {
 					},
 					'Play'
 				),
-				#a(
-				#	{
-				#		-class => 'action',
-				#		-title => "Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording",
-				#		-onClick => "form.NEXTPAGE.value='pvr_queue'; form.submit()",
-				#	},
-				#	'Record'
-				#),
 			]),
 		),
 	);
@@ -2183,12 +2254,14 @@ sub search_absolute_path {
 
 sub pvr_queue {
 	# Gets the multiple selections of progs to queue from PROGSELECT
-	my @record = ( $cgi->param( 'PROGSELECT' ) );
+	my @record;
 	# The 'Record' action button uses SEARCH to pass it's pvr_queue data
-	if ( $#record < 0 ) {
-		push @record, $cgi->param( 'SEARCH' )
+	if ( $cgi->param( 'SEARCH' ) ) {
+		push @record, $cgi->param( 'SEARCH' );
+	} else {
+		@record = ( $cgi->param( 'PROGSELECT' ) );
 	}
-	
+
 	my @params = get_search_params();
 	my $out;
 
@@ -2197,6 +2270,14 @@ sub pvr_queue {
 		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
 	}
 
+	print $fh "<p>Queuing The Following Programmes in the PVR</p><ul>\n";
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
+		next if ! ($type && $pid );
+		print $fh "<li>$name - $episode ($pid)</li>\n";
+	}
+	print $fh "</ul><br />\n";
 	# Queue all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		chomp();
@@ -2238,15 +2319,41 @@ sub pvr_queue {
 
 sub recordings_delete {
 	# Gets the multiple selections of progs to queue from PROGSELECT
-	my @record = ( $cgi->param( 'PROGSELECT' ) );
-	# The 'Delete' action button uses SEARCH to pass it's recordings_delete data
-	if ( $#record < 0 ) {
-		push @record, $cgi->param( 'SEARCH' )
+	my @record;
+	# The 'Record' action button uses SEARCH to pass it's pvr_queue data
+	if ( $cgi->param( 'SEARCH' ) ) {
+		push @record, $cgi->param( 'SEARCH' );
+	} else {
+		@record = ( $cgi->param( 'PROGSELECT' ) );
 	}
 
 	my @params = get_search_params();
-	my $out;
 
+	# Render options actions
+	my $buttons = div( { -class=>'action' },
+		ul( { -class=>'action' },
+			li( { -class=>'action' }, [
+				a(
+					{
+						-class=>'action',
+						-title => 'Go Back',
+						-onClick  => "history.back()",
+					},
+					'Back'
+				),
+			]),
+		),
+	);
+	# Render options actions
+	print $fh $buttons;
+	print $fh "<p>Deleting the Following Programmes:</p><ul>\n";
+	for (@record) {
+		chomp();
+		my ( $type, $pid, $name, $episode ) = (split /\|/)[0,1,2,3];
+		next if ! ($type && $pid );
+		print $fh "<li>$name - $episode ($pid)</li>\n";
+	}
+	print $fh "</ul><br />\n";
 	# Queue all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		chomp();
@@ -2264,24 +2371,22 @@ sub recordings_delete {
 				# Use absolute path
 				$file = "${dir}/${file}";
 				if ( -f $file ) {
-					if ( unlink( $file ) ) {
-						print $fh p("INFO: Deleted $file");
-					} else {
+					if ( ! unlink( $file ) ) {
 						print $fh p("ERROR: Failed to delete $file");
 					}
 				} else {
 					print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
 				}
 			}
-			print $fh p("INFO: Successfully deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
+			print $fh p("Successfully deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
 			closedir(DIR);
 		} else {
 			print $fh p("ERROR: Cannot open dir '$dir' for file deletion\n");
 		}
 	}
-	print $fh "<pre>$out</pre>";
-
-	return $out;
+	# Render options actions
+	print $fh $buttons;
+	return '';
 }
 
 
@@ -2745,11 +2850,13 @@ sub search_progs {
 			# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Record' ).'<br />';
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='record_now'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.target='_newtab_$pid'; form.submit(); RestoreFormVars(form); form.target='';" }, 'Record' ).'<br />';
+			# Queue
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Queue' ).'<br />';
 			# Add Series
 			$links .= label( {
 				-id=>'nowrap', 
-				-class=>'search pointer_noul', 
+				-class=>'search pointer_noul',
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
 				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
@@ -2939,11 +3046,19 @@ sub search_progs {
 		},
 		'Search'
 	);
-	$action_button{'Record'} = a(
+	$action_button{'Queue'} = a(
 		{
 			-class => 'action',
 			-title => 'Queue selected programmes (or Quick URL) for one-off recording',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.submit(); RestoreFormVars(form); form.URL.value='';",
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='pvr_queue'; form.submit(); RestoreFormVars(form); form.URL.value=''; disable_selected_checkboxes(document.form, 'PROGSELECT');",
+		},
+		'Queue'
+	);
+	$action_button{'Record'} = a(
+		{
+			-class => 'action',
+			-title => 'Immediately Record selected programmes (or Quick URL) in a new tab',
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='record_now'; var random=Math.floor(Math.random()*99999); form.target='_newtab_'+random; form.submit(); RestoreFormVars(form); form.target=''; form.URL.value=''; disable_selected_checkboxes(document.form, 'PROGSELECT');",
 		},
 		'Record'
 	);
@@ -2951,7 +3066,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Permanently delete selected recorded files',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='recordings_delete'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='recordings_delete'; form.submit(); RestoreFormVars(form);",
 		},
 		'Delete'
 	);
@@ -2959,7 +3074,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes (or Quick URL) to stream in your media player',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; RestoreFormVars(form); form.URL.value='';",
+			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; RestoreFormVars(form); form.URL.value='';",
 		},
 		'Play'
 	);
@@ -2967,7 +3082,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for local file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylistfile'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylistfile'; form.submit(); RestoreFormVars(form);",
 		},
 		'Play Files'
 	);
@@ -2975,7 +3090,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for remote file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.ACTION.value='genplaylistdirect'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylistdirect'; form.submit(); RestoreFormVars(form);",
 		},
 		'Play Remote'
 	);
@@ -3020,6 +3135,7 @@ sub search_progs {
 					$action_button{'Search'},
 					$action_button{'Record'},
 					$action_button{'Play'},
+					$action_button{'Queue'},
 					$action_button{'Play Remote'},
 					$action_button{'Add Search to PVR'},
 					$action_button{'Refresh Cache'},
@@ -3938,8 +4054,8 @@ sub insert_javascript {
 			var e = f.elements[i];
 			if (e.type == "checkbox" && e.name == name) {
 				if (check == 1) {
-					// First check if the box is checked
-					if(e.checked == false) {
+					// First check if the box is checked (don't check a disabled box)
+					if(e.checked == false && e.disabled == false) {
 						e.checked = true;
 					}
 				} else {
@@ -3965,6 +4081,28 @@ sub insert_javascript {
 			}
 		}
 		return false;
+	}
+
+	//
+	// Disable checkboxes named <name> that are selected
+	//
+	function disable_selected_checkboxes(f, name) {
+		var empty_fields = "";
+		var errors = "";
+		var check;
+
+		// Loop through the elements of the form
+		for(var i = 0; i < f.length; i++) {
+			var e = f.elements[i];
+			if (e.type == "checkbox" && e.name == name) {
+				// First check if the box is checked
+				if(e.checked == true) {
+					e.checked = false;
+					e.disabled = true;
+				}
+			}
+		}
+		return true;
 	}
 
 	//
@@ -4069,7 +4207,7 @@ sub insert_stylesheet {
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 15.5%; }
+	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 13.0%; }
 	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
 	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
 	A.action:hover		{ color: #ADADAD; }
