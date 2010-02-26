@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.71;
+my $version = 2.72;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -6832,8 +6832,8 @@ sub download {
 		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
 
-	# Rename the subtitle file accordingly
-	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile;
+	# Rename the subtitle file accordingly if the stream get was successful
+	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile && ! $return;
 
 	return $return;
 }
@@ -6849,6 +6849,12 @@ sub download_subtitles {
 	my $suburl;
 	my $subs;
 	
+	# Don't redownload subs if the file already exists
+	if ( ( -f $file || -f "$prog->{dir}/$prog->{fileprefix}.partial.srt" ) && ! $opt->{overwrite} ) {
+		main::logger "INFO: Skipping subtitles download - file already exists: $file\n" if $opt->{verbose};
+		return 0;
+	}
+
 	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles1}->{streamurl};
 	# Return if we have no url
 	if (! $suburl) {
@@ -6867,6 +6873,8 @@ sub download_subtitles {
 	$subs = main::request_url_retry($ua, $suburl, 2);
 	if (! $subs ) {
 		main::logger "ERROR: Subtitle Download failed\n";
+		close $fh;
+		unlink($file) if -f $file;
 		return 1;
 	} else {
 		# Dump raw subs into a file if required
