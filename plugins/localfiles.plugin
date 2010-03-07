@@ -265,6 +265,11 @@ sub download {
 	# Determine the correct filenames for this download
 	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
 
+	# Create dir for prog if not streaming-only
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		$prog->create_dir();
+	}
+
 	# Skip from here if we are only testing downloads
 	return 1 if $opt->{test};
 	# Instantiate new streamer based on streamdata

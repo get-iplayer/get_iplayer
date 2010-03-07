@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.73;
+my $version = 2.75;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -3881,7 +3881,10 @@ sub init {
 # Create dir if it does not exist
 sub create_dir {
 	my $prog = shift;
-	mkpath("$prog->{dir}") if (! -d "$prog->{dir}") && (! $opt->{test});
+	if ( (! -d "$prog->{dir}") && (! $opt->{test}) ) {
+		main::logger "INFO: Creating dir '$prog->{dir}'\n" if $opt->{verbose};
+		mkpath("$prog->{dir}");
+	}
 }
 
 
@@ -4158,11 +4161,6 @@ sub mode_ver_download_retry_loop {
 	# Use different number of retries for flash modes
 	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
-	# Create dir for prog if not streaming-only
-	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
-		$prog->create_dir();
-	}
-	
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
@@ -4778,11 +4776,13 @@ sub create_symlink {
 	my $symlink = shift;
 	my $target = shift;
 
-	# remove old symlink
-	unlink $symlink if -l $symlink;
-	# Create symlink
-	symlink $target, $symlink;
-	main::logger "INFO: Created symlink from '$symlink' -> '$target'\n" if $opt->{verbose};
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		# remove old symlink
+		unlink $symlink if -l $symlink;
+		# Create symlink
+		symlink $target, $symlink;
+		main::logger "INFO: Created symlink from '$symlink' -> '$target'\n" if $opt->{verbose};
+	}
 }
 
 
@@ -6809,14 +6809,19 @@ sub download {
 	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 
-
 	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
 		return 'skip';
 	}
-	
+
+	# Create symlink if required
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
+
+	# Create dir for prog if not streaming-only
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		$prog->create_dir();
+	}
+
 	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
