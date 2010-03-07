@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.72;
+my $version = 2.73;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -187,7 +187,7 @@ my $opt_format = {
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	refresh		=> [ 2, "refresh|flush|f!", 'Config', '--refresh, --flush, -f', "Refresh cache"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
-	nopurge		=> [ 0, "no-purge|nopurge!", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
+	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
 	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update!", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add!", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
@@ -199,7 +199,7 @@ my $opt_format = {
 	profiledir	=> [ 1, "profiledir|profile-dir=s", 'Config', '--profile-dir <dir>', "Override the user profile directory/folder"],
 	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
-	refreshfuture	=> [ 1, "refreshfuture!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
+	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
 	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
 	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
@@ -663,7 +663,7 @@ sub init_search {
 
 	$bin->{tee}		= 'tee';
 
-	$bin->{flvstreamer}	= $opt->{flvstreamer} || $opt->{rtmpdump} || 'flvstreamer';
+	$bin->{flvstreamer}	= $opt->{flvstreamer} || 'flvstreamer';
 	delete $binopts->{flvstreamer};
 	push @{ $binopts->{flvstreamer} }, ( '--timeout', 10 );
 	push @{ $binopts->{flvstreamer}	}, '--quiet' if $opt->{quiet};
@@ -1152,15 +1152,21 @@ sub list_progs {
 			$this->generate_filenames( $ua, $this->file_prefix_format() );
 			# info
 			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
-			# subs
-			if ( $opt->{subsonly} ) {
-				# skip for non-tv
-				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt" ) if $this->{type} eq 'tv';
+			# subs (only for tv)
+			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
+				$this->create_dir();
+				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt" );
 			}
 			# metadata
-			$this->create_metadata_file if $opt->{metadataonly};
+			if ( $opt->{metadataonly} ) {
+				$this->create_dir();
+				$this->create_metadata_file;
+			}
 			# thumbnail
-			$this->download_thumbnail if $opt->{thumbonly} && $this->{thumbnail};
+			if ( $opt->{thumbonly} && $this->{thumbnail} ) {
+				$this->create_dir();
+				$this->download_thumbnail();
+			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
 				main::display_stream_info( $this, $this->{verpids}->{$version}, $version );
@@ -2520,7 +2526,7 @@ sub purge_downloaded_files {
 		main::logger "-----------------------------------\n";
 		main::logger join "\n", @proglist;
 		main::logger "\n-----------------------------------\n";
-		main::logger "Do you wish to delete them now (--nopurge will prevent this check) (yes/NO) ?\n";
+		main::logger "Do you wish to delete them now (Yes/No) ?\n";
 		my $answer = <STDIN>;
 		if ($answer =~ /^yes$/i ) {
 			for ( @delete ) {
@@ -3064,7 +3070,7 @@ sub usage {
 		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.',
 		'Each available programme has a numerical identifier, \fBpid\fR.',
 		'\fBget_iplayer\fR records BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for recording.',
-		'It can also utilise the \fBrtmpdump\fR or \fBflvstreamer\fR tools to record programmes from RTMP flash streams at various qualities.',
+		'It can also utilise the \fBflvstreamer\fR tool to record programmes from RTMP flash streams at various qualities.',
 		'.PP',
 		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
 		'.SH "OPTIONS"' if $manpage;
@@ -3872,6 +3878,13 @@ sub init {
 }
 
 
+# Create dir if it does not exist
+sub create_dir {
+	my $prog = shift;
+	mkpath("$prog->{dir}") if (! -d "$prog->{dir}") && (! $opt->{test});
+}
+
+
 # Return metadata of the prog
 sub get_metadata {
 	my $prog = shift;
@@ -4145,6 +4158,11 @@ sub mode_ver_download_retry_loop {
 	# Use different number of retries for flash modes
 	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
+	# Create dir for prog if not streaming-only
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		$prog->create_dir();
+	}
+	
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
@@ -4182,10 +4200,16 @@ sub mode_ver_download_retry_loop {
 					$hist->add( $prog );
 					$prog->tag_file;
 				}
-				$prog->download_thumbnail if $opt->{thumb};
-				$prog->create_metadata_file if $opt->{metadata};
-				if ( ! $opt->{nowrite} ) {
-					$prog->run_user_command( $opt->{command} ) if $opt->{command};
+				if ( $opt->{thumb} ) {
+					$prog->create_dir();
+					$prog->download_thumbnail();
+				}
+				if ( $opt->{metadata} ) {
+					$prog->create_dir();
+					$prog->create_metadata_file();
+				}
+				if ( $opt->{command} && ! $opt->{nowrite} ) {
+					$prog->run_user_command( $opt->{command} );
 				}
 			}
 			$prog->report() if $opt->{pvr};
@@ -4591,9 +4615,6 @@ sub generate_filenames {
 		$prog->{dir} .= s|\/\/|\/|g;
 		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
-
-	# Create dir if it does not exist
-	mkpath("$prog->{dir}") if (! -d "$prog->{dir}") && (! $opt->{test});
 
 	main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
 
@@ -5615,7 +5636,6 @@ sub get_rdf_data {
 		main::logger "WARNING: rdf URL contained no data\n";
 		return '';
 	}
-	decode_entities( $entry );
 	# Flatten
 	$entry =~ s|[\n\r]| |g;
 	my $simple = new XML::Simple();
@@ -6256,7 +6276,7 @@ sub opt_format {
 		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: iphone,flashhigh,flashstd,flashnormal)"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 1, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
-		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer/rtmpdump for tv"],
+		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer for tv"],
 	};
 }
 
@@ -6282,7 +6302,7 @@ sub modelist {
 	# Defaults
 	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
 			$mlist = 'iphone';
 		} else {
 			$mlist = 'iphone,flashhigh,flashstd,flashnormal';
@@ -6766,9 +6786,9 @@ sub download {
 		main::logger "\nWARNING: Required vlc does not exist\n";
 		return 'next';
 	}
-	# if rtmpdump does not exist
+	# if flvstreamer does not exist
 	if ( $mode =~ /^flash/ && ! main::exists_in_path('flvstreamer')) {
-		main::logger "WARNING: Required program flvstreamer/rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+		main::logger "WARNING: Required program flvstreamer does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
@@ -7114,7 +7134,7 @@ sub opt_format {
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
 		wav		=> [ 1, "wav!", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
-		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer/rtmpdump for radio"],
+		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer for radio"],
 	};
 }
 
@@ -7158,7 +7178,7 @@ sub modelist {
 	# Defaults
 	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
 			$mlist = 'iphone,realaudio,wma';
 		} else {
 			$mlist = 'iphone,flashaachigh,flashaacstd,flashaudio,realaudio,flashaaclow,wma';
@@ -7379,7 +7399,7 @@ sub opt_format {
 	return {
 		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV Recoding modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal (default: flashhd,flashvhigh,flashhigh,flashstd,flashnormal)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings"],
-		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to flvstreamer/rtmpdump for livetv"],
+		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to flvstreamer for livetv"],
 	};
 }
 
@@ -7521,7 +7541,7 @@ sub opt_format {
 	return {
 		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio Recording modes: flashaac,realaudio,wma"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
-		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to flvstreamer/rtmpdump for liveradio"],
+		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to flvstreamer for liveradio"],
 	};
 }
 
@@ -7550,7 +7570,7 @@ sub modelist {
 	# Defaults
 	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer/rtmpdump is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
 			$mlist = 'realaudio,wma';
 		} else {
 			$mlist = 'flashaachigh,flashaacstd,realaudio,flashaaclow,wma';
@@ -8082,7 +8102,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
-		flvstreamer	=> [ 0, "flvstreamer|rtmpdump=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer/rtmpdump binary"],
+		flvstreamer	=> [ 0, "flvstreamer=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer binary"],
 	};
 }
 
@@ -8114,43 +8134,34 @@ sub get {
 		$file_tmp = $prog->{filepart}.'.flv'
 	}
 
-	# Remove failed file recording (below a certain size) - hack to get around flvstreamer/rtmpdump not returning correct exit code
+	# Remove failed file recording (below a certain size) - hack to get around flvstreamer not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
 		unlink( $file_tmp );
 	}
 		
-	# Add custom options to flvstreamer/rtmpdump for this type if specified with --rtmp-<type>-opts
+	# Add custom options to flvstreamer for this type if specified with --rtmp-<type>-opts
 	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
 		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
 	}
 
-	# rtmpdump/flvstreamer version detection e.g. 'RTMPDump v1.5', 'FLVStreamer v1.7a', 'RTMPDump 2.1b'
+	# flvstreamer version detection e.g. 'FLVStreamer v1.8a'
 	my $rtmpver;
-	chomp( $rtmpver = (grep /^(RTMPDump|FLVStreamer)/i, `"$bin->{flvstreamer}" 2>&1`)[0] );
+	chomp( $rtmpver = (grep /^\w+\s+v?[\.\d]+.*$/i, `"$bin->{flvstreamer}" 2>&1`)[0] );
 	$rtmpver =~ s/^\w+\s+v?([\.\d]+).*$/$1/g;
 	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
-	# Save the effort and don't support < v1.5
-	if ( $rtmpver < 1.5 ) {
-		main::logger "WARNING: rtmpdump >= 1.5 or flvstreamer is required - please upgrade\n";
+	# Save the effort and don't support < v1.8
+	if ( $rtmpver < 1.8 ) {
+		main::logger "WARNING: flvstreamer 1.8 or later is required - please upgrade\n";
 		return 'next';
 	}
 
 	# Add --live option if required
-	if ( $streamdata{live} ) {
-		if ( $rtmpver < 1.8 ) {
-			main::logger "WARNING: Please use flvstreamer v1.8 or later for more reliable live streaming\n";
-		}
-		push @cmdopts, '--live';
-	}
+	push @cmdopts, '--live' if $streamdata{live};
 
 	# Add start stop options if defined
 	if ( $opt->{start} || $opt->{stop} ) {
-		if ( $rtmpver < 1.8 ) {
-			main::logger "ERROR: Please use flvstreamer v1.8c or later for start/stop features\n";
-			exit 4;
-		}
 		push @cmdopts, ( '--start', $opt->{start} ) if $opt->{start};
 		push @cmdopts, ( '--stop', $opt->{stop} ) if $opt->{stop};
 	}
@@ -8166,13 +8177,7 @@ sub get {
 		main::logger "ERROR: Cannot stream RTMP to STDOUT and file simultaneously\n";
 		exit 4;
 	}
-	if ( $opt->{stdout} && $opt->{nowrite} ) {
-		if ( $rtmpver < 1.7) {
-			push @cmdopts, ( '-o', '-' );
-		}
-	} else {
-		push @cmdopts, ( '--resume', '-o', $file_tmp );
-	}
+	push @cmdopts, ( '--resume', '-o', $file_tmp ) if ! ( $opt->{stdout} && $opt->{nowrite} );
 	push @cmdopts, @{ $binopts->{flvstreamer} } if $binopts->{flvstreamer};
 	
 	my $return;
@@ -8993,16 +8998,8 @@ sub get {
 
 	# Recording - disabled
 	} else {
-		# Commented out cos this is stream-only - don't want anything in history as a result
-		#main::logger "INFO: Copying $url to $prog->{filepart}\n" if $opt->{verbose};
-		#if ( ! copy( $url, $prog->{filepart} ) ) {
-		#	main::logger "\rERROR: Recording failed\n";
-			main::logger "\rERROR: Recording failed - this is a stream-only programme\n";
-			return 'next';
-		#}
-		#move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename};
-		## symlink file
-		#$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
+		main::logger "\rERROR: Recording failed - this is a stream-only programme\n";
+		return 'next';
 	}
 
 	return 0;
