@@ -115,7 +115,7 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
-	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
+	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
@@ -188,8 +188,6 @@ my $opt_format = {
 	refresh		=> [ 2, "refresh|flush|f!", 'Config', '--refresh, --flush, -f', "Refresh cache"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
-	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
-	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update!", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add!", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del!", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
 	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear!", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
@@ -201,7 +199,6 @@ my $opt_format = {
 	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
 	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
-	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
 	# Display
@@ -445,16 +442,6 @@ if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	logger request_url_retry( create_ua( 'get_iplayer', 1 ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
-
-# Force plugins update if no plugins found
-if ( ! keys %plugin_files ) {
-	logger "WARNING: Running the updater again to obtain plugins.\n";
-	$opt->{pluginsupdate} = 1;
-}
-# Update this script if required
-update_script() if $opt->{update} || $opt->{pluginsupdate};
-
-
 
 ########## Global vars ###########
 
@@ -1938,177 +1925,6 @@ sub open_file_append {
 	# Fix for binary - needed for Windows
 	binmode FH;
 	return *FH;
-}
-
-
-
-# Generic
-# Updates and overwrites this script - makes backup as <this file>.old
-# Update logic:
-# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-# If any available plugins in $plugin_dir_system are not writable then abort
-# If all available plugins in $plugin_dir_system are writable then:
-#	if any available plugins in $plugin_dir_user are not writable then abort
-#	if all available plugins in $plugin_dir_user are writable then:
-#		update script
-#		update matching plugins in $plugin_dir_system
-#		update matching plugins in $plugin_dir_user
-#		warn of any plugins that are not in $plugin_dir_system or $plugin_dir_user and not available
-sub update_script {
-	my $version_url	= 'http://linuxcentre.net/get_iplayer/VERSION-get_iplayer';
-	my $update_url	= 'http://linuxcentre.net/get_iplayer/get_iplayer';
-	my $changelog_url = 'http://linuxcentre.net/get_iplayer/CHANGELOG.txt';
-	my $latest_ver;
-	# Get version URL
-	my $script_file = $0;
-	my $script_url;
-	my %plugin_url;
-	my $ua = create_ua( 'update', 1 );
-
-	# Are we flagged as installed using a pkg manager?
-	if ( $opt->{packagemanager} ) {
-		if ( $opt->{packagemanager} =~ /(apt|deb|dpkg)/i ) {
-			logger "INFO: Please run the following commands to update get_iplayer using $opt->{packagemanager}\n".
-			"  wget http://linuxcentre.net/get_iplayer/packages/get-iplayer-current.deb\n".
-			"  sudo dpkg -i get-iplayer-current.deb\n".
-			"  sudo apt-get -f install\n";
-		} elsif ( $opt->{packagemanager} =~ /yum/i ) {
-			logger "INFO: Please run the following commands as root to update get_iplayer using $opt->{packagemanager}\n".
-			"  wget http://linuxcentre.net/get_iplayer/packages/get_iplayer-current.noarch.rpm\n".
-			"  yum --nogpgcheck localinstall get_iplayer-current.noarch.rpm\n";
-		} elsif ( $opt->{packagemanager} =~ /rpm/i ) {
-			logger "INFO: Please run the following command as root to update get_iplayer using $opt->{packagemanager}\n".
-			"  rpm -Uvh http://linuxcentre.net/get_iplayer/packages/get_iplayer-current.noarch.rpm\n";
-		} elsif ( $opt->{packagemanager} =~ /disable/i ) {
-			logger "ERROR: get_iplayer should only be updated using your local package management system, for more information see http://linuxcentre.net/installation\n";
-		} else {
-			logger "ERROR: get_iplayer was installed using '$opt->{packagemanager}' package manager please refer to the update documentation at http://linuxcentre.net/getiplayer/installation/\n";
-		}
-		exit 1;
-	} 
-
-	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-	if ( ! -w $script_file ) {
-		logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
-		exit 1;
-	}
-
-	# Force update if no plugins dir
-	if ( ! -d "$profile_dir/plugins" ) {
-		mkpath "$profile_dir/plugins";
-		if ( ! -d "$profile_dir/plugins" ) {
-			logger "ERROR: Cannot create '$profile_dir/plugins' - no plugins will be downloaded.\n";
-			return 1;
-		}
-		$opt->{pluginsupdate} = 1;
-	}
-
-	logger "INFO: Current version is ".(sprintf '%.2f', $version)."\n";
-	logger "INFO: Checking for latest version from linuxcentre.net\n";
-	if ( $latest_ver = request_url_retry($ua, $version_url, 3 ) ) {
-		chomp($latest_ver);
-		# Compare version numbers
-		if ( $latest_ver > $version || $opt->{force} || $opt->{pluginsupdate} ) {
-			# reformat version number
-			$latest_ver = sprintf('%.2f', $latest_ver);
-			logger "INFO: Newer version $latest_ver available\n" if $latest_ver > $version;
-			
-			# Get the manifest of files to be updated
-			my $base_url = "${update_url}-${latest_ver}";
-			my $res;
-			if ( not $res = request_url_retry($ua, "$base_url/MANIFEST.txt", 3 ) ) {
-				logger "ERROR: Failed to obtain update file manifest - Update aborted\n";
-				exit 3;
-			}
-
-			# get a list of plugins etc from the manifest
-			for ( split /\n/, $res ) {
-				chomp();
-				my ( $type, $url) = split /\s/;
-				if ( $type eq 'bin' ) {
-					$script_url =  $url;
-				} elsif ( $type eq 'plugins' ) {
-					my $filename = $url;
-					$filename =~ s|^.+/(.+?)$|$1|g;
-					$plugin_url{$filename} = $url;
-				}
-			}
-
-			# Now decide whether to update based on write permissions
-			# %plugin_files:      contains hash of current full_path_to_plugin_file -> plugin_filename
-			# %plugin_url:      contains a hash of plugin_filename -> update_url for available plugins from the update site
-
-			# If any available plugins in $plugin_dir_system are not writable then abort
-			# if any available plugins in $plugin_dir_user are not writable then abort
-
-			# loop through each currently installed plugin
-			for my $path ( keys %plugin_files ) {
-				my $file = $plugin_files{$path};
-				# If this in the list of available plugins
-				if ( $plugin_url{$file} ) {
-					if ( ! -w $path ) {
-						logger "ERROR: Cannot write plugin $path - aborting update\n";
-						exit 1;
-					}
-				# warn of any plugins that are not in $plugin_dir_system or $plugin_dir_user and not available
-				} else {
-					logger "WARNING: Plugin $path is not managed - not updating this plugin\n";
-				}
-			}
-
-			# All available plugins in all plugin dirs are writable:
-			# update script if required
-			if ( $latest_ver > $version || $opt->{force} ) {
-				logger "INFO: Updating $script_file (from $version to $latest_ver)\n";
-				update_file( $ua, $script_url, $script_file ) if ! $opt->{test};
-			}
-			for my $path ( keys %plugin_files ) {
-				my $file = $plugin_files{$path};
-				# If there is an update available for this plugin file...
-				if ( $plugin_url{$file} ) {
-					logger "INFO: Updating $path\n";
-					# update matching plugin
-					update_file( $ua, $plugin_url{$file}, $path ) if ! $opt->{test};
-				}
-			}
-
-			# Install plugins which are currently not installed
-			for my $file ( keys %plugin_url ) {
-				# Not found in either system or user plugins dir
-				if ( ( ! -f "$plugin_dir_system/$file" ) && ( ! -f "$plugin_dir_user/$file" ) ) {
-					logger "INFO: Found new plugin $file\n";
-					# Is the system plugin dir writable?
-					if ( -d $plugin_dir_system && -w $plugin_dir_system ) {
-						logger "INFO: Installing $file in $plugin_dir_system\n";
-						update_file( $ua, $plugin_url{$file}, "$plugin_dir_system/$file" ) if ! $opt->{test};
-					} elsif ( -d $plugin_dir_user && -w $plugin_dir_user ) {
-						logger "INFO: Installing $file in $plugin_dir_user\n";
-						update_file( $ua, $plugin_url{$file}, "$plugin_dir_user/$file" ) if ! $opt->{test};
-					} else {
-						logger "INFO: Cannot install $file, plugin dirs are not writable\n";
-					}
-				}
-			}
-
-			# Show changelog since last version if this is an upgrade
-			if ( $version < $latest_ver ) {
-				logger "INFO: Change Log: http://linuxcentre.net/get_iplayer/CHANGELOG.txt\n";
-				my $changelog = request_url_retry($ua, $changelog_url, 3 );
-				my $current_ver = sprintf('%.2f', $version);
-				$changelog =~ s|^(.*)Version\s+$current_ver.+$|$1|s;
-				logger "INFO: Changes since version $current_ver:\n\n$changelog\n";
-			}
-
-		} else {
-			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
-		}
-				
-	} else {
-		logger "ERROR: Failed to connect to update site - Update aborted\n";
-		exit 2;
-	}
-
-	exit 0;
 }
 
 
