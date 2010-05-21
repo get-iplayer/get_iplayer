@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.75;
+my $version = 2.76;
 #
 # Help:
 #	./get_iplayer --help | --longhelp
@@ -1147,6 +1147,7 @@ sub list_progs {
 			}
 			# Search versions for versionlist versions
 			my @versions = $this->generate_version_list;
+
 			# Use first version in list if a version list is not specified
 			$this->{version} = $versions[0] || 'default';
 			$this->generate_filenames( $ua, $this->file_prefix_format() );
@@ -1169,7 +1170,7 @@ sub list_progs {
 			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
-				main::display_stream_info( $this, $this->{verpids}->{$version}, $version );
+				main::display_stream_info( $this, $this->{verpids}->{$this->{version}}, $this->{version} );
 				$opt->{quiet} = 0;
 			}
 			# remove offending metadata
