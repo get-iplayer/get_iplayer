@@ -5639,7 +5639,7 @@ sub get_stream_data_cdn {
 				my $url = ${media_stream_live_prefix}."?server=$cattribs->{server}&identifier=$cattribs->{identifier}&kind=$cattribs->{kind}&application=$cattribs->{application}";
 				my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
 				main::logger "\n$xml\n" if $opt->{debug};
-				$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
+				$cattribs->{authString} = 'auth='.$1 if $xml =~ m{<token>(.+?)</token>};
 				$conn->{authstring} = $cattribs->{authString};
 			}
 
