@@ -5661,24 +5661,28 @@ sub get_stream_data_cdn {
 				$conn->{authstring} = $cattribs->{authString};
 			}
 
+			if ( $cattribs->{authString} !~ /&aifp=/ ) {
+				$cattribs->{authString} .= '&aifp=v001';
+			}
+
+			if ( $cattribs->{authString} !~ /&slist=/ ) {
+				$cattribs->{identifier} =~ s/^mp[34]://;
+				$cattribs->{authString} .= '&snlist=&cattribs->{identifier}';
+			}
+
+			$conn->{playpath} = $cattribs->{identifier};
+			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
+			$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
 			if ( $cattribs->{authString} ) {
 				### ??? live and Live TV, Live EMP Video or Non-public EMP video:
-				$conn->{playpath} = "$cattribs->{identifier}?$cattribs->{authString}&aifp=v001";
+				$conn->{playpath} .= "?$cattribs->{authString}";
+				$conn->{streamurl} .= "&$cattribs->{authString}";
+				$conn->{application} .= "&$cattribs->{authString}";
 			} else {
-				$conn->{playpath} = $cattribs->{identifier};
+				$conn->{streamurl} .= "&undefined";
+				$conn->{application} .= "&undefined";
 			}
-			if ( $cattribs->{authString} ) {
-				$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
-			} else {
-				$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
-			}
-			# Remove offending mp3/mp4: at the start of the identifier (don't remove in stream url)
-			$cattribs->{identifier} =~ s/^mp[34]://;
-			if ( $cattribs->{authString} ) {
-				$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
-			} else {
-				$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
-			}
+
 			# Port 1935? for live?
 			$conn->{tcurl} = "rtmp://$cattribs->{server}:80/$conn->{application}";
 
