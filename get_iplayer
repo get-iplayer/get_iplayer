@@ -5624,6 +5624,18 @@ sub get_stream_data_cdn {
 			priority	=> $cattribs->{priority},
 		};
 
+		# Get authstring from more specific mediaselector - fails sometimes otherwise
+		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ ) {
+			# Build URL
+			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
+			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
+			my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
+			main::logger "\n$xml\n" if $opt->{debug};
+			$cattribs->{authString} = $1 if $xml =~ m{authString=\"(.+?)\"};
+			decode_entities($cattribs->{authString});
+			$conn->{authstring} = $cattribs->{authString};
+		}
+
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Set the live flag if this is not an ondemand stream
@@ -5828,6 +5840,9 @@ sub get_stream_data {
 	my $mode;
 	for my $mattribs ( @medias ) {
 		
+		# Put verpid into mattribs
+		$mattribs->{verpid} = $verpid;
+
 		# New iphone stream
 		if ( $mattribs->{service} eq 'iplayer_streaming_http_mp4' ) {
 			# Fix/remove some audio stream attribs
