@@ -7800,7 +7800,8 @@ sub get {
 
 	my $file_tmp;
 	my @cmd;
-	
+	my $swfarg = "--swfUrl";
+
 	if ( $opt->{raw} ) {
 		$file_tmp = $prog->{filepart};
 	} else {
@@ -7818,15 +7819,19 @@ sub get {
 	}
 
 	# flvstreamer version detection e.g. 'FLVStreamer v1.8a'
-	my $rtmpver;
-	chomp( $rtmpver = (grep /^\w+\s+v?[\.\d]+.*$/i, `"$bin->{flvstreamer}" 2>&1`)[0] );
-	$rtmpver =~ s/^\w+\s+v?([\.\d]+).*$/$1/g;
+	my $rtmpver = `"$bin->{flvstreamer}" --swfVfy 2>&1`;
+	if ( $rtmpver =~ /option '--swfVfy' requires an argument/ ) {
+		$swfarg = "--swfVfy";
+	} else {
+		main::logger "WARNING: Your version of flvstreamer/rtmpdump does not support SWF Verification\n";
+	}
+	$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
 	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Save the effort and don't support < v1.8
 	if ( $rtmpver < 1.8 ) {
-		main::logger "WARNING: flvstreamer 1.8 or later is required - please upgrade\n";
+		main::logger "WARNING: rtmpdump/flvstreamer 1.8 or later is required - please upgrade\n";
 		return 'next';
 	}
 
@@ -7863,7 +7868,7 @@ sub get {
 			'--protocol', $protocol,
 			'--playpath', $playpath,
 			'--host', $server,
-			'--swfUrl', $swfurl,
+			$swfarg, $swfurl,
 			'--tcUrl', $tcurl,
 			'--app', $application,
 			@cmdopts,
