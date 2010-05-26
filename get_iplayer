@@ -5611,6 +5611,24 @@ sub get_stream_data_cdn {
 
 	my $count = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
+
+		# Get authstring from more specific mediaselector if this mode is specified - fails sometimes otherwise
+		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ && (grep /^$mode$/, (split /,/, $mattribs->{modelist})) ) {
+			# Build URL
+			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
+			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
+			my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
+			main::logger "\n$xml\n" if $opt->{debug};
+			# get new set of connection attributes from the new xml data
+			my $new_mattribs = (parse_metadata( $xml ))[0];
+			my $new_cattribs = $new_mattribs->{connections}[0];
+			# Override elemnts from more specific connection attribs if present
+			for my $element ( keys %{ $new_cattribs } ) {
+				$cattribs->{$element} = $new_cattribs->{$element} if $new_cattribs->{$element};
+			}
+		}
+		decode_entities($cattribs->{authString});
+
 		# Common attributes
 		# swfurl = Default iPlayer swf version
 		my $conn = {
@@ -5623,17 +5641,6 @@ sub get_stream_data_cdn {
 			authstring	=> $cattribs->{authString},
 			priority	=> $cattribs->{priority},
 		};
-		# Get authstring from more specific mediaselector - fails sometimes otherwise
-		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ && (grep /^$mode$/, (split /,/, $mattribs->{modelist})) ) {
-			# Build URL
-			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
-			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
-			my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			$cattribs->{authString} = $1 if $xml =~ m{authString=\"(.+?)\"};
-			decode_entities($cattribs->{authString});
-			$conn->{authstring} = $cattribs->{authString};
-		}
 
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
