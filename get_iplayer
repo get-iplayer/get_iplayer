@@ -5623,9 +5623,8 @@ sub get_stream_data_cdn {
 			authstring	=> $cattribs->{authString},
 			priority	=> $cattribs->{priority},
 		};
-
 		# Get authstring from more specific mediaselector - fails sometimes otherwise
-		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ ) {
+		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ && (grep /^$mode$/, (split /,/, $mattribs->{modelist})) ) {
 			# Build URL
 			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
 			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
@@ -5842,6 +5841,7 @@ sub get_stream_data {
 		
 		# Put verpid into mattribs
 		$mattribs->{verpid} = $verpid;
+		$mattribs->{modelist} = $prog->modelist;
 
 		# New iphone stream
 		if ( $mattribs->{service} eq 'iplayer_streaming_http_mp4' ) {
