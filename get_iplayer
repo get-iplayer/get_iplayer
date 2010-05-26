@@ -5661,19 +5661,20 @@ sub get_stream_data_cdn {
 				$conn->{authstring} = $cattribs->{authString};
 			}
 
-			if ( $cattribs->{authString} !~ /&aifp=/ ) {
-				$cattribs->{authString} .= '&aifp=v001';
-			}
-
-			if ( $cattribs->{authString} !~ /&slist=/ ) {
-				$cattribs->{identifier} =~ s/^mp[34]://;
-				$cattribs->{authString} .= '&snlist=&cattribs->{identifier}';
-			}
-
 			$conn->{playpath} = $cattribs->{identifier};
 			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
 			$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
+
 			if ( $cattribs->{authString} ) {
+				if ( $cattribs->{authString} !~ /&aifp=/ ) {
+					$cattribs->{authString} .= '&aifp=v001';
+				}
+
+				if ( $cattribs->{authString} !~ /&slist=/ ) {
+					$cattribs->{identifier} =~ s/^mp[34]://;
+					$cattribs->{authString} .= '&snlist=&cattribs->{identifier}';
+				}
+
 				### ??? live and Live TV, Live EMP Video or Non-public EMP video:
 				$conn->{playpath} .= "?$cattribs->{authString}";
 				$conn->{streamurl} .= "&$cattribs->{authString}";
