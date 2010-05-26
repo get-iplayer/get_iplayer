@@ -650,7 +650,11 @@ sub init_search {
 
 	$bin->{tee}		= 'tee';
 
-	$bin->{flvstreamer}	= $opt->{flvstreamer} || 'flvstreamer';
+	$bin->{flvstreamer}	= $opt->{flvstreamer} || 'rtmpdump';
+	if (! main::exists_in_path('flvstreamer') ) {
+		$bin->{flvstreamer} = 'flvstreamer';
+	}
+
 	delete $binopts->{flvstreamer};
 	push @{ $binopts->{flvstreamer} }, ( '--timeout', 10 );
 	push @{ $binopts->{flvstreamer}	}, '--quiet' if $opt->{quiet};
