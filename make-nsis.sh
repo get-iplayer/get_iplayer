@@ -19,5 +19,5 @@ mkdir -p $NSISDIR/get_iplayer/Downloads
 cd $NSISDIR
 makensis -NOCD get_iplayer/get_iplayer_setup.nsi
 cd -
-mv $NSISDIR/get_iplayer_setup_2.77.exe .
+mv $NSISDIR/get_iplayer_setup_${VERSION}.exe .
 rm -rf $NSISDIR
