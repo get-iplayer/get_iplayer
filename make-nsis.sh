@@ -20,4 +20,4 @@ cd $NSISDIR
 makensis -NOCD get_iplayer/get_iplayer_setup.nsi
 cd -
 mv $NSISDIR/get_iplayer_setup_2.77.exe .
-#rm -rf $NSISDIR
+rm -rf $NSISDIR
