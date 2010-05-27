@@ -14,6 +14,8 @@ VERSION=`./get_iplayer --help | head -1 | cut -f1 -d, | cut -f2 -dv`
 
 cp -av windows/get_iplayer windows/installer_files $NSISDIR
 tar xvfz perlfiles.tar.gz -C $NSISDIR/get_iplayer
+cp get_iplayer $NSISDIR/get_iplayer/get_iplayer.pl
+cp get_iplayer.cgi $NSISDIR/get_iplayer/get_iplayer.cgi
 sed "s/\(!define VERSION\).*/\1 \"$VERSION\"/" -i $NSISDIR/get_iplayer/get_iplayer_setup.nsi
 mkdir -p $NSISDIR/get_iplayer/Downloads
 cd $NSISDIR
