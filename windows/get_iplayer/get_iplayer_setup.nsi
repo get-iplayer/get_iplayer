@@ -1,7 +1,7 @@
 ;Product Info
 Name "get_iplayer"
 !define PRODUCT "get_iplayer"
-!define VERSION "3.0a+" 
+!define VERSION "4.0" 
 
  !include "MUI.nsh"
  !include "Sections.nsh"
@@ -68,10 +68,10 @@ Section "get_iplayer" section1
 
   ;download get_iplayer
   Delete $INSTDIR\get_iplayer.pl
-  NSISdl::download http://github.com/jjl/get_iplayer/raw/master/get_iplayer $INSTDIR\get_iplayer.pl
+  NSISdl::download http://www.infradead.org/get_iplayer/get_iplayer $INSTDIR\get_iplayer.pl
 
   ;download get_iplayer.cgi
-  NSISdl::download http://github.com/jjl/get_iplayer/raw/master/get_iplayer.cgi $INSTDIR\get_iplayer.cgi
+  NSISdl::download http://www.infradead.org/get_iplayer/get_iplayer.cgi $INSTDIR\get_iplayer.cgi
 
   ;startmenu
   CreateDirectory "$SMPROGRAMS\get_iplayer"
