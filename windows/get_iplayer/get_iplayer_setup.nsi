@@ -168,11 +168,13 @@ LangString DESC_Section5 ${LANG_ENGLISH} "Download and install VLC (~15MB)"
 Section "rtmpdump" section6
   Call ConnectInternet ;Make an internet connection (if no connection available)
   ;download flvstreamer
-  NSISdl::download http://www.infradead.org/cgi-bin/get_iplayer.cgi?rtmpdump "$INSTDIR\rtmpdump.exe"
+  NSISdl::download http://www.infradead.org/cgi-bin/get_iplayer.cgi?rtmpdumpz "$INSTDIR\rtmpdump.zip"
   Pop $R0 ;Get the return value
   StrCmp $R0 "success" +3
     MessageBox MB_OK "Download of rtmpdump failed: $R0, Install it manually"
     Return
+  ZipDLL::extractall $INSTDIR\rtmpdump.zip $INSTDIR <ALL>
+  Delete $INSTDIR\rtmpdump.zip
 SectionEnd
 LangString DESC_Section6 ${LANG_ENGLISH} "Download and install rtmpdump(win32) (~300k)"
 
