@@ -4,7 +4,7 @@ BASEURL=http://www.infradead.org/get_iplayer
 
 git pull -q
 
-TAGS="`git tag -l v* | sort -r`"
+TAGS="`git tag -l 'v*' | sort -r`"
 
 THISTAG=
 for NEWTAG in $TAGS; do
@@ -17,7 +17,7 @@ for NEWTAG in $TAGS; do
 	continue;
     fi
     # Compare $OLDTAG with $THISTAG
-    git show --format=%aD $OLDTAG | head -1 | sed "s/^\(.*\)..:..:.. [+-]..../Version ${OLDTAG##v} -- \1/"
+    git show --format=%aD $OLDTAG -- | head -1 | sed "s/^\(.*\)..:..:.. [+-]..../Version ${OLDTAG##v} -- \1/"
     git log $THISTAG..$OLDTAG --pretty=oneline | sed 's/[0-9a-f]*/ \*/' | grep -v 'Tag version '
     echo
     if [ ! -d $OLDTAG ]; then
