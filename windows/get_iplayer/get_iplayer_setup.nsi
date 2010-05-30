@@ -147,7 +147,7 @@ Section "get_iplayer" section1
   FileWrite $fh "mplayer .\mplayer\MPlayer-1.0rc2\mplayer.exe$\r$\n"
   FileWrite $fh "atomicparsley .\atomicparsley\atomicparsley.exe$\r$\n"
   FileWrite $fh "output $DataDir$\r$\n"
-  FileWrite $fh "rtmpdump .\rtmpdump-2.2d\rtmpdump.exe$\r$\n"
+  FileWrite $fh "flvstreamer .\rtmpdump-2.2d\rtmpdump.exe$\r$\n"
   FileWrite $fh "ffmpeg .\ffmpeg\bin\ffmpeg.exe$\r$\n"
   FileWrite $fh "vlc .\vlc\vlc.exe$\r$\n"
   FileWrite $fh "mmsnothread 1$\r$\n"
