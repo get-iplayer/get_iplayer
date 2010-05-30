@@ -304,7 +304,9 @@ Section "Lame" section3
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of Lame failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
+  SetOutPath "$InstallDir\lame"
   Nsis7z::ExtractWithDetails "$InstallDir\lame\lame.7z" "Installing package %s..."
+  SetOutPath "$InstallDir"
   Delete $InstallDir\lame\lame.7z
   ; start menu
   WriteIniStr "$InstallDir\lame_docs.url" "InternetShortcut" "URL" "http://lame.sourceforge.net/using.php"
@@ -335,8 +337,10 @@ Section "ffmpeg" section4
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of FFmpeg failed: $R0, Do you wish to try again?" IDYES download
      Return
   install:
+  SetOutPath "$InstallDir\ffmpeg"
   Nsis7z::ExtractWithDetails "$InstallDir\ffmpeg\ffmpeg.7z" "Installing package %s..."
   DetailPrint "Nsis7z returned ($R0)"
+  SetOutPath "$InstallDir"
   Delete "$InstallDir\ffmpeg\ffmpeg.7z"
   ; start menu
   WriteIniStr "$InstallDir\ffmpeg_docs.url" "InternetShortcut" "URL" "http://ffmpeg.org/ffmpeg-doc.html"
