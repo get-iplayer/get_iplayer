@@ -173,7 +173,7 @@ Section "get_iplayer" section1
   ;download get_iplayer
   Delete $InstallDir\get_iplayer.pl
   download1:
-  inetc::get /USERAGENT "${USERAGENT}" "http://www.infradead.org/get_iplayer/get_iplayer" "$InstallDir\get_iplayer.pl" /END
+  inetc::get /USERAGENT "${USERAGENT}" "http://www.infradead.org/get_iplayer/latest/get_iplayer" "$InstallDir\get_iplayer.pl" /END
   Pop $R0 ;Get the return value
   StrCmp $R0 "OK" install1
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer failed: $R0, Do you wish to try again?" IDYES download1
@@ -191,7 +191,7 @@ Section "get_iplayer" section1
   ;download get_iplayer.cgi
   Delete $InstallDir\get_iplayer.cgi
   download2:
-  inetc::get /USERAGENT "${USERAGENT}" "http://www.infradead.org/get_iplayer/get_iplayer.cgi" "$InstallDir\get_iplayer.cgi" /END
+  inetc::get /USERAGENT "${USERAGENT}" "http://www.infradead.org/get_iplayer/latest/get_iplayer.cgi" "$InstallDir\get_iplayer.cgi" /END
   Pop $R0 ;Get the return value
   StrCmp $R0 "OK" install2
      MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer Web PVR Manager failed: $R0, Do you wish to try again?" IDYES download2
@@ -505,7 +505,7 @@ Function .onInit
   ; Check for newer installer
   ClearErrors
   Delete "$INSTDIR\Installer-ver.txt"
-  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" /SILENT "http://www.infradead.org/get_iplayer/VERSION-get_iplayer-win-installer" "$INSTDIR\Installer-ver.txt" /END
+  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" /SILENT "http://www.infradead.org/get_iplayer_win/VERSION-get_iplayer-win-installer" "$INSTDIR\Installer-ver.txt" /END
   Pop $R0 ;Get the return value
   ; abort checking new installer and just continue if not OK
   StrCmp $R0 "OK" 0 nonew
@@ -522,7 +522,7 @@ Function .onInit
   MessageBox MB_YESNO|MB_ICONQUESTION "A newer installer version $Test is available, Do you wish to download and run it?" IDYES download IDNO nonew
   download:
   ClearErrors
-  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" "http://david.woodhou.se/get_iplayer_setup_latest.exe" "$DESKTOP\get_iplayer_Setup_$Test.exe" /END
+  inetc::get /USERAGENT "get_iplayer windows installer v${VERSION}" "http://www.infradead.org/get_iplayer_win/get_iplayer_setup_$Test.exe" "$DESKTOP\get_iplayer_Setup_$Test.exe" /END
   Pop $R0 ;Get the return value
   StrCmp $R0 "OK" newinstall
     MessageBox MB_YESNO|MB_ICONQUESTION "Download of get_iplayer installer failed: $R0, Do you wish to try again?" IDYES download
@@ -612,7 +612,7 @@ FunctionEnd
 Function .onInstSuccess
   ; URLs
   WriteIniStr "$InstallDir\linuxcentre.url" "InternetShortcut" "URL" "http://linuxcentre.net/getiplayer/"
-  WriteIniStr "$InstallDir\download_latest_installer.url" "InternetShortcut" "URL" "http://david.woodhou.se/get_iplayer_setup_latest.exe"
+  WriteIniStr "$InstallDir\download_latest_installer.url" "InternetShortcut" "URL" "http://www.infradead.org/get_iplayer_win/get_iplayer_setup_latest.exe"
   WriteIniStr "$InstallDir\nsis_docs.url" "InternetShortcut" "URL" "http://nsis.sourceforge.net/"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Recordings Folder.lnk" "$DataDir"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Help\NSIS Installer Home.lnk" "$InstallDir\nsis_docs.url" "" "$SYSDIR\SHELL32.dll" 175
