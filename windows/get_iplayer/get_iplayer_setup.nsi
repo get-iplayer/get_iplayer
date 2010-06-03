@@ -5,7 +5,7 @@
   Name "get_iplayer"
 
   !define PRODUCT "get_iplayer"
-  !define VERSION "4.1"
+  !define VERSION "4.2"
   !define USERAGENT "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9.2) Gecko/20100115 Firefox/3.6"
   !include "MUI.nsh"
   !include "Sections.nsh"
