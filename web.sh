@@ -31,3 +31,4 @@ done > CHANGELOG.new
 
 mv CHANGELOG.new CHANGELOG-get_iplayer
 mv VERSION.new VERSION-get_iplayer
+ln -sf v$LATESTTAG latest
