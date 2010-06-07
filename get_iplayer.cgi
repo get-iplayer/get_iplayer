@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.70';
+my $VERSION = '0.71';
 
 use strict;
 use CGI ':all';
@@ -240,7 +240,7 @@ $layout->{BASICTAB}->{order} = [ qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /
 
 $layout->{SEARCHTAB}->{title} = 'Advanced Search';
 $layout->{SEARCHTAB}->{heading} = 'Advanced Search Options:';
-$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
+$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST EXCLUDE CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
 
 $layout->{DISPLAYTAB}->{title} = 'Display';
 $layout->{DISPLAYTAB}->{heading} = 'Display Options:';
@@ -2711,6 +2711,7 @@ sub search_history {
 	$opt->{REVERSE}->{current} = 1;
 	$opt->{SINCE}->{current} = '';
 	$opt->{BEFORE}->{current} = '';
+	$opt->{EXCLUDE}->{current} = '';
 	$opt->{CATEGORY}->{current} = '';
 	$opt->{EXCLUDECATEGORY}->{current} = '';
 	$opt->{CHANNEL}->{current} = '';
@@ -2923,6 +2924,7 @@ sub search_progs {
 						-onClick=>"
 							BackupFormVars(form);
 							form.NEXTPAGE.value='search_progs';
+							form.EXCLUDE.value='';
 							form.CATEGORY.value='".encode_entities($category)."';
 							form.EXCLUDECATEGORY.value='';
 							form.SEARCH.value='.*';
@@ -3547,6 +3549,17 @@ sub process_params {
 		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
 		default	=> 'default', # default
+		value	=> 30, # width values
+		save	=> 1,
+	};
+
+	$opt->{EXCLUDE} = {
+		title	=> 'Exclude Programmes', # Title
+		tooltip	=> 'Comma separated list of programmes to exclude. Partial word matches are supported', # Tooltip
+		webvar	=> 'EXCLUDE', # webvar
+		optkey	=> 'exclude', # option
+		type	=> 'text', # type
+		default	=> '', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
