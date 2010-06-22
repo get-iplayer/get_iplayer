@@ -6062,6 +6062,11 @@ sub get_stream_data {
 	} elsif ( $verpid =~ /http:/ ) {
 		$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
+		if  ( $xml =~ m{<mediator identifier=\"(.+?)\"} ) {
+		    $verpid = $media_stream_data_prefix.$1;
+		    main::logger "new verpid $verpid" if $opt->{debug};
+		    $xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
+		}
 		@medias = parse_metadata( $xml );
 
 	# Could also use Javascript based one: 'http://www.bbc.co.uk/iplayer/mediaselector/4/js/stream/$verpid?cb=NNNNN
