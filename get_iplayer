@@ -5880,6 +5880,8 @@ sub get_stream_data_cdn {
 
 		# Limelight CDN
 		} elsif ( $cattribs->{kind} eq 'limelight' ) {
+			# Set the live flag if this has 'live' in the service name
+			$conn->{live} = 1 if defined $mattribs->{service} && $mattribs->{service} =~ /live/;
 			decode_entities( $cattribs->{authString} );
 			$conn->{playpath} = $cattribs->{identifier};
 			# Remove offending mp3/mp4: at the start of the identifier (don't remove in stream url)
