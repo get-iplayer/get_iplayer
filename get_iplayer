@@ -4976,6 +4976,8 @@ sub get_verpids {
 	# iPlayer LiveTV or PID
 	} else {
 		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
+		# use the audiodescribed playlist url if non-default versions are specified
+		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} ne 'default';
 	}
 	
 	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
@@ -5097,7 +5099,11 @@ sub get_verpids {
 			# <alternate id="default" />
 			if ( m{<alternate\s+id="(.+?)"} ) {
 				my $curr_version = lc($1);
-				$version = lc($1);
+				# Remap version name from 'default' => 'audiodescribed' if we are using the /ad playlist URL:
+				if ( defined $opt->{versionlist} && $opt->{versionlist} ne 'default' ) {
+					$curr_version = 'audiodescribed' if $curr_version eq 'default';
+				}
+				$version = $curr_version;
 				# if current version is already defined, add a numeric suffix
 				if ( $prog->{verpids}->{$curr_version} ) {
 					my $vercount = 1;
@@ -5108,20 +5114,14 @@ sub get_verpids {
 					}
 					$version = $curr_version;
 				}
-			# If this item has no version name then append $count to previous version found (a hack but I think it works)
+			# If this item has no version name then this is assumed to be the 'default' version
 			} else {
-				# determine version name and trailing count (if any)
-				$prev_version =~ m{^(.+)(\d*)$};
-				my $prev_count = $2 || 1;
-				$prev_version = $1 || 'default';
-				$prev_count++;
-				$version = $prev_version.$prev_count;
+				$version = 'default';
 			}
 			main::logger "INFO: Using Not Live standard TV and Radio: $verpid\n" if $opt->{verbose} && $verpid;
 		}
 
 		next if ! ($verpid && $version);
-		$prev_version = $version;
 		$prog->{verpids}->{$version} = $verpid;
 		$prog->{durations}->{$version} = $1 if m{duration="(\d+?)"};
 		main::logger "INFO: Version: $version, VersionPid: $verpid, Duration: $prog->{durations}->{$version}\n" if $opt->{verbose};  
