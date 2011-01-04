@@ -6619,6 +6619,8 @@ sub get_links {
 
 			# Extract channel
 			$channel = $channels{$_};
+			# Add HD as category
+			push @category, 'HD' if $channel eq 'BBC HD';
 
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
@@ -6638,7 +6640,6 @@ sub get_links {
 				$cats{$_} = 1 for ( @category, split /,/, $prog->{$pid}->{categories} );
 				$cats{Popular} = 1 if $channel eq 'Popular';
 				$cats{Highlights} = 1 if $channel eq 'Highlights';
-				$cats{HD} = 1 if $channel eq 'BBC HD';
 				$prog->{$pid}->{categories} = join(',', sort keys %cats);
 
 				# If this is a dupicate pid and the channel is now Signed then both versions are available
