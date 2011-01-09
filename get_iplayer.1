@@ -1,0 +1,493 @@
+.TH GET_IPLAYER "1" "January 2010" "Phil Lewis" "get_iplayer Manual"
+.SH NAME
+get_iplayer \- Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more
+.SH SYNOPSIS
+\fBget_iplayer\fR [<options>] [<regex|index> ...]
+.PP
+\fBget_iplayer\fR \fB\-\-get\fR [<options>] <regex|index> ...
+.br
+\fBget_iplayer\fR <url> \fB\-\-type\fR=<type> [<options>]
+.PP
+\fBget_iplayer\fR <pid|url> [\fB\-\-type\fR=<type> <options>]
+.PP
+\fBget_iplayer\fR \fB\-\-stream\fR [<options>] <regex|index> | mplayer \fB\-cache\fR 3072 \-
+.PP
+\fBget_iplayer\fR \fB\-\-stream\fR [<options>] \fB\-\-type\fR=<type> <pid|url> | mplayer \fB\-cache\fR 3072 \-
+.PP
+\fBget_iplayer\fR \fB\-\-stream\fR [<options>] \fB\-\-type\fR=livetv,liveradio <regex|index> \fB\-\-player\fR="mplayer \-cache 128 \-"
+.PP
+\fBget_iplayer\fR \fB\-\-refresh\fR
+.SH DESCRIPTION
+\fBget_iplayer\fR lists, searches and records BBC iPlayer TV/Radio, BBC Podcast programmes. Other 3rd\-Party plugins may be available.
+.PP
+\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme
+directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to
+search terms and recording programmes automatically. It can also stream or record live BBC iPlayer output
+.PP
+If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.
+Each available programme has a numerical identifier, \fBpid\fR.
+\fBget_iplayer\fR records BBC iPlayer programmes by pretending to be an iPhone, which means that some programmes in the list are unavailable for recording.
+It can also utilise the \fBflvstreamer\fR tool to record programmes from RTMP flash streams at various qualities.
+.PP
+In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.
+.SH "OPTIONS"
+.SS "Search Options:"
+.TP
+\fB\-\-before
+Limit search to programmes added to the cache before N hours ago
+.TP
+\fB\-\-category <string>
+Narrow search to matched categories (regex or comma separated values)
+.TP
+\fB\-\-channel <string>
+Narrow search to matched channel(s) (regex or comma separated values)
+.TP
+\fB\-\-exclude <string>
+Narrow search to exclude matched programme names (regex or comma separated values)
+.TP
+\fB\-\-exclude\-category <string>
+Narrow search to exclude matched catogories (regex or comma separated values)
+.TP
+\fB\-\-exclude\-channel <string>
+Narrow search to exclude matched channel(s) (regex or comma separated values)
+.TP
+\fB\-\-fields <field1>,<field2>,..
+Searches only in the specified comma separated fields
+.TP
+\fB\-\-future
+Search future programme schedule if it has been indexed (refresh cache with: \-\-refresh \-\-refresh\-future).
+.TP
+\fB\-\-history
+Search/show recordings history
+.TP
+\fB\-\-long, \-l
+Additionally search in programme descriptions and episode names (same as \-\-fields=name,episode,desc )
+.TP
+\fB\-\-search <search term>
+GetOpt compliant way of specifying search args
+.TP
+\fB\-\-since
+Limit search to programmes added to the cache in the last N hours
+.TP
+\fB\-\-type <type>
+Only search in these types of programmes: livetv,tv,liveradio,radio,all (tv is default)
+.TP
+\fB\-\-versions <versions>
+Version of programme to search or record (e.g. '\-\-versions signed,audiodescribed,default')
+.SS "Display Options:"
+.TP
+\fB\-\-conditions
+Shows GPLv3 conditions
+.TP
+\fB\-\-debug
+Debug output
+.TP
+\fB\-\-dump\-options
+Dumps all options with their internal option key names
+.TP
+\fB\-\-help, \-h
+Intermediate help text
+.TP
+\fB\-\-helpbasic, \-\-usage
+Basic help text
+.TP
+\fB\-\-helplong
+Advanced help text
+.TP
+\fB\-\-hide
+Hide previously recorded programmes
+.TP
+\fB\-\-info, \-i
+Show full programme metadata and availability of modes and subtitles (max 50 matches)
+.TP
+\fB\-\-list <categories|channel>
+Show a list of available categories/channels for the selected type and exit
+.TP
+\fB\-\-listformat <format>
+Display programme data based on a user\-defined format string (such as <pid>, <name> etc)
+.TP
+\fB\-\-listplugins
+Display a list of currently available plugins or programme types
+.TP
+\fB\-\-long, \-l
+Show long programme info
+.TP
+\fB\-\-manpage <file>
+Create man page based on current help text
+.TP
+\fB\-\-nocopyright
+Don't display copyright header
+.TP
+\fB\-\-page <number>
+Page number to display for multipage output
+.TP
+\fB\-\-pagesize <number>
+Number of matches displayed on a page for multipage output
+.TP
+\fB\-\-quiet, \-q
+No logging output
+.TP
+\fB\-\-series
+Display Programme series names only with number of episodes
+.TP
+\fB\-\-show\-cache\-age
+Displays the age of the selected programme caches then exit
+.TP
+\fB\-\-show\-options
+Shows options which are set and where they are defined
+.TP
+\fB\-\-sort <fieldname>
+Field to use to sort displayed matches
+.TP
+\fB\-\-sortreverse
+Reverse order of sorted matches
+.TP
+\fB\-\-streaminfo
+Returns all of the media stream urls of the programme(s)
+.TP
+\fB\-\-terse
+Only show terse programme info (does not affect searching)
+.TP
+\fB\-\-tree
+Display Programme listings in a tree view
+.TP
+\fB\-\-verbose, \-v
+Verbose
+.TP
+\fB\-\-warranty
+Displays warranty section of GPLv3
+.TP
+\fB\-V
+Show get_iplayer version and exit.
+.SS "Recording Options:"
+.TP
+\fB\-\-attempts <number>
+Number of attempts to make or resume a failed connection
+.TP
+\fB\-\-bandwidth
+In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)
+.TP
+\fB\-\-force
+Ignore programme history (unsets \-\-hide option also). Forces a script update if used wth \-u
+.TP
+\fB\-\-get, \-g
+Start recording matching programmes
+.TP
+\fB\-\-hash
+Show recording progress as hashes
+.TP
+\fB\-\-liveradiomode <mode>,<mode>,..
+Live Radio Recording modes: flashaac,realaudio,wma
+.TP
+\fB\-\-livetvmode <mode>,<mode>,...
+Live TV Recoding modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal (default: flashhd,flashvhigh,flashhigh,flashstd,flashnormal)
+.TP
+\fB\-\-metadata\-only
+Create specified metadata info file without any recording or streaming (can also be used with thumbnail option).
+.TP
+\fB\-\-mmsnothread
+Disable parallel threaded recording for mms
+.TP
+\fB\-\-modes <mode>,<mode>,...
+Recoding modes: iphone,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma
+.TP
+\fB\-\-multimode
+Allow the recording of more than one mode for the same programme \- WARNING: will record all specified/default modes!!
+.TP
+\fB\-\-overwrite
+Overwrite recordings if they already exist
+.TP
+\fB\-\-partial\-proxy
+Only uses web proxy where absolutely required (try this extra option if your proxy fails)
+.TP
+\fB\-\-pid <pid>
+Record an arbitrary pid that does not necessarily appear in the index.
+.TP
+\fB\-\-pid\-recursive
+When used with \-\-pid record all the embedded pids if the pid is a series or brand pid.
+.TP
+\fB\-\-proxy, \-p <url>
+Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'
+.TP
+\fB\-\-radiomode <mode>,<mode>,...
+Radio Recording mode(s): iphone,flashaac,flashaachigh,flashaacstd,flashaaclow,flashaudio,realaudio,wma (default: flashaachigh,flashaacstd,flashaudio,realaudio,flashaaclow)
+.TP
+\fB\-\-raw
+Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv)
+.TP
+\fB\-\-rtmp\-liveradio\-opts <options>
+Add custom options to flvstreamer for liveradio
+.TP
+\fB\-\-rtmp\-livetv\-opts <options>
+Add custom options to flvstreamer for livetv
+.TP
+\fB\-\-rtmp\-radio\-opts <options>
+Add custom options to flvstreamer for radio
+.TP
+\fB\-\-rtmp\-tv\-opts <options>
+Add custom options to flvstreamer for tv
+.TP
+\fB\-\-rtmpport <port>
+Override the RTMP port (e.g. 443)
+.TP
+\fB\-\-start <secs>
+Recording/streaming start offset (rtmp and realaudio only)
+.TP
+\fB\-\-stop <secs>
+Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only
+.TP
+\fB\-\-suboffset <offset>
+Offset the subtitle timestamps by the specified number of milliseconds
+.TP
+\fB\-\-subsraw
+Additionally save the raw subtitles file
+.TP
+\fB\-\-subtitles
+Download subtitles into srt/SubRip format if available and supported
+.TP
+\fB\-\-subtitles\-only
+Only download the subtitles, not the programme
+.TP
+\fB\-\-test, \-t
+Test only \- no recording (will show programme type)
+.TP
+\fB\-\-thumb
+Download Thumbnail image if available
+.TP
+\fB\-\-thumbnail\-only
+Only Download Thumbnail image if available, not the programme
+.TP
+\fB\-\-tvmode <mode>,<mode>,...
+TV Recoding modes: iphone,rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: flashhigh,flashstd,flashnormal)
+.TP
+\fB\-\-url "<url>"
+Record the embedded media player in the specified URL. Use with \-\-type=<type>.
+.TP
+\fB\-\-wav
+In radio realaudio mode output as wav and don't transcode to mp3
+.SS "Output Options:"
+.TP
+\fB\-\-command, \-c <command>
+Run user command after successful recording using args such as <pid>, <name> etc
+.TP
+\fB\-\-email <address>
+Email HTML index of matching programmes to specified address
+.TP
+\fB\-\-email\-sender <address>
+Optional email sender address
+.TP
+\fB\-\-email\-smtp <hostname>
+SMTP server IP address to use to send email (default: localhost)
+.TP
+\fB\-\-fatfilename
+Omit characters forbidden by FAT filesystems from filenames but keep whitespace
+.TP
+\fB\-\-file\-prefix <format>
+The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>\-<episode>\-<pid>'
+.TP
+\fB\-\-fxd <file>
+Create Freevo FXD XML of matching programmes in specified file
+.TP
+\fB\-\-html <file>
+Create basic HTML index of matching programmes in specified file
+.TP
+\fB\-\-isodate
+Use ISO8601 dates (YYYY\-MM\-DD) in filenames
+.TP
+\fB\-\-metadata <type>
+Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, freevo, generic
+.TP
+\fB\-\-mythtv <file>
+Create Mythtv streams XML of matching programmes in specified file
+.TP
+\fB\-\-nowrite, \-n
+No writing of file to disk (use with \-x to prevent a copy being stored on disk)
+.TP
+\fB\-\-output, \-o <dir>
+Recording output directory
+.TP
+\fB\-\-outputliveradio <dir>
+Output directory for live radio recordings
+.TP
+\fB\-\-outputlivetv <dir>
+Output directory for live tv recordings
+.TP
+\fB\-\-outputlocalfiles <dir>
+Output directory for localfiles recordings
+.TP
+\fB\-\-outputpodcast <dir>
+Output directory for podcast recordings
+.TP
+\fB\-\-outputradio <dir>
+Output directory for radio recordings
+.TP
+\fB\-\-outputtv <dir>
+Output directory for tv recordings
+.TP
+\fB\-\-player '<command> <options>'
+Use specified command to directly play the stream
+.TP
+\fB\-\-stdout, \-x
+Additionally stream to STDOUT (so you can pipe output to a player)
+.TP
+\fB\-\-stream
+Stream to STDOUT (so you can pipe output to a player)
+.TP
+\fB\-\-subdir, \-s
+Put Recorded files into Programme name subdirectory
+.TP
+\fB\-\-subdir\-format <format>
+The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>\-<seriesnum>'
+.TP
+\fB\-\-symlink <file>
+Create symlink to <file> once we have the header of the recording
+.TP
+\fB\-\-thumb\-ext <ext>
+Thumbnail filename extension to use
+.TP
+\fB\-\-thumbsize <index|width>
+Default thumbnail size/index to use for the current recording and metadata (see \-\-info for thumbnailN: to get size/index)
+.TP
+\fB\-\-thumbsizecache <index|width>
+Default thumbnail size/index to use when building cache and index (see \-\-info for thumbnailN: to get size/index)
+.TP
+\fB\-\-whitespace, \-w
+Keep whitespace (and escape chars) in filenames
+.TP
+\fB\-\-xml\-alpha
+Create freevo/Mythtv menu sorted alphabetically by programme name
+.TP
+\fB\-\-xml\-channels
+Create freevo/Mythtv menu of channels \-> programme names \-> episodes
+.TP
+\fB\-\-xml\-names
+Create freevo/Mythtv menu of programme names \-> episodes
+.SS "PVR Options:"
+.TP
+\fB\-\-comment <string>
+Adds a comment to a PVR search
+.TP
+\fB\-\-pvr [pvr search name]
+Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command.
+.TP
+\fB\-\-pvr\-disable <search name>
+Disable (not delete) a named PVR search
+.TP
+\fB\-\-pvr\-enable <search name>
+Enable a previously disabled named PVR search
+.TP
+\fB\-\-pvr\-exclude <string>
+Exclude the PVR searches to run by seacrh name (regex or comma separated values)
+.TP
+\fB\-\-pvr\-single <search name>
+Runs a named PVR search
+.TP
+\fB\-\-pvradd <search name>
+Save the named PVR search with the specified search terms
+.TP
+\fB\-\-pvrdel <search name>
+Remove the named search from the PVR searches
+.TP
+\fB\-\-pvrlist
+Show the PVR search list
+.TP
+\fB\-\-pvrqueue
+Add currently matched programmes to queue for later one\-off recording using the \-\-pvr option
+.TP
+\fB\-\-pvrscheduler <seconds>
+Runs the PVR using all saved PVR searches every <seconds>
+.SS "Config Options:"
+.TP
+\fB\-\-expiry, \-e <secs>
+Cache expiry in seconds (default 4hrs)
+.TP
+\fB\-\-limit\-matches <number>
+Limits the number of matching results for any search (and for every PVR search)
+.TP
+\fB\-\-localfilesdirs <dir>[,dir,]
+Directories/Folders to scan for new files
+.TP
+\fB\-\-nopurge
+Don't ask to delete programmes recorded over 30 days ago
+.TP
+\fB\-\-packagemanager <string>
+Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)
+.TP
+\fB\-\-plugins\-update
+Update get_iplayer plugins to the latest
+.TP
+\fB\-\-prefs\-add
+Add/Change specified saved user or preset options
+.TP
+\fB\-\-prefs\-clear
+Remove *ALL* saved user or preset options
+.TP
+\fB\-\-prefs\-del
+Remove specified saved user or preset options
+.TP
+\fB\-\-prefs\-show
+Show saved user or preset options
+.TP
+\fB\-\-preset, \-z <name>
+Use specified user options preset
+.TP
+\fB\-\-preset\-list
+Show all valid presets
+.TP
+\fB\-\-profile\-dir <dir>
+Override the user profile directory/folder
+.TP
+\fB\-\-refresh, \-\-flush, \-f
+Refresh cache
+.TP
+\fB\-\-refresh\-exclude <string>
+Exclude matched channel(s) when refreshing cache (regex or comma separated values)
+.TP
+\fB\-\-refresh\-future
+Obtain future programme schedule when refreshing cache (between 7\-14 days)
+.TP
+\fB\-\-refresh\-include <string>
+Include matched channel(s) when refreshing cache (regex or comma separated values)
+.TP
+\fB\-\-skipdeleted
+Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with \-\-history & \-\-metadataonly/subsonly/thumbonly.
+.TP
+\fB\-\-update, \-u
+Update get_iplayer if a newer one exists
+.TP
+\fB\-\-webrequest <urlencoded string>
+Specify all options as a urlencoded string of "name=val&name=val&..."
+.SS "External Program Options:"
+.TP
+\fB\-\-atomicparsley <path>
+Location of AtomicParsley tagger binary
+.TP
+\fB\-\-ffmpeg <path>
+Location of ffmpeg binary
+.TP
+\fB\-\-flvstreamer <path>
+Location of flvstreamer binary
+.TP
+\fB\-\-id3v2 <path>
+Location of id3v2 or id3tag binary
+.TP
+\fB\-\-lame <path>
+Location of lame binary
+.TP
+\fB\-\-mplayer <path>
+Location of mplayer binary
+.TP
+\fB\-\-vlc <path>
+Location of vlc or cvlc binary
+.SH AUTHOR
+get_iplayer is written and maintained by Phil Lewis <iplayer2 (at sign) linuxcentre.net>.
+.PP
+This manual page was originally written by Jonathan Wiltshire <debian@jwiltshire.org.uk> for the Debian project (but may be used by others).
+.SH COPYRIGHT NOTICE
+get_iplayer v2.79, Copyright (C) 2008\-2010 Phil Lewis
+  This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
+  This is free software, and you are welcome to redistribute it under certain
+  conditions; use \-\-conditions for details.
+
+
+
