@@ -138,6 +138,7 @@ my $opt_format = {
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
+	aactomp3 => [ 1, "aactomp3", 'Recording', '--aactomp3', "Transcode aac audio to mp3 with ffmpeg"],
 
 	# Search
 	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
@@ -4259,7 +4260,7 @@ sub tag_file {
 				'--artist', $id3_channel,
 				'--album', $id3_name,
 				'--song', $id3_episode,
-				'--comment', 'Description:'.$id3_desc,
+				'--comment', $id3_desc,
 				'--year', substr( $prog->{firstbcast}->{$prog->{version}}, 0, 4 ) || ((localtime())[5] + 1900),
 				$prog->{filename},
 			);
@@ -6913,6 +6914,8 @@ sub download {
 	$prog->{ext} = 'wav' if $opt->{wav} &&  $mode =~ /^real/;
 	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
+	# Override flashaac ext based on aactomp3
+	$prog->{ext} = 'mp3' if ! $opt->{raw} && $opt->{aactomp3} && $mode =~ /^flashaac/;
 
 	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
@@ -8144,16 +8147,26 @@ sub get {
 			$file_tmp,
 			'-dumpfile', $prog->{filepart},
 		);
-	# Convert flv to aac/mp4a
+	# Convert flv to aac/mp4a/mp3
 	} elsif ( $mode =~ /flashaac/ ) {
-		# This works as long as we specify aac and not mp4a
-		@cmd = (
-			$bin->{ffmpeg},
-			'-i', $file_tmp,
-			'-vn',
-			'-acodec', 'copy',
-			'-y', $prog->{filepart},
-		);
+		# transcode to MP3 if directed
+		if ( $opt->{aactomp3} ) {
+			@cmd = (
+				$bin->{ffmpeg},
+				'-i', $file_tmp,
+				'-vn',
+				'-acodec', 'libmp3lame', '-ac', '2', '-ab', '128k',
+				'-y', $prog->{filepart},
+			);
+		} else {
+			@cmd = (
+				$bin->{ffmpeg},
+				'-i', $file_tmp,
+				'-vn',
+				'-acodec', 'copy',
+				'-y', $prog->{filepart},
+			);
+		}
 	# Convert video flv to mp4/avi if required
 	} else {
 		@cmd = (
@@ -8174,7 +8187,7 @@ sub get {
 			# If we have an aac file use ffmpeg to pack in m4a container and remove adts headers
 			# Have to do a second ffmpeg call because remuxing flv to m4a with -absf aac_adtstoasc gives corrupt m4a
 			# flv -> aac -> m4a works
-			if ( $mode =~ /flashaac/ && $prog->{ext} eq 'aac' ) {
+			if ( $mode =~ /flashaac/ && $prog->{ext} eq 'aac' && ! $opt->{aactomp3} ) {
 
 				# Temp file is now partial file from flv->aac conversion
 				# Change the extension to m4a for later info / debug messages
