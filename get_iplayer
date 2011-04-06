@@ -54,6 +54,7 @@ use Fcntl;
 use File::Copy;
 use File::Path;
 use File::stat;
+use File::Spec;
 use Getopt::Long;
 use HTML::Entities;
 use HTTP::Cookies;
@@ -4584,11 +4585,7 @@ sub generate_filenames {
 	}
 
 	# Determine direcotry and find it's absolute path
-	if ( $^O !~ /^MSWin32$/ ) {
-		$prog->{dir} = abs_path( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
-	} else {
-		$prog->{dir} = $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.';
-	}
+	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
 	
 	# Add modename to default format string if multimode option is used
 	$format .= ' <mode>' if $opt->{multimode};
