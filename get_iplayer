@@ -4647,8 +4647,16 @@ sub generate_filenames {
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	
+	# check if file extension has changed as a result of failed attempt with different mode
+	my $ext_changed = 0;
+	if ( ! $opt->{history} && ! $opt->{multimode} && defined $prog->{filename} && $prog->{filename} ne '' ) {
+		my ($dir, $fileprefix, $ext) = ( $1, $3, $4 ) if $prog->{filename} =~ m{^((.*)[\//]+)?([^\//]+?)\.(\w+)$};
+		$ext_changed = ( defined $ext && $ext ne '' && $ext ne $prog->{ext} );
+		main::logger "DEBUG: File ext changed:   $ext -> $prog->{ext}\n" if $ext_changed && $opt->{debug};
+	}
+
 	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename};
+	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename} || $ext_changed;
 	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
 
 	# Create symlink filename if required
@@ -6940,7 +6948,6 @@ sub download {
 		main::logger "\n";
 		$prog->download_subtitles( $ua, $subfile );
 	}
-
 
 	my $return = 0;
 	# Only get the stream if we are writing a file or streaming
