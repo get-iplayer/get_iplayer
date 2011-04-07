@@ -1,7 +1,7 @@
 get_iplayer PVR Manager
 -----------------------
 
-The Worlds most insecure web-based PVR Manager adn streaming proxy for get_iplayer
+The world's most insecure web-based PVR manager and streaming proxy for get_iplayer
 ** WARNING ** Never run this in an untrusted environment or facing the internet
 
     Copyright (C) 2009-2010 Phil Lewis
