@@ -4839,15 +4839,15 @@ sub get_time_string {
 	main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
 	# Sanity check date data
 	return '' if $year < 1970 || $mon < 1 || $mon > 12 || $mday < 1 || $mday > 31 || $hour < 0 || $hour > 24 || $min < 0 || $min > 59 || $sec < 0 || $sec > 59 || $tzhour < -13 || $tzhour > 13 || $tzmin < -59 || $tzmin > 59;
-	# Year cannot be > 2032 so limit accordingly :-/
-	$year = 2038 if $year > 2038;
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-	my $epoch = timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60;
+	my $epoch = eval { timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60; };
+	# ensure safe 32-bit date if timegm croaks
+	if ( $@ ) { $epoch = timegm(0, 0, 0, 1, 0, 138, undef, undef, 0) - $tzhour*60*60 - $tzmin*60; };
 	my $rtn;
 	if ( $diff ) {
 		# Return time ago
 		if ( $epoch < $diff ) {
-			my @time = gmtime( $diff - ( timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60 ) );
+			my @time = gmtime( $diff - $epoch );
 			# The time() func gives secs since 1970, gmtime is since 1900
 			my $years = $time[5] - 70;
 			$rtn = "$years years " if $years;
@@ -4855,7 +4855,7 @@ sub get_time_string {
 			return $rtn;
 		# Return time to go
 		} elsif ( $epoch > $diff ) {
-			my @time = gmtime( ( timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60 ) - $diff );
+			my @time = gmtime( $epoch - $diff );
 			my $years = $time[5] - 70;
 			$rtn = 'in ';
 			$rtn .= "$years years " if $years;
@@ -4868,7 +4868,7 @@ sub get_time_string {
 	# Return time in epoch
 	} else {
 		# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-		return timegm($sec, $min, $hour, $mday, ($mon-1), ($year-1900), undef, undef, 0) - $tzhour*60*60 - $tzmin*60;
+		return $epoch;
 	}
 }
 
