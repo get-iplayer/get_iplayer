@@ -3751,8 +3751,10 @@ package Programme;
 
 use Env qw[@PATH];
 use Fcntl;
+use File::Basename;
 use File::Copy;
 use File::Path;
+use File::Spec;
 use File::stat;
 use HTML::Entities;
 use HTTP::Cookies;
@@ -4531,7 +4533,10 @@ sub substitute {
 		# escape these chars: ! ` \ "
 		} elsif ($sanitize_mode == 4) {
 			$replace = $value;
-			$replace =~ s/([\!"\\`])/\\$1/g;
+			# Don't escape file paths
+			if ( $key !~ /(filename|filepart|thumbfile)/ ) {
+				$replace =~ s/([\!"\\`])/\\$1/g;
+			}
 		} else {
 			$replace = $value;
 		}
@@ -4584,7 +4589,7 @@ sub generate_filenames {
 		$prog->get_metadata_general();
 	}
 
-	# Determine direcotry and find it's absolute path
+	# Determine directory and find its absolute path
 	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
 	
 	# Add modename to default format string if multimode option is used
@@ -4623,22 +4628,24 @@ sub generate_filenames {
 
 	# Special case for history mode, parse the fileprefix and dir from filename if it is already defined
 	if ( $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
-		( $prog->{dir}, $prog->{fileprefix}, $prog->{ext} ) = ( $1, $3, $4 ) if $prog->{filename} =~ m{^((.*)[\//]+)?([^\//]+?)\.(\w+)$};
+		( $prog->{fileprefix}, $prog->{dir}, $prog->{ext} ) = fileparse($prog->{filename}, qr/\.[^.]*/);
+		# Fix up file path components
+		$prog->{ext} =~ s/\.//;
+		$prog->{dir} = File::Spec->canonpath($prog->{dir});
+		$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}");
 	}
 
 	# Don't create subdir if we are only testing recordings
 	# Create a subdir for programme sorting option
 	if ( $opt->{subdir} ) {
 		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
-		$prog->{dir} .= "/${subdir}";
-		$prog->{dir} =~ s|\/\/|\/|g;
+		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
 	# Create a subdir if there are multiple parts
 	if ( $multipart ) {
-		$prog->{dir} .= "/$prog->{fileprefix}";
-		$prog->{dir} .= s|\/\/|\/|g;
+		$prog->{dir} = File::Spec->catdir($prog->{dir}, $prog->{fileprefix});
 		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
@@ -4650,14 +4657,15 @@ sub generate_filenames {
 	# check if file extension has changed as a result of failed attempt with different mode
 	my $ext_changed = 0;
 	if ( ! $opt->{history} && ! $opt->{multimode} && defined $prog->{filename} && $prog->{filename} ne '' ) {
-		my ($dir, $fileprefix, $ext) = ( $1, $3, $4 ) if $prog->{filename} =~ m{^((.*)[\//]+)?([^\//]+?)\.(\w+)$};
+		( my $fileprefix, my $dir, my $ext ) = fileparse($prog->{filename}, qr/\.[^.]*/);
+		$ext =~ s/\.//;
 		$ext_changed = ( defined $ext && $ext ne '' && $ext ne $prog->{ext} );
 		main::logger "DEBUG: File ext changed:   $ext -> $prog->{ext}\n" if $ext_changed && $opt->{debug};
 	}
 
 	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
-	$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}" if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename} || $ext_changed;
-	$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
+	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename} || $ext_changed;
+	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 
 	# Create symlink filename if required
 	if ( $opt->{symlink} ) {
@@ -4691,7 +4699,7 @@ sub generate_filenames {
 		my $ext;
 		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
 		$ext = $opt->{thumbext} || $ext;
-		$prog->{thumbfile} = "$prog->{dir}/$prog->{fileprefix}.${ext}";
+		$prog->{thumbfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}");
 	}
 
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
@@ -7979,6 +7987,7 @@ use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
 use File::Path;
+use File::Spec;
 use File::stat;
 use HTML::Entities;
 use HTTP::Cookies;
@@ -8195,11 +8204,11 @@ sub get {
 
 				# Temp file is now partial file from flv->aac conversion
 				# Change the extension to m4a for later info / debug messages
-				# final and parital filenames use new extension
+				# final and partial filenames use new extension
 				$file_tmp = $prog->{filepart};
 				$prog->{ext} = 'm4a';
-				$prog->{filename} = "$prog->{dir}/$prog->{fileprefix}.$prog->{ext}";
-				$prog->{filepart} = "$prog->{dir}/$prog->{fileprefix}.partial.$prog->{ext}";
+				$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}");
+				$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 
 				@cmd = (
 					$bin->{ffmpeg},
