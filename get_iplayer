@@ -139,7 +139,7 @@ my $opt_format = {
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
-	aactomp3 => [ 1, "aactomp3", 'Recording', '--aactomp3', "Transcode aac audio to mp3 with ffmpeg"],
+	aactomp3	=> [ 1, "aactomp3", 'Recording', '--aactomp3', "Transcode aac audio to mp3 with ffmpeg"],
 
 	# Search
 	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
@@ -168,6 +168,7 @@ my $opt_format = {
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames"],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, freevo, generic"],
+	mkv			=> [ 1, "mkv", 'Output', '--mkv', "Output video in MKV container instead of MP4. Currently no tagging supported from get_iplayer for MKV output"],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n!", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
@@ -6832,6 +6833,8 @@ sub download {
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 	# Override flashaac ext based on aactomp3
 	$prog->{ext} = 'mp3' if ! $opt->{raw} && $opt->{aactomp3} && $mode =~ /^flashaac/;
+	# Override ext based on mkv option
+	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 
 	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
@@ -8083,6 +8086,15 @@ sub get {
 				'-y', $prog->{filepart},
 			);
 		}
+	# Convert video flv to mkv if required
+	} elsif ( $opt->{mkv} ) {
+		@cmd = (
+			$bin->{ffmpeg},
+			'-i', $file_tmp,
+			'-vcodec', 'copy',
+			'-acodec', 'copy',
+			'-y', $prog->{filepart},
+		);
 	# Convert video flv to mp4/avi if required
 	} else {
 		@cmd = (
