@@ -622,35 +622,96 @@ exit 0;
 
 
 sub init_search {
-	# Show options
-	$opt->display('Current options') if $opt->{verbose};
-	# $prog->{pid}->object hash
-	my $prog = {};
-	# obtain prog object given index. e.g. $index_prog->{$index_no}->{element};
-	my $index_prog = {};
-	# hash of prog types specified
-	my $type = {};
-	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
+	# Set --subtitles if --subsonly is used
+	if ( $opt->{subsonly} ) {
+		$opt->{subtitles} = 1;
+	}
+
+	# Set --thumbnail if --thumbonly is used
+	if ( $opt->{thumbonly} ) {
+		$opt->{thumb} = 1;
+	}
 
 	# Ensure lowercase types
 	$opt->{type} = lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
-	$type->{$_} = 1 for split /,/, $opt->{type};
+
 	# --stream is the same as --stdout --nowrite
 	if ( $opt->{stream} ) {
 		$opt->{nowrite} = 1;
 		$opt->{stdout} = 1;
 		delete $opt->{stream};
 	}
-	# Redirect STDOUT to player command if one is specified
-	if ( $opt->{player} && $opt->{nowrite} && $opt->{stdout} ) {
-		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
-		STDOUT->autoflush(1);
-		binmode STDOUT;
+
+	# Force nowrite if metadata/subs/thumb-only
+	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} ) {
+		$opt->{nowrite} = 1;
 	}
+
+	# List all options and where they are set from then exit
+	if ( $opt_cmdline->{showoptions} ) {
+		# Show all options andf where set from
+		$opt_file->display('Options from Files');
+		$opt_cmdline->display('Options from Command Line');
+		$opt->display('Options Used');
+		logger "Search Args: ".join(' ', @search_args)."\n\n";
+	}
+
+	# Web proxy
+	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
+	logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
+
+	# Set --get && --nowrite if --metadataonly is used
+	if ( $opt->{metadataonly} ) {
+		if ( ! $opt->{metadata} ) {
+			main::logger "ERROR: Please specify metadata type using --metadata=<type>\n";
+			exit 2;
+		}
+	}
+
+	# Sanity check some conflicting options
+	if ( $opt->{nowrite} && ! $opt->{stdout} ) {
+		if ( ! ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} ) ) {
+			logger "ERROR: Cannot record to nowhere\n";
+			exit 1;
+		}
+	}
+
+	# hash of prog types specified
+	my $type = {};
+	$type->{$_} = 1 for split /,/, $opt->{type};
+
 	# Default to type=tv if no type option is set
 	$type->{tv}		= 1 if keys %{ $type } == 0;
+
+	# Sanity check valid --type specified
+	for (keys %{ $type }) {
+		if ( not progclass($_) ) {
+			logger "ERROR: Invalid type '$_' specified. Valid types are: ".( join ',', progclass() )."\n";
+			exit 3;
+		}
+	}
+
+	# exit if only showing options
+	exit 0 if ( $opt_cmdline->{showoptions} );
+
+	# Display the ages of the selected caches in seconds
+	if ( $opt->{showcacheage} ) {
+		for ( keys %{ $type } ) {
+			my $cachefile = "${profile_dir}/${_}.cache";
+			main::logger "INFO: $_ cache age: ".( time() - stat($cachefile)->mtime )." secs\n" if -f $cachefile;
+		}
+		exit 0;
+	}
+
+	# Show options
+	$opt->display('Current options') if $opt->{verbose};
+	# $prog->{pid}->object hash
+	my $prog = {};
+	# obtain prog object given index. e.g. $index_prog->{$index_no}->{element};
+	my $index_prog = {};
+	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
 	# External Binaries
 	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
@@ -691,59 +752,13 @@ sub init_search {
 		s!^(.+)$!"$1"!g;
 	}
 	
-	# Set --subtitles if --subsonly is used
-	if ( $opt->{subsonly} ) {
-		$opt->{subtitles} = 1;
+	# Redirect STDOUT to player command if one is specified
+	if ( $opt->{player} && $opt->{nowrite} && $opt->{stdout} ) {
+		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
+		STDOUT->autoflush(1);
+		binmode STDOUT;
 	}
 
-	# Set --thumbnail if --thumbonly is used
-	if ( $opt->{thumbonly} ) {
-		$opt->{thumb} = 1;
-	}
-
-	# Set --get && --nowrite if --metadataonly is used
-	if ( $opt->{metadataonly} ) {
-		if ( ! $opt->{metadata} ) {
-			main::logger "ERROR: Please specify metadata type using --metadata=<type>\n";
-			exit 2;
-		}
-	}
-
-	# List all options and where they are set from then exit
-	if ( $opt_cmdline->{showoptions} ) {
-		# Show all options andf where set from
-		$opt_file->display('Options from Files');
-		$opt_cmdline->display('Options from Command Line');
-		$opt->display('Options Used');
-		logger "Search Args: ".join(' ', @search_args)."\n\n";
-	}
-
-	# Sanity check some conflicting options
-	if ( $opt->{nowrite} && ! $opt->{stdout} ) {
-		logger "ERROR: Cannot record to nowhere\n";
-		exit 1;
-	}
-
-	# Sanity check valid --type specified
-	for (keys %{ $type }) {
-		if ( not progclass($_) ) {
-			logger "ERROR: Invalid type '$_' specified. Valid types are: ".( join ',', progclass() )."\n";
-			exit 3;
-		}
-	}
-	
-	# Web proxy
-	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
-	logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
-
-	# Display the ages of the selected caches in seconds
-	if ( $opt->{showcacheage} ) {
-		for ( keys %{ $type } ) {
-			my $cachefile = "${profile_dir}/${_}.cache";
-			main::logger "INFO: $_ cache age: ".( time() - stat($cachefile)->mtime )." secs\n" if -f $cachefile;
-		}
-		exit 0;
-	}
 	return ( $type, $prog, $index_prog );
 }
 
