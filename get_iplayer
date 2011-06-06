@@ -66,6 +66,7 @@ use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use POSIX qw(:termios_h);
 use strict;
+use Errno;
 #use warnings;
 use Time::Local;
 use URI;
@@ -2789,9 +2790,24 @@ sub lockfile {
 		}
 		my @lines = <LOCKFILE>;
 		close LOCKFILE;
-
+		
+		my $cnt;
+		my $fail = 0;
+		$cnt = kill(0,$lines[0]);
+		main::logger "Exit $cnt";
 		# If the process is still running and the lockfile is newer than $stale_time seconds
-		if ( kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
+		# If posiable we use the ESRCH error code to check kill command. ESRCH is returned if 
+		# no process is found. This is different from EPERM which is returned if the process
+		# is being run by a different user.
+		if ( exists &Errno::ESRCH ){
+			# if ESRCH exists on this system use it.
+			$fail = 1 if ( $cnt != Errno::ESRCH && $now < ( stat($lockfile)->mtime + $stale_time ) ) ;
+		} else {
+			# if not default to the old method.
+			$fail = 1 if ( $cnt > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) );
+		}
+		
+		if ( $fail ) {
 				main::logger "ERROR: Quitting - process is already running ($lockfile)\n";
 				# redefine cleanup sub so that it doesn't delete $lockfile
 				$lockfile = '';
