@@ -66,6 +66,7 @@ use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use POSIX qw(:termios_h);
 use strict;
+use Errno;
 #use warnings;
 use Time::Local;
 use URI;
@@ -116,6 +117,7 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
+	maxmtime	=> [ 1, "maxmtime=n", 'Recording', '--maxmtime <seconds>', "Maxmium amount of time a temp recording file can be unmodified for before deletion. Useful for handling corrupted temp files"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used wth -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
@@ -2789,9 +2791,23 @@ sub lockfile {
 		}
 		my @lines = <LOCKFILE>;
 		close LOCKFILE;
-
+		
+		my $cnt;
+		my $fail = 0;
+		$cnt = kill(0,$lines[0]);
 		# If the process is still running and the lockfile is newer than $stale_time seconds
-		if ( kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
+		# If posiable we use the ESRCH error code to check kill command. ESRCH is returned if 
+		# no process is found. This is different from EPERM which is returned if the process
+		# is being run by a different user.
+		if ( exists &Errno::ESRCH ){
+			# if ESRCH exists on this system use it.
+			$fail = 1 if ( $cnt != Errno::ESRCH && $now < ( stat($lockfile)->mtime + $stale_time ) ) ;
+		} else {
+			# if not default to the old method.
+			$fail = 1 if ( $cnt > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) );
+		}
+		
+		if ( $fail ) {
 				main::logger "ERROR: Quitting - process is already running ($lockfile)\n";
 				# redefine cleanup sub so that it doesn't delete $lockfile
 				$lockfile = '';
@@ -7963,6 +7979,14 @@ sub get {
 
 	# Remove failed file recording (below a certain size) - hack to get around flvstreamer not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+		unlink( $file_tmp );
+	}
+	
+	# Remove failed file if recording has not been modified in the past 5 mins. This is a hack to handle flvstreamer when 
+	# it creates a corupted temp file that it cannot resume
+	my $stale_time = $opt->{maxmtime} || 300;
+	my $now = time(); 
+	if ( -f $file_tmp && (stat($file_tmp)->mtime + $stale_time) < $now ) {
 		unlink( $file_tmp );
 	}
 		
