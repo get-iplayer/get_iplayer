@@ -5501,7 +5501,10 @@ sub get_pids_recursive {
 	return @pids;
 }
 
-
+sub ensure_array {
+	my ($in) = @_;
+	return ref $in eq 'ARRAY' ? @$in : $in;
+}
 
 # Gets the episode data from a given episode pid
 sub parse_rdf_episode {
@@ -5540,7 +5543,7 @@ sub parse_rdf_series {
 	my $spid = extract_pid( $rdf->{'po:Series'}->{'rdf:about'} );
 	main::logger "INFO:    Series: '".$rdf->{'po:Series'}->{'dc:title'}."' ($spid)\n";
 	main::logger "INFO:      From Brand PID '".$rdf->{'po:Brand'}->{'rdf:about'}."'\n" if $opt->{debug};
-	for my $episode_element ( @{ $rdf->{'po:Series'}->{'po:episode'} } ) {
+	for my $episode_element (ensure_array($rdf->{'po:Series'}->{'po:episode'})) {
 		my $pid = extract_pid( $episode_element->{'po:Episode'}->{'rdf:about'} );
 		main::logger "INFO:      Episode '".$episode_element->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
 		push @pids, $pid;
@@ -5566,8 +5569,9 @@ sub parse_rdf_brand {
 		main::logger "INFO: With Series pid '".$series_element->{'rdf:resource'}."'\n" if $opt->{debug};
 		push @pids, parse_rdf_series( $ua, $series_element->{'rdf:resource'} );
 	}
-	main::logger "INFO:    Series: <None>\n" if $#{ $rdf->{'po:Brand'}->{'po:episode'} };
-	for my $episode_element ( @{ $rdf->{'po:Brand'}->{'po:episode'} } ) {
+	my @episodes = ensure_array($rdf->{'po:Brand'}->{'po:episode'});
+	main::logger "INFO:    Series: <None>\n" if @episodes;
+	for my $episode_element ( @episodes ) {
 		main::logger "INFO:      Episode pid: ".$episode_element->{'rdf:resource'}."\n" if $opt->{debug};
 		push @pids, extract_pid( $episode_element->{'rdf:resource'} );
 		parse_rdf_episode( $ua, $episode_element->{'rdf:resource'} );
