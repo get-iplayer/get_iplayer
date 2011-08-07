@@ -8,7 +8,8 @@ tag:
 		echo Uncommitted changes in above files; exit 1; fi
 	sed 's/^\(my $$version = \).*/\1$(VERSION);/' -i get_iplayer
 	@./get_iplayer --manpage get_iplayer.1; git add get_iplayer.1
-	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1
+	@git log --format='%aN' |sort -u > CONTRIBUTORS; git add CONTRIBUTORS
+	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 CONTRIBUTORS
 	@git tag v$(VERSION)
 
 tarball:
