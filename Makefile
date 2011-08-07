@@ -7,7 +7,9 @@ tag:
 	@if git diff-index --name-only HEAD | grep ^ ; then \
 		echo Uncommitted changes in above files; exit 1; fi
 	sed 's/^\(my $$version = \).*/\1$(VERSION);/' -i get_iplayer
-	@./get_iplayer --manpage get_iplayer.1; git add get_iplayer.1
+	@./get_iplayer --manpage get_iplayer.1
+	git diff --exit-code get_iplayer.1 > /dev/null || \
+		sed 's/\(\.TH GET_IPLAYER "1" "\)[^"]*"/\1$(shell date +"%B %Y")\"/' -i get_iplayer get_iplayer.1
 	@git log --format='%aN' |sort -u > CONTRIBUTORS; git add CONTRIBUTORS
 	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 CONTRIBUTORS
 	@git tag v$(VERSION)
