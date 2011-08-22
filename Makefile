@@ -10,8 +10,9 @@ tag:
 	@./get_iplayer --manpage get_iplayer.1
 	git diff --exit-code get_iplayer.1 > /dev/null || \
 		sed 's/\(\.TH GET_IPLAYER "1" "\)[^"]*"/\1$(shell date +"%B %Y")\"/' -i get_iplayer get_iplayer.1
+	sed 's/\(The latest version is v\)[0-9]\{1,\}\.[0-9]\{1,\}/\1$(VERSION)/' -i html/get_iplayer.html
 	@git log --format='%aN' |sort -u > CONTRIBUTORS; git add CONTRIBUTORS
-	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 CONTRIBUTORS
+	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 html/get_iplayer.html CONTRIBUTORS
 	@git tag v$(VERSION)
 
 tarball:
