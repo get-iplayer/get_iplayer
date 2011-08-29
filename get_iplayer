@@ -5479,6 +5479,10 @@ sub get_pids_recursive {
 			main::logger "INFO: Episode-only pid detected\n";
 			# No need to lookup - we already are an episode pid
 			push @pids, $prog->{pid};
+		} elsif ( $rdf->{'po:Clip'} ) {
+			main::logger "INFO: Clip-only pid detected\n";
+			# No need to lookup - we already are a clip pid
+			push @pids, $prog->{pid};
 		# a series pid page
 		} elsif ( $rdf->{'po:Series'} ) {
 			main::logger "INFO: Series pid detected\n";
@@ -5532,6 +5536,31 @@ sub parse_rdf_episode {
 
 
 
+# Gets the clip data from a given clip pid
+sub parse_rdf_clip {
+	my $ua = shift;
+	my $uri = shift;
+	my $rdf = get_rdf_data( $ua, $uri );
+	if ( ! $rdf ) {
+		main::logger "WARNING: Clip PID rdf URL contained no RDF data.\n";
+		return '';
+	}
+	my $pid = extract_pid( $uri );
+	main::logger "INFO:      Clip '".$rdf->{'po:Clip'}->{'dc:title'}."' ($pid)\n";
+	# We don't really need the ver pids from here
+	if ( ref$rdf->{'po:Clip'}->{'po:version'} eq 'ARRAY' ) {
+		for my $verpid_element ( @{ $rdf->{'po:Clip'}->{'po:version'} } ) {
+			main::logger "INFO:        With Version PID '".extract_pid( $verpid_element->{'rdf:resource'} )."'\n" if $opt->{debug};
+		}
+	} else {
+		main::logger "INFO:        With Version PID '".extract_pid( $rdf->{'po:Clip'}->{'po:version'}->{'rdf:resource'} )."'\n" if $opt->{debug};
+	}
+	#main::logger "INFO:        From Series PID '".extract_pid( $rdf->{'po:Series'}->{'rdf:about'} )."'\n" if $opt->{debug};
+	main::logger "INFO:        From Brand PID '".extract_pid( $rdf->{'po:Brand'}->{'rdf:about'} )."'\n" if $opt->{debug};
+}
+
+
+
 sub parse_rdf_series {
 	my $ua = shift;
 	my $uri = shift;
@@ -5576,6 +5605,12 @@ sub parse_rdf_brand {
 		main::logger "INFO:      Episode pid: ".$episode_element->{'rdf:resource'}."\n" if $opt->{debug};
 		push @pids, extract_pid( $episode_element->{'rdf:resource'} );
 		parse_rdf_episode( $ua, $episode_element->{'rdf:resource'} );
+	}
+	my @clips = ensure_array($rdf->{'po:Brand'}->{'po:clip'});
+	for my $clip_element ( @clips ) {
+		main::logger "INFO:      Clip pid: ".$clip_element->{'rdf:resource'}."\n" if $opt->{debug};
+		push @pids, extract_pid( $clip_element->{'rdf:resource'} );
+		parse_rdf_clip( $ua, $clip_element->{'rdf:resource'} );
 	}
 	return @pids;
 }
