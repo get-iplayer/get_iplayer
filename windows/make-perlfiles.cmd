@@ -50,8 +50,10 @@ if exist "%GIPPAR%" (
 :makepar
 REM location of pp
 set PP=%PERLDIST%\perl\site\bin\pp
-REM additional modules for pp - will force existence check
-set PPMODS=-M=MP3::Tag -M=MP3::Info
+REM include modules from CPAN - pp will check if present
+set PPMODS=-M MP3::Tag -M MP3::Info
+REM force XML parsers into PAR
+set PPMODS=%PPMODS% -M XML::LibXML::SAX -M XML::LibXML::SAX::Parser -M XML::SAX::PurePerl -M XML::Parser
 call :log Running pp...
 REM run pp
 call perl "%PP%" %PPMODS% -o "%TMPDIR%\%PAREXE%" "%GIPDIR%\get_iplayer" "%GIPDIR%\get_iplayer.cgi" >> "%LOG%" 2>&1
@@ -81,6 +83,11 @@ call :log Copying Perl support files...
 xcopy "%PERLDIST%\licenses\perl\*.*" "%TMPDIR%\perl-license" /e /i /r /y >> "%LOG%" 2>&1
 copy /y "%PERLDIST%\perl\bin\*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
 copy /y "%PERLDIST%\perl\bin\perl.exe" "%TMPDIR%" >> "%LOG%" 2>&1
+REM XML parser support
+copy /y "%PERLDIST%\c\bin\libexpat*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\libiconv*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\libxml2*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\libz*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
 call :log ...Finished
 REM create archive in temp dir
 call :log Archiving Perl support files...

@@ -112,10 +112,29 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 	In the event of an error, the temporary folder used by the script (`make-installer.tmp`) will remain in the build directory.
 
 3. There is no step 3.  For deployment information, see [Deployment Notes](#deploy) below.
-    
+
 #### Build Notes
 
 * `perlfiles.zip` will contain the Perl core libraries (as determined by PAR::Packer), plus the additional modules specified above.  However, `make-perlfiles.cmd` strips some large files from the "unicore" package in order to save space.  These files are input and test files for generation of Unicode character tables and are not required for `get_iplayer`.
+
+* The Perl XML parser modules listed below are forced into `perlfiles.zip` via the `pp` command line:
+
+    - XML::LibXML::SAX
+    - XML::LibXML::SAX::Parser
+    - XML::SAX::PurePerl
+    - XML::Parser
+
+* The use of the XML parser modules requires that the DLL files listed below (from the Strawberry Perl distribution) must also be included in `perlfiles.zip`:
+
+    - XML::LibXML::SAX
+
+        + %PERLDIST%\c\bin\libiconv*.dll
+        + %PERLDIST%\c\bin\libxml2*.dll
+        + %PERLDIST%\c\bin\libz*.dll
+
+    - XML::Parser
+
+        + %PERLDIST%\c\bin\libexpat*.dll
 
 * Subsequent invocations of `make-installer.cmd` will use an existing `perlfiles.zip` if it is found in the current directory.  To force the Perl support archive to be completely rebuilt, add `/makeperl` to the command:
 
@@ -157,7 +176,7 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 
 	The installer application will be copied into the current directory.  As in Windows, the installer may be built in any folder, but the build folder must be the current directory for your shell.
 
-<a id="deploy"/> 
+<a id="deploy"/>
 ## Deployment Notes
 
 ### Download Location
@@ -181,7 +200,7 @@ The installer application is deployed in the directory corresponding to `http://
 4. Update the contents of the installer version file with the new version (e.g. 4.3)
 
     `$ echo -n "4.3" > VERSION-get_iplayer-win-installer`
-   
+
     **NOTE:** For installers version 4.2 and earlier, the version file MUST NOT contain a trailing newline character after the version number (thus the `-n` option for `echo`).  A trailing newline character will break the installer update mechanism.  This is fixed in versions 4.3+.
 
 ### Configuration File
@@ -194,12 +213,12 @@ The configuration file is named `get_iplayer_config.ini` and is found in the **w
 
     `$ cd $WEBROOT/get_iplayer_win`
 
-2. Copy the latest version of the configuration file into the directory  
+2. Copy the latest version of the configuration file into the directory
 
     `$ cp $SOURCEPATH/get_iplayer_config.ini get_iplayer_config_20110828.ini`
 
     **NOTE:** Use a file name in the form `get_iplayer_config_YYYYMMDD.ini` to distinguish the new version from previous versions.
-    
+
 3. Update the `get_iplayer_config_latest.ini` symbolic link to refer to the new configuration file.
 
     `$ ln -sf get_iplayer_config_20110828.ini get_iplayer_config_latest.ini`
@@ -208,7 +227,7 @@ The configuration file only needs to be changed when the release version and/or 
 
 ### CGI Script
 
-Prior to version 4.3, the installer required the assistance of a CGI script to retrieve the download URLs for the various helper applications.  The CGI script would be accessed by the installer for every helper application selected for installation.  The former behaviour can be restored if the installer is built with /NOCONFIG (see [Useful Options](#useful) below). 
+Prior to version 4.3, the installer required the assistance of a CGI script to retrieve the download URLs for the various helper applications.  The CGI script would be accessed by the installer for every helper application selected for installation.  The former behaviour can be restored if the installer is built with /NOCONFIG (see [Useful Options](#useful) below).
 
 The CGI script is named `get_iplayer_setup.cgi` and is found in the **windows** directory of the `get_iplayer` Git repository along with the other installer-related files.  The script is deployed in the directory corresponding to `http://www.infradead.org/cgi-bin/`.  Deployment is performed as follows (with placeholders for actual directory paths):
 

@@ -3,7 +3,7 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.3"
+!define VERSION "4.4"
 
 ;#######################################
 ;# Build Setup
@@ -442,7 +442,9 @@ Section "get_iplayer" section1
 !ifndef NOCONFIG
   ${LineRead} "$INSTDIR\${GIPVER_CHECK}" 1 $1
   ${StrTrimNewLines} $1 $1
+  ; update config file
   WriteINIStr "$INSTDIR\${CONFIG}" "get_iplayer" "version" $1
+  WriteINIStr "$INSTDIR\${CONFIG}" "perlfiles" "version" ${VERSION}
 !else
   CopyFiles "$INSTDIR\${GIPVER_CHECK}" "$INSTDIR\${GIPVER}"
 !endif
@@ -492,7 +494,9 @@ Section "un.get_iplayer" un.section1
     ; delete the local user data
     RMDir /r $PROFILE\.get_iplayer
 !ifndef NOCONFIG
+  ; update config file
   DeleteINISec "$INSTDIR\${CONFIG}" "get_iplayer"
+  DeleteINISec "$INSTDIR\${CONFIG}" "perlfiles"
 !endif
   clean_files:
   ; clear files on uninstall
@@ -689,6 +693,13 @@ Function .onInit
 !ifndef WITHSCRIPTS
   ; check for newer get_iplayer version
 !ifndef NOCONFIG
+  ; check perl support version from config file
+  ReadINIStr $2 "$INSTDIR\${CONFIG}" "perlfiles" "version"
+  StrCmp $2 ${VERSION} no_new_perl
+    ; new perl means get_iplayer component should be updated
+    SectionSetFlags ${Section1} ${SF_SELECTED}
+    StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Perl Support $2 -> ${VERSION})"
+  no_new_perl:
   ReadINIStr $3 "$INSTDIR\${CONFIG}" "get_iplayer" "version"
 !else
   ${LineRead} "$INSTDIR\${GIPVER}" 1 $3
@@ -708,7 +719,7 @@ Function .onInit
       StrCmp $3 $4 no_new_gip
         SectionSetFlags ${Section1} ${SF_SELECTED}
         ; add notice if versions different
-        StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer ($3 -> $4)"
+        StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Main Script $3 -> $4)"
   no_new_gip:
 !endif
   ; set helper app sections as unselected if already installed
