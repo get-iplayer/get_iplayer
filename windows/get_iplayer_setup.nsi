@@ -773,6 +773,7 @@ Function .onInstSuccess
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "URLInfoAbout" "${MOTHERSHIP}/get_iplayer/"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "Publisher" "${MOTHERSHIP_NAME}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "UninstallString" "$INSTDIR\Uninst.exe"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\get_iplayer" "DisplayIcon" "$INSTDIR\Uninst.exe"
   WriteRegStr HKCU "Software\${PRODUCT}" "" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninst.exe"
 FunctionEnd
