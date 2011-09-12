@@ -57,6 +57,7 @@ GetOptions(
 	"port|p=n"			=> \$opt_cmdline->{port},
 	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
+	"hostaddress=s"			=> \$opt_cmdline->{hostaddress},
 	"debug"				=> \$opt_cmdline->{debug},
 ) || die usage();
 
@@ -77,6 +78,7 @@ Options:
  --listen,-l       Use the built-in web server and listen on this interface address (default: 0.0.0.0)
  --port,-p         Use the built-in web server and listen on this TCP port
  --getiplayer,-g   Path to the get_iplayer script
+ --hostaddress     The root address of the host when running standalone (useful behind reverse proxies).
  --ffmpeg          Path to the ffmpeg binary
  --debug           Debug mode
  --help,-h         This help text
@@ -366,7 +368,8 @@ if ( $opt_cmdline->{port} > 0 ) {
 				# respond OK to browser
 				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
-				run_cgi( $client, $query_string, $request{URL}, 'http://'.$request{host}.'/' );
+                                my $host = $opt_cmdline->{hostaddress} || 'http://'.$request{host}.'/';
+				run_cgi( $client, $query_string, $request{URL}, $host );
 
 			# Else 404
 			} else {
