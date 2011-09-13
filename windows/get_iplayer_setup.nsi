@@ -139,7 +139,7 @@ Page custom UpdatesPage
 Var UpdatedComponents
 
 ; user agent strings for downloads
-!define USERAGENT "Mozilla/5.0 (Windows; U; Windows NT 5.1; en-GB; rv:1.9.2) Gecko/20100115 Firefox/3.6"
+!define USERAGENT "curl/7.21.7 (i386-pc-win32) libcurl/7.21.7 OpenSSL/0.9.8r zlib/1.2.5"
 !define SETUP_UA "get_iplayer windows installer v${VERSION}"
 ; URLs and file names for updates and version checks
 !define SETUPVER "get_iplayer_setup-ver.txt"
