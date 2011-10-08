@@ -251,7 +251,7 @@ my $opt_format = {
 	tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 	tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 	tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts"],
-	tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "AtomicParsley expects UTF-8 input"],
+	tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "AtomicParsley accepts UTF-8 input"],
 
 	# Deprecated
 
@@ -3520,7 +3520,7 @@ sub add {
 	return 0 if $opt->{nowrite};
 
 	# Add to history
-	if ( ! open(HIST, ">> $historyfile") ) {
+	if ( ! open(HIST, ">>:utf8", $historyfile) ) {
 		main::logger "ERROR: Cannot write or append to $historyfile\n";
 		exit 11;
 	}
@@ -4281,10 +4281,6 @@ sub tag_metadata {
 		} else {
 			$meta->{$key} = $val;
 		}
-	}
-	# expect input in UTF-8
-	while ( my ($key, $val) = each %{$meta} ) {
-		$meta->{$key} = decode("utf8", $val);
 	}
 	return $meta;
 }
