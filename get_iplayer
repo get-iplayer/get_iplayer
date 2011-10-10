@@ -9483,6 +9483,20 @@ sub tags_from_metadata {
 	return $tags;
 }
 
+# escape/enclose embedded quotes in command line parameters
+sub tags_escape_quotes {
+	my ($tags) = @_;
+	# only necessary for Windows
+	if ( $^O =~ /^MSWin32$/ ) {
+		while ( my ($key, $val) = each %$tags ) {
+			if ($val =~ /"/) {
+				$val =~ s/"/\\"/g;
+				$tags->{$key} = '"'.$val.'"';
+			}
+		}
+	}
+}
+
 # add metadata tag to file
 sub tag_file {
 	my ($self, $meta) = @_;
@@ -9587,6 +9601,8 @@ sub tag_file_id3_basic {
 		# make safe lyrics text as well
 		# can't use $tags->{lyrics} because of colons in links
 		$tags->{longDescription} =~ s/:/_/g;
+		# handle embedded quotes
+		tags_escape_quotes($tags);
 		# encode for id3v2
 		while ( my ($key, $val) = each %{$tags} ) {
 			$tags->{$key} = encode("iso-8859-1", $val);
@@ -9629,6 +9645,8 @@ sub tag_file_mp4 {
 		main::logger "INFO: MP4 tagging \U$meta->{ext}\E file\n";
 		# pretty copyright for MP4
 		$tags->{copyright} = "\xA9 $tags->{copyright}" if $tags->{copyright};
+		# handle embedded quotes
+		tags_escape_quotes($tags);
 		# encode metadata for atomicparsley
 		my $encoding = $opt->{tag_utf8} ? "utf8" : "iso-8859-1";
 		while ( my ($key, $val) = each %$tags ) {
