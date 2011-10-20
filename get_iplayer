@@ -6702,38 +6702,60 @@ sub get_links {
 				$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get programme schedule feed for $channel_id from iplayer site\n");
 				decode_entities($xml);
 		
-				#      <broadcast>
-				#        <start>2010-01-11T11:25:00Z</start>
-				#        <end>2010-01-11T11:30:00Z</end>
-				#        <duration>300</duration>
-				#        <episode>
-				#          <pid>b00l6wjs</pid>
-				#          <title>Vampire Bats</title>
-				#          <short_synopsis>How to survive the most dangerous
-				#          situations that Mother Nature can chuck at
-				#          you.</short_synopsis>
-				#          <medium_synopsis>A light-hearted look at how to survive
-				#          the most dangerous situations that Mother Nature can
-				#          chuck at you.</medium_synopsis>
-				#          <long_synopsis></long_synopsis>
-				#          <iplayer>
-				#            <audio_expires />
-				#            <video_expires>2010-01-18T11:29:00Z</video_expires>
-				#          </iplayer>
-				#          <position>16</position>
-				#          <series>
-				#            <pid>b00kh5x3</pid>
-				#            <title>Shorts</title>
-				#          </series>
-				#          <brand>
-				#            <pid>b00kh5y8</pid>
-				#            <title>Sam and Mark's Guide to Dodging Disaster</title>
-				#          </brand>
-				#        </episode>
-				#      </broadcast>
+				# <broadcast is_repeat="1" is_blanked="0">
+				#   <pid>p00l44r8</pid>
+				#   <start>2011-10-24T00:45:00+01:00</start>
+				#   <end>2011-10-24T01:15:00+01:00</end>
+				#   <duration>1800</duration>
+				#   <programme type="episode">
+				#     <pid>b016c73c</pid>
+				#     <position>3</position>
+				#     <title>Episode 3</title>
+				#     <short_synopsis>With team captains Noel Fielding and Phill Jupitus, and a surprise special guest host.</short_synopsis>
+				#     <media_type>audio_video</media_type>
+				#     <duration>2100</duration>
+				#     <display_titles>
+				#       <title>Never Mind the Buzzcocks</title>
+				#       <subtitle>Series 25, Episode 3</subtitle>
+				#     </display_titles>
+				#     <first_broadcast_date>2011-10-17T22:00:00+01:00</first_broadcast_date>
+				#     <ownership>
+				#       <service type="tv" id="bbc_two" key="bbctwo">
+				#         <title>BBC Two</title>
+				#       </service>
+				#     </ownership>
+				#     <programme type="series">
+				#       <pid>b015skhy</pid>
+				#       <title>Series 25</title>
+				#       <position>25</position>
+				#       <expected_child_count>12</expected_child_count>
+				#       <first_broadcast_date>2011-10-03T22:00:00+01:00</first_broadcast_date>
+				#       <programme type="brand">
+				#         <pid>b006v0dz</pid>
+				#         <title>Never Mind the Buzzcocks</title>
+				#         <position />
+				#         <expected_child_count />
+				#         <first_broadcast_date>2007-06-20T22:00:00+01:00</first_broadcast_date>
+				#         <ownership>
+				#           <service type="tv" id="bbc_two" key="bbctwo">
+				#             <title>BBC Two</title>
+				#           </service>
+				#         </ownership>
+				#       </programme>
+				#     </programme>
+				#     <available_until>2011-10-30T23:29:00Z</available_until>
+				#     <actual_start>2011-10-17T22:30:00+01:00</actual_start>
+				#     <is_available_mediaset_pc_sd>1</is_available_mediaset_pc_sd>
+				#     <is_legacy_media>0</is_legacy_media>
+				#     <media format="video">
+				#       <expires>2011-10-30T23:29:00Z</expires>
+				#       <availability>11 days left to watch</availability>
+				#     </media>
+				#   </programme>
+				# </broadcast>
 
 				# get list of entries within <broadcast> </broadcast> tags
-				my @entries = split /<broadcast>/, $xml;
+				my @entries = split /<broadcast[^s]/, $xml;
 				# Discard first element == header
 				shift @entries;
 				main::logger "INFO: Got ".($#entries + 1)." programmes\n" if $opt->{verbose};
@@ -6744,11 +6766,11 @@ sub get_links {
 					my $entry_flat = $entry;
 					$entry_flat =~ s/\n/ /g;
 
-					$pid = $1 if $entry =~ m{<episode>.*?<pid>\s*(.+?)\s*</pid>};
+					$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
 
-					$episode = $1 if $entry =~ m{<episode>.*?<title>\s*(.*?)\s*</title>};
-					$nametitle = $1 if $entry =~ m{<brand>.*?<title>\s*(.*?)\s*</title>.*?</brand>};
-					$seriestitle = $1 if $entry =~ m{<series>.*?<title>\s*(.*?)\s*</title>.*?</series>};
+					$episode = $1 if $entry =~ m{<programme\s+type="episode">.*?<title>\s*(.*?)\s*</title>};
+					$nametitle = $1 if $entry =~ m{<programme\s+type="brand">.*?<title>\s*(.*?)\s*</title>.*?</programme>};
+					$seriestitle = $1 if $entry =~ m{<programme\s+type="series">.*?<title>\s*(.*?)\s*</title>.*?</programme>};
 
 					# Set name
 					if ( $nametitle && $seriestitle ) {
