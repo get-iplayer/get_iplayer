@@ -3,7 +3,9 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.4"
+!define VERSION "4.5"
+; VERSION where Perl support last changed
+!define PERLVER "4.4"
 
 ;#######################################
 ;# Build Setup
@@ -444,7 +446,7 @@ Section "get_iplayer" section1
   ${StrTrimNewLines} $1 $1
   ; update config file
   WriteINIStr "$INSTDIR\${CONFIG}" "get_iplayer" "version" $1
-  WriteINIStr "$INSTDIR\${CONFIG}" "perlfiles" "version" ${VERSION}
+  WriteINIStr "$INSTDIR\${CONFIG}" "perlfiles" "version" ${PERLVER}
 !else
   CopyFiles "$INSTDIR\${GIPVER_CHECK}" "$INSTDIR\${GIPVER}"
 !endif
@@ -695,10 +697,10 @@ Function .onInit
 !ifndef NOCONFIG
   ; check perl support version from config file
   ReadINIStr $2 "$INSTDIR\${CONFIG}" "perlfiles" "version"
-  StrCmp $2 ${VERSION} no_new_perl
+  StrCmp $2 ${PERLVER} no_new_perl
     ; new perl means get_iplayer component should be updated
     SectionSetFlags ${Section1} ${SF_SELECTED}
-    StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Perl Support $2 -> ${VERSION})"
+    StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Perl Support $2 -> ${PERLVER})"
   no_new_perl:
   ReadINIStr $3 "$INSTDIR\${CONFIG}" "get_iplayer" "version"
 !else
@@ -914,9 +916,13 @@ Function InstFilesPre
 !ifndef NOCONFIG
   ; ensure config files exist on fresh install
   Call InitConfigFile
-  IfFileExists "$INSTDIR\${CONFIG_CHECK}" +2
-    ; use built-in config if none found
+  IfFileExists "$INSTDIR\${CONFIG_CHECK}" got_config_check
+    inetc::get /USERAGENT "${SETUP_UA}" /SILENT "${CONFIG_URL}" "$INSTDIR\${CONFIG_CHECK}" /END
+    Pop $R0
+    StrCmp $R0 "OK" got_config_check
+    ; use built-in config on error
     File "/oname=${CONFIG_CHECK}" "${SOURCEPATH}\windows\${CONFIG}"
+  got_config_check:
 !endif
 FunctionEnd
 
