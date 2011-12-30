@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = '0.71';
+my $VERSION = '0.72';
 
 use strict;
 use CGI ':all';
@@ -168,7 +168,6 @@ my %prog_types = (
 	tv	=> 'BBC TV',
 	radio	=> 'BBC Radio',
 	podcast	=> 'BBC Podcast',
-	itv	=> 'ITV',
 	livetv	=> 'Live BBC TV',
 	liveradio => 'Live BBC Radio',
 );
@@ -177,9 +176,8 @@ my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio',
 	3	=> 'podcast',
-	4	=> 'itv',
-	5	=> 'livetv',
-	6	=> 'liveradio',
+	4	=> 'livetv',
+	5	=> 'liveradio',
 );
 
 # Get list of currently valid and prune %prog types and add new entry
@@ -3008,8 +3006,8 @@ sub search_progs {
 		my @order = @{ $tab->{order} };
 		my $heading = $tab->{heading};
 		# Set displayed tab status (i.e. style) based on posted/cookie vars (always display basic tab)
-		$tab->{style} = "display: none;";
-		$tab->{style} = "display: table-cell;" if $tabname eq 'BASICTAB' || ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' );
+		$tab->{style} = "display: none; visibility: collapse;";
+		$tab->{style} = "display: table-cell; visibility: visible;" if $tabname eq 'BASICTAB' || ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' );
 
 		# Each option within the tab
 		my @optrows;
@@ -3945,6 +3943,7 @@ sub begin_html {
 
 	# Write out the page http and html headers
 	print $fh $headers;
+	print $fh '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'."\n";
 	print $fh "<html>";
 	print $fh "<HEAD><TITLE>$title</TITLE>\n";
 	insert_stylesheet();
@@ -4031,6 +4030,7 @@ sub insert_javascript {
 			var button = document.getElementById( 'button_' + tabs[i] );
 			if ( tab == selected_tab ) {
 				tab.style.display = 'table-cell';
+				tab.style.visibility = 'visible';
 				option.value = 'yes';
 				//button.innerHTML = '- ' + button.innerHTML.substring(2);
 				button.style.color = '#F54997';
@@ -4038,6 +4038,7 @@ sub insert_javascript {
 				li.className = 'options_tab_sel';
 			} else {
 				tab.style.display = 'none';
+				tab.style.visibility = 'collapse';
 				option.value = 'no';
 				//button.innerHTML = '+ ' + button.innerHTML.substring(2);
 				button.style.color = '#ADADAD';
@@ -4204,9 +4205,10 @@ sub insert_stylesheet {
 
 	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TR.options		{ white-space: nowrap; }
-	TH.options		{ width: 20px }
-	TD.options		{ width: 20px }
+	TH.options		{ padding-right: 4px; text-align: left; }
+	TD.options		{ }
 	LABEL.options		{ font-size: 100%; } 
+	INPUT.options[type="radio"],INPUT.options[type="checkbox"] { font-size: 100%; background:none; }
 	INPUT.options		{ font-size: 100%; } 
 	SELECT.options		{ font-size: 100%; } 
 
@@ -4244,7 +4246,7 @@ sub insert_stylesheet {
 	TD.search		{ text-align: left; }
 	A.search		{ }
 	LABEL.search		{ text-decoration: none; }
-	INPUT.search		{ font-size: 70%; background: #DDD; }
+	INPUT.search		{ font-size: 70%; background: none; }
 	LABEL.sorted            { color: #CFC; }
 	LABEL.unsorted          { color: #FFF; }
 	LABEL.sorted_reverse    { color: #FCC; }
