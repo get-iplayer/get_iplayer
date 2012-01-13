@@ -136,6 +136,7 @@ my $opt_format = {
 	subtitles	=> [ 2, "subtitles|subs!", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
 	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Recording', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subsraw!", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
+	tagonly		=> [ 1, "tagonly|tag-only!", 'Recording', '--tag-only', "Only update the programme tag and not download the programme (can also be used with --history)"],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
@@ -647,7 +648,7 @@ sub init_search {
 	}
 
 	# Force nowrite if metadata/subs/thumb-only
-	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} ) {
+	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
 	}
 
@@ -674,7 +675,7 @@ sub init_search {
 
 	# Sanity check some conflicting options
 	if ( $opt->{nowrite} && ! $opt->{stdout} ) {
-		if ( ! ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} ) ) {
+		if ( ! ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) ) {
 			logger "ERROR: Cannot record to nowhere\n";
 			exit 1;
 		}
@@ -788,7 +789,7 @@ sub find_pid_matches {
 		@try_types = (keys %{ $type });
 	}
 	logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-	return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{subsonly} ) ) && $hist->check( $pid );	
+	return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $pid );	
 
 	# Maybe we don't want to populate caches - this slows down --pid recordings ...
 	# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -1171,8 +1172,8 @@ sub list_progs {
 				}
 			}
 		}
-		# Get info, create metadata, subtitles and/or thumbnail file (i.e. don't stream/record)
-		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{streaminfo} ) {
+		# Get info, create metadata, subtitles, tag and/or thumbnail file (i.e. don't stream/record)
+		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 			$this->get_metadata_general();
 			if ( $this->get_metadata( $ua ) ) {
 				main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
@@ -1200,6 +1201,13 @@ sub list_progs {
 			if ( $opt->{thumbonly} && $this->{thumbnail} ) {
 				$this->create_dir();
 				$this->download_thumbnail();
+			}
+			# tag
+			if ( $opt->{tagonly} && ! $opt->{notag} ) {
+				# this probably needs to be initialised earlier - needed for tagging
+				$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
+				$this->create_dir();
+				$this->tag_file;
 			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
@@ -3703,7 +3711,10 @@ sub list_progs {
 			push @match_list, main::get_regex_matches( $prog, $_ );
 		}
 	}
-	
+
+	# force skipdeleted if --tagonly is specified
+	$opt->{skipdeleted} = 1 if $opt->{tagonly};
+
 	# Prune list of history entries with non-existant media files
 	if ( $opt->{skipdeleted} ) {
 		my @pruned = ();
@@ -3712,7 +3723,7 @@ sub list_progs {
 			if ( defined $this->{filename} && $this->{filename} ) {
 				# Skip if the originally recorded file no longer exists
 				if ( ! -f $this->{filename} ) {
-					main::logger "DEBUG: Skipping metadata/thumbnail - file no longer exists: '$this->{filename}'\n" if $opt->{verbose};
+					main::logger "DEBUG: Skipping metadata/thumbnail/tagging - file no longer exists: '$this->{filename}'\n" if $opt->{verbose};
 				} else {
 					push @pruned, $this;
 				}
@@ -4243,6 +4254,8 @@ sub mode_ver_download_retry_loop {
 				if ( ! $opt->{nowrite} ) {
 					$hist->add( $prog );
 					$prog->tag_file if ! $opt->{notag};
+				} elsif ( $opt->{tagonly} ) {
+					$prog->tag_file;
 				}
 				if ( $opt->{command} && ! $opt->{nowrite} ) {
 					$prog->run_user_command( $opt->{command} );
@@ -4601,6 +4614,7 @@ sub generate_filenames {
 		&& ( ! $opt->{metadataonly} )
 		&& ( ! $opt->{thumbonly} )
 		&& ( ! $opt->{subsonly} )
+		&& ( ! $opt->{tagonly} )
 		&& -f $prog->{filename} 
 		&& stat($prog->{filename})->size > $prog->min_download_size()
 	) {
@@ -5304,8 +5318,8 @@ sub get_metadata {
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
-			# Only return at this stage unless we want metadata only for various reasons
-			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} )
+			# Only return at this stage unless we want metadata/tags only for various reasons
+			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
 	}
 	$versions = join ',', sort keys %{ $prog->{verpids} };
@@ -9189,7 +9203,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
