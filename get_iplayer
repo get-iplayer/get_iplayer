@@ -1518,8 +1518,8 @@ sub get_links {
 			$prog->{$pid} = progclass( lc($memcache->{$prog_type}->{$pid}->{type}) )->new( 'pid' => $pid );
 			# Deep-copy of elements in memcache prog instance to %prog
 			$prog->{$pid}->{$_} = $memcache->{$prog_type}->{$pid}->{$_} for @cache_format;
-			# Copy pid into index_prog hash
-			$index_prog->{ $prog->{$pid}->{index} } = $pid;
+			# Copy object reference into index_prog hash
+			$index_prog->{ $prog->{$pid}->{index} } = $prog->{$pid};
 		}
 		logger "INFO: Got (quick) ".(keys %{ $memcache->{$prog_type} })." memcache entries for $prog_type\n" if $opt->{verbose};
 		return 0;
