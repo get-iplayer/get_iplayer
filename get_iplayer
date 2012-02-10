@@ -117,7 +117,7 @@ my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
-	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes"],
+	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mmsnothread	=> [ 1, "mmsnothread!", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
@@ -540,6 +540,8 @@ if ( defined $opt->{search} ) {
 	delete $opt->{search};
 	delete $opt_cmdline->{search};
 }
+# check if no search term(s) specified
+my $no_search_args = $#search_args < 0;
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0];
 
@@ -565,6 +567,10 @@ $pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
 
 # PVR functions
 if ( $opt->{pvradd} ) {
+	if ( $no_search_args ) {
+		main::logger "ERROR: Search term(s) required for recording\n";
+		exit 1;
+	}
 	$pvr->add( $opt->{pvradd}, @search_args );
 
 } elsif ( $opt->{pvrdel} ) {
@@ -580,6 +586,10 @@ if ( $opt->{pvradd} ) {
 	$pvr->display_list();
 
 } elsif ( $opt->{pvrqueue} ) {
+	if ( ! $opt->{pid} && $no_search_args ) {
+		main::logger "ERROR: Search term(s) required for recording\n";
+		exit 1;
+	}
 	$pvr->queue( @search_args );
 
 } elsif ( $opt->{pvrscheduler} ) {
@@ -616,6 +626,10 @@ if ( $opt->{pvradd} ) {
 
 # Else just process command line args
 } else {
+	if ( $opt->{get} && $no_search_args ) {
+		main::logger "ERROR: Search term(s) required for recording\n";
+		exit 1;
+	}
 	my $hist = History->new();
 	download_matches( $hist, find_matches( $hist, @search_args ) );
 	purge_downloaded_files( $hist, 30 );
@@ -9006,12 +9020,12 @@ sub opt_format {
 		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr [pvr search name]', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command. Synonyms: --pvrrun, --pvr-run"],
 		pvrexclude	=> [ 0, "pvrexclude|pvr-exclude=s", 'PVR', '--pvr-exclude <string>', "Exclude the PVR searches to run by search name (regex or comma separated values). Synonyms: --pvrexclude"],
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search. Synonyms: --pvrsingle"],
-		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvr-add <search name>', "Save the named PVR search with the specified search terms. Synonyms: --pvradd"],
+		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvr-add <search name>', "Save the named PVR search with the specified search terms.  Search terms required. Synonyms: --pvradd"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvr-del <search name>', "Remove the named search from the PVR searches. Synonyms: --pvrdel"],
 		pvrdisable	=> [ 1, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search. Synonyms: --pvrdisable"],
 		pvrenable	=> [ 1, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search. Synonyms: --pvrenable"],
 		pvrlist		=> [ 0, "pvrlist|pvr-list!", 'PVR', '--pvr-list', "Show the PVR search list. Synonyms: --pvrlist"],
-		pvrqueue	=> [ 0, "pvrqueue|pvr-queue!", 'PVR', '--pvr-queue', "Add currently matched programmes to queue for later one-off recording using the --pvr option. Synonyms: --pvrqueue"],
+		pvrqueue	=> [ 0, "pvrqueue|pvr-queue!", 'PVR', '--pvr-queue', "Add currently matched programmes to queue for later one-off recording using the --pvr option. Search terms required unless --pid specified. Synonyms: --pvrqueue"],
 		pvrscheduler	=> [ 0, "pvrscheduler|pvr-scheduler=n", 'PVR', '--pvr-scheduler <seconds>', "Runs the PVR using all saved PVR searches every <seconds>. Synonyms: --pvrscheduler"],
 		comment		=> [ 1, "comment=s", 'PVR', '--comment <string>', "Adds a comment to a PVR search"],
 	};
