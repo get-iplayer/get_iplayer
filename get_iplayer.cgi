@@ -87,7 +87,7 @@ EOF
 
 
 # Some defaults
-my $default_modes = 'flashaachigh,flashaacstd,flash,iphone,realaudio,flashaaclow';
+my $default_modes = 'flashaachigh,flashaacstd,flash,realaudio,flashaaclow';
 $opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
@@ -3513,7 +3513,7 @@ sub process_params {
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'flashaachigh,flashaacstd,flashaudio,flashhigh,iphone,flashstd,flashnormal,realaudio,flashaaclow', # default
+		default	=> 'flashaachigh,flashaacstd,flashaudio,flashhigh,flashstd,flashnormal,realaudio,flashaaclow', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
