@@ -156,7 +156,7 @@ my %fieldname = (
 	filename		=> 'Filename',
 	mode			=> 'Mode',
 	seriesnum		=> 'Series Number',
-	episodenum		=> 'Episode Numer',
+	episodenum		=> 'Episode Number',
 	'name,episode'		=> 'Name+Episode',
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
