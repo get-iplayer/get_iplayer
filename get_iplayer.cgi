@@ -3098,7 +3098,7 @@ sub search_progs {
 		{
 			-class => 'action'.$add_search_class_suffix,
 			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-			-onClick => "if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if ('$opt->{SEARCH}->{current}' == '.*') { alert('Search = .* will download all available programmes.  Please enter a more specific search term.'); return false; } if ('$opt->{SEARCH}->{current}' == '') { alert('Please enter a search term.'); return false; } if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; }  BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
 		},
 		'Add Search to PVR'
 	);
