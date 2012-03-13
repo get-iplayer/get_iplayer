@@ -5619,7 +5619,7 @@ sub parse_rdf_brand {
 	my @pids = ();
 	my $bpid = extract_pid( $uri );
 	main::logger "INFO:  Brand: '".$rdf->{'po:Brand'}->{'dc:title'}."' ($bpid)\n";
-	for my $series_element ( @{ $rdf->{'po:Brand'}->{'po:series'} } ) {
+	for my $series_element ( ensure_array($rdf->{'po:Brand'}->{'po:series'}) ) {
 		main::logger "INFO: With Series pid '".$series_element->{'rdf:resource'}."'\n" if $opt->{debug};
 		push @pids, parse_rdf_series( $ua, $series_element->{'rdf:resource'} );
 	}
