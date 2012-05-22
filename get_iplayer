@@ -543,7 +543,7 @@ if ( defined $opt->{search} ) {
 # check if no search term(s) specified
 my $no_search_args = $#search_args < 0;
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
-push @search_args, '.*' if ! $search_args[0];
+push @search_args, '.*' if ! $search_args[0] && ! $opt->{pid};
 
 # Auto-detect http:// url or <type>:http:// in a search term and set it as a --pid option (disable if --fields is used).
 if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fields} ) ) {
@@ -567,8 +567,8 @@ $pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
 
 # PVR functions
 if ( $opt->{pvradd} ) {
-	if ( $no_search_args ) {
-		main::logger "ERROR: Search term(s) required for recording\n";
+	if ( ! $opt->{pid} && $no_search_args ) {
+		main::logger "ERROR: Search term(s) or PID required for recording\n";
 		exit 1;
 	}
 	$pvr->add( $opt->{pvradd}, @search_args );
@@ -587,7 +587,7 @@ if ( $opt->{pvradd} ) {
 
 } elsif ( $opt->{pvrqueue} ) {
 	if ( ! $opt->{pid} && $no_search_args ) {
-		main::logger "ERROR: Search term(s) required for recording\n";
+		main::logger "ERROR: Search term(s) or PID required for recording\n";
 		exit 1;
 	}
 	$pvr->queue( @search_args );
