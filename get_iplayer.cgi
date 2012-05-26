@@ -1839,9 +1839,9 @@ sub show_pvr_list {
 	        # Sort by column click and change display class (colour) according to sort status
 	        my ($title, $class, $onclick);
 	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; submit(); RestoreFormVars(form);");
+                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; form.submit(); RestoreFormVars(form);");
                 } else {
-                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; submit(); RestoreFormVars(form); ");
+                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.submit(); RestoreFormVars(form); ");
                 }
                 $class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
@@ -1875,7 +1875,7 @@ sub show_pvr_list {
 				label( {
 					-title		=> "Click to Edit",
 					-class		=> 'search',
-					-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='pvr_edit'; form.PVRSEARCH.value='$name'; submit(); RestoreFormVars(form);",
+					-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='pvr_edit'; form.PVRSEARCH.value='$name'; form.submit(); RestoreFormVars(form);",
 					},
 					$pvrsearch->{$name}->{$_},
 				)
@@ -2757,9 +2757,9 @@ sub search_progs {
 		my ($title, $class, $onclick);
 
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; submit();");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; form.submit();");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; submit();");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; form.submit();");
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
@@ -2857,7 +2857,7 @@ sub search_progs {
 				-id=>'nowrap', 
 				-class=>'search pointer_noul',
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
-				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; submit(); RestoreFormVars(form);" }, 'Add Series' );
+				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$prog{$pid}->{name}\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; form.submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
 
 		# Add links to row
@@ -2880,12 +2880,12 @@ sub search_progs {
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
 			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $text ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, $text ) );
 			# Name / Series link
 			} elsif ( /^name$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
@@ -2895,7 +2895,7 @@ sub search_progs {
 						form.SEARCHFIELDS.value='name';
 						form.SEARCH.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
 						form.PAGENO.value=1;
-						submit();
+						form.submit();
 						RestoreFormVars(form);
 					"}, $prog{$pid}->{$_} )
 				);
@@ -2909,7 +2909,7 @@ sub search_progs {
 						form.EXCLUDECHANNEL.value='';
 						form.SEARCH.value='.*';
 						form.PAGENO.value=1;
-						submit();
+						form.submit();
 						RestoreFormVars(form);
 					"}, $prog{$pid}->{$_} )
 				);
@@ -2927,7 +2927,7 @@ sub search_progs {
 							form.EXCLUDECATEGORY.value='';
 							form.SEARCH.value='.*';
 							form.PAGENO.value=1;
-							submit();
+							form.submit();
 							RestoreFormVars(form);
 						"},
 					$category );
@@ -2935,7 +2935,7 @@ sub search_progs {
 				push @row, td( {-class=>$search_class}, @cats );
 			# Every other column type
 			} else {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>$search_class}, @row );
@@ -2991,7 +2991,7 @@ sub search_progs {
 			label( {
 				-class		=> 'options_outer pointer_noul',
 				-title		=> 'Remember Current Options as Default',
-				-onClick	=> "BackupFormVars(form); form.SAVE.value=1; submit(); RestoreFormVars(form);",
+				-onClick	=> "BackupFormVars(form); form.SAVE.value=1; form.submit(); RestoreFormVars(form);",
 				},
 				'Save As Default',
 			),
@@ -3190,14 +3190,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Previous Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; form.submit(); RestoreFormVars(form);",},
 		"<<",
 	)) if $page > 1;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page 1",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",},
 		"1",
 	)) if $page > 1;
 
@@ -3207,7 +3207,7 @@ sub pagetrail {
 		push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail pointer',
-			-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; submit(); RestoreFormVars(form);",},
+			-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; form.submit(); RestoreFormVars(form);",},
 			"$pn",
 		)) if $pn > 1 && $pn != $page && $pn < $pages;
 		push @pagetrail, td( { -class=>'pagetrail' }, label( {
@@ -3221,14 +3221,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page ".$pages,
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; form.submit(); RestoreFormVars(form);",},
 		"$pages",
 	)) if $page < $pages;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Next Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; form.submit(); RestoreFormVars(form);",},
 		">>",
 	)) if $page < $pages;
 
@@ -3479,7 +3479,7 @@ sub process_params {
 		type	=> 'popup', # type
 		default	=> 20, # default
 		value	=> ['10','25','50','100','200','400'], # values
-		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; submit(); RestoreFormVars(form);",
+		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
 		save	=> 1,
 	};
 
@@ -3491,7 +3491,7 @@ sub process_params {
 		label	=> \%fieldname, # labels
 		default	=> 'index', # default
 		value	=> [@headings], # values
-		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
+		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.submit(); RestoreFormVars(form);",
 		save	=> 1,
 	};
 
@@ -3500,7 +3500,7 @@ sub process_params {
 		tooltip	=> 'Reverse the sort order', # Tooltip
 		webvar	=> 'REVERSE', # webvar
 		type	=> 'radioboolean', # type
-		#onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; submit(); RestoreFormVars(form);",
+		#onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.submit(); RestoreFormVars(form);",
 		default	=> '0', # value
 		save	=> 1,
 	};
@@ -3795,7 +3795,7 @@ sub process_params {
 		label	=> , \%streamtype_labels, # labels
 		default	=> '', # default
 		value	=> [ '', 'none', 'flv', 'mov', 'asf', 'avi', 'mp3', 'aac', 'wav', 'flac' ], # values
-		onChange=> "submit();",
+		onChange=> "form.submit();",
 		save	=> 1,
 	};
 
