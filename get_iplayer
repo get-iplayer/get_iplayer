@@ -246,6 +246,7 @@ my $opt_format = {
 
 	# Tagging
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
+	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "AtomicParsley supports --cnID argument to add catalog ID used for combining HD and SD versions in iTunes"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Use complete title (including series) instead of shorter episode title"],
 	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley supports --hdvideo argument for HD video flag"],
 	tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Tagging', '--tag-longdesc', "AtomicParsley supports --longdesc argument for long description text"],
@@ -9479,7 +9480,7 @@ sub tags_from_metadata {
 	# iTunes media kind
 	$tags->{stik} = 'Normal';
 	if ( $meta->{ext} =~ /(mp4|m4v)/i) {
-		$tags->{stik} = $meta->{categories} =~ /(film|movie)/i ? 'Movie' : 'TV Show';
+		$tags->{stik} = $meta->{categories} =~ /(film|movie)/i ? 'Short Film' : 'TV Show';
 	}
 	$tags->{advisory} = $meta->{guidance} ? 'explicit' : 'remove';
 	# copyright message from download date
@@ -9524,8 +9525,8 @@ sub tags_from_metadata {
 	$tags->{disk} = $meta->{seriesnum};
 	# generate lyrics text with links if available
 	$tags->{lyrics} = $meta->{desc};
-	$tags->{lyrics} .= "\n\nEPISODE\n  $meta->{player}" if $meta->{player};
-	$tags->{lyrics} .= "\n\nSERIES\n  $meta->{web}" if $meta->{web};
+	$tags->{lyrics} .= "\n\nEPISODE\n$meta->{player}" if $meta->{player};
+	$tags->{lyrics} .= "\n\nSERIES\n$meta->{web}" if $meta->{web};
 	$tags->{description} = $meta->{descshort};
 	$tags->{longDescription} = $meta->{desc};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
@@ -9753,6 +9754,7 @@ sub tag_file_mp4 {
 		# video only
 		if ( $tags->{is_video} ) {
 			# all video
+			push @cmd, ( '--cnID', 3004 ) if $opt->{tag_cnid};
 			push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
 			# tv only
 			if ( $tags->{is_tvshow} ) {
