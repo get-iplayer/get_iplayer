@@ -2023,22 +2023,12 @@ sub update_script {
 
 	# Are we flagged as installed using a pkg manager?
 	if ( $opt->{packagemanager} ) {
-		if ( $opt->{packagemanager} =~ /(apt|deb|dpkg)/i ) {
-			logger "INFO: Please run the following commands to update get_iplayer using $opt->{packagemanager}\n".
-			"  wget http://linuxcentre.net/get_iplayer/packages/get-iplayer-current.deb\n".
-			"  sudo dpkg -i get-iplayer-current.deb\n".
-			"  sudo apt-get -f install\n";
-		} elsif ( $opt->{packagemanager} =~ /yum/i ) {
-			logger "INFO: Please run the following commands as root to update get_iplayer using $opt->{packagemanager}\n".
-			"  wget http://linuxcentre.net/get_iplayer/packages/get_iplayer-current.noarch.rpm\n".
-			"  yum --nogpgcheck localinstall get_iplayer-current.noarch.rpm\n";
-		} elsif ( $opt->{packagemanager} =~ /rpm/i ) {
-			logger "INFO: Please run the following command as root to update get_iplayer using $opt->{packagemanager}\n".
-			"  rpm -Uvh http://linuxcentre.net/get_iplayer/packages/get_iplayer-current.noarch.rpm\n";
+		if ( $opt->{packagemanager} =~ /installer/i ) {
+			logger "ERROR: get_iplayer should only be updated using the Windows installer: http://www.infradead.org/get_iplayer_win/get_iplayer_setup_latest.exe\n";
 		} elsif ( $opt->{packagemanager} =~ /disable/i ) {
-			logger "ERROR: get_iplayer should only be updated using your local package management system, for more information see http://linuxcentre.net/installation\n";
+			logger "ERROR: get_iplayer should only be updated using your local package management system.  Please refer to your system documentation.\n";
 		} else {
-			logger "ERROR: get_iplayer was installed using '$opt->{packagemanager}' package manager please refer to the update documentation at http://linuxcentre.net/getiplayer/installation/\n";
+			logger "ERROR: get_iplayer was installed using the '$opt->{packagemanager}' package manager.  Please refer to the package manager documentation.\n";
 		}
 		exit 1;
 	} 
