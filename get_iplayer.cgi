@@ -1280,7 +1280,7 @@ sub build_url_playlist {
 # If the get_iplayer.cgi script is unwritable then quit
 # update script
 sub update_script {
-	my $update_url	= 'http://linuxcentre.net/get_iplayer/get_iplayer.cgi';
+	my $update_url	= 'http://www.infradead.org/get_iplayer/latest/get_iplayer.cgi';
 	# Get version URL
 	my $script_file = $0;
 	my $ua = create_ua('update');
