@@ -24,7 +24,7 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = 2.81;
+my $VERSION = 2.82;
 
 use strict;
 use CGI ':all';
