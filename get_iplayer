@@ -245,6 +245,7 @@ my $opt_format = {
 	mplayer		=> [ 1, "mplayer=s", 'External Program', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Tagging
+	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file.  All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "AtomicParsley supports --cnID argument to add catalog ID used for combining HD and SD versions in iTunes"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Use complete title (including series) instead of shorter episode title"],
@@ -4309,7 +4310,7 @@ sub tag_file {
 	# return if file does not exist
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
-	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} );
+	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
 	# create metadata
 	my $meta = $prog->tag_metadata;
 	# tag file
@@ -9623,7 +9624,7 @@ sub tag_file_id3 {
 			$mp3->select_id3v2_frame_by_descr('TGID', $tags->{podcastGUID});
 		}
 		# add artwork if available
-		if ( -f $meta->{thumbfile} ) {
+		if ( -f $meta->{thumbfile}  && ! $opt->{noartwork} ) {
 			my $data;
 			open(THUMB, $meta->{thumbfile});
 			binmode(THUMB);
@@ -9768,7 +9769,7 @@ sub tag_file_mp4 {
 			);
 		}
 		# add artwork if available
-		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
+		push @cmd, ( '--artwork', $meta->{thumbfile} ) if ( -f $meta->{thumbfile} && ! $opt->{noartwork} );
 		# run atomicparsley command
 		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
