@@ -164,6 +164,10 @@ my $opt_format = {
 	email		=> [ 1, "email=s", 'Output', '--email <address>', "Email HTML index of matching programmes to specified address"],
 	emailsmtp	=> [ 1, "emailsmtpserver|email-smtp=s", 'Output', '--email-smtp <hostname>', "SMTP server IP address to use to send email (default: localhost)"],
 	emailsender	=> [ 1, "emailsender|email-sender=s", 'Output', '--email-sender <address>', "Optional email sender address"],
+	emailsecurity	=> [ 1, "emailsecurity|email-security=s", 'Output', '--email-security <TLS|SSL>', "Email security TLS, SSL (default: none)"],
+	emailpassword	=> [ 1, "emailpassword|email-password=s", 'Output', '--email-password <password>', "Email password"],
+	emailport       => [ 1, "emailport|email-port=s", 'Output', '--email-port <port number>', "Email port number (default: appropriate port for --email-security)"],
+	emailuser	=> [ 1, "emailuser|email-user=s", 'Output', '--email-user <username>', "Email username"],
 	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
@@ -2410,19 +2414,44 @@ sub create_html_file {
 
 
 # Usage: create_email( @prog_objects )
-# Reference: http://sial.org/howto/perl/Net-SMTP/
+# References: http://sial.org/howto/perl/Net-SMTP/, http://cpansearch.perl.org/src/RJBS/Email-Send-2.198/lib/Email/Send/SMTP.pm
 # Credit: Network Ned, andy <AT SIGN> networkned.co.uk, http://networkned.co.uk
 sub create_html_email {
-	# Check if we have Net::SMTP installed - might not be for the windows installer
-	eval "use Net::SMTP";
+	# Check if we have Net::SMTP::TLS::ButMaintained/Net::SMTP::TLS/Net::SMTP::SSL/Net::SMTP installed
+	my $smtpclass;
+	if ( $opt->{emailsecurity} eq "TLS" ) {
+		# prefer Net::SMTP::TLS::ButMaintained if installed
+		$smtpclass = 'Net::SMTP::TLS::ButMaintained';
+		eval "use $smtpclass";
+		if ($@) {
+			$smtpclass = 'Net::SMTP::TLS';
+		}
+	} elsif ( $opt->{emailsecurity} eq "SSL" ) {
+		$smtpclass = 'Net::SMTP::SSL';
+		eval "use Authen::SASL";
+		if ($@) {
+			main::logger "WARNING: Authen::SASL Perl module is required for --email-security=$opt->{emailsecurity}.\n";
+			return 0;
+		}
+	} else {
+		$smtpclass = 'Net::SMTP';
+	}
+	eval "use $smtpclass";
 	if ($@) {
-		main::logger "WARNING: Please download and run latest installer or install the Net::SMTP perl module to use --email options\n";
+		main::logger "WARNING: Please download and run latest installer or install the $smtpclass Perl module to use --email-security=$opt->{emailsecurity}.\n";
 		return 0;
 	};
 	my $search_args = shift;
 	my $recipient = $opt->{email};
 	my $sender = $opt->{emailsender} || 'get_iplayer <>';
 	my $smtphost = $opt->{emailsmtp} || 'localhost';
+	my $password = $opt->{emailpassword};
+	my $user = $opt->{emailuser};
+	my $port = $opt->{emailport};
+	if ( ! $port ) {
+		$port = ( $opt->{emailsecurity} eq "SSL" ) ? 465
+			: ( $opt->{emailsecurity} eq "TLS" ) ? 587 : 25;
+	}
 	my @mail_failure;
 	my @subject;
 	# Set the subject using the currently set cmdline options
@@ -2440,18 +2469,53 @@ sub create_html_email {
 		.create_html( @_ )."\n";
 	main::logger "DEBUG: Email message to $recipient:\n$message\n\n" if $opt->{debug};
 
-	my $smtp = Net::SMTP->new($smtphost);
+	my $smtp;
+	if ( $opt->{emailsecurity} ne 'TLS' ) {
+		$smtp = $smtpclass->new($smtphost, Port => $port);
+	} else {
+		eval {
+			$smtp = $smtpclass->new(
+				$smtphost,
+				Port => $port,
+				User => $user,
+				Password=> $password
+			);
+		};
+	}
 	if ( ! $smtp ) {
 		main::logger "ERROR: Could not find or connect to specified SMTP server\n";
 		return 1;
 	};
 
-	$smtp->mail( $sender ) || push @mail_failure, "MAIL FROM: $sender";
-	$smtp->to( $recipient ) || push @mail_failure, "RCPT TO: $recipient";
-	$smtp->data() || push @mail_failure, 'DATA';
-	$smtp->datasend( $message ) || push @mail_failure, 'Message Data';
-	$smtp->dataend() || push @mail_failure, 'End of DATA';
-	$smtp->quit() || push @mail_failure, 'QUIT';
+	if ( $opt->{emailsecurity} ne 'TLS' && $user ) {
+		if ( ! $smtp->auth($user, $password) ) {
+			main::logger "ERROR: Could not authenticate to specified SMTP server\n";
+			return 1;
+		}
+	}
+
+	if ( $opt->{emailsecurity} ne 'TLS' ) {
+		$smtp->mail( $sender ) || push @mail_failure, "MAIL FROM: $sender";
+		$smtp->to( $recipient ) || push @mail_failure, "RCPT TO: $recipient";
+		$smtp->data() || push @mail_failure, 'DATA';
+		$smtp->datasend( $message ) || push @mail_failure, 'Message Data';
+		$smtp->dataend() || push @mail_failure, 'End of DATA';
+		$smtp->quit() || push @mail_failure, 'QUIT';
+	} else {
+		# ::TLS has no useful return value, but will croak on failure.
+		eval { $smtp->mail( $sender ) };
+		push @mail_failure, "MAIL FROM: $sender" if $@;
+		eval { $smtp->to( $recipient ) };
+		push @mail_failure, "RCPT TO: $recipient" if $@;
+		eval { $smtp->data() };
+		push @mail_failure, 'DATA' if $@;
+		eval { $smtp->datasend( $message ) };
+		push @mail_failure, 'Message Data' if $@;
+		eval { $smtp->dataend() };
+		push @mail_failure, 'End of DATA' if $@;
+		eval { $smtp->quit() };
+		push @mail_failure, 'QUIT' if $@;
+	}
 
 	if ( @mail_failure ) {
 		main::logger "ERROR: Sending of email failed with $mail_failure[0]\n";
