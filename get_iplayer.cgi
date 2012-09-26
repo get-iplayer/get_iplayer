@@ -701,7 +701,7 @@ sub pvr_run {
 	#print $se "DEBUG: running: $cmd\n";
 	print $fh '<pre>';
 	# Redirect both STDOUT and STDERR to client browser socket
-	run_cmd( $fh, $fh, 1, @cmd );
+	run_cmd_autorefresh( $fh, $fh, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("PVR Run complete");
 
@@ -799,7 +799,7 @@ sub record_now {
 		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 		print $fh '<pre>';
 		# Redirect both STDOUT and STDERR to client browser socket
-		run_cmd( $fh, $fh, 1, @cmd );
+		run_cmd_autorefresh( $fh, $fh, 1, @cmd );
 		print $fh '</pre>';
 	}
 	print $fh p("Recording complete");
@@ -1619,7 +1619,46 @@ sub run_cmd_win32 {
 	return interpret_return_code( $rtn );
 }
 
+# PVR Run and Refresh Cache pages will not auto-refresh if client socket
+# is dup()-ed to STDOUT (as in run_cmd_win32).  Run command in shell and
+# copy get_iplayer output to client socket instead.
+sub run_cmd_autorefresh {
+	return run_cmd( @_ ) unless IS_WIN32;
+	# Define what to do with STDOUT and STDERR of the child process
+	my $fh_child_out = shift;
+	my $fh_child_err = shift;
+	my $size = shift;
+	my @cmd = ( @_ );
+	# workaround to add quotes around the args because we are using a shell here
+	for ( @cmd ) {
+		s/^(.+)$/"$1"/g if ! m{^[\-\"]};
+	}
+	# eek! - works around win32 inability to redirect STDERR nicely
+	# If the stderr is supposed to go to the same fh and stdout then add '2>&1'
+	push @cmd, '2>&1' if fileno($fh_child_out) == fileno($fh_child_err);
 
+	# Disable buffering
+	$fh_child_out->autoflush(1);
+
+	print $se "INFO: Win32 Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
+
+	my $buf;
+	my $bytes;
+	open( CMD, ( join ' ', @cmd ).'|' ) || die "can't open pipe: $!\n";
+	while ( $bytes = read( CMD, $buf, $size ) ) {
+		if ( $bytes <= 0 ) {
+			print $se "DEBUG: pipe fd closed - exiting thread\n";
+			exit 0;
+		} else {
+			print $fh_child_out $buf;
+		}
+		last if $bytes < $size;
+	}
+	close(CMD);
+
+	# Interpret return code
+	return interpret_return_code( $? );
+}
 
 # Same as backticks but without needing a shell
 # sets $?
@@ -1735,7 +1774,7 @@ sub get_cmd_output_win32 {
 
 
 sub interpret_return_code {
-	my $rtn = $_;
+	my $rtn = shift;
 	# Interpret return code	and force return code 2 upon error      
 	my $return = $rtn >> 8;
 	if ( $rtn == -1 ) {
@@ -2667,7 +2706,7 @@ sub refresh {
 		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
 	);
 	print $fh '<pre>';
-	run_cmd( $fh, $se, 1, @cmd );
+	run_cmd_autorefresh( $fh, $se, 1, @cmd );
 	print $fh '</pre>';
 	print $fh p("Flushed Programme Caches for Types: $typelist");
 
