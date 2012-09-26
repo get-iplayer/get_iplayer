@@ -587,7 +587,7 @@ sub run_cgi {
 		# cannot stream mp4/avi so transcode to flv
 		# Add types here which you want re-muxed into flv
 		#if ( $src_ext =~ m{^(mp4|avi|mov|mp3|aac)$} && ! $ext ) {
-		} elsif ( $src_ext =~ m{^(mp4|avi|mov)$} && ! $ext ) {
+		} elsif ( $src_ext =~ m{^(mp4|m4a|aac|avi|mov)$} && ! $ext ) {
 			$ext = 'flv';
 
 		# Else Default to no transcoding
@@ -813,7 +813,7 @@ sub stream_prog {
 	# Default modes to try
 	$modes = $default_modes if ! $modes;
 	
-	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video fram rate '$vfr'\n";
+	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video frame rate '$vfr'\n";
 
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -866,7 +866,7 @@ sub stream_prog {
 sub stream_file {
 	my ( $filename, $mimetype, $src_ext, $ext, $notranscode, $abitrate, $vsize, $vfr ) = ( @_ );
 
-	print $se "INFO: Start Direct Streaming $filename to browser using mimetype '$mimetype', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video fram rate '$vfr'\n";
+	print $se "INFO: Start Direct Streaming $filename to browser using mimetype '$mimetype', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video frame rate '$vfr'\n";
 
 	# If transcoding required (i.e. output ext != source ext) - OR, if one of the transcoing options is set
 	if ( ( ! $notranscode ) && ( lc( $ext ) ne lc( $src_ext ) || $abitrate || $vsize || $vfr ) ) {
@@ -916,7 +916,7 @@ sub build_ffmpeg_args {
 			if ( lc( $ext ) =~ m{^(flv|aac|m4a)$} ) {
 				# Tweak: ffmpeg cannot understand aac or m4a as audio output formats - force flash audio
 				$ext = 'flv' if lc( $ext ) =~ m{^(aac|m4a)$} && $mimetype =~ m{^audio};
-				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', "${abitrate}k" );
+				push @cmd_aopts, ( '-ar', '44100', '-ab', "${abitrate}k" );
 			# else just copy  the codec?
 			} else {
 				push @cmd_aopts, ( '-ab', "${abitrate}k" );
@@ -924,7 +924,7 @@ sub build_ffmpeg_args {
 		} else {
 			if ( lc( $ext ) eq 'flv' ) {
 				# 160k is the max for libfaac!
-				push @cmd_aopts, ( '-acodec', 'libfaac', '-ab', '160k' );
+				push @cmd_aopts, ( '-ar', '44100', '-ab', '160k' );
 			}
 			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox liveradio flashaac)
 			#push @cmd_aopts, ( '-acodec', 'copy' );
