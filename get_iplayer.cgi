@@ -88,7 +88,6 @@ EOF
 
 # Some defaults
 my $default_modes = 'flashaachigh,flashaacstd,flash,realaudio,flashaaclow';
-$opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
@@ -100,6 +99,18 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
 	exit 2;
 }
+if ( ! $opt_cmdline->{ffmpeg} ) {
+	chomp(my @ffmpegs = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () } 
+		get_cmd_output(
+			$opt_cmdline->{getiplayer},
+			'--nopurge',
+			'--nocopyright',
+			'--show-options'
+		)
+	);
+	$opt_cmdline->{ffmpeg} = pop @ffmpegs;
+}
+$opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
