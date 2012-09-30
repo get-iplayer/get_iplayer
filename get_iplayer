@@ -5042,17 +5042,8 @@ sub get_verpids {
 		if ( m{\s+simulcast="true"} ) {
 			$version = 'default';
 			# <item kind="programme" live="true" liverewind="true" identifier="bbc_two_england" group="bbc_two_england" simulcast="true" availability_class="liverewind">
-			$verpid = "http://open.live.bbc.co.uk/mediaselector/5/select/format/xml/version/2.0/vpid/".$2."/mediaset/pc/" if m{\s+live="true"\s+(liverewind="true"\s+)?identifier="(.+?)"};
-			# old media selector URL - above seems to work fine with simulcast tv channels
-			# $verpid = "http://www.bbc.co.uk/emp/simulcast/".$2.".xml" if m{\s+live="true"\s+(liverewind="true"\s+)?identifier="(.+?)"};
+			$verpid = "http://www.bbc.co.uk/emp/simulcast/".$2.".xml" if m{\s+live="true"\s+(liverewind="true"\s+)?identifier="(.+?)"};
 			main::logger "INFO: Using Live TV: $verpid\n" if $opt->{verbose} && $verpid;
-
-		# Live TV - not simulcast
-		} elsif ( m{kind="programme"} && m{\s+live="true"\s} ) {
-			$version = 'default';
-			# <item kind="programme" duration="29400" identifier="p00w33n1" group="p00w2rxx" publisher="pips" live="true" availability_class="liverewind" >
-			$verpid = "http://open.live.bbc.co.uk/mediaselector/5/select/format/xml/version/2.0/vpid/".$2."/mediaset/pc/" if m{\s+live="true"\s+(liverewind="true"\s+)?identifier="(.+?)"};
-			main::logger "INFO: Using Live TV non-simulcast: $verpid\n" if $opt->{verbose} && $verpid;
 
 		# Live/Non-live EMP tv/radio XML URL
 		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http.+xml$/ ) {
@@ -5077,7 +5068,7 @@ sub get_verpids {
 			main::logger "INFO: Using Live/Non-live EMP tv/radio: $verpid\n" if $opt->{verbose} && $verpid;
 
 		# Live radio
-		} elsif ( m{kind="radioProgramme"} && m{\s+live="true"\s} ) {
+		} elsif ( m{\s+live="true"\s} ) {
 			# Try to get live stream version and verpid
 			# <item kind="radioProgramme" live="true" identifier="bbc_radio_one" group="bbc_radio_one">
 			$verpid = $1 if m{\s+live="true"\s+identifier="(.+?)"};
@@ -5864,9 +5855,6 @@ sub get_stream_data_cdn {
 			priority	=> $cattribs->{priority},
 		};
 
-		# Allow for connections that have 'supplier' set and not 'kind'
-		$cattribs->{kind} = $cattribs->{supplier} if not defined $cattribs->{kind};
-
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Set the live flag if this is not an ondemand stream
@@ -6099,7 +6087,6 @@ sub get_stream_data {
 		push @medias, $mattribs;
 
 	# Live simulcast verpid: http://www.bbc.co.uk/emp/simulcast/bbc_one_london.xml
-	# Live tv streams: http://open.live.bbc.co.uk/mediaselector/5/select/format/xml/version/2.0/vpid/p00w33n1/mediaset/pc/
 	} elsif ( $verpid =~ /http:/ ) {
 		$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
