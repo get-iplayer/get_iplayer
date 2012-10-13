@@ -9547,7 +9547,21 @@ sub tags_from_metadata {
 	$tags->{is_podcast} = $meta->{type} =~ /podcast/i || $opt->{tag_podcast}
 		|| ( $opt->{tag_podcast_radio} && ! $tags->{is_video} )
 		|| ( $opt->{tag_podcast_tv} && $tags->{is_video} );
+	$tags->{cnID} = $self->tag_cnid_from_pid($meta->{pid}) if $opt->{tag_cnid};
 	return $tags;
+}
+
+# convert PID into 32-bit fake cnID
+sub tag_cnid_from_pid {
+	use integer;
+	my ($self, $pid) = @_;
+	my $cnid = 0;
+	foreach( split(//, $pid) ) {
+		$cnid = (unpack("L", (pack("L", 33 * $cnid))));
+		$cnid = (unpack("L", (pack "L", $cnid + ord($_))));
+	}
+	$cnid = (unpack("L", (pack "L", $cnid + ($cnid >> 5))));
+	return $cnid;
 }
 
 # escape/enclose embedded quotes in command line parameters
@@ -9753,7 +9767,7 @@ sub tag_file_mp4 {
 		# video only
 		if ( $tags->{is_video} ) {
 			# all video
-			push @cmd, ( '--cnID', 3004 ) if $opt->{tag_cnid};
+			push @cmd, ( '--cnID', $tags->{cnID} ) if $opt->{tag_cnid};
 			push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
 			# tv only
 			if ( $tags->{is_tvshow} ) {
