@@ -883,7 +883,7 @@ sub stream_file {
 	if ( ( ! $notranscode ) && ( lc( $ext ) ne lc( $src_ext ) || $abitrate || $vsize || $vfr ) ) {
 		$fh->autoflush(0);
 
-		my @cmd = build_ffmpeg_args( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr );
+		my @cmd = build_ffmpeg_args( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr, $src_ext );
 		run_cmd( $fh, $se, 100000, @cmd );
 		print $se "INFO: Finished Streaming and transcoding $filename to browser\n";
 
@@ -920,22 +920,23 @@ sub stream_file {
 
 
 sub build_ffmpeg_args {
-		my ( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr ) = ( @_ );
+		my ( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr, $src_ext ) = ( @_ );
 		my @cmd_aopts;
+		my $src_mimetype = $mimetype;
+		# mime type override for audio->flv conversion
+		if ( lc( $src_ext ) =~ m{^(aac|m4a)$} ) {
+			$src_mimetype = 'audio/mpeg';
+		}
+
 		if ( $abitrate =~ m{^\d+$} ) {
-			# if this is flv stream output then use the AAC codec
-			if ( lc( $ext ) =~ m{^(flv|aac|m4a)$} ) {
-				# Tweak: ffmpeg cannot understand aac or m4a as audio output formats - force flash audio
-				$ext = 'flv' if lc( $ext ) =~ m{^(aac|m4a)$} && $mimetype =~ m{^audio};
+			if ( lc( $ext ) eq 'flv' ) {
 				push @cmd_aopts, ( '-ar', '44100', '-ab', "${abitrate}k" );
-			# else just copy  the codec?
 			} else {
 				push @cmd_aopts, ( '-ab', "${abitrate}k" );
 			}
 		} else {
 			if ( lc( $ext ) eq 'flv' ) {
-				# 160k is the max for libfaac!
-				push @cmd_aopts, ( '-ar', '44100', '-ab', '160k' );
+				push @cmd_aopts, ( '-ar', '44100' );
 			}
 			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox liveradio flashaac)
 			#push @cmd_aopts, ( '-acodec', 'copy' );
@@ -944,7 +945,7 @@ sub build_ffmpeg_args {
 		my @cmd;
 		# If conversion is necessary
 		# Video
-		if ( $mimetype =~ m{^video} ) {
+		if ( $src_mimetype =~ m{^video} ) {
 			my @cmd_vopts;
 
 			# Apply video size
