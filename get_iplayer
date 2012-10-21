@@ -9173,6 +9173,10 @@ sub run_scheduler {
 	while ( 1 ) {
 		my $start_time = time();
 		$opt_cmdline->{pvr} = 1;
+		# empty mem cache before each run to force cache file refresh
+		for ( keys %$memcache ) {
+			delete $memcache->{$_};
+		}
 		$pvr->run();
 		my $remaining = $interval - ( time() - $start_time );
 		if ( $remaining > 0 ) {
