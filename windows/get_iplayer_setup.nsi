@@ -3,9 +3,9 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.5"
+!define VERSION "4.6"
 ; VERSION where Perl support last changed
-!define PERLVER "4.4"
+!define PERLVER "4.6"
 
 ;#######################################
 ;# Build Setup
@@ -42,6 +42,7 @@
 Name "get_iplayer"
 SetCompressor /SOLID lzma
 OutFile "${BUILDPATH}\get_iplayer_setup_${VERSION}.exe"
+RequestExecutionLevel admin
 ; default install location
 InstallDir "$PROGRAMFILES\${PRODUCT}\"
 ; remember install folder
@@ -60,6 +61,7 @@ InstallDirRegKey HKCU "Software\${PRODUCT}" ""
 ${StrRep}
 ${StrCase}
 ${StrTrimNewLines}
+${StrLoc}
 
 ;#######################################
 ;# Install Locations
@@ -366,24 +368,24 @@ FunctionEnd
 ;#######################################
 
 ; section sizes - update descriptions below if changed
-!define MPLAYER_SIZE 26300
-!define LAME_SIZE 1200
-!define FFMPEG_SIZE 43500
-!define VLC_SIZE 81900
-!define RTMPDUMP_SIZE 1900
-!define ATOMICPARSLEY_SIZE 500
+!define MPLAYER_SIZE 41300
+!define LAME_SIZE 1370
+!define FFMPEG_SIZE 63700
+!define VLC_SIZE 102000
+!define RTMPDUMP_SIZE 1820
+!define ATOMICPARSLEY_SIZE 480
 
 ; section descriptions
-!define GET_IPLAYER_DESC "Install get_iplayer and required Strawberry Perl - Required for all recordings. \
-  Also bundled with Web PVR Manager (~25.9MB)"
-!define MPLAYER_DESC "Download and install ${MPLAYER} - Used for RealAudio and MMS recording modes (~26.3MB)"
-!define LAME_DESC "Download and install ${LAME} - Used for transcoding RealAudio recordings to MP3 (~1.2MB)"
+!define GET_IPLAYER_DESC "Install get_iplayer and Strawberry Perl - Required for all recordings. \
+  Also bundled with Web PVR Manager (~17.1 MB)"
+!define MPLAYER_DESC "Download and install ${MPLAYER} - Used for RealAudio and MMS recording modes (~41.3 MB)"
+!define LAME_DESC "Download and install ${LAME} - Used for transcoding RealAudio recordings to MP3 (~1.4 MB)"
 !define FFMPEG_DESC "Download and install ${FFMPEG} - Used for losslessly converting Flash Video into useful \
-  video/audio files formats (~43.5MB)"
+  video/audio files formats (~63.7 MB)"
 !define VLC_DESC "Download and install ${VLC} - Required for playback of playlists and content from \
-    Web PVR Manager (~81.9MB)"
-!define RTMPDUMP_DESC "Download and install ${RTMPDUMP} - Used for recording Flash video modes (~1.9MB)"
-!define ATOMICPARSLEY_DESC "Download and install ${ATOMICPARSLEY} - Used for Tagging MP4 files (~0.5MB)"
+    Web PVR Manager (~102 MB)"
+!define RTMPDUMP_DESC "Download and install ${RTMPDUMP} - Used for recording Flash video modes (~1.8 MB)"
+!define ATOMICPARSLEY_DESC "Download and install ${ATOMICPARSLEY} - Used for Tagging MP4 files (~0.5 MB)"
 
 ;#######################################
 ;# Sections
@@ -471,7 +473,7 @@ Section "get_iplayer" section1
   FileWrite $0 "$\r$\n"
   FileClose $0
   ; URLs
-  WriteINIStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "http://wiki.github.com/jjl/get_iplayer/"
+  WriteINIStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "https://github.com/dinkypumpkin/get_iplayer/wiki/documentation"
   WriteINIStr "$INSTDIR\pvr_manager.url" "InternetShortcut" "URL" "http://127.0.0.1:1935"
   WriteINIStr "$INSTDIR\strawberry_docs.url" "InternetShortcut" "URL" "http://strawberryperl.com/"
   ; root start menu items
@@ -755,14 +757,40 @@ FunctionEnd
 ;# After Successful Installation
 ;#######################################
 
+!macro _DeleteSwfUrl201306 _key
+  StrCpy $1 "$PROFILE\.get_iplayer\options"
+  IfFileExists $1 0 no_options_${_key}
+    StrCpy $2 "http://www.bbc.co.uk/emp/releases/iplayer/revisions/617463_618125_4/617463_618125_4_emp.swf"
+    StrCpy $3 "--swfVfy"
+    ${ConfigRead} $1 "${_key} " $R0
+    Push $R0
+    Call Trim
+    Pop $R0
+    ${StrLoc} $4 $R0 $2 ">"
+    IntCmp $4 0 ${_key}1 0
+      ${ConfigWrite} $1 "${_key}" "" $R1
+      Goto ${_key}2
+    ${_key}1:
+    StrCmp $R0 $3 0 ${_key}2
+      ${ConfigWrite} $1 "${_key}" "" $R1
+    ${_key}2:
+  no_options_${_key}:
+!macroend
+!define DeleteSwfUrl201306 '!insertmacro _DeleteSwfUrl201306'
+
 Function .onInstSuccess
   ; remove items obsolete in 4.3+
   RMDir /r "$INSTDIR\Downloads"
   Delete "$INSTDIR\linuxcentre.url"
   Delete "$INSTDIR\get_iplayer_setup.nsi"
   Delete "$INSTDIR\update_get_iplayer.cmd"
+  ; clean up the mess from June 2013 SWF URL debacle
+  ${DeleteSwfUrl201306} "rtmptvopts"
+  ${DeleteSwfUrl201306} "rtmpradioopts"
+  ${DeleteSwfUrl201306} "rtmplivetvopts"
+  ${DeleteSwfUrl201306} "rtmpliveradioopts"
   ; URLs
-  WriteINIStr "$INSTDIR\get_iplayer_home.url" "InternetShortcut" "URL" "${MOTHERSHIP}/get_iplayer/"
+  WriteINIStr "$INSTDIR\get_iplayer_home.url" "InternetShortcut" "URL" "${MOTHERSHIP}/get_iplayer/html/get_iplayer.html"
   WriteINIStr "$INSTDIR\nsis_docs.url" "InternetShortcut" "URL" "http://nsis.sourceforge.net/"
   WriteINIStr "$INSTDIR\download_latest_installer.url" "InternetShortcut" "URL" "${SETUP_URL}"
   CreateShortCut "$SMPROGRAMS\get_iplayer\Help\Get_iPlayer Home.lnk" "$INSTDIR\get_iplayer_home.url" "" "$SYSDIR\SHELL32.dll" 175
@@ -1149,4 +1177,38 @@ Function un.InstallHelper
       RMDir /r "$INSTDIR\${RTMPDUMP_OLD}"
   RMDir /r $HelperDir
   Delete $HelperFile
+FunctionEnd
+
+; Trim
+;   Removes leading & trailing whitespace from a string
+; Usage:
+;   Push
+;   Call Trim
+;   Pop
+Function Trim
+	Exch $R1 ; Original string
+	Push $R2
+Loop:
+	StrCpy $R2 "$R1" 1
+	StrCmp "$R2" " " TrimLeft
+	StrCmp "$R2" "$\r" TrimLeft
+	StrCmp "$R2" "$\n" TrimLeft
+	StrCmp "$R2" "$\t" TrimLeft
+	GoTo Loop2
+TrimLeft:
+	StrCpy $R1 "$R1" "" 1
+	Goto Loop
+Loop2:
+	StrCpy $R2 "$R1" 1 -1
+	StrCmp "$R2" " " TrimRight
+	StrCmp "$R2" "$\r" TrimRight
+	StrCmp "$R2" "$\n" TrimRight
+	StrCmp "$R2" "$\t" TrimRight
+	GoTo Done
+TrimRight:
+	StrCpy $R1 "$R1" -1
+	Goto Loop2
+Done:
+	Pop $R2
+	Exch $R1
 FunctionEnd

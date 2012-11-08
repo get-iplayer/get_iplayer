@@ -1,6 +1,6 @@
 ## get_player Windows installer
 
-This document contains instructions for building the `get_iplayer` Windows installer and provides additional notes for installer developers. The information below is current for version 4.3 of the installer.
+This document contains instructions for building the `get_iplayer` Windows installer and provides additional notes for installer developers. The information below is current for version 4.6 of the installer.
 
 ## Building the Installer
 
@@ -10,7 +10,7 @@ This document contains instructions for building the `get_iplayer` Windows insta
 
 	Source: <http://strawberryperl.com>
 
-	Version: 5.12.3.0
+	Version: 5.16.2.1
 
 	The installer is built with the Strawberry Perl distribution that is in your system path.  If you are using a different version, you may need to uninstall it and temporarily install the appropriate version.  Note that Strawberry Perl 5.12+ provides a mechanism to switch between versions without uninstalling.
 
@@ -18,8 +18,12 @@ This document contains instructions for building the `get_iplayer` Windows insta
 
 	Additional modules must be installed into the Perl distribution used to build the installer:
 
-	* MP3::Info (1.13)    - Used in localfiles plugin
-	* MP3::Tag (1.24)     - Used to enhance MP3 tagging
+	* MP3::Info (1.13) - Used in localfiles plugin
+	* MP3::Tag (1.24) - Used to enhance MP3 tagging
+	* Net::SMTP(2.31) - Used for email functions
+	* Net::SMTP::SSL (1.01) - Used for SSL secure email
+	* Authen::SASL (2.16) - Used for SSL secure email
+	* Net::SMTP::TLS::ButMaintained (0.21) - Used for TLS secure email
 	* PAR::Packer (1.010) - Used to build installer
 
 	The modules may be installed with the CPAN client provided by Strawberry Perl.
@@ -104,7 +108,7 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 
     The build script creates 4 files in the build directory:
 
-	* `get_iplayer_setup_4.3.exe` - `get_player` installer application
+	* `get_iplayer_setup_4.6.exe` - `get_player` installer application
 	* `perlfiles.zip`             - Archive of Perl support files included in the installer
 	* `perlpar.exe`               - PAR (Perl ARchive) file used to create perlfiles.zip
 	* `make-installer.log`        - Log of output from build script
@@ -130,11 +134,17 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 
         + %PERLDIST%\c\bin\libiconv*.dll
         + %PERLDIST%\c\bin\libxml2*.dll
-        + %PERLDIST%\c\bin\libz*.dll
+        + %PERLDIST%\c\bin\zlib*.dll
+        + %PERLDIST%\c\bin\liblzma*.dll
 
     - XML::Parser
 
         + %PERLDIST%\c\bin\libexpat*.dll
+
+* The secure email modules (SSL and TLS) require that the DLL files listed below (from the Strawberry Perl distribution) must also be included in `perlfiles.zip`:
+
+    - %PERLDIST%\c\bin\libeay*.dll
+    - %PERLDIST%\c\bin\ssleay*.dll
 
 * Subsequent invocations of `make-installer.cmd` will use an existing `perlfiles.zip` if it is found in the current directory.  To force the Perl support archive to be completely rebuilt, add `/makeperl` to the command:
 
@@ -197,9 +207,9 @@ The installer application is deployed in the directory corresponding to `http://
 
     `$ ln -sf get_iplayer_setup_4.3.exe get_iplayer_setup_latest.exe`
 
-4. Update the contents of the installer version file with the new version (e.g. 4.3)
+4. Update the contents of the installer version file with the new version (e.g. 4.6)
 
-    `$ echo -n "4.3" > VERSION-get_iplayer-win-installer`
+    `$ echo -n "4.6" > VERSION-get_iplayer-win-installer`
 
     **NOTE:** For installers version 4.2 and earlier, the version file MUST NOT contain a trailing newline character after the version number (thus the `-n` option for `echo`).  A trailing newline character will break the installer update mechanism.  This is fixed in versions 4.3+.
 

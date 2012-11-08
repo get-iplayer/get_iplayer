@@ -50,8 +50,8 @@ if exist "%GIPPAR%" (
 :makepar
 REM location of pp
 set PP=%PERLDIST%\perl\site\bin\pp
-REM include modules from CPAN - pp will check if present
-set PPMODS=-M MP3::Tag -M MP3::Info
+REM include optional modules - pp will check if present
+set PPMODS=-M MP3::Tag -M MP3::Info -M Net::SMTP -M Net::SMTP::SSL -M Authen::SASL -M Net::SMTP::TLS::ButMaintained
 REM force XML parsers into PAR
 set PPMODS=%PPMODS% -M XML::LibXML::SAX -M XML::LibXML::SAX::Parser -M XML::SAX::PurePerl -M XML::Parser
 call :log Running pp...
@@ -87,7 +87,10 @@ REM XML parser support
 copy /y "%PERLDIST%\c\bin\libexpat*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
 copy /y "%PERLDIST%\c\bin\libiconv*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
 copy /y "%PERLDIST%\c\bin\libxml2*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
-copy /y "%PERLDIST%\c\bin\libz*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\zlib*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\liblzma*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\libeay*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
+copy /y "%PERLDIST%\c\bin\ssleay*.dll" "%TMPDIR%" >> "%LOG%" 2>&1
 call :log ...Finished
 REM create archive in temp dir
 call :log Archiving Perl support files...
