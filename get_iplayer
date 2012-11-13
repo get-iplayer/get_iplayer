@@ -4138,7 +4138,7 @@ sub generate_version_list {
 	}
 
 	if ( $got == 0 ) {
-		main::logger "INFO: No versions of this programme were selected (".(join ',', sort keys %{ $prog->{verpids} })." are available)\n";
+		main::logger "INFO: No versions of this programme were selected (available versions: ".(join ',', sort keys %{ $prog->{verpids} }).")\n";
 	} else {
 		main::logger "INFO: Will search for versions: ".(join ',', @version_list)."\n" if $opt->{verbose};
 	}
@@ -5023,7 +5023,7 @@ sub get_verpids {
 	} else {
 		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
 		# use the audiodescribed playlist url if non-default versions are specified
-		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} ne 'default';
+		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/i;
 	}
 	
 	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
@@ -5082,7 +5082,7 @@ sub get_verpids {
 
 	# Detect noItems or no programmes
 	if ( $xml =~ m{<noItems\s+reason="noMedia"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
-		main::logger "\rWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " ($prog->{versions} are available)\n" : "\n");
+		main::logger "\rWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 		return 1;
 	}
 
@@ -5143,27 +5143,26 @@ sub get_verpids {
 		} else {
 			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
 			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
+			# assume default version
+			my $curr_version = "default";
 			# <alternate id="default" />
 			if ( m{<alternate\s+id="(.+?)"} ) {
-				my $curr_version = lc($1);
+				$curr_version = lc($1);
 				# Remap version name from 'default' => 'audiodescribed' if we are using the /ad playlist URL:
-				if ( defined $opt->{versionlist} && $opt->{versionlist} ne 'default' ) {
+				if ( defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/i ) {
 					$curr_version = 'audiodescribed' if $curr_version eq 'default';
 				}
-				$version = $curr_version;
-				# if current version is already defined, add a numeric suffix
-				if ( $prog->{verpids}->{$curr_version} ) {
-					my $vercount = 1;
-					# Search for the next free suffix
-					while ( $prog->{verpids}->{$curr_version} ) {
-						$vercount++;
-						$curr_version = $version.$vercount;
-					}
-					$version = $curr_version;
+			}
+			$version = $curr_version;
+			# check version collisions
+			if ( $prog->{verpids}->{$curr_version} ) {
+				my $vercount = 1;
+				# Search for the next free suffix
+				while ( $prog->{verpids}->{$curr_version} ) {
+					$vercount++;
+					$curr_version = $version.$vercount;
 				}
-			# If this item has no version name then this is assumed to be the 'default' version
-			} else {
-				$version = 'default';
+				$version = $curr_version;
 			}
 			main::logger "INFO: Using Not Live standard TV and Radio: $verpid\n" if $opt->{verbose} && $verpid;
 		}
