@@ -2768,6 +2768,16 @@ sub search_history {
 	search_progs();
 }
 
+sub get_searches_from_files {
+	my $pvrsearches = get_pvr_list();
+
+	my @searches;
+	# Parse all 'pvrsearch' elements to get all fields used
+	for my $name ( keys %{$pvrsearches} ) {
+		push(@searches, $pvrsearches->{$name}->{'search0'});
+	}
+	return @searches;
+}
 
 
 sub search_progs {
@@ -2779,6 +2789,7 @@ sub search_progs {
 	# Determine which cols to display and Set default status for cols
 	get_display_cols();
 
+	my @searches = get_searches_from_files();
 	#for my $key (sort keys %ENV) {
 	#	print $fh $key, " = ", $ENV{$key}, "\n<br>";
 	#}    
@@ -2913,7 +2924,13 @@ sub search_progs {
 
 		# Add links to row
 		push @row, td( {-class=>$search_class}, $links );
-
+		
+		my $recordedStyle = "";
+		foreach my $pvrSearch (@searches) {
+			if ($prog{$pid}->{'name'} =~ m/$pvrSearch/) {
+				$recordedStyle = "background-color: green";
+			}
+		}
 		# This builds each row in turn
 		for ( @displaycols ) {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
@@ -2940,6 +2957,7 @@ sub search_progs {
 			# Name / Series link
 			} elsif ( /^name$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
+					-style=>$recordedStyle,
 					-onClick=>"
 						BackupFormVars(form);
 						form.NEXTPAGE.value='search_progs';
