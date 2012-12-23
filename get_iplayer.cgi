@@ -924,7 +924,7 @@ sub build_ffmpeg_args {
 		my @cmd_aopts;
 		my $src_mimetype = $mimetype;
 		# mime type override for audio->flv conversion
-		if ( lc( $src_ext ) =~ m{^(aac|m4a)$} ) {
+		if ( lc( $src_ext ) =~ m{^(aac|m4a|mp3)$} ) {
 			$src_mimetype = 'audio/mpeg';
 		}
 
