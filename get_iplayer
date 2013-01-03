@@ -6010,6 +6010,10 @@ sub get_stream_data_cdn {
 		} elsif ( $cattribs->{kind} eq 'securesis' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
+		# asx playlist
+		} elsif ( $cattribs->{kind} eq 'asx' ) {
+			$conn->{streamurl} = $cattribs->{href};
+
 		# Unknown CDN
 		} else {
 			new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -6301,7 +6305,7 @@ sub get_stream_data {
 
 		# wma modes
 		} elsif (	$mattribs->{type} eq 'audio/wma' &&
-				$mattribs->{encoding} eq 'wma'
+				$mattribs->{encoding} =~ /wma/
 		) {
 			get_stream_data_cdn( $data, $mattribs, 'wma', 'mms', 'wma' );
 
