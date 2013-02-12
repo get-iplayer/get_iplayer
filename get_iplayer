@@ -7115,7 +7115,11 @@ sub download_subtitles {
 		return 0;
 	}
 
-	$suburl = $prog->{streams}->{$prog->{version}}->{subtitles1}->{streamurl};
+	# Find subtitles stream
+	for ( keys %{$prog->{streams}} ) {
+		$suburl = $prog->{streams}->{$_}->{subtitles1}->{streamurl};
+		last if $suburl;
+	}
 	# Return if we have no url
 	if (! $suburl) {
 		main::logger "INFO: Subtitles not available\n";
