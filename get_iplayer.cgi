@@ -25,6 +25,8 @@
 #
 
 my $VERSION = 2.82;
+my $VERSION_TEXT;
+$VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use strict;
 use CGI ':all';
@@ -66,7 +68,7 @@ usage() if $opt_cmdline->{help} || @ARGV;
 
 # Usage
 sub usage {
-	my $text = sprintf "get_iplayer Web PVR Manager v%.2f, ", $VERSION;
+	my $text = "get_iplayer Web PVR Manager $VERSION_TEXT, ";
 	$text .= <<'EOF';
 Copyright (C) 2009-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
@@ -3472,7 +3474,7 @@ sub form_footer {
 	#print $fh "<iframe src=\"about:blank\" height=\"0\" width=\"0\" name=\"dataframe\"></iframe>";
 	# <script type=\"text/javascript\">window.frames['dataframe'].window.location.replace('loadData.html');</script>
 	print $fh p( b({-class=>"footer"},
-		sprintf( "get_iplayer Web PVR Manager v%.2f, &copy;2009-2010 Phil Lewis - Licensed under GPLv3", $VERSION )
+		"get_iplayer Web PVR Manager $VERSION_TEXT, &copy;2009-2010 Phil Lewis - Licensed under GPLv3"
 	));
 }
 
@@ -4000,7 +4002,7 @@ sub begin_html {
 		$title = 'Running PVR: get_iplayer Web PVR Manager';
 	} else {
 		$body_element = "<body>\n";
-		$title = sprintf "get_iplayer Web PVR Manager v%.2f", $VERSION;
+		$title = "get_iplayer Web PVR Manager $VERSION_TEXT";
 	}
 
 	# Write out the page http and html headers
