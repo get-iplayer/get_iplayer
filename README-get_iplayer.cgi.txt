@@ -54,17 +54,22 @@ Installation as Apache CGI script
 	cp -p get_iplayer.cgi get_iplayer /var/www/get_iplayer/
 * Ensure they are executable:
 	chmod 755 /var/www/get_iplayer/get_iplayer.cgi /var/www/get_iplayer/get_iplayer
+* Perform one-off plugins setup:
+  /var/www/get_iplayer/get_iplayer --profile-dir /var/www/get_iplayer/.get_iplayer --plugins-update
 * Ensure you have the following lines in Apache's httpd.conf:
  ScriptAlias /iplayer "/var/www/get_iplayer/get_iplayer.cgi"
  SetEnv HOME /var/www/get_iplayer/
 * This will run as apache's user/group and save all settings files in /var/www/get_iplayer/.get_iplayer
 * Ensure that ffmpeg is in the default system PATH that apache exports such as /usr/bin/
-* Ensure that flvstreamer (and other binaries) are in the default system PATH that apache exports such as /usr/bin/
+* Ensure that rtmpdump (and other binaries) are in the default system PATH that apache exports such as /usr/bin/
 * or, specify their locations in /var/www/get_iplayer/.get_iplayer/options,
 * and specify a default output directory in /var/www/get_iplayer/.get_iplayer/options, e.g.:
 output /var/www/get_iplayer/output
 ffmpeg /usr/bin/ffmpeg
-flvstreamer /path/to/flvstreamer
+rtmpdump /path/to/rtmpdump
+mplayer /path/to/mplayer
+atomicparsley /path/to/atomicparsley
+id3v2 /path/to/id3v2
 * make sure that apache user can see and execute the binaries
 * Access using http://<your web server>/iplayer
 * Recordings will be in /var/www/get_iplayer/output/

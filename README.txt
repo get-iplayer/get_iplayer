@@ -1,4 +1,4 @@
-BBC iplayer Indexing Tool and PVR (get_iplayer)
+BBC iPlayer Indexing Tool and PVR (get_iplayer)
 -----------------------------------------------
 
 This file is well out of date - see: http://linuxcentre.net/getiplayer/
@@ -13,7 +13,7 @@ Features:
 * Full HTTP Proxy support (tested on Squid)
 * Regex search on programme name capability (makes it useful to run this from crontab)
 * Regex search on long programme description and episode capability
-* Tested on Linux (Fedora 6/7/8/9, Centos/RHEL 5, MacOSX, Ubuntu), Windows and loads more
+* Known to run on Linux (Debian, Ubuntu, openSUSE and many others), MacOSX (10.5+) and Windows (XP/Vista/7/8)
 * Requires: perl 5.8, perl-LWP
 * Latest Version: http://linuxcentre.net/get_iplayer/get_iplayer
 
