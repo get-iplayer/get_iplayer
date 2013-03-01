@@ -19,7 +19,7 @@
 #
 # Author: Phil Lewis
 # Email: iplayer2 (at sign) linuxcentre.net
-# Web: http://linuxcentre.net/iplayer
+# Web: http://www.infradead.org/get_iplayer/html/get_iplayer.html
 # License: GPLv3 (see LICENSE.txt)
 #
 #
@@ -32,10 +32,10 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 #	./get_iplayer --help | --longhelp
 #
 # Changelog:
-# 	http://linuxcentre.net/get_iplayer/CHANGELOG.txt
+# 	http:/www.infradead.org/get_iplayer/CHANGELOG-get_iplayer
 #
-# Example Usage and Documentation:
-# 	http://linuxcentre.net/getiplayer/documentation
+# Example Usage and Examples:
+# 	https://github.com/dinkypumpkin/get_iplayer/wiki/documentation
 #
 # Todo:
 # * Fix non-uk detection - iphone auth?
@@ -3199,7 +3199,7 @@ sub usage {
 		'.PP',
 		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
 		'.SH "OPTIONS"' if $manpage;
-	push @usage, 'Usage ( Also see http://linuxcentre.net/getiplayer/documentation ):';
+	push @usage, 'Usage ( Also see https://github.com/dinkypumpkin/get_iplayer/wiki/documentation ):';
 	push @usage, ' List All Programmes:            get_iplayer [--type=<TYPE>]';
 	push @usage, ' Search Programmes:              get_iplayer <REGEX>';
 	push @usage, ' Record Programmes by Search:    get_iplayer <REGEX> --get';
@@ -7021,13 +7021,13 @@ sub download {
 		return 'next';
 	}
 	# if rtmpdump does not exist
-	if ( $mode =~ /^flash/ && ! main::exists_in_path('rtmpdump')) {
-		main::logger "WARNING: Required program rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
+		main::logger "WARNING: Required rtmpdump does not exist - cannot download Flash audio/video\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
-	if ( $mode =~ /^flash/ && ! main::exists_in_path('ffmpeg')) {
-		main::logger "\nWARNING: ffmpeg does not exist - not converting flv file\n";
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('ffmpeg')) {
+		main::logger "\nWARNING: Required ffmpeg does not exist - not converting flv file\n";
 		$opt->{raw} = 1;
 	}
 

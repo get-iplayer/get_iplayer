@@ -20,7 +20,7 @@
 #
 # Author: Phil Lewis
 # Email: iplayer2 (at sign) linuxcentre.net
-# Web: http://linuxcentre.net/iplayer
+# Web: http://www.infradead.org/get_iplayer/html/get_iplayer.html
 # License: GPLv3 (see LICENSE.txt)
 #
 
@@ -3448,7 +3448,7 @@ sub form_header {
 						-title => 'get_iplayer Web PVR Manager',
 						-width => 174,
 						-height => 32,
-						-src => "http://linuxcentre.net/get_iplayer/contrib/iplayer_logo.gif",
+						-src => "http://www.infradead.org/get_iplayer/html/iplayer_logo.gif",
 						-href => $request_host,
 					}),
 				),
@@ -3458,7 +3458,7 @@ sub form_header {
 			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
 			li( { -class=>$class->{pvrrun} }, a( { -class=>'nav', -title=>'Run the PVR now - wait for the PVR to complete', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';" }, 'Run PVR' ) ).
 			li( { -class=>$class->{update} }, $update_element ).
-			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "http://linuxcentre.net/projects/get_iplayer-pvr-manager/" }, 'Help' ) )
+			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "https://github.com/dinkypumpkin/get_iplayer/wiki/webpvr" }, 'Help' ) )
 		),
 	);
 	print $fh hidden( -name => 'AUTOPVRRUN', -value => $opt->{AUTOPVRRUN}->{current}, -override => 1 );
