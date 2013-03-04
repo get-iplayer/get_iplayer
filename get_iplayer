@@ -766,16 +766,17 @@ sub init_search {
 
 	$bin->{tee}		= 'tee';
 
-	$bin->{flvstreamer}	= $opt->{flvstreamer} || 'rtmpdump';
-	if (! main::exists_in_path('flvstreamer') ) {
-		$bin->{flvstreamer} = 'flvstreamer';
-	}
+ 	$bin->{rtmpdump}	= $opt->{rtmpdump};
+# 	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
+# 	if (! main::exists_in_path('rtmpdump') ) {
+# 		$bin->{rtmpdump} = 'rtmpdump';
+# 	}
 
-	delete $binopts->{flvstreamer};
-	push @{ $binopts->{flvstreamer} }, ( '--timeout', 10 );
-	push @{ $binopts->{flvstreamer}	}, '--quiet' if $opt->{quiet};
-	push @{ $binopts->{flvstreamer}	}, '--verbose' if $opt->{verbose};
-	push @{ $binopts->{flvstreamer}	}, '--debug' if $opt->{debug};
+	delete $binopts->{rtmpdump};
+	push @{ $binopts->{rtmpdump} }, ( '--timeout', 10 );
+	push @{ $binopts->{rtmpdump}	}, '--quiet' if $opt->{quiet};
+	push @{ $binopts->{rtmpdump}	}, '--verbose' if $opt->{verbose};
+	push @{ $binopts->{rtmpdump}	}, '--debug' if $opt->{debug};
 
 	# quote binaries which allows for spaces in the path (only required if used via a shell)
 	for ( $bin->{lame}, $bin->{tee} ) {
@@ -6476,7 +6477,7 @@ sub opt_format {
 		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV Recoding modes: rtmp,flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,n95_wifi (default: flashhigh,flashstd,flashnormal). Use --tvmode=best to automatically select highest quality available."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings"],
 		vlc		=> [ 1, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
-		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to flvstreamer for tv"],
+		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 	};
 }
 
@@ -6501,8 +6502,8 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
+		if ( ! main::exists_in_path('rtmpdump') ) {
+			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'iphone';
 		} else {
 			$mlist = 'flashhigh,flashstd,flashnormal';
@@ -7013,9 +7014,9 @@ sub download {
 		main::logger "\nWARNING: Required vlc does not exist\n";
 		return 'next';
 	}
-	# if flvstreamer does not exist
-	if ( $mode =~ /^flash/ && ! main::exists_in_path('flvstreamer')) {
-		main::logger "WARNING: Required program flvstreamer does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
+	# if rtmpdump does not exist
+	if ( $mode =~ /^flash/ && ! main::exists_in_path('rtmpdump')) {
+		main::logger "WARNING: Required program rtmpdump does not exist (see http://linuxcentre.net/getiplayer/installation and http://linuxcentre.net/getiplayer/download)\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
@@ -7380,7 +7381,7 @@ sub opt_format {
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
 		wav		=> [ 1, "wav!", 'Recording', '--wav', "In radio realaudio mode output as wav and don't transcode to mp3"],
-		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to flvstreamer for radio"],
+		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Recording', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 	};
 }
 
@@ -7423,8 +7424,8 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
+		if ( ! main::exists_in_path('rtmpdump') ) {
+			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'rtspaudio,realaudio,wma';
 		} else {
 			$mlist = 'flashaachigh,flashaacstd,flashaudio,rtspaudio,realaudio,flashaaclow,wma';
@@ -7650,7 +7651,7 @@ sub opt_format {
 	return {
 		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV Recoding modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal (default: flashhd,flashvhigh,flashhigh,flashstd,flashnormal). Use --livetvmode=best to automatically select highest quality available."],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings"],
-		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to flvstreamer for livetv"],
+		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to rtmpdump for livetv"],
 	};
 }
 
@@ -7791,7 +7792,7 @@ sub opt_format {
 	return {
 		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio Recording modes: flashaac,realaudio,wma. Use --liveradiomode=best to automatically select highest quality available."],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
-		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to flvstreamer for liveradio"],
+		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to rtmpdump for liveradio"],
 	};
 }
 
@@ -7819,8 +7820,8 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('flvstreamer') ) {
-			main::logger "WARNING: Not using flash modes since flvstreamer is not found\n" if $opt->{verbose};
+		if ( ! main::exists_in_path('rtmpdump') ) {
+			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
 			$mlist = 'realaudio,wma';
 		} else {
 			$mlist = 'flashaachigh,flashaacstd,realaudio,flashaaclow,wma';
@@ -8128,7 +8129,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
-		flvstreamer	=> [ 0, "flvstreamer=s", 'External Program', '--flvstreamer <path>', "Location of flvstreamer binary"],
+		rtmpdump	=> [ 0, "rtmpdump|flvstreamer=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary. Synonyms: --flvstreamer"],
 	};
 }
 
@@ -8162,25 +8163,25 @@ sub get {
 		$file_tmp = $prog->{filepart}.'.flv'
 	}
 
-	# Remove failed file recording (below a certain size) - hack to get around flvstreamer not returning correct exit code
+	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
 		unlink( $file_tmp );
 	}
 		
-	# Add custom options to flvstreamer for this type if specified with --rtmp-<type>-opts
+	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
 	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
 		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
 	}
 
-	# flvstreamer version detection e.g. 'FLVStreamer v1.8a'
-	my $rtmpver = `"$bin->{flvstreamer}" --help 2>&1`;
+	# rtmpdump version detection e.g. 'RTMPDump v2.4'
+	my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
 	if ( $rtmpver =~ /swfVfy/ ) {
 		$swfarg = "--swfVfy";
 	} else {
-		main::logger "WARNING: Your version of flvstreamer/rtmpdump does not support SWF Verification\n";
+		main::logger "WARNING: Your version of rtmpdump/flvstreamer does not support SWF Verification\n";
 	}
 	$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
-	main::logger "INFO: $bin->{flvstreamer} version $rtmpver\n" if $opt->{verbose};
+	main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
 	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
 
 	# Save the effort and don't support < v1.8
@@ -8210,14 +8211,14 @@ sub get {
 		exit 4;
 	}
 	push @cmdopts, ( '--resume', '-o', $file_tmp ) if ! ( $opt->{stdout} && $opt->{nowrite} );
-	push @cmdopts, @{ $binopts->{flvstreamer} } if $binopts->{flvstreamer};
+	push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
 	
 	my $return;
 	# Different invocation depending on version
 	# if playpath is defined
 	if ( $playpath ) {
 		@cmd = (
-			$bin->{flvstreamer},
+			$bin->{rtmpdump},
 			'--port', $port,
 			'--protocol', $protocol,
 			'--playpath', $playpath,
@@ -8231,7 +8232,7 @@ sub get {
 	# Using just streamurl (i.e. no playpath defined)
 	} else {
 		@cmd = (
-			$bin->{flvstreamer},
+			$bin->{rtmpdump},
 			'--port', $port,
 			'--protocol', $protocol,
 			'--rtmp', $streamdata{streamurl},
