@@ -89,7 +89,7 @@ EOF
 
 
 # Some defaults
-my $default_modes = 'flashaachigh,flashaacstd,flash,realaudio,flashaaclow';
+my $default_modes = 'default';
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
@@ -3572,12 +3572,12 @@ sub process_params {
 	};
 
 	$opt->{MODES} = {
-		title	=> 'Recording Modes', # Title
-		tooltip	=> 'Comma separated list of recording modes which should be tried in order', # Tooltip
+		title	=> 'Recording Modes<br/>(set to "best" for HD TV)', # Title
+		tooltip	=> 'Comma separated list of recording modes which should be tried in order. Set to "best" (without quotes) for HD TV (if available, with fallback to SD TV). Set to "default" (without quotes) for best available SD TV.  Set to "good" (without quotes) for lower-quality SD TV.', # Tooltip
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'flashaachigh,flashaacstd,flashaudio,flashhigh,flashstd,flashnormal,realaudio,flashaaclow', # default
+		default	=> 'default', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
