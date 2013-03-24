@@ -2231,15 +2231,15 @@ sub create_xml {
 			$program_count{ $this->{name} }++;
 		}
 		for my $name ( sort keys %program_index ) {
-			print XML "\t\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
+			print XML "\t\t<container title=\"".encode_entities( $name, '&<>"\'' )." ($program_count{$name})\">\n" if $opt->{fxd};
 			print XML "\t<Streams>\n" if $opt->{mythtv};
-			print XML "\t\t<Name>".encode_entities( $name )."</Name>\n" if $opt->{mythtv};
+			print XML "\t\t<Name>".encode_entities( $name, '&<>' )."</Name>\n" if $opt->{mythtv};
 			for my $this (@_) {
 				my $pid = $this->{pid};
 				# loop through and find matches for each progname
 				if ( $this->{name} eq $name ) {
-					my $episode = encode_entities( $this->{episode} );
-					my $desc = encode_entities( $this->{desc} );
+					my $episode = encode_entities( $this->{episode}, '&<>"\'' );
+					my $desc = encode_entities( $this->{desc}, '&<>' );
 					my $title = "${episode}";
 					$title .= " ($this->{available})" if $this->{available} !~ /^(unknown|)$/i;
 					if ( $opt->{fxd} ) {
@@ -2284,10 +2284,10 @@ sub create_xml {
 			push @{ $channels{ $this->{channel} } }, $this->{name};
 		}
 		for my $channel ( sort keys %channels ) {
-			print XML "\t\t<container title=\"".encode_entities( $channel )."\">\n" if $opt->{fxd};
+			print XML "\t\t<container title=\"".encode_entities( $channel, '&<>"\'' )."\">\n" if $opt->{fxd};
 			print XML
 				"\t<Feed>\n".
-				"\t\t<Name>".encode_entities( $channel )."</Name>\n".
+				"\t\t<Name>".encode_entities( $channel, '&<>' )."</Name>\n".
 				"\t\t<Provider>BBC</Provider>\n".
 				"\t\t<Streams>\n" if $opt->{mythtv};
 			for my $name ( sort keys %program_index ) {
@@ -2297,14 +2297,14 @@ sub create_xml {
 					$match = 1 if $_ eq $name;
 				}
 				if ( $match ) {
-					print XML "\t\t\t<container title=\"".encode_entities( $name )." ($program_count{$name})\">\n" if $opt->{fxd};
+					print XML "\t\t\t<container title=\"".encode_entities( $name, '&<>"\'' )." ($program_count{$name})\">\n" if $opt->{fxd};
 					#print XML "\t\t<Stream>\n" if $opt->{mythtv};
 					for my $this (@_) {
 						# loop through and find matches for each progname for this channel
 						my $pid = $this->{pid};
 						if ( $this->{channel} eq $channel && $this->{name} eq $name ) {
-							my $episode = encode_entities( $this->{episode} );
-							my $desc = encode_entities( $this->{desc} );
+							my $episode = encode_entities( $this->{episode}, '&<>"\'' );
+							my $desc = encode_entities( $this->{desc}, '&<>' );
 							my $title = "${episode} ($this->{available})";
 							if ( $opt->{fxd} ) {
 								print XML
@@ -2319,7 +2319,7 @@ sub create_xml {
 							} elsif ( $opt->{mythtv} ) {
 								print XML 
 									"\t\t\t<Stream>\n".
-									"\t\t\t\t<Name>".encode_entities( $name )."</Name>\n".
+									"\t\t\t\t<Name>".encode_entities( $name, '&<>' )."</Name>\n".
 									"\t\t\t\t<index>$this->{index}</index>\n".
 									"\t\t\t\t<type>$this->{type}</type>\n".
 									"\t\t\t\t<Url>${pid}.mov</Url>\n".
@@ -2359,9 +2359,9 @@ sub create_xml {
 			print XML "\t\t<container title=\"$folder\">\n";
 			for my $this (@_) {
 				my $pid = $this->{pid};
-				my $name = encode_entities( $this->{name} );
-				my $episode = encode_entities( $this->{episode} );
-				my $desc = encode_entities( $this->{desc} );
+				my $name = encode_entities( $this->{name}, '&<>"\'' );
+				my $episode = encode_entities( $this->{episode}, '&<>"\'' );
+				my $desc = encode_entities( $this->{desc}, '&<>' );
 				my $title = "${name} - ${episode} ($this->{available})";
 				my $regex = $table{$folder};
 				if ( $name =~ /^$regex/i ) {
@@ -4538,7 +4538,7 @@ sub substitute {
 			$replace = StringUtils::sanitize_path( $value );
 		# html entity encode
 		} elsif ($sanitize_mode == 3) {
-			$replace = encode_entities( $value );
+			$replace = encode_entities( $value, '&<>' );
 		# escape these chars: ! ` \ "
 		} elsif ($sanitize_mode == 4) {
 			$replace = $value;
