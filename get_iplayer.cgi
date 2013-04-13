@@ -1685,7 +1685,8 @@ sub get_cmd_output {
 	#my $to = new IO::Handle;
 	my $from = new IO::Handle;
 	my $error = new IO::Handle;
-	my $rtn;
+	my $rtn_val;
+	my $rtn_code;
 	my @out_from;
 	my @out_error;
 
@@ -1746,18 +1747,24 @@ sub get_cmd_output {
 			print $se "ERROR: Could not fork STDERR reader process\n";
 			exit 1;
 		}
-		waitpid( $childpid, 0 );
 
-		waitpid( $procid, 0 );
-		$rtn = $?;
+		$rtn_val = waitpid( $childpid, 0 );
+		$rtn_code = $?;
+		#print "\nDEBUG: childpid rtn_val: '" . $rtn_val . "', rtn_code: '" . $rtn_val . "'\n";
+		$rtn_val = waitpid( $procid, 0 );
+		$rtn_code = $?;
+		#print "\nDEBUG: procid rtn_val: '" . $rtn_val . "', rtn_code: '" . $rtn_val . "'\n";
+		#print "\nDEBUG: out_from#: '" . scalar(@out_from) . "'\n";
+		#don't process return status when the zombie process has disappeared
+		$rtn_code = 0 if ( $rtn_val == -1 && scalar(@out_from) > 0 );
 
 		# Restore sigpipe handler for reader and writer processes
 		$SIG{PIPE} = 'DEFAULT';
 	}
 
-	# Interpret return code	      
-	interpret_return_code( $rtn );
-	
+	# Interpret return status code
+	interpret_return_code( $rtn_code );
+
 	return @out_from;
 }
 
