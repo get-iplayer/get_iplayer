@@ -4088,7 +4088,9 @@ sub insert_javascript {
 		for(var i = 0; i < tabs.length; i++) {
 			var li     = document.getElementById( 'li_' + tabs[i] );
 			var tab    = document.getElementById( 'tab_' + tabs[i] );
-			var option = document.getElementById( 'option_' + tabs[i] );
+EOF
+	print $fh "			var option = document.". ( $] < 5.008005 ? "getElementsByName( tabs[i] )[0];" : "getElementById( 'option_' + tabs[i] );") . "\n";
+	print $fh <<EOF;
 			var button = document.getElementById( 'button_' + tabs[i] );
 			if ( tab == selected_tab ) {
 				tab.style.display = 'table-cell';
