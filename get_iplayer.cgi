@@ -46,25 +46,13 @@ my $fh;
 # Send log messages to this fh
 my $se = *STDERR;
 
-my $opt_cmdline;
-$opt_cmdline->{debug} = 0;
-# Allow bundling of single char options
-Getopt::Long::Configure ("bundling");
-# cmdline opts take precedence
-GetOptions(
-	"help|h"			=> \$opt_cmdline->{help},
-	"listen|address|l=s"		=> \$opt_cmdline->{listen},
-	"port|p=n"			=> \$opt_cmdline->{port},
-	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
-	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
-	"debug"				=> \$opt_cmdline->{debug},
-) || die usage();
+#### state ####
+my $home = $ENV{HOME}; # path to get_iplayer (HOME env var not set by apache)
+my $cgi;
+my $opt;
+my $nextpage;
 
-# Display usage if old method of invocation is used or --help
-usage() if $opt_cmdline->{help} || @ARGV;
-
-
-# Usage
+#### usage ####
 sub usage {
 	my $text = sprintf "get_iplayer Web PVR Manager v%.2f, ", $VERSION;
 	$text .= <<'EOF';
@@ -85,24 +73,55 @@ EOF
 	exit 1;
 }	
 
-# ensure get_iplayer
-if ( ! $opt_cmdline->{getiplayer} ) {
+#### options ####
+# command line options
+my %opt_cmdline;
+# Allow bundling of single char options
+Getopt::Long::Configure ("bundling");
+GetOptions(
+	"help|h"			=> \$opt_cmdline{help},
+	"listen|address|l=s"		=> \$opt_cmdline{listen},
+	"port|p=n"			=> \$opt_cmdline{port},
+	"ffmpeg=s"			=> \$opt_cmdline{ffmpeg},
+	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline{getiplayer},
+	"debug"				=> \$opt_cmdline{debug},
+) || die usage();
+# Display usage if old method of invocation is used or --help
+usage() if $opt_cmdline{help} || @ARGV;
+
+# default options
+my %opt_default;
+# ensure underlying get_iplayer script is available
+if ( ! $opt_cmdline{getiplayer} ) {
 	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
-		$opt_cmdline->{getiplayer} = $_ if -x $_;
+		$opt_cmdline{getiplayer} = $_ if -x $_;
 	}
 }
-if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
+if ( ( ! $opt_cmdline{getiplayer} ) || ! -f $opt_cmdline{getiplayer} ) {
 	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
 	exit 2;
 }
+$opt_default{getiplayer} = $opt_cmdline{getiplayer};
+set_default_options(); # command line options merged. use opt_default beyond here
 
-# Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
-my $home = $ENV{HOME};
-
-my %prog;
-my @pids;
-my @displaycols;
-
+#### page ####
+# Page routing based on NEXTPAGE CGI parameter
+my %nextpages = (
+	'search_progs'		=> \&search_progs,	# Main Programme Listings
+	'search_history'	=> \&search_history,	# Recorded Programme Listings
+	'pvr_queue'		=> \&pvr_queue,		# Queue Recording of Selected Progs
+	'recordings_delete'	=> \&recordings_delete,	# Delete Files for Selected Recordings
+	'pvr_list'		=> \&show_pvr_list,	# Show all current PVR searches
+	'pvr_del'		=> \&pvr_del,		# Delete selected PVR searches
+	'pvr_add'		=> \&pvr_add,
+	'pvr_edit'		=> \&pvr_edit,
+	'pvr_save'		=> \&pvr_save,
+	'pvr_run'		=> \&pvr_run,
+	'record_now'		=> \&record_now,
+	'show_info'		=> \&show_info,
+	'refresh'		=> \&refresh,
+	'update_script'		=> \&update_script,
+);
 # Field names to be grabbed from get_iplayer
 my @headings = qw( 
 	index
@@ -125,7 +144,6 @@ my @headings = qw(
 	filename
 	mode
 );
-
 # Lookup table for nice field name headings
 my %fieldname = (
 	index			=> 'Index',
@@ -152,10 +170,6 @@ my %fieldname = (
 	'name,episode'		=> 'Name+Episode',
 	'name,episode,desc'	=> 'Name+Episode+Desc',
 );
-
-my %cols_order = ();
-my %cols_names = ();
-
 my %prog_types = (
 	tv	=> 'BBC TV',
 	radio	=> 'BBC Radio',
@@ -163,7 +177,6 @@ my %prog_types = (
 	livetv	=> 'Live BBC TV',
 	liveradio => 'Live BBC Radio',
 );
-
 my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio',
@@ -171,59 +184,14 @@ my %prog_types_order = (
 	4	=> 'livetv',
 	5	=> 'liveradio',
 );
+my %cols_order = ();
+my %cols_names = ();
+my %prog;
+my @pids;
+my @displaycols;
 
-# Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--nopurge', '--nocopyright', '--listplugins' ) );
-for my $type (keys %prog_types) {
-	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
-		# delete from %prog_types hash
-		delete $prog_types{$type};
-		# Delete from %prog_types_order hash
-		for ( keys %prog_types_order ) {
-			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type; 
-		}
-	}
-}
-for my $type ( @plugins ) {
-	if ( not $prog_types{$type} ) {
-		$prog_types{$type} = $type;
-		# Add to %prog_types_order hash
-		my $max = scalar( keys %prog_types_order ) + 1;
-		$prog_types_order{$max} = $type;
-	}
-}
-#print "DEBUG: prog_types_order: $_ => $prog_types_order{$_}\n" for sort keys %prog_types_order;
-
-my $icons_base_url = './icons/';
-
-my $cgi;
-my $nextpage;
-
-# Page routing based on NEXTPAGE CGI parameter
-my %nextpages = (
-	'search_progs'		=> \&search_progs,	# Main Programme Listings
-	'search_history'	=> \&search_history,	# Recorded Programme Listings
-	'pvr_queue'		=> \&pvr_queue,		# Queue Recording of Selected Progs
-	'recordings_delete'	=> \&recordings_delete,	# Delete Files for Selected Recordings
-	'pvr_list'		=> \&show_pvr_list,	# Show all current PVR searches
-	'pvr_del'		=> \&pvr_del,		# Delete selected PVR searches
-	'pvr_add'		=> \&pvr_add,
-	'pvr_edit'		=> \&pvr_edit,
-	'pvr_save'		=> \&pvr_save,
-	'pvr_run'		=> \&pvr_run,
-	'record_now'		=> \&record_now,
-	'show_info'		=> \&show_info,
-	'refresh'		=> \&refresh,
-	'update_script'		=> \&update_script,
-);
-
-# default options
-my %opt_default;
-set_default_options();
-# state options
-my $opt;
-
-# Options Layout on page tabs
+#### layout ####
+# Options on page tabs
 my $layout;
 $layout->{BASICTAB}->{title} = 'Search Options',
 $layout->{BASICTAB}->{heading} = 'Search Options:',
@@ -231,7 +199,7 @@ $layout->{BASICTAB}->{order} = [ qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /
 
 $layout->{SEARCHTAB}->{title} = 'Advanced Search';
 $layout->{SEARCHTAB}->{heading} = 'Advanced Search Options:';
-$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST EXCLUDE CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
+$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST EXCLUDE CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ];
 
 $layout->{DISPLAYTAB}->{title} = 'Display';
 $layout->{DISPLAYTAB}->{heading} = 'Display Options:';
@@ -255,6 +223,29 @@ $layout->{HIDDENTAB}->{order} = [ qw/ RESET SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB
 
 # Order of displayed tab buttoms (BASICTAB and HIDDEN are always displayed regardless of order)
 $layout->{taborder} = [ qw/ BASICTAB SEARCHTAB DISPLAYTAB COLUMNSTAB RECORDINGTAB STREAMINGTAB HIDDENTAB / ];
+
+#### plugins ####
+# Get list of currently valid and prune %prog types and add new entry
+chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_default{getiplayer}, '--nopurge', '--nocopyright', '--listplugins' ) );
+for my $type (keys %prog_types) {
+	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
+		# delete from %prog_types hash
+		delete $prog_types{$type};
+		# Delete from %prog_types_order hash
+		for ( keys %prog_types_order ) {
+			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type;
+		}
+	}
+}
+for my $type ( @plugins ) {
+	if ( not $prog_types{$type} ) {
+		$prog_types{$type} = $type;
+		# Add to %prog_types_order hash
+		my $max = scalar( keys %prog_types_order ) + 1;
+		$prog_types_order{$max} = $type;
+	}
+}
+#print "DEBUG: prog_types_order: $_ => $prog_types_order{$_}\n" for sort keys %prog_types_order;
 
 ### Perl CGI Web Server ###
 use Socket;
@@ -311,7 +302,7 @@ if ( $opt_default{port} > 0 ) {
 							s/\s+$//;
 						}
 						$request{lc $type} = $val;
-						print "REQUEST HEADER: $type: $val\n" if $opt_cmdline->{debug};
+						print "REQUEST HEADER: $type: $val\n" if $opt_default{debug};
 					# POST data
 					} elsif (/^$/) {
 						read( $client, $request{CONTENT}, $request{'content-length'} ) if defined $request{'content-length'};
@@ -404,7 +395,6 @@ if ( $opt_default{port} > 0 ) {
 exit 0;
 
 
-
 sub cleanup {
 	my $signal = shift;
 	print $se "INFO: Cleaning up PID $$ (signal = $signal)\n";
@@ -413,9 +403,10 @@ sub cleanup {
 
 sub set_default_options {
 	# source get_iplayer file options
-	%opt_default = ( %opt_default,  map { m/.*=+.*/ ? s/^\s*(.*?)\s*=\s*(.*?)\s*\n/\1=\2/ && split "=" : () }
-		get_cmd_output($opt_cmdline->{getiplayer}, '--nopurge', '--nocopyright', '--show-options'));
+	%opt_default = ( getiplayer => $opt_default{getiplayer}, ( map { m/.*=+.*/ ? s/^\s*(.*?)\s*=\s*(.*?)\s*\n/\1=\2/ && split "=" : () }
+		get_cmd_output( $opt_default{getiplayer}, '--nopurge', '--nocopyright', '--show-options' ) ) );
 	# ensure defaults
+	$opt_default{debug} = 0;
 	$opt_default{listen} = '0.0.0.0';
 	$opt_default{port} = 0;
 	$opt_default{nosearch} = ''; # params that should never get into the get_iplayer pvr-add search
@@ -436,9 +427,10 @@ sub set_default_options {
 	$opt_default{autopvrrun} = 4 if not defined $opt_default{autopvrrun};
 	$opt_default{refreshfuture} = 0 if not defined $opt_default{refreshfuture};
 	# ensure command line overrides
-	$opt_default{listen} = $opt_cmdline->{listen} if defined $opt_cmdline->{listen};
-	$opt_default{port} = $opt_cmdline->{port} if defined $opt_cmdline->{port};
-	$opt_default{ffmpeg} = $opt_cmdline->{ffmpeg} if defined $opt_cmdline->{ffmpeg};
+	$opt_default{debug} = $opt_cmdline{debug} if defined $opt_cmdline{debug};
+	$opt_default{listen} = $opt_cmdline{listen} if defined $opt_cmdline{listen};
+	$opt_default{port} = $opt_cmdline{port} if defined $opt_cmdline{port};
+	$opt_default{ffmpeg} = $opt_cmdline{ffmpeg} if defined $opt_cmdline{ffmpeg};
 }
 
 sub parse_post_form_string {
@@ -534,7 +526,7 @@ sub run_cgi {
 			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
 			# Send the headers to the browser
-			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_default{debug};
 			print $fh $headers;
 
 			# Default Recipies
@@ -626,7 +618,7 @@ sub run_cgi {
 			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
 			# Send the headers to the browser
-			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+			print $se "\r\nHEADERS:\n$headers\n"; #if $opt_default{debug};
 			print $fh $headers;
 
 			stream_file( $filename, $mimetypes{$ext}, $src_ext, $ext, $notranscode, $cgi->param( 'BITRATE' ), $cgi->param( 'VSIZE' ), $cgi->param( 'VFR' ) );
@@ -640,7 +632,7 @@ sub run_cgi {
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_default{debug};
 		print $fh $headers;
 
 		# determine output type
@@ -656,7 +648,7 @@ sub run_cgi {
 		my $headers = $cgi->header( -type => 'text/xml' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_default{debug};
 		print $fh $headers;
 		# ( host, outtype, modes, type, bitrate )
 		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
@@ -669,7 +661,7 @@ sub run_cgi {
 		#my $headers = $cgi->header( -type => 'audio/x-mpegurl', -attachment => 'get_iplayer.m3u' );
 
 		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
+		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_default{debug};
 		print $fh $headers;
 		
 		# determine output type
@@ -687,7 +679,7 @@ sub run_cgi {
 		# Page Routing
 		form_header( $request_host );
 		#print $fh $cgi->Dump();
-		if ( $opt_cmdline->{debug} ) {
+		if ( $opt_default{debug} ) {
 			print $fh $cgi->Dump();
 			#for my $key (sort keys %ENV) {
 			#    print $fh $key, " = ", $ENV{$key}, "\n";
@@ -712,7 +704,7 @@ sub pvr_run {
 	print $fh "<strong><p>The PVR will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
 	print $se "INFO: Starting PVR Run\n";
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nopurge',
 		'--nocopyright',
 		'--hash',
@@ -729,22 +721,22 @@ sub pvr_run {
 	my $autopvrrun = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
 
 	# Render options actions
-	print $fh div( { -class=>'action' },
-		ul( { -class=>'action' },
-			li( { -class=>'action' }, [
+	print $fh div( { -class => 'action' },
+		ul( { -class => 'action' },
+			li( { -class => 'action' }, [
 				a(
 					{
-						-class=>'action',
+						-class => 'action',
 						-title => 'Run PVR Now',
-						-onClick  => "RefreshTab( '?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun).", 1 );",
+						-onClick => "RefreshTab( '?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun).", 1 );",
 					},
 					'PVR Run Now'
 				),
 				a(
 					{
-						-class=>'action',
+						-class => 'action',
 						-title => 'Close',
-						-onClick  => "window.close()",
+						-onClick => "window.close()",
 					},
 					'Close'
 				),
@@ -804,7 +796,7 @@ sub record_now {
 		next if ! ($type && $pid );
 		my $comment = "$name - $episode";
 		my @cmd = (
-			$opt_cmdline->{getiplayer},
+			$opt_default{getiplayer},
 			'--nopurge',
 			'--nocopyright',
 			'--expiry=999999999',
@@ -816,7 +808,7 @@ sub record_now {
 				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDEDELETED|FUTURE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
 			),
 		);
-		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 		print $fh '<pre>';
 		# Redirect both STDOUT and STDERR to client browser socket
 		run_cmd_autorefresh( $fh, $fh, 1, @cmd );
@@ -836,7 +828,7 @@ sub stream_prog {
 	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video frame rate '$vfr'\n";
 
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--hash',
 		'--expiry=999999999',
@@ -925,7 +917,6 @@ sub stream_file {
 
 	return 0;
 }
-
 
 
 sub build_ffmpeg_args {
@@ -1021,7 +1012,7 @@ sub create_playlist_m3u_single {
 		
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -1175,7 +1166,7 @@ sub get_opml {
 
 		# Extract and rewrite into playlist format
 		my @out = get_cmd_output(
-			$opt_cmdline->{getiplayer},
+			$opt_default{getiplayer},
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -1216,7 +1207,7 @@ sub get_opml {
 
 		# Extract and rewrite into playlist format
 		my @out = get_cmd_output(
-			$opt_cmdline->{getiplayer},
+			$opt_default{getiplayer},
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -1322,7 +1313,7 @@ sub update_script {
 
 	print $se "INFO: Updating get_iplayer\n";
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--nopurge',
@@ -1824,7 +1815,7 @@ sub interpret_return_code {
 sub get_pvr_list {
 	my $pvrsearch;
 	my $out = join "\n", get_cmd_output(
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--pvrlist',
@@ -2132,13 +2123,13 @@ sub pvr_del {
 	for my $name (@record) {
 		chomp();
 		my @cmd = (
-			$opt_cmdline->{getiplayer},
+			$opt_default{getiplayer},
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
 			get_iplayer_webrequest_args( "pvrdel=$name" ),
 		);
-		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 		my $cmdout = join "", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Deleted: $name");
@@ -2164,13 +2155,13 @@ sub show_info {
 	# Queue all selected '<type>|<pid>' entries in the PVR
 	chomp();
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "future=$opt->{FUTURE}->{current}", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
 	);
-	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 	for ( grep !/^(Added|INFO):/, @cmdout ) {
@@ -2250,13 +2241,13 @@ sub get_direct_filename {
 
 	# Get the 'filename' entry from --history --info for this pid
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'nopurge=1', "history=$history", 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <pid>|<filename>|<mode>' ),
 	);
-	print $se "Command: ".( join ' ', @cmd )."\n"; # if $opt_cmdline->{debug};
+	print $se "Command: ".( join ' ', @cmd )."\n"; # if $opt_default{debug};
 	my @cmdout = get_cmd_output( @cmd );
 	return p("ERROR: ".@cmdout) if $? && not $IGNOREEXIT;
 
@@ -2284,7 +2275,7 @@ sub search_absolute_path {
 	if ( IS_WIN32 ) {
 		# add a hardcoded prefix for now if relative path (assume relative to local get_iplayer script)
 		if ( $filename !~ m{^[A-Za-z]:} && $filename =~ m{^(\.|\.\.|[A-Za-z])} ) {
-			$filename = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
+			$filename = dirname( abs_path( $opt_default{getiplayer} ) ).'/'.$filename;
 		}
 		# twiddle the / to \
 		$filename =~ s!(\\/|/|\/)!\\!g;
@@ -2298,8 +2289,8 @@ sub search_absolute_path {
 		$abs_path = abs_path($filename);
 
 	# else try dir of get_iplayer
-	} elsif ( -f dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename ) {
-		$abs_path = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
+	} elsif ( -f dirname( abs_path( $opt_default{getiplayer} ) ).'/'.$filename ) {
+		$abs_path = dirname( abs_path( $opt_default{getiplayer} ) ).'/'.$filename;
 
 	# else try dir current output dir option
 	} elsif ( $opt->{OUTPUT}->{current} && -f abs_path( $opt->{OUTPUT}->{current} ).'/'.$filename ) {
@@ -2354,7 +2345,7 @@ sub pvr_queue {
 		$comment =~ s/^_*//g;
 		$comment =~ s/_*$//g;
 		my @cmd = (
-			$opt_cmdline->{getiplayer},
+			$opt_default{getiplayer},
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -2366,7 +2357,7 @@ sub pvr_queue {
 				build_cmd_options( grep !/^(HISTORY|SINCE|BEFORE|HIDEDELETED|FUTURE|SEARCH|SEARCHFIELDS|VERSIONLIST|PROGTYPES|EXCLUDEC.+)$/, @params )
 			),
 		);
-		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+		print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 		my $cmdout = join "", get_cmd_output( @cmd );
 		return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 		print $fh p("Queued: $type: '$name - $episode' ($pid)");
@@ -2509,14 +2500,14 @@ sub pvr_add {
 
 	# Remove a few options from leaking into a PVR search
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( "pvradd=$searchname", build_cmd_options( grep !/^(HISTORY|HIDEDELETED|SINCE|BEFORE|HIDE|FORCE|FUTURE)$/, @params ) ),
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
-	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 	$out = join "", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added PVR Search ($searchname):\n\tTypes: $opt->{PROGTYPES}->{current}\n\tSearch: $opt->{SEARCH}->{current}\n\tSearch Fields: $opt->{SEARCHFIELDS}->{current}\n");
@@ -2563,13 +2554,13 @@ sub pvr_save {
 	# Delete the original pvr entry
 	my $searchname = $cgi->param( 'PVRSEARCH' );
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
 		get_iplayer_webrequest_args( "pvrdel=$searchname" ),
 	);
-	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 	my $cmdout = join "", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Deleted: $searchname");
@@ -2577,7 +2568,7 @@ sub pvr_save {
 
 	# Add the new pvr entry
 	@cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2586,7 +2577,7 @@ sub pvr_save {
 		@search_args,
 	);
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
-	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
+	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_default{debug};
 	$out = join "", get_cmd_output( @cmd );
 	return p("ERROR: ".$out) if $? && not $IGNOREEXIT;
 	print $fh p("Added Updated PVR Search '$newsearchname'\n");
@@ -2731,7 +2722,7 @@ sub refresh {
 	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	print $se "INFO: Refreshing\n";
 	my @cmd = (
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
@@ -3340,7 +3331,7 @@ sub get_progs {
 	push @webrequest_args, "sortmatches=$opt->{SORT}->{current}" if $opt->{SORT}->{current} && $opt->{SORT}->{current} ne 'name';
 	# Run command
 	my @list = get_cmd_output(
-		$opt_cmdline->{getiplayer},
+		$opt_default{getiplayer},
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -3966,7 +3957,6 @@ sub process_params {
 		save	=> 0,
 	};
 
-
 	# Go through each of the options defined above
 	for ( keys %{ $opt } ) {
 		if ( defined $cgi->param($_) && $cgi->param($_) eq '' &&
@@ -3986,15 +3976,15 @@ sub process_params {
 			}
 		} else {
 			if ( defined $cgi->param($_) ) {
-				print $se "DEBUG: GOT Param  $_ = ".$cgi->param($_)."\n" if $opt_cmdline->{debug};
+				print $se "DEBUG: GOT Param  $_ = ".$cgi->param($_)."\n" if $opt_default{debug};
 				$opt->{$_}->{current} = join ",", $cgi->param($_);
 			} elsif (  defined $cgi->cookie($_) ) {
-				print $se "DEBUG: GOT Cookie $_ = ".$cgi->cookie($_)."\n" if $opt_cmdline->{debug};
+				print $se "DEBUG: GOT Cookie $_ = ".$cgi->cookie($_)."\n" if $opt_default{debug};
 				$opt->{$_}->{current} = join ",", $cgi->cookie($_);
 			} else {
 				$opt->{$_}->{current} =  join ",", $opt->{$_}->{default};
 			}
-			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_cmdline->{debug};
+			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_default{debug};
 		}
 	}
 }
@@ -4024,7 +4014,7 @@ sub begin_html {
 			my $cookie;
 			if ( $opt->{$_}->{current} ne $opt->{$_}->{default} ) {
 				$cookie = $cgi->cookie( -name=>$_, -value=>$opt->{$_}->{current}, -expires=>'+1y' );
-				print $se "DEBUG: Sending cookie: $cookie\n" if $opt_cmdline->{debug};
+				print $se "DEBUG: Sending cookie: $cookie\n" if $opt_default{debug};
 			} else {
 				$cookie = $cgi->cookie( -name=>$_, -value=>'', -expires=>'-1s' );
 			}
@@ -4048,7 +4038,7 @@ sub begin_html {
 		-charset	=> 'utf-8',
 		-cookie		=> [@cookies],
 	);
-	print $se "\nHEADERS:\n$headers\n" if $opt_cmdline->{debug};
+	print $se "\nHEADERS:\n$headers\n" if $opt_default{debug};
 
 	# Build body element and page title differently depending on the type of page
 	# Load the refresh tab if required
