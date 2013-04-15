@@ -66,6 +66,7 @@ Options:
  --port,-p         Use the built-in web server and listen on this TCP port
  --getiplayer,-g   Path to the get_iplayer script
  --ffmpeg          Path to the ffmpeg binary
+ --hideoptions     List of options whose values should not be made visible
  --debug           Debug mode
  --help,-h         This help text
 EOF
@@ -84,6 +85,7 @@ GetOptions(
 	"port|p=n"			=> \$opt_cmdline{port},
 	"ffmpeg=s"			=> \$opt_cmdline{ffmpeg},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline{getiplayer},
+	"hideoptions|hideopts=s"	=> \$opt_cmdline{hideoptions},
 	"debug"				=> \$opt_cmdline{debug},
 ) || die usage();
 # Display usage if old method of invocation is used or --help
@@ -189,6 +191,8 @@ my %cols_names = ();
 my %prog;
 my @pids;
 my @displaycols;
+my $hidestring = "-----";
+my $hidesuffix = " | [hidden]";
 
 #### layout ####
 # Options on page tabs
@@ -219,7 +223,7 @@ $layout->{STREAMINGTAB}->{order} = [ qw/ BITRATE VSIZE VFR STREAMTYPE / ];
 
 $layout->{HIDDENTAB}->{title} = '';
 $layout->{HIDDENTAB}->{heading} = '';
-$layout->{HIDDENTAB}->{order} = [ qw/ RESET SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION / ];
+$layout->{HIDDENTAB}->{order} = [ qw/ HIDEOPTIONS RESET SAVE SEARCHTAB COLUMNSTAB DISPLAYTAB RECORDINGTAB STREAMINGTAB PAGENO INFO NEXTPAGE ACTION / ];
 
 # Order of displayed tab buttoms (BASICTAB and HIDDEN are always displayed regardless of order)
 $layout->{taborder} = [ qw/ BASICTAB SEARCHTAB DISPLAYTAB COLUMNSTAB RECORDINGTAB STREAMINGTAB HIDDENTAB / ];
@@ -410,6 +414,7 @@ sub set_default_options {
 	$opt_default{listen} = '0.0.0.0';
 	$opt_default{port} = 0;
 	$opt_default{nosearch} = ''; # params that should never get into the get_iplayer pvr-add search
+	$opt_default{hideoptions} = '' if not defined $opt_default{hideoptions};
 	$opt_default{ffmpeg} = 'ffmpeg' if not defined $opt_default{ffmpeg};
 	$opt_default{versionlist} = 'default' if not defined $opt_default{versionlist};
 	$opt_default{search} = '.*' if not defined $opt_default{search};
@@ -430,13 +435,14 @@ sub set_default_options {
 	$opt_default{debug} = $opt_cmdline{debug} if defined $opt_cmdline{debug};
 	$opt_default{listen} = $opt_cmdline{listen} if defined $opt_cmdline{listen};
 	$opt_default{port} = $opt_cmdline{port} if defined $opt_cmdline{port};
+	$opt_default{hideoptions} = $opt_cmdline{hideoptions} if defined $opt_cmdline{hideoptions};
 	$opt_default{ffmpeg} = $opt_cmdline{ffmpeg} if defined $opt_cmdline{ffmpeg};
 }
 
 sub parse_post_form_string {
 	my $form = $_[0];
 	my @data;
-	while ( $form =~ /Content-Disposition:(.+?)--/sg ) {
+	while ( $form =~ /Content-Disposition:(.+?)--+[0-9a-zA-Z]+/sg ) {
 		$_ = $1;
 		# form-data; name = "KEY"
 		m{name.+?"(.+?)"[\n\r\s]*(.+)}sg;
@@ -448,6 +454,7 @@ sub parse_post_form_string {
 		decode_entities($val);
 		# url encode each entry
 		$val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+		next if $val eq $hidestring;
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
@@ -2604,6 +2611,7 @@ sub build_option_html {
 	my $current = $arg->{current};
 	my $value = $arg->{value};
 	my $status = $arg->{status};
+	my $hide = ( defined $arg->{hide} && $arg->{hide} == 1 ) ? 1 : 0;
 	my @html;
 
 	# On/Off
@@ -2698,6 +2706,7 @@ sub build_option_html {
 
 	# text field
 	} elsif ( $type eq 'text' ) {
+		$current = $hidestring if $hide; # override for hidden
 		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
 		td( { -class => 'options', -title => $tooltip },
 			textfield(
@@ -2706,6 +2715,7 @@ sub build_option_html {
 				-value		=> $current,
 				-size		=> $value,
 				-onKeyDown	=> 'return submitonEnter(event);',
+				$hide ? ( -disabled => $hide ) : (),
 			)
 		);
 
@@ -3596,6 +3606,7 @@ sub process_params {
 		default	=> $opt_default{modes},
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 		empty	=> 0, # disallow empty string
 	};
 	
@@ -3608,6 +3619,7 @@ sub process_params {
 		default	=> $opt_default{output}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 	
 	$opt->{PROXY} = {
@@ -3619,6 +3631,7 @@ sub process_params {
 		default	=> $opt_default{proxy}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 	
 	$opt->{VERSIONLIST} = {
@@ -3641,6 +3654,7 @@ sub process_params {
 		default	=> $opt_default{exclude}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 
 	$opt->{CATEGORY} = {
@@ -3652,6 +3666,7 @@ sub process_params {
 		default	=> $opt_default{category}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 
 	$opt->{EXCLUDECATEGORY} = {
@@ -3663,6 +3678,7 @@ sub process_params {
 		default	=> $opt_default{excludecategory}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 
 	$opt->{CHANNEL} = {
@@ -3674,6 +3690,7 @@ sub process_params {
 		default	=> $opt_default{channel}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 
 	$opt->{EXCLUDECHANNEL} = {
@@ -3685,6 +3702,7 @@ sub process_params {
 		default	=> $opt_default{excludechannel}, # default
 		value	=> 30, # width values
 		save	=> 1,
+		hide	=> 0,
 	};
 
 	$opt->{HIDE} = {
@@ -3957,8 +3975,27 @@ sub process_params {
 		save	=> 0,
 	};
 
-	# Go through each of the options defined above
+	# hideoptions persistance for 'stateful' web server deployment
+	$opt->{HIDEOPTIONS} = {
+		webvar => 'HIDEOPTIONS',
+		optkey => 'hideoptions',
+		type	=> 'hidden',
+		default	=> $opt_default{hideoptions},
+		save	=> 1,
+	};
+
+	# Go through each of the options defined above and set the 'current' value for display
+	# process any hideoptions first
+	my %hideopts = map { $_ => 1 } split(/,/, $opt->{HIDEOPTIONS}->{default});
+	if ( ! $cgi->param('RESET') && $cgi->param('HIDEOPTIONS') && 
+				$cgi->param('HIDEOPTIONS') ne $opt->{HIDEOPTIONS}->{default} ) {
+		# only shrink to default on explicit reset. merge existing hide options
+		%hideopts = ( %hideopts, map { $_ => 1 } split(/,/, $cgi->param('HIDEOPTIONS')) ); 
+	}
+	$opt->{HIDEOPTIONS}->{current} = join(",", keys %hideopts);
+	$cgi->param('HIDEOPTIONS', $opt->{HIDEOPTIONS}->{current});
 	for ( keys %{ $opt } ) {
+		next if $_ eq "HIDEOPTIONS";
 		if ( defined $cgi->param($_) && $cgi->param($_) eq '' &&
 			defined $opt->{$_}->{empty} && $opt->{$_}->{empty} == 0 ) {
 			$cgi->param($_, $opt->{$_}->{default}); # no empty string allowed for this option
@@ -3986,6 +4023,20 @@ sub process_params {
 			}
 			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_default{debug};
 		}
+		if ( defined $opt->{$_}->{hide} ) {
+			if ( defined $hideopts{$opt->{$_}->{optkey}} ) { 
+				$opt->{$_}->{current} = $opt_default{$opt->{$_}->{optkey}};
+				$opt->{$_}->{hide} = 1;
+				if ( substr($opt->{$_}->{tooltip}, -length($hidesuffix) ) ne $hidesuffix ) {
+					$opt->{$_}->{tooltip} .= $hidesuffix;
+				}
+			} elsif ( $opt->{$_}->{hide} == 1 ) {
+				$opt->{$_}->{hide} = 0;
+				if ( substr($opt->{$_}->{tooltip}, -length($hidesuffix) ) eq $hidesuffix ) {
+				$opt->{$_}->{tooltip} = substr( $opt->{$_}->{tooltip}, 0, -length( $hidesuffix ) );
+				}
+			}
+		}
 	}
 }
 
@@ -4008,8 +4059,9 @@ sub begin_html {
 	if ( $cgi->param('SAVE') ) {
 		print $se "DEBUG: Sending cookies\n";
 		for ( %{ $opt } ) {
-			# skip if opt not allowed to be saved
-			next if not $opt->{$_}->{save};
+			# skip if opt not allowed to be saved. hard-coded, or hidden
+			next if ( not $opt->{$_}->{save} ||
+								( defined $opt->{$_}->{hide} && $opt->{$_}->{hide} == 1 ) );
 			# ensure cookie for none default settings only
 			my $cookie;
 			if ( $opt->{$_}->{current} ne $opt->{$_}->{default} ) {
