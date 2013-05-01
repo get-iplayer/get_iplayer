@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # The world's most insecure web-based PVR manager and streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
