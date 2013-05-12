@@ -1,72 +1,129 @@
 BBC iPlayer Indexing Tool and PVR (get_iplayer)
 -----------------------------------------------
 
-This file is well out of date - see: http://linuxcentre.net/getiplayer/
+Website:
+
+http://www.infradead.org/get_iplayer/html/get_iplayer.html
 
 Features:
 
-* Downloads Mov (mp4) streams from BBC iplayer site in much better quality than Flash player streams
+* Downloads MP4 streams from BBC iPlayer site in much better quality than Flash player streams
+* Downloads Flash MP3 and WMA streams for radio programmes
 * Allow multiple programmes to be downloaded using a single command
-* Indexing of all available (i.e. listed) iplayer programs
-* Available Programme Index listing
-* Caching of Index (default 4hrs)
-* Full HTTP Proxy support (tested on Squid)
-* Regex search on programme name capability (makes it useful to run this from crontab)
-* Regex search on long programme description and episode capability
-* Known to run on Linux (Debian, Ubuntu, openSUSE and many others), MacOSX (10.5+) and Windows (XP/Vista/7/8)
-* Requires: perl 5.8, perl-LWP
-* Latest Version: http://linuxcentre.net/get_iplayer/get_iplayer
-
-Usage: See 'get_iplayer -h'
+* Indexing of all available iPlayer programs
+* Caching of Index (default 4h)
+* Regex search on programme name 
+* Regex search on programme description and episode title
+* PVR capability (may be used from crontab)
+* Full HTTP Proxy support
+* Runs on Linux (Debian, Ubuntu, openSUSE and many others), MacOSX (10.5+) and Windows (XP/Vista/7/8)
+* Requires: perl 5.8 with LWP module
 
 
-Notes:
+Installation (Linux/Unix/OSX):
 
-* After downloading the script you can make it executable using:
+* Download Latest Version:
 
-	chmod 755 ./get_iplayer
+http://www.infradead.org/get_iplayer/get_iplayer
 
-* You can set the default dowload directory by putting the following in
-  your shell environment (e.g. ~/.bashrc):
+* After downloading the script make it executable:
 
-	export IPLAYER_OUTDIR="/path/to/my/output/dir"
+chmod 755 ./get_iplayer
+  
+The script may optionally be installed to a location in $PATH.
 
-* The first time you run the script it will access the BBC website and
-  download an index of all programmes currently on iplayer.
+* You can set the default download directory by putting the following in your
+  shell environment (e.g. ~/.bashrc):
 
-* Sometimes you will not be able to download a programme listed due to BBC
-  not encoding it yet for H.264 format (usually happens within 24hrs of airing).
-  Also BBC don't seem to create an H.264 version for some programmes at all.
+export IPLAYER_OUTDIR="/path/to/my/output/dir"
+
+* The first time you run the script it will create a settings directory
+  (~/.get_iplayer) and download plugins.  It will then access the BBC website
+  and create an index of all TV programmes currently on iPlayer.
+
+
+Usage: 
+  
+get_iplayer -h
 
 
 Examples:
 
-* List all programmes (either from BBC site or cached):
+* List all TV programmes (--type tv set by default):
 
-	./get_iplayer
+get_iplayer
 
-* List all programmes with long descriptions:
+Search output appears in this format:
 
-	./get_iplayer -l
+...
+208:  Doctor Who: Series 7 Part 2 - 1. The Bells of Saint John, BBC One, Drama,SciFi & Fantasy,TV, default
+209:  Doctor Who: Series 7 Part 2 - 2. The Rings Of Akhaten, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
+210:  Doctor Who: Series 7 Part 2 - 3. Cold War, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
+...
 
-* Record programme number 123 (see index list):
+Format: index: name - episode, channel, categories, versions 
+  
+* List all TV programmes with long descriptions:
 
-	./get_iplayer 123
+get_iplayer --long
 
-* Record all programmes with 'blue peter' in the title/episode:
+* List all radio programmes:
 
- 	./get_iplayer 'blue peter'
+get_iplayer --type radio
 
-* Record all programmes with 'blue peter' in the title/episode, and
-  programme index 123:
+* List all TV programmes with "doctor who" in the title/episode:
 
-	./get_iplayer 'blue peter' 123
+get_iplayer "doctor who"
 
-* Record all programmes with URL that conatns a programme ID (pid) b002a23a:
+* List all TV and radio programmes with "doctor who" in the title/episode:
 
-	./get_iplayer http://blah.blah.blah/b002a23a.shtml
+get_iplayer --type tv,radio "doctor who"
 
-* Record all programmes with 'comedy' in the title, episode or long description:
+* List all TV programmes categorised as "comedy":
 
-	./get_iplayer -l comedy
+get_iplayer --category comedy
+
+* List all BBC One TV programmes categorised as "sport":
+
+get_iplayer --channel "BBC One" --category sport
+
+* List all Radio 4 Extra programmes categorised as "drama":
+
+get_iplayer --type radio --channel "Radio 4 Extra" --category drama
+
+* Record programme number 208 (index from search results) in SD:
+
+get_iplayer --get 208
+
+* Record programme number 208 in HD (if available), with SD fallback:
+
+get_iplayer --modes best --get 208
+
+* Record all TV programmes with "doctor who' in the title/episode:
+
+get_iplayer --get "doctor who"
+
+* Record a programme using its iPlayer URL:
+
+get_iplayer http://www.bbc.co.uk/iplayer/episode/b01rryzz/Doctor_Who_Series_7_Part_2_The_Bells_of_Saint_John/
+
+* Record a programme using the PID (b01rryzz) from its iPlayer URL:
+
+get_iplayer --pid b01rryzz
+  
+* Refresh the cached index of available TV programmes:
+
+get_iplayer --refresh
+
+* Refresh the cached index of available TV and radio programmes:
+
+get_iplayer --type tv,radio --refresh
+
+
+Notes:
+
+* Sometimes you may not be able to download a listed programme immediately
+  after broadcast (usually available within 24hrs of airing). Some BBC
+  programmes may not be available from iPlayer.
+
 
