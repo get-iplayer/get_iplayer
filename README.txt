@@ -105,11 +105,11 @@ get_iplayer --get "doctor who"
 
 * Record a programme using its iPlayer URL:
 
-get_iplayer http://www.bbc.co.uk/iplayer/episode/b01rryzz/Doctor_Who_Series_7_Part_2_The_Bells_of_Saint_John/
+get_iplayer http://www.bbc.co.uk/iplayer/episode/b01sc0wf/Doctors_Series_15_Perfect/
 
-* Record a programme using the PID (b01rryzz) from its iPlayer URL:
+* Record a programme using the PID (b01sc0wf) from its iPlayer URL:
 
-get_iplayer --pid b01rryzz
+get_iplayer --pid b01sc0wf
   
 * Refresh the cached index of available TV programmes:
 
