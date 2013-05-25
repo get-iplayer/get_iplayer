@@ -142,7 +142,7 @@ my $opt_format = {
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
-	aactomp3	=> [ 1, "aactomp3", 'Recording', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg (CBR 128k unless --mp3vbr is specified)"],
+	aactomp3	=> [ 1, "aactomp3", 'Recording', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg/avconv (CBR 128k unless --mp3vbr is specified)"],
 	mp3vbr		=> [ 1, "mp3vbr=n", 'Recording', '--mp3vbr', "Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires --aactomp3)"],
 
 	# Search
@@ -757,7 +757,10 @@ sub init_search {
 	push @{ $binopts->{mplayer} }, '-v' if $opt->{debug};
 	push @{ $binopts->{mplayer} }, '-really-quiet' if $opt->{quiet};
 
-	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'ffmpeg';
+	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'avconv';
+	if (! main::exists_in_path('ffmpeg') ) {
+		$bin->{ffmpeg} = 'ffmpeg';
+	}
 
 	$bin->{lame}		= $opt->{lame} || 'lame';
 	delete $binopts->{lame};
@@ -7027,7 +7030,7 @@ sub download {
 	}
 	# Force raw mode if ffmpeg is not installed
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('ffmpeg')) {
-		main::logger "\nWARNING: Required ffmpeg does not exist - not converting flv file\n";
+		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting flv file\n";
 		$opt->{raw} = 1;
 	}
 
@@ -8133,7 +8136,7 @@ use URI;
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary"],
+		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		rtmpport	=> [ 1, "rtmpport=n", 'Recording', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "rtmpdump|flvstreamer=s", 'External Program', '--rtmpdump <path>', "Location of rtmpdump binary. Synonyms: --flvstreamer"],
 	};
