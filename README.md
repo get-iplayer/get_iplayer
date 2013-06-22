@@ -14,7 +14,10 @@
 * Runs on Linux (Debian, Ubuntu, openSUSE and many others), OS X (10.5+) and Windows (XP/Vista/7/8)
 * Requires perl 5.8.8+ with LWP module
 
+## Documentation
 
+<https://github.com/dinkypumpkin/get_iplayer/wiki>
+	
 ## Installation (Linux/Unix/OS X)
 
 * Download latest release:
@@ -33,14 +36,15 @@
 
 * The first time you run the script it will create a settings directory (~/.get_iplayer) and download plugins.  It will then access the BBC website and create an index of all TV programmes currently on iPlayer.
 
+## Installation (Windows)
+
+See documentation for Windows installation information.
 
 ## Usage 
   
-``` bash
-get_iplayer --help
-get_iplayer --basic-help
-get_iplayer --long-help
-```
+	get_iplayer --help
+	get_iplayer --basic-help
+	get_iplayer --long-help
 
 ## Examples
 
@@ -50,13 +54,11 @@ get_iplayer --long-help
 
 	Search output appears in this format:
 
-	```
-	...
-	208:  Doctor Who: Series 7 Part 2 - 1. The Bells of Saint John, BBC One, Drama,SciFi & Fantasy,TV, default
-	209:  Doctor Who: Series 7 Part 2 - 2. The Rings Of Akhaten, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
-	210:  Doctor Who: Series 7 Part 2 - 3. Cold War, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
-	...
-	```
+		...
+		208:  Doctor Who: Series 7 Part 2 - 1. The Bells of Saint John, BBC One, Drama,SciFi & Fantasy,TV, default
+		209:  Doctor Who: Series 7 Part 2 - 2. The Rings Of Akhaten, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
+		210:  Doctor Who: Series 7 Part 2 - 3. Cold War, BBC One, Audio Described,Drama,SciFi & Fantasy,TV, default,audiodescribed
+		...
 
 	Format = index: name - episode, channel, categories, versions 
   
