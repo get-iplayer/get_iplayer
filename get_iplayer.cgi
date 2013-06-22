@@ -3448,7 +3448,7 @@ sub form_header {
 						-title => 'get_iplayer Web PVR Manager',
 						-width => 174,
 						-height => 32,
-						-src => "http://www.infradead.org/get_iplayer/html/iplayer_logo.gif",
+						-src => "https://raw.github.com/wiki/dinkypumpkin/get_iplayer/image/iplayer_logo.gif",
 						-href => $request_host,
 					}),
 				),
