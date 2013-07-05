@@ -9686,6 +9686,9 @@ sub tag_file_id3 {
 		main::logger "INFO: ID3 tagging \U$meta->{ext}\E file\n";
 		# translate podcast flag
 		$tags->{podcastFlag} = "\x01";
+		for ( keys %$tags ) {
+			$tags->{$_} = '' if ! defined $tags->{$_};
+		}
 		# remove existing tag(s) to avoid decoding errors
 		my $mp3 = MP3::Tag->new($meta->{filename});
 		$mp3->get_tags();
