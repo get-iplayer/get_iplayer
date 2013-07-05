@@ -9693,34 +9693,33 @@ sub tag_file_id3 {
 		$mp3->{ID3v2}->remove_tag() if exists $mp3->{ID3v2};
 		$mp3->close();
 		# add metadata
-		$mp3 = MP3::Tag->new($meta->{filename});
-		$mp3->select_id3v2_frame_by_descr('TCOP', $tags->{copyright});
-		$mp3->select_id3v2_frame_by_descr('TIT2', $tags->{title});
-		$mp3->select_id3v2_frame_by_descr('TPE1', $tags->{artist});
-		$mp3->select_id3v2_frame_by_descr('TPE2', $tags->{albumArtist});
-		$mp3->select_id3v2_frame_by_descr('TALB', $tags->{album});
-		$mp3->select_id3v2_frame_by_descr('TIT1', $tags->{grouping});
-		$mp3->select_id3v2_frame_by_descr('TCOM', $tags->{composer});
-		$mp3->select_id3v2_frame_by_descr('TCON', $tags->{genre});
-		$mp3->select_id3v2_frame_by_descr('COMM(eng,#0)[]', $tags->{comment});
-		$mp3->select_id3v2_frame_by_descr('TYER', $tags->{tyer});
-		$mp3->select_id3v2_frame_by_descr('TDAT', $tags->{tdat});
-		$mp3->select_id3v2_frame_by_descr('TIME', $tags->{time});
-		$mp3->select_id3v2_frame_by_descr('TRCK', $tags->{tracknum});
-		$mp3->select_id3v2_frame_by_descr('TPOS', $tags->{disk});
-		$mp3->select_id3v2_frame_by_descr('USLT', $tags->{lyrics});
+		$mp3->select_id3v2_frame_by_descr('TCOP', $tags->{copyright} ? $tags->{copyright} : '');
+		$mp3->select_id3v2_frame_by_descr('TIT2', $tags->{title} ? $tags->{title} : '');
+		$mp3->select_id3v2_frame_by_descr('TPE1', $tags->{artist} ? $tags->{artist} : '');
+		$mp3->select_id3v2_frame_by_descr('TPE2', $tags->{albumArtist} ? $tags->{albumArtist} : '');
+		$mp3->select_id3v2_frame_by_descr('TALB', $tags->{album} ? $tags->{album} : '');
+		$mp3->select_id3v2_frame_by_descr('TIT1', $tags->{grouping} ? $tags->{grouping} : '');
+		$mp3->select_id3v2_frame_by_descr('TCOM', $tags->{composer} ? $tags->{composer} : '');
+		$mp3->select_id3v2_frame_by_descr('TCON', $tags->{genre} ? $tags->{genre} : '');
+		$mp3->select_id3v2_frame_by_descr('COMM(eng,#0)[]', $tags->{comment} ? $tags->{comment} : '');
+		$mp3->select_id3v2_frame_by_descr('TYER', $tags->{tyer} ? $tags->{tyer} : '');
+		$mp3->select_id3v2_frame_by_descr('TDAT', $tags->{tdat} ? $tags->{tdat} : '');
+		$mp3->select_id3v2_frame_by_descr('TIME', $tags->{time} ? $tags->{time} : '');
+		$mp3->select_id3v2_frame_by_descr('TRCK', $tags->{tracknum} ? $tags->{tracknum} : '');
+		$mp3->select_id3v2_frame_by_descr('TPOS', $tags->{disk} ? $tags->{disk} : '');
+		$mp3->select_id3v2_frame_by_descr('USLT', $tags->{lyrics} ? $tags->{lyrics} : '');
 		# tag iTunes podcast
 		if ( $tags->{is_podcast} ) {
 			# ID3v2.4 only, but works in iTunes
-			$mp3->select_id3v2_frame_by_descr('TDRL', $tags->{year});
+			$mp3->select_id3v2_frame_by_descr('TDRL', $tags->{year} ? $tags->{year} : '');
 			# ID3v2.3 and ID3v2.4
-			$mp3->select_id3v2_frame_by_descr('TIT3', $tags->{description});
+			$mp3->select_id3v2_frame_by_descr('TIT3', $tags->{description} ? $tags->{description} : '');
 			# Neither ID3v2.3 nor ID3v2.4, but work in iTunes
-			$mp3->select_id3v2_frame_by_descr('TDES', $tags->{longDescription});
+			$mp3->select_id3v2_frame_by_descr('TDES', $tags->{longDescription} ? $tags->{longDescription} : '');
 			$mp3->{ID3v2}->add_raw_frame('PCST', $tags->{podcastFlag});
-			$mp3->select_id3v2_frame_by_descr('TCAT', $tags->{category});
-			$mp3->select_id3v2_frame_by_descr('TKWD', $tags->{keyword});
-			$mp3->select_id3v2_frame_by_descr('TGID', $tags->{podcastGUID});
+			$mp3->select_id3v2_frame_by_descr('TCAT', $tags->{category} ? $tags->{category} : '');
+			$mp3->select_id3v2_frame_by_descr('TKWD', $tags->{keyword} ? $tags->{keyword} : '');
+			$mp3->select_id3v2_frame_by_descr('TGID', $tags->{podcastGUID} ? $tags->{podcastGUID} : '');
 		}
 		# add artwork if available
 		if ( -f $meta->{thumbfile}  && ! $opt->{noartwork} ) {
