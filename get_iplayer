@@ -5451,7 +5451,7 @@ sub get_metadata {
 		# Flatten
 		$rdf =~ s|\n| |g;
 		# Get min/max bcast dates from rdf
-		my ( $first, $last, $first_string, $last_string ) = ( 9999999999, 0, 'Never', 'Never' );
+		my ( $now, $first, $last, $first_string, $last_string ) = ( time(), 9999999999, 0, 'Never', 'Never' );
 
 		# <po:(First|Repeat)Broadcast>
 		#  <po:schedule_date rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2009-06-06</po:schedule_date>
@@ -5469,7 +5469,7 @@ sub get_metadata {
 				$first = $epoch;
 				$first_string = $timestring;
 			}
-			if ( $epoch > $last ) {
+			if ( $now > $epoch && $epoch > $last ) {
 				$last = $epoch;
 				$last_string = $timestring;
 			}
