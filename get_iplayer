@@ -5207,7 +5207,7 @@ sub get_metadata {
 	my $entry;
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 
-	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $player, $thumbnail, $seriestitle, $episodetitle, $nametitle, $seriesnum, $episodenum );
+	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $player, $thumbnail, $seriestitle, $episodetitle, $nametitle, $seriesnum, $episodenum );
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -5341,6 +5341,15 @@ sub get_metadata {
 			push @cats, $1 if m{\s*label="(.+?)">\d+<\/media:category>};
 		}
 		$categories = join ',', @cats;
+		# capture first category, skip generic values
+		my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
+		foreach my $cat ( @cats ) {
+			if ( ! grep(/$cat/i,  @ignore_categories) ) {
+				$category = $cat;
+				last
+			}
+		}
+		$category ||= "get_iplayer";
 	}
 
 
@@ -5547,6 +5556,7 @@ sub get_metadata {
 	$prog->{versions}	= $versions;
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{category}	= $category || $prog->{category};
 	$prog->{desc}		= $longdesc || $meddesc || $desc || $prog->{desc} || $summary;
 	$prog->{descmedium}	= $meddesc;
 	$prog->{descshort}	= $summary;
@@ -9578,12 +9588,7 @@ sub tags_from_metadata {
 	# composer references iPlayer
 	$tags->{composer} = "BBC iPlayer";
 	# extract genre as first category, use second if first too generic
-	my @ignore = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
-	my ($genre, $genre2) = split(/\s*,\s*/, $meta->{categories}, 3);
-	if ( $genre && $genre2 && grep(/$genre/i, @ignore) ) { $genre = $genre2; }
-	# fallback genre
-	$genre ||= "get_iplayer";
-	$tags->{genre} = $genre;
+	$tags->{genre} = $meta->{category};
 	$tags->{comment} = $meta->{descshort};
 	# fix up firstbcast if necessary
 	$tags->{year} = $meta->{firstbcast};
