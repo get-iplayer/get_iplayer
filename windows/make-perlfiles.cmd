@@ -142,14 +142,20 @@ echo   /makepar - force rebuild of PAR file (re-run pp)
 echo   /expand  - expand Perl support archive in current directory
 echo.
 echo Input/Output (in current directory):
-echo   perlpar.exe - PAR file [output from pp]
+echo   perlpar_N.N.exe - PAR file [output from pp]
+echo     (N.N = Perl support version)
 echo     (override by specifying PAR file on command line)
 echo.
 echo Output (in current directory):
-echo   perlfiles.zip - Perl support archive
+echo   perlfiles_N.N.zip - Perl support archive
+echo     (N.N = Perl support version)
 echo.
 echo Required Perl modules (install from CPAN):
-echo   MP3::Info   - localfiles plugin
-echo   MP3::Tag    - MP3 tagging
 echo   PAR::Packer - archive creation
+echo   HTML::Parser - downloading embedded clips (only install from CPAN if distributed version ^< 3.71)
+echo   MP3::Info - localfiles plugin
+echo   MP3::Tag - MP3 tagging
+echo   Authen::SASL - secure email
+echo   Net::SMTP::SSL - secure email
+echo   Net::SMTP::TLS::ButMaintained - secure email
 echo.

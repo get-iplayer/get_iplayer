@@ -8,13 +8,10 @@ REM get base dir - assumes script in %BASEDIR%\get_iplayer\windows
 for %%D in (%CMDDIR%..\..) do (
     set BASEDIR=%%~fD
 )
+REM location of Strawberry Perl
+set PERLDIST=E:\perl-5.16.3.1
 REM location of get_iplayer source
 set GIPDIR=%BASEDIR%\get_iplayer
-REM perl support naming
-set PAREXE=perlpar.exe
-set GIPPFX=perlfiles
-set GIPEXE=%GIPPFX%.exe
-set GIPZIP=%GIPPFX%.zip
 REM location of installer script
 set NSIDIR=%GIPDIR%\windows
 set NSIPFX=get_iplayer_setup
@@ -27,8 +24,6 @@ set NSISDIR=C:\Program Files\NSIS
 set MAKENSIS=%NSISDIR%\makensis.exe
 REM location of 7-Zip utility
 set P7ZIP=C:\Program Files\7-Zip\7z.exe
-REM location of Strawberry Perl
-set PERLDIST=C:\strawberry
 REM get version numbers as sanity check
 set BADVER=0
 REM determine perl version
@@ -61,6 +56,21 @@ if "%INSTVER%"=="0.0" (
     set BADVER=1
 )
 call :log Installer version: %INSTVER%
+REM extract Perl support version
+set PERLFILESVER=0.0
+for /f "usebackq tokens=1" %%V in (`perl -nle "print $1 if /^\s*\Wdefine\s+PERLFILESVER\W+(\d+\.\d+)/; exit if $1;" "%NSIDIR%\%NSIFILE%"`) do (
+    set PERLFILESVER=%%V
+)
+if "%PERLFILESVER%"=="0.0" (
+    call :log Could not determine Perl support version
+    set BADVER=1
+)
+call :log Perl support version: %PERLFILESVER%
+REM perl support naming
+set PAREXE=perlpar_%PERLFILESVER%.exe
+set GIPPFX=perlfiles_%PERLFILESVER%
+set GIPEXE=%GIPPFX%.exe
+set GIPZIP=%GIPPFX%.zip
 if %BADVER% equ 1 goto die
 :done
 exit /b

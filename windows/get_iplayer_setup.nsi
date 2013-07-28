@@ -3,9 +3,9 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.6"
+!define VERSION "4.7"
 ; VERSION where Perl support last changed
-!define PERLVER "4.6"
+!define PERLFILESVER "4.7"
 
 ;#######################################
 ;# Build Setup
@@ -448,7 +448,7 @@ Section "get_iplayer" section1
   ${StrTrimNewLines} $1 $1
   ; update config file
   WriteINIStr "$INSTDIR\${CONFIG}" "get_iplayer" "version" $1
-  WriteINIStr "$INSTDIR\${CONFIG}" "perlfiles" "version" ${PERLVER}
+  WriteINIStr "$INSTDIR\${CONFIG}" "perlfiles" "version" ${PERLFILESVER}
 !else
   CopyFiles "$INSTDIR\${GIPVER_CHECK}" "$INSTDIR\${GIPVER}"
 !endif
@@ -699,10 +699,10 @@ Function .onInit
 !ifndef NOCONFIG
   ; check perl support version from config file
   ReadINIStr $2 "$INSTDIR\${CONFIG}" "perlfiles" "version"
-  StrCmp $2 ${PERLVER} no_new_perl
+  StrCmp $2 ${PERLFILESVER} no_new_perl
     ; new perl means get_iplayer component should be updated
     SectionSetFlags ${Section1} ${SF_SELECTED}
-    StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Perl Support $2 -> ${PERLVER})"
+    StrCpy $UpdatedComponents "$UpdatedComponents$\r$\nget_iplayer (Perl Support $2 -> ${PERLFILESVER})"
   no_new_perl:
   ReadINIStr $3 "$INSTDIR\${CONFIG}" "get_iplayer" "version"
 !else
