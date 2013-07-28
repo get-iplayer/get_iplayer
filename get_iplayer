@@ -4276,6 +4276,14 @@ sub download_retry_loop {
 				# quit if successful or skip (unless --multimode selected)
 				last if ( $retcode == 0 || $retcode == 2 ) && ! $opt->{multimode};
 			}
+			if ( $retcode && ! $opt->{multimode} ) {
+				if ( $prog->{type} eq 'radio' || $prog->{type} eq 'liveradio' ) {
+					if ( grep(/wma/, @available_modes) && ! grep(/wma/, @modes) ) {
+						main::logger "INFO: You may wish to try --modes=wma for version $version\n";
+						main::logger "INFO: Note that wma mode is real-time only, and thus is generally only suitable for recording live radio.\n";
+					}
+				}
+			}
 		}
 		# Break out of loop if we have a successful recording for this version and mode
 		return 0 if not $retcode;
@@ -7403,7 +7411,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaudio,flashaaclow,wma)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaudio,flashaaclow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Recording', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 0, "lame=s", 'External Program', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings"],
@@ -7454,11 +7462,6 @@ sub modelist {
 	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
-			if ( ! main::exists_in_path('mplayer') ) {
-				main::logger "WARNING: Not using wma mode since mplayer is not found\n" if $opt->{verbose};
-			} else {
-				$mlist = 'wma';
-			}
 		} else {
 			$mlist = 'default';
 		}
@@ -7467,7 +7470,7 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', 'default');
 	$mlist = main::expand_list($mlist, 'better', 'default');
 	$mlist = main::expand_list($mlist, 'good', 'default');
-	$mlist = main::expand_list($mlist, 'default', 'flash,wma');
+	$mlist = main::expand_list($mlist, 'default', 'flash');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flash');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaachigh,flashaacstd,flashaudio,flashaaclow');
 	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaaclow');
@@ -7827,7 +7830,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaaclow,wma)"],
+		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaaclow)"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings"],
 		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to rtmpdump for liveradio"],
 		ffmpegliveradioopts => [ 1, "ffmpeg-liveradio-opts|ffmpegliveradioopts=s", 'Recording', '--ffmpeg-liveradio-opts <options>', "Add custom options to ffmpeg re-muxing for liveradio"],
@@ -7860,11 +7863,6 @@ sub modelist {
 	if ( ! $mlist ) {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
-			if ( ! main::exists_in_path('mplayer') ) {
-				main::logger "WARNING: Not using wma mode since mplayer is not found\n" if $opt->{verbose};
-			} else {
-				$mlist = 'wma';
-			}
 		} else {
 			$mlist = 'default';
 		}
@@ -7873,7 +7871,7 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', 'default');
 	$mlist = main::expand_list($mlist, 'better', 'default');
 	$mlist = main::expand_list($mlist, 'good', 'default');
-	$mlist = main::expand_list($mlist, 'default', 'flash,wma');
+	$mlist = main::expand_list($mlist, 'default', 'flash');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flash');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaachigh,flashaacstd,flashaudio,flashaaclow');
 	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaaclow');
