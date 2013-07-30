@@ -259,6 +259,8 @@ my $opt_format = {
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Use complete title (including series) instead of shorter episode title"],
+	tag_shorttitle => [ 1, "tagshorttitle|tag-shorttitle!", 'Tagging', '--tag-shorttitle', "Use short series name (without number)."],
+	tag_shortname => [ 1, "tagshortname|tag-shortname!", 'Tagging', '--tag-shortname', "Use short episode name (without number)."],
 	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley supports --hdvideo argument for HD video flag"],
 	tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Tagging', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
 	tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Tagging', '--tag-longdesc', "AtomicParsley supports --longdesc argument for long description text"],
@@ -9754,6 +9756,9 @@ sub tags_from_metadata {
 	# select version of of episode title to use
 	if ( $opt->{tag_fulltitle} ) {
 		$tags->{title} = $meta->{title};
+	} elsif ($opt->{tag_shorttitle}) {
+		(my $title = $meta->{episodeshort}) =~ s/[\s\-]+$//;
+		$tags->{title} = $title ? $title : $meta->{name};
 	} else {
 		# fix up episode if necessary
 		(my $title = $meta->{episode}) =~ s/[\s\-]+$//;
@@ -9791,7 +9796,11 @@ sub tags_from_metadata {
 	$tags->{description} = $meta->{descshort};
 	$tags->{longDescription} = $meta->{desc};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
-	$tags->{TVShowName} = $meta->{name};
+	if ($opt->{tag_shortname}) {
+		$tags->{TVShowName} = $meta->{nameshort};
+	} else {
+		$tags->{TVShowName} = $meta->{name};
+	}
 	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
 	$tags->{TVSeasonNum} = $tags->{disk};
 	$tags->{TVEpisodeNum} = $tags->{tracknum};
