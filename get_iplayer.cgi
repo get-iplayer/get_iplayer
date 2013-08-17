@@ -3445,14 +3445,7 @@ sub form_header {
 		ul( { -class=>'nav' },
 			li( { -id=>'logo', -class=>'nav_tab' },
 				a( { -class=>'nav', -href=>$request_host },
-					img({
-						-class => 'nav',
-						-title => 'get_iplayer Web PVR Manager',
-						-width => 174,
-						-height => 32,
-						-src => "https://raw.github.com/wiki/dinkypumpkin/get_iplayer/image/iplayer_logo.gif",
-						-href => $request_host,
-					}),
+					span( { -class=>'logotext' }, 'get_iplayer' )
 				),
 			).
 			li( { -class=>$class->{search} }, a( { -class=>'nav', -title=>'Main search page', -href => $request_host }, 'Search' ) ).
@@ -4327,6 +4320,7 @@ sub insert_stylesheet {
 	A.info:hover		{ }
 
 	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
+	.logotext		{ font-size: 24px; font-family: "Courier New",monospace; color: #F54997; }
 	</STYLE>
 EOF
 
