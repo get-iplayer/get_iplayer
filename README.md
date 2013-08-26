@@ -18,6 +18,10 @@
 
 <https://github.com/dinkypumpkin/get_iplayer/wiki>
 	
+## Support
+
+<https://github.com/dinkypumpkin/get_iplayer/wiki/help>
+
 ## Installation (Linux/Unix/OS X)
 
 * Download latest release:
