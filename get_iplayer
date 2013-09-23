@@ -4028,7 +4028,11 @@ sub create_dir {
 	my $prog = shift;
 	if ( (! -d "$prog->{dir}") && (! $opt->{test}) ) {
 		main::logger "INFO: Creating dir '$prog->{dir}'\n" if $opt->{verbose};
-		mkpath("$prog->{dir}");
+		eval { mkpath("$prog->{dir}") };
+		if ( $@ ) {
+			main::logger "ERROR: Could not create dir '$prog->{dir}': $@";
+			exit 1;
+		}
 	}
 }
 
