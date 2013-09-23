@@ -7213,9 +7213,14 @@ sub download_subtitles {
 	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
 	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
 	my $count = 1;
-	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
-	for ( @lines ) {
+	my @lines = split /\n/, $subs;
+	for my $ix ( 0 .. $#lines ) {
 		my ( $begin, $end, $sub );
+		$_ = $lines[$ix];
+		while ( m{<br.*?>\s*$} ) {
+		    s|<br.*?>\s*$| |g;
+		    $_ .= $lines[++$ix];
+		}
 		# Remove <br /> elements
 		s|<br.*?>| |g;
 		# Remove >1 spaces
