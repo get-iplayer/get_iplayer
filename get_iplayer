@@ -7220,21 +7220,10 @@ sub download_subtitles {
 	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
 	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
 	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
-	# There is also a multiline form:
-	#<p region="speaker" begin="00:00:01.840" end="00:00:08.800"><span style="textStyle">  This programme contains  <br/>
-	#                  some strong language</span></p>
-
 	my $count = 1;
-	my @lines = split /\n/, $subs;
-	for my $ix ( 0 .. $#lines ) {
+	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
+	for ( @lines ) {
 		my ( $begin, $end, $sub );
-		$_ = $lines[$ix];
-		# Deal with multiline subtitles. We infer these from a trailing <br/> at the
-		# end of the line; in which case we concat the following line.
-		while ( m{<br[^\>]*?>\s*$} ) {
-		    s|<br[^\>]*?>\s*$| |g;
-		    $_ .= $lines[++$ix];
-		}
 		# Remove <br /> elements
 		s|<br.*?>| |g;
 		# Remove >1 spaces
