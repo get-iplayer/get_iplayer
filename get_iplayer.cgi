@@ -1947,7 +1947,7 @@ sub show_pvr_list {
 	# Render options actions
 	print $fh $buttons;
 	# Render table
-	print $fh table( {-class=>'search'} , @html );
+	print $fh table( {-class=>'search', -summary=>'search'} , @html );
 	print $fh $buttons;
 	# Make sure we go to the correct nextpage for processing
 	print $fh hidden(
@@ -2020,7 +2020,7 @@ sub pvr_edit {
 		-method => "POST",
 	);
 
-	print $fh table( { -class => 'info' }, @html );
+	print $fh table( { -class => 'info', -summary => 'info' }, @html );
 
 	# Render options actions
 	print $fh div( { -class=>'action' },
@@ -2169,7 +2169,7 @@ sub show_info {
 		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
 	}
 	# Show thumb if one exists
-	print $fh img( { -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
+	print $fh img( { -alt=>'thumbnail', -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
 	# Set optional output dir for pvr queue if set
 	my $outdir;
 	$outdir = '&OUTPUT='.CGI::escape("$opt->{OUTPUT}->{current}") if $opt->{OUTPUT}->{current};
@@ -2196,7 +2196,7 @@ sub show_info {
 			]),
 		),
 	);
-	print $fh table( { -class => 'info' }, @html );
+	print $fh table( { -class => 'info', summary => 'info' }, @html );
 	return $out;
 }
 
@@ -2648,7 +2648,7 @@ sub build_option_html {
 			my $val = $value->{shift @keylist};
 			$element .=
 				td( { -class => 'options' },
-					table ( { -class => 'options_embedded', -title => $tooltip }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
+					table ( { -class => 'options_embedded', -title => $tooltip, -summary => $tooltip }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
 						checkbox(
 							-class		=> 'options',
 							-name		=> $webvar,
@@ -2667,7 +2667,7 @@ sub build_option_html {
 			}
 			$count++;
 		}
-		my $inner_table = table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' },
+		my $inner_table = table ( { -class => 'options_embedded', -summary => 'options' }, Tr( { -class => 'options_embedded' },
 			$element
 		) );
 			
@@ -2818,7 +2818,7 @@ sub search_progs {
 
 		push @html, 
 			th( { -class => 'search' },
-				table( { -class => 'searchhead' },
+				table( { -class => 'searchhead', -summary => 'searchhead' },
 					Tr( { -class => 'search' }, [ 
 						th( { -class => 'search' },
 							label( {
@@ -2883,34 +2883,34 @@ sub search_progs {
 				# Play
 				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'PlayFile' ).'<br />';
+				$links .= a( { -class=>$search_class.' nowrap', -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'PlayFile' ).'<br />';
 				# PlayDirect
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
+				$links .= a( { -class=>$search_class.' nowrap', -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 			}
 		# History mode
 		} elsif ( $opt->{HISTORY}->{current} ) {
 			if ( $opt->{HIDEDELETED}->{current} || -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
+				$links .= a( { -class=>$search_class.' nowrap', -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
+				$links .= a( { -class=>$search_class.' nowrap', -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'PlayFile' ).'<br />';
 				# PlayDirect - depends on browser support
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
+				$links .= a( { -class=>$search_class.' nowrap', -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'PlayDirect' ).'<br />';
 			}
 		# Search mode
 		} else {
 			# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='record_now'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.target='_newtab_$pid'; form.submit(); RestoreFormVars(form); form.target='';" }, 'Record' ).'<br />';
+			$links .= label( { -class=>$search_class.' nowrap', -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='record_now'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.target='_newtab_$pid'; form.submit(); RestoreFormVars(form); form.target='';" }, 'Record' ).'<br />';
 			# Queue
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Queue' ).'<br />';
+			$links .= label( { -class=>$search_class.' nowrap', -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Queue' ).'<br />';
 			# Add Series
 			my $escaped_name = quotemeta $prog{$pid}->{name};
 			$escaped_name =~ s/\\(\S)/\\\\\1/g;
 			$links .= label( {
 				-id=>'nowrap', 
-				-class=>'search pointer_noul',
+				-class=>'search pointer_noul nowrap',
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
 				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$escaped_name\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; form.submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
@@ -2927,7 +2927,7 @@ sub search_progs {
 					$prog{$pid}->{$_} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
 				}
 				if ( $prog{$pid}->{$_} =~ m{^http://} ) {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -alt=>'image', -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 				} else {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, 'Open URL' ) );
 				}
@@ -2943,7 +2943,7 @@ sub search_progs {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, $text ) );
 			# Name / Series link
 			} elsif ( /^name$/ ) {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class. ' underline', -title=>"Click to list '$prog{$pid}->{$_}'",
 					-onClick=>"
 						BackupFormVars(form);
 						form.NEXTPAGE.value='search_progs';
@@ -2956,7 +2956,7 @@ sub search_progs {
 				);
 			# Channel link
 			} elsif ( /^channel$/ ) {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class. ' underline', -title=>"Click to list '$prog{$pid}->{$_}'",
 					-onClick=>"
 						BackupFormVars(form);
 						form.NEXTPAGE.value='search_progs';
@@ -2973,7 +2973,7 @@ sub search_progs {
 				my @cats = split /,/, $prog{$pid}->{$_};
 				for ( @cats ) {
 					my $category = $_;
-					$_ = label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$category'", 
+					$_ = label( { -class=>$search_class. ' underline', -title=>"Click to list '$category'", 
 						-onClick=>"
 							BackupFormVars(form);
 							form.NEXTPAGE.value='search_progs';
@@ -3073,17 +3073,17 @@ sub search_progs {
 		# Set the basic search tab to be rowspan=3
 		if ( $tabname eq 'BASICTAB' ) {
 			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
+				table( { -class=>'options', -summary=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
 			);
 		} else {
 			push @opt_td, td( { -class=>'options_outer', -id=>"tab_${tabname}", -style=>"$tab->{style}" },
-				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
+				table( { -class=>'options', -summary=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
 			);		
 		}
 	}
 
 	# Render outer options table frame (keeping some tabs hidden)
-	print $fh table( { -class=>'options_outer' },
+	print $fh table( { -class=>'options_outer', -summary=>'options_outer'  },
 		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab' }, @optrows_nav ) ) ).
 		Tr( { -class=>'options_outer' }, (join '', @opt_td) ).
 		Tr( { -class=>'options_outer' }, td( { -class=>'options_outer' }, $options_buttons ) )
@@ -3212,7 +3212,7 @@ sub search_progs {
 	
 	print $fh @actionbar;
 	print $fh @pagetrail;
-	print $fh table( {-class=>'search' }, @html );
+	print $fh table( {-class=>'search', -summary=>'search' }, @html );
 	print $fh @pagetrail;
 	print $fh @actionbar;
 
@@ -3293,7 +3293,7 @@ sub pagetrail {
 		"($count programmes)",
 	));
 
-	my @html = table( { -id=>'centered', -class=>'pagetrail' }, Tr( { -class=>'pagetrail' }, @pagetrail ));
+	my @html = table( { -class=>'pagetrail centered', -summary=>"page trailer" }, Tr( { -class=>'pagetrail' }, @pagetrail ));
 	return ($first, $last, @html);
 }
 
@@ -3990,10 +3990,10 @@ sub begin_html {
 	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
 	my $autopvrrun  = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
 	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'refresh' ) {
-		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
+		$body_element = "<body onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
 		$title = 'Refreshing Cache: get_iplayer Web PVR Manager';
 	} elsif ( $autopvrrun && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
-		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
+		$body_element = "<body onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
 		$title = 'Running PVR: get_iplayer Web PVR Manager';
 	} else {
 		$body_element = "<body>\n";
@@ -4004,9 +4004,9 @@ sub begin_html {
 	print $fh $headers;
 	print $fh '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'."\n";
 	print $fh "<html>";
-	print $fh "<HEAD><TITLE>$title</TITLE>\n";
+	print $fh "<head><title>$title</title>\n";
 	insert_stylesheet();
-	print $fh "</HEAD>\n";
+	print $fh "</head>\n";
 	insert_javascript();
 	print $fh $body_element;
 }
@@ -4023,7 +4023,7 @@ sub insert_javascript {
 	print $fh <<EOF;
 
 	<script type="text/javascript">
-	
+	//<![CDATA[
 	function RefreshTab(url, time, force ) {
 		if ( force ) {
 			window.location.href = url;
@@ -4190,8 +4190,8 @@ sub insert_javascript {
 			document.form.submit();
 		}
 	}
-
-	</SCRIPT>
+	//]]>
+	</script>
 EOF
 }
 
@@ -4205,8 +4205,8 @@ EOF
 sub insert_stylesheet {
 	print $fh <<EOF;
 
-	<STYLE type="text/css">
-	
+	<style type="text/css">
+	/*<![CDATA[*/
 	.pointer		{ cursor: pointer; cursor: hand; }
 	.pointer:hover		{ text-decoration: underline; }
 
@@ -4221,107 +4221,108 @@ sub insert_stylesheet {
 	#nowrap			{ white-space: nowrap; }
 	#smaller80pc		{ font-size: 80%; }
 
-	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
-	IMG			{ border: 0; }
-	INPUT			{ border: 0 none; background: #ddd; }
-	A			{ color: #FFF; text-decoration: none; }
-	A:hover			{ text-decoration: none; }
+	body			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
+	img			{ border: 0; }
+	input			{ border: 0 none; background: #ddd; }
+	a			{ color: #FFF; text-decoration: none; }
+	a:hover			{ text-decoration: none; }
 
-	TABLE.title 		{ font-size: 150%; border-spacing: 0px; padding: 0px; }
-	A.title			{ color: #F54997; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
+	table.title 		{ font-size: 150%; border-spacing: 0px; padding: 0px; }
+	a.title			{ color: #F54997; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
 
 	/* Nav bar */
-	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
-	UL.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.nav_tab		{ padding-left: 0px; border-top: 1px solid #444; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
-	LI.nav_tab_sel		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
-	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; }
-	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.nav:hover		{ color: #ADADAD; }
+	div.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	ul.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	li.nav_tab		{ padding-left: 0px; border-top: 1px solid #444; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
+	li.nav_tab_sel		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
+	a.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; }
+	img.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
+	a.nav:hover		{ color: #ADADAD; }
 
-	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
-	INPUT.header		{ font-size: 80%; } 
-	SELECT.header		{ font-size: 80%; } 
+	table.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
+	input.header		{ font-size: 80%; } 
+	select.header		{ font-size: 80%; } 
 
-	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; }
-	TR.types		{ white-space: nowrap; }
-	TD.types		{ width: 20px }
+	table.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; }
+	tr.types		{ white-space: nowrap; }
+	td.types		{ width: 20px }
 	
-	TABLE.options_embedded	{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
-	TR.options_embedded	{ white-space: nowrap; }
-	TH.options_embedded	{ width: 20px }
-	TD.options_embedded	{ width: 20px }
+	table.options_embedded	{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	tr.options_embedded	{ white-space: nowrap; }
+	th.options_embedded	{ width: 20px }
+	td.options_embedded	{ width: 20px }
 
 	/*DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }*/
 	/* options_tab */
-	UL.options_tab		{ text-align: left; cursor: pointer; cursor: hand; list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	ul.options_tab		{ text-align: left; cursor: pointer; cursor: hand; list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
 	/* selected tab button */
-	LI.options_tab_sel	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
+	li.options_tab_sel	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
 	/* unselected tab button */
-	LI.options_tab		{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #444; display: inline; float: left; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
+	li.options_tab		{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #444; display: inline; float: left; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
 	/* unselected tab button */
-	LI.options_button	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 1px solid #888; margin: 0; margin-right: 5px; margin-bottom: 5px; }
+	li.options_button	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 1px solid #888; margin: 0; margin-right: 5px; margin-bottom: 5px; }
 
-	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
-	TR.options		{ white-space: nowrap; }
-	TH.options		{ padding-right: 4px; text-align: left; }
-	TD.options		{ }
-	LABEL.options		{ font-size: 100%; } 
-	INPUT.options[type="radio"],INPUT.options[type="checkbox"] { font-size: 100%; background:none; }
-	INPUT.options		{ font-size: 100%; } 
-	SELECT.options		{ font-size: 100%; } 
+	table.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
+	tr.options		{ white-space: nowrap; }
+	th.options		{ padding-right: 4px; text-align: left; }
+	td.options		{ }
+	label.options		{ font-size: 100%; } 
+	input.options[type="radio"],input.options[type="checkbox"] { font-size: 100%; background:none; }
+	input.options		{ font-size: 100%; } 
+	select.options		{ font-size: 100%; } 
 
-	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
-	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
-	TH.options_outer	{ }
-	TD.options_outer	{ padding-right: 50px; }
-	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
-	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
+	table.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
+	tr.options_outer	{ vertical-align: top; white-space: nowrap; }
+	th.options_outer	{ }
+	td.options_outer	{ padding-right: 50px; }
+	label.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
+	label.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
 	
 	/* Action bar */
-	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
-	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 13.0%; }
-	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
-	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.action:hover		{ color: #ADADAD; }
+	div.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
+	ul.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
+	li.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 13.0%; }
+	a.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
+	img.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
+	a.action:hover		{ color: #ADADAD; }
 
-	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
+	table.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
 	#centered		{ height:20px; margin:0px auto 0; position: relative; }
-	LABEL.pagetrail		{ color: #FFF; }
-	LABEL.pagetrail-current	{ color: #F54997; }
+	label.pagetrail		{ color: #FFF; }
+	label.pagetrail-current	{ color: #F54997; }
 
-	TABLE.colselect		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
-	TR.colselect		{ text-align: left; }
-	TH.colselect		{ font-weight: bold; }
-	INPUT.colselect		{ font-size: 70%; }
-	LABEL.colselect		{ font-size: 70%; }
+	table.colselect		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
+	tr.colselect		{ text-align: left; }
+	th.colselect		{ font-weight: bold; }
+	input.colselect		{ font-size: 70%; }
+	label.colselect		{ font-size: 70%; }
 	
-	TABLE.search		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
-	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
-	TR.search		{ background: #444; }
-	TR.search:hover		{ background: #555; }
-	TH.search		{ color: #FFF; text-align: center; background: #000; text-align: center; }
-	TD.search		{ text-align: left; }
-	A.search		{ }
-	LABEL.search		{ text-decoration: none; }
-	INPUT.search		{ font-size: 70%; background: none; }
-	LABEL.sorted            { color: #CFC; }
-	LABEL.unsorted          { color: #FFF; }
-	LABEL.sorted_reverse    { color: #FCC; }
-	INPUT.edit		{ font-size: 100%; background: #DDD; }
+	table.search		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
+	table.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
+	tr.search		{ background: #444; }
+	tr.search:hover		{ background: #555; }
+	th.search		{ color: #FFF; text-align: center; background: #000; text-align: center; }
+	td.search		{ text-align: left; }
+	a.search		{ }
+	label.search		{ text-decoration: none; }
+	input.search		{ font-size: 70%; background: none; }
+	label.sorted            { color: #CFC; }
+	label.unsorted          { color: #FFF; }
+	label.sorted_reverse    { color: #FCC; }
+	input.edit		{ font-size: 100%; background: #DDD; }
 
-	TABLE.info		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
-	TR.info			{ background: #444; }
-	TR.info:hover		{ background: #555; }
-	TH.info			{ color: #FFF; text-align: center; background: #000; text-align: center; }
-	TD.info			{ text-align: left; }
-	A.info			{ text-decoration: underline; }
-	A.info:hover		{ }
+	table.info		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
+	tr.info			{ background: #444; }
+	tr.info:hover		{ background: #555; }
+	th.info			{ color: #FFF; text-align: center; background: #000; text-align: center; }
+	td.info			{ text-align: left; }
+	a.info			{ text-decoration: underline; }
+	a.info:hover		{ }
 
-	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
+	b.footer		{ font-size: 70%; color: #777; font-weight: normal; }
 	.logotext		{ font-size: 24px; font-family: "Courier New",monospace; color: #F54997; }
-	</STYLE>
+	/*]]>*/
+	</style>
 EOF
 
 }
