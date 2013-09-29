@@ -136,6 +136,7 @@ my $opt_format = {
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
 	subtitles	=> [ 2, "subtitles|subs!", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
+	subsfmt		=> [ 1, "subsfmt=s", 'Search', '--subsfmt <format>', "Subtitles format.  One of: default, compact.  Default: 'default'"],
 	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Recording', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subsraw!", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
 	subsrequired		=> [ 1, "subsrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
@@ -7220,32 +7221,46 @@ sub download_subtitles {
 	#<p begin="0:01:12.400" end="0:01:13.880">Thinking.</p>
 	#<p begin="00:01:01.88" id="p15" end="00:01:04.80"><span tts:color="cyan">You're thinking of Hamburger Hill...<br /></span>Since we left...</p>
 	#<p begin="00:00:18.48" id="p0" end="00:00:20.52">APPLAUSE AND CHEERING</p>
+	# There is also a multiline form:
+	#<p region="speaker" begin="00:00:01.840" end="00:00:08.800"><span style="textStyle">  This programme contains  <br/>
+	#                  some strong language</span></p>
+
 	my $count = 1;
-	my @lines = grep /<p\s.*begin=/, split /\n/, $subs;
-	for ( @lines ) {
-		my ( $begin, $end, $sub );
-		# Remove <br /> elements
-		s|<br.*?>| |g;
-		# Remove >1 spaces
-		s|\s{2,}| |g;
-		( $begin, $end, $sub ) = ( $1, $2, $3 ) if m{<p\s+.*begin="(.+?)".+end="(.+?)".*?>(.+?)<\/p>};
-		if ($begin && $end && $sub ) {
-			# Format numerical field widths
-			$begin = sprintf( '%02d:%02d:%02d,%02d', split /[:\.,]/, $begin );
-			$end = sprintf( '%02d:%02d:%02d,%02d', split /[:\.,]/, $end );
-			# Add trailing zero if ttxt format only uses hundreths of a second
-			$begin .= '0' if $begin =~ m{,\d\d$};
-			$end .= '0' if $end =~ m{,\d\d$};
+	for ( $subs =~ m{<p\b.+?</p>}gis ) {
+		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</p>}is );
+		if ( $begin && $end && $sub ) {
+			($begin = sprintf( '%02d:%02d:%06.3f', split /:/, $begin )) =~ s/\./,/;
+			($end = sprintf( '%02d:%02d:%06.3f', split /:/, $end )) =~ s/\./,/;
 			if ($opt->{suboffset}) {
 				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
 				$end = main::subtitle_offset( $end, $opt->{suboffset} );
 			}
-			# Separate individual lines based on <span>s
-			$sub =~ s|<span.*?>(.*?)</span>|\n$1\n|g;
+			# remove line breaks, squeeze whitespace, fix up <br> and <span>
+			$sub =~ s|\n+||g;
+			$sub =~ s/(^\s+|\s+$)//g;
+			$sub =~ s|\s+| |g;
+			$sub =~ s|(<br.*?>\s?)+|<br/>|gi;
+			$sub =~ s!(^<br/>|<br/>$)!!g;
+			$sub =~ s|<br/>(</span>)$|$1|i;
+			$sub =~ s|(<span.*?>)\s|$1|i;
+			# separate individual lines based on <span>s
+			$sub =~ s|<span.*?>(.*?)</span>|\n$1\n|gi;
 			if ($sub =~ m{\n}) {
-				chomp($sub);
-				$sub =~ s|^\n?|- |;
+				# fix up line breaks
+				$sub =~ s/(^\n|\n$)//g;
+				# add leading hyphens
 				$sub =~ s|\n+|\n- |g;
+				if ( $sub =~ m{\n-} ) {
+					$sub =~ s|^|- |;
+				}
+			}
+			if ( $opt->{subsfmt} eq 'compact' ) {
+				$sub =~ s|\n+||g;
+				# embed line breaks
+				$sub =~ s|<br/>|\n|g;
+			} else {
+				# remove <br/> elements
+				$sub =~ s|<br/>| |g;
 			}
 			decode_entities($sub);
 			# Write to file
