@@ -7225,7 +7225,7 @@ sub download_subtitles {
 	#<p region="speaker" begin="00:00:01.840" end="00:00:08.800"><span style="textStyle">  This programme contains  <br/>
 	#                  some strong language</span></p>
 
-	my $count = 1;
+	my $count = 0;
 	for ( $subs =~ m{<p\b.+?</p>}gis ) {
 		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</p>}is );
 		if ( $begin && $end && $sub ) {
@@ -7264,13 +7264,17 @@ sub download_subtitles {
 			}
 			decode_entities($sub);
 			# Write to file
-			print $fh "$count\n";
+			print $fh ++$count, "\n";
 			print $fh "$begin --> $end\n";
 			print $fh "$sub\n\n";
-			$count++;
 		}
 	}	
 	close $fh;
+
+	if ( ! $count ) {
+		main::logger "WARNING: Subtitles empty\n";
+		return 3;
+	}
 
 	return 0;
 }
