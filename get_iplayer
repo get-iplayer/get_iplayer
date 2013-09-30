@@ -7225,6 +7225,11 @@ sub download_subtitles {
 	#<p region="speaker" begin="00:00:01.840" end="00:00:08.800"><span style="textStyle">  This programme contains  <br/>
 	#                  some strong language</span></p>
 
+	my @subsfmts = qw/compact default/;
+	if ( $opt->{subsfmt} && ! grep /^$opt->{subsfmt}$/i, @subsfmts ) {
+		main::logger "WARNING: Invalid value specified for --subsfmt: $opt->{subsfmt}. Must be one of: @subsfmts. Using default subtitles format.\n";
+		$opt->{subsfmt} = "default";
+	}
 	my $count = 0;
 	for ( $subs =~ m{<p\b.+?</p>}gis ) {
 		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</p>}is );
