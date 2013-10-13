@@ -7224,15 +7224,21 @@ sub download_subtitles {
 	# There is also a multiline form:
 	#<p region="speaker" begin="00:00:01.840" end="00:00:08.800"><span style="textStyle">  This programme contains  <br/>
 	#                  some strong language</span></p>
+	# And a form with explicit namespace:
+	#<tt:p xml:id="C80" begin="00:08:45.440" end="00:08:49.240" style="s2">It was in 2000. At the beginning,<tt:br />it was different.</tt:p>
 
 	my @subsfmts = qw/compact default/;
 	if ( $opt->{subsfmt} && ! grep /^$opt->{subsfmt}$/i, @subsfmts ) {
 		main::logger "WARNING: Invalid value specified for --subsfmt: $opt->{subsfmt}. Must be one of: @subsfmts. Using default subtitles format.\n";
 		$opt->{subsfmt} = "default";
 	}
+	my ($ns) = $subs =~ m{<(\w+:)p\b};
+	my $p = $ns.'p';
+	my $span = $ns.'span';
+	my $br = $ns.'br';
 	my $count = 0;
-	for ( $subs =~ m{<p\b.+?</p>}gis ) {
-		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</p>}is );
+	for ( $subs =~ m{<$p\b.+?</$p>}gis ) {
+		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</$p>}is );
 		if ( $begin && $end && $sub ) {
 			($begin = sprintf( '%02d:%02d:%06.3f', split /:/, $begin )) =~ s/\./,/;
 			($end = sprintf( '%02d:%02d:%06.3f', split /:/, $end )) =~ s/\./,/;
@@ -7244,12 +7250,12 @@ sub download_subtitles {
 			$sub =~ s|\n+||g;
 			$sub =~ s/(^\s+|\s+$)//g;
 			$sub =~ s|\s+| |g;
-			$sub =~ s|(<br.*?>\s?)+|<br/>|gi;
+			$sub =~ s|(\s?<$br.*?>\s?)+|<br/>|gi;
 			$sub =~ s!(^<br/>|<br/>$)!!g;
-			$sub =~ s|<br/>(</span>)$|$1|i;
-			$sub =~ s|(<span.*?>)\s|$1|i;
+			$sub =~ s|<br/>(</$span>)$|$1|i;
+			$sub =~ s|(<$span.*?>)\s|$1|i;
 			# separate individual lines based on <span>s
-			$sub =~ s|<span.*?>(.*?)</span>|\n$1\n|gi;
+			$sub =~ s|<$span.*?>(.*?)</$span>|\n$1\n|gi;
 			if ($sub =~ m{\n}) {
 				# fix up line breaks
 				$sub =~ s/(^\n|\n$)//g;
@@ -7265,6 +7271,8 @@ sub download_subtitles {
 				$sub =~ s|<br/>|\n|g;
 			} else {
 				# remove <br/> elements
+				$sub =~ s|\n- <br/>\n|\n|g;
+				$sub =~ s|\n- <br/>|\n- |g;
 				$sub =~ s|<br/>| |g;
 			}
 			decode_entities($sub);
