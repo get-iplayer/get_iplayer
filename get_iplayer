@@ -5332,12 +5332,14 @@ sub get_metadata {
 		$prog_type = 'tv' if $prog_type eq 'video';
 		$prog_type = 'radio' if $prog_type eq 'audio';
 		$desc = $1 if $entry =~ m{<media:description>\s*(.*?)\s*<\/media:description>};
+		$desc =~ s|[\n\r]| |g;
 		$meddesc = '';
 		$meddesc = $1 if $entry =~ m{<content type="html">\s*(.+?)\s*</content>};
 		decode_entities( $meddesc );
 		$meddesc =~ s|^.+<p>\s*(.+?)\s*</p>|$1|g;
 		$meddesc =~ s|[\n\r]| |g;
 		$summary = $1 if $entry =~ m{<summary>\s*(.*?)\s*</summary>};
+		$summary =~ s|[\n\r]| |g;
 		$guidance = $1 if $entry =~ m{<media:rating scheme="urn:simple">(.+?)<\/media:rating>};
 		$player = $1 if $entry =~ m{<media:player\s*url=\"(.*?)\"\s*\/>};
 		# Get all thumbnails into elements of thumbnailN with increasing width
@@ -6777,6 +6779,7 @@ sub get_links {
 
 			#<p>    House of Lords, including the third reading of the Health and Social Care Bill. 1 July.   </p>    </content>
 			$desc = $1 if $entry =~ m{<p>\s*(.*?)\s*</p>\s*</content>};
+			$desc =~ s|[\n\r]| |g;
 			# Remove unwanted html tags
 			$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
 
