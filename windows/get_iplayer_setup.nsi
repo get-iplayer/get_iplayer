@@ -3,7 +3,7 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.7"
+!define VERSION "4.8"
 ; VERSION where Perl support last changed
 !define PERLFILESVER "4.7"
 
@@ -474,7 +474,7 @@ Section "get_iplayer" section1
   FileClose $0
   ; URLs
   WriteINIStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "https://github.com/dinkypumpkin/get_iplayer/wiki/documentation"
-  WriteINIStr "$INSTDIR\pvr_manager.url" "InternetShortcut" "URL" "http://127.0.0.1:1935"
+  WriteINIStr "$INSTDIR\pvr_manager.url" "InternetShortcut" "URL" "http://localhost:1935"
   WriteINIStr "$INSTDIR\strawberry_docs.url" "InternetShortcut" "URL" "http://strawberryperl.com/"
   ; root start menu items
   CreateShortCut "$SMPROGRAMS\get_iplayer\Get_iPlayer.lnk" "$SYSDIR\cmd.exe" \
