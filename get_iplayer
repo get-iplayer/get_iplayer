@@ -8261,10 +8261,16 @@ sub get {
 
 	# rtmpdump version detection e.g. 'RTMPDump v2.4'
 	my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
+	if ( $opt->{verbose} ) {
+		(my $rtmpver2 = $rtmpver) =~ s/^/INFO: /gm;
+		main::logger "INFO: rtmpver: \n$rtmpver2";
+	}
 	if ( $rtmpver =~ /swfVfy/ ) {
 		$swfarg = "--swfVfy";
 	} else {
 		main::logger "WARNING: Your version of rtmpdump/flvstreamer does not support SWF Verification\n";
+		main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
+		main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
 	}
 	$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
 	main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
@@ -8273,6 +8279,8 @@ sub get {
 	# Save the effort and don't support < v1.8
 	if ( $rtmpver < 1.8 ) {
 		main::logger "WARNING: rtmpdump/flvstreamer 1.8 or later is required - please upgrade\n";
+		main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
+		main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
 		return 'next';
 	}
 
