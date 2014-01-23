@@ -4273,10 +4273,15 @@ sub download_retry_loop {
 			# Expand the modes into a loop
 			for my $mode ( @modes ) {
 				chomp( $mode );
+				(my $modeshort = $mode) =~ s/\d+$//g;
+				# force regeneration of file name if mode changed
+				if ( $prog->{modeshort} ne $modeshort ) {
+					undef $prog->{filename};
+					main::logger "INFO: Regenerate filename for mode change: $prog->{modeshort} -> $modeshort\n" if ( $prog->{modeshort} && $opt->{verbose} );
+				}
 				$prog->{mode} = $mode;
 				# Keep short mode name for substitutions
-				$prog->{modeshort} = $mode;
-				$prog->{modeshort} =~ s/\d+$//g;
+				$prog->{modeshort} = $modeshort;
 
 				# If multimode is used, skip only modes which are in the history
 				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
