@@ -172,7 +172,7 @@ my $opt_format = {
 	emailpassword	=> [ 1, "emailpassword|email-password=s", 'Output', '--email-password <password>', "Email password"],
 	emailport       => [ 1, "emailport|email-port=s", 'Output', '--email-port <port number>', "Email port number (default: appropriate port for --email-security)"],
 	emailuser	=> [ 1, "emailuser|email-user=s", 'Output', '--email-user <username>', "Email username"],
-	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Omit characters forbidden by FAT filesystems from filenames but keep whitespace"],
+	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Omit characters forbidden by FAT filesystems from file and directory names.  Removes non-ASCII (accented) characters.  Set by default on Windows."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
@@ -191,7 +191,7 @@ my $opt_format = {
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata (see --info for thumbnailN: to get size/index)"],
-	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace (and escape chars) in filenames"],
+	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names"],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels!", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names!", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha!", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
@@ -320,6 +320,8 @@ $opt->{verbose} = 1 if $opt_pre->{verbose};
 $opt->{quiet} = 1 if $opt_pre->{quiet};
 $opt->{pvr} = 1 if $opt_pre->{pvr};
 $opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
+# force fatfilename as default on Windows
+$opt->{fatfilename} = 1 if $^O eq "MSWin32";
 
 # show version and exit
 if ( $opt_pre->{showver} ) {
@@ -554,9 +556,6 @@ foreach ('start', 'stop') {
 		$opt->{$_} = $1 * 3600 +  $2 * 60 + $4;
 	}
 }
-
-# force fatfilename with whitespace on Windows
-$opt->{fatfilename} = 1 if ( $opt->{whitespace} && $^O eq "MSWin32" );
 
 # Add --search option to @search_args if specified
 if ( defined $opt->{search} ) {
@@ -2865,22 +2864,24 @@ sub cleanup {
 
 
 # Generic
-# Make a filename/path sane (optionally allow fwd slashes)
+# Make a filename/path sane
 sub StringUtils::sanitize_path {
 	my $string = shift;
-	my $allow_fwd_slash = shift || 0;
-
-	# Remove fwd slash if reqd
-	$string =~ s/\//_/g if ! $allow_fwd_slash;
-
-	# Replace backslashes with _ regardless
-	$string =~ s/\\/_/g;
-	# Sanitize by default
-	$string =~ s/\s+/_/g if (! $opt->{whitespace}) && (! $allow_fwd_slash);
-	$string =~ s/[^\w_\-\.\/\s]//gi if ! $opt->{whitespace};
-	$string =~ s/[\|\\\?\*\<\"\:\>\+\[\]\/]//gi if $opt->{fatfilename};
-	# Truncate multiple '_'
+	my $is_path = shift || 0;
+	# Replace forward slashes with _ if not path
+	$string =~ s/\//_/g unless $is_path;
+	# Replace backslashes with _ if not Windows path
+	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
+	# Remove extra/leading/trailing whitespace
+	$string =~ s/\s+/ /g;
+	$string =~ s/(^\s+|\s+$)//g;
+	# Replace whitespace with _ if required
+	$string =~ s/\s+/_/g unless $opt->{whitespace};
+	# Truncate multiple replacement chars
 	$string =~ s/_+/_/g;
+	# Remove non-ASCII and forbidden chars if required
+	$string =~ s/[^\x{20}-\x{7E}]//g if $opt->{fatfilename};
+	$string =~ s/[\|\?\*\+\"\:\<\>\[\]]//g if $opt->{fatfilename};
 	return $string;
 }
 
@@ -4532,8 +4533,8 @@ sub create_metadata_file {
 
 # Usage: print $prog{$pid}->substitute('<name>-<pid>-<episode>', [mode], [begin regex tag], [end regex tag]);
 # Return a string with formatting fields substituted for a given pid
-# sanitize_mode == 0 then sanitize final string but dont sanitize '/' in field values
-# sanitize_mode == 1 then sanitize final string and also sanitize '/' in field values
+# sanitize_mode == 0 then sanitize final string and also sanitize '/' in field values
+# sanitize_mode == 1 then sanitize final string but don't sanitize '/' (and '\' on Windows) in field values
 # sanitize_mode == 2 then just substitute only
 # sanitize_mode == 3 then substitute then use encode entities for fields only
 # sanitize_mode == 4 then substitute then escape characters in fields only for use in double-quoted shell text.
@@ -4606,8 +4607,9 @@ sub substitute {
 		$string =~ s/[\s_]+/_/g if ! $opt->{whitespace};
 		# Strip leading ellipsis
 		$string =~ s/^\.+/_/;
-		# Remove/replace all non-nice-filename chars if required except for fwd slashes
-		return StringUtils::sanitize_path( $string, 1 );
+		# Remove/replace all non-nice-filename chars if required
+		# Keep '/' (and '\' on Windows) if $sanitize_mode == 1
+		return StringUtils::sanitize_path( $string, $sanitize_mode );
 	} else {
 		return $string;
 	}
@@ -4694,7 +4696,7 @@ sub generate_filenames {
 	# Don't create subdir if we are only testing recordings
 	# Create a subdir for programme sorting option
 	if ( $opt->{subdir} ) {
-		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
+		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>', 1 );
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
