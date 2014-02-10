@@ -5063,6 +5063,10 @@ sub get_verpids {
 		} elsif ( $xml =~ m{href="http://www.bbc.co.uk/iplayer/episode/(b0[a-z0-9]{6})"} ) {
 			$prog->{pid} = $1;
 			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
+		# live streams (e.g., olympics)
+		} elsif ( $xml =~ m{live-experience\/services.+?pid=([bp]0[a-z0-9]{6})} ) {
+			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
+			$prog->{pid} = $url;
 		# playlist embedded in JSON
 		} elsif ( $xml =~ m{"href":"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"} ) {
  			($url = $1) =~ s/\\//g;
@@ -5170,6 +5174,12 @@ sub get_verpids {
 			$version = 'default';
 			$verpid = $url;
 			main::logger "INFO: Using Live/Non-live EMP tv/radio XML URL: $verpid\n" if $opt->{verbose} && $verpid;
+
+		# Live/Non-live EMP tv/radio URL
+		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http/ ) {
+			$version = 'default';
+			$verpid = $url;
+			main::logger "INFO: Using Live/Non-live EMP tv/radio URL: $verpid\n" if $opt->{verbose} && $verpid;
 
 		# Live/Non-live EMP tv/radio
 		} elsif ( $prog->{pid} =~ /^http/i ) {
