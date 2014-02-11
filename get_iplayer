@@ -5064,6 +5064,9 @@ sub get_verpids {
 			$prog->{pid} = $1;
 			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
 		# live streams (e.g., olympics)
+		} elsif ( $xml =~ m{"href":\s*"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"[^\}]+?"live":\s*true} ) {
+			($url = $1) =~ s/\\//g;
+			$prog->{pid} = $url;
 		} elsif ( $xml =~ m{live-experience\/services.+?pid=([bp]0[a-z0-9]{6})} ) {
 			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
 			$prog->{pid} = $url;
