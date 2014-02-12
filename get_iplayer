@@ -4334,6 +4334,13 @@ sub mode_ver_download_retry_loop {
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
 
+		# for live streams update <dldate> and <dltime> for each download attempt
+		# creates new output file if <dldate> or <dltime> in <fileprefix>
+		if ( $prog->{type} =~ /live/ ) {
+			my @t = localtime();
+			$prog->{dldate} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
+			$prog->{dltime} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];					
+		}
 		$retcode = $prog->download( $ua, $mode, $version, $version_pid );
 		main::logger "DEBUG: Record using $mode mode return code: '$retcode'\n" if $opt->{verbose};
 
