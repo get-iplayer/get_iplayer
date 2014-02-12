@@ -893,7 +893,7 @@ sub download_pid_not_in_cache {
 
 	# Force prog type and create new prog instance if it doesn't exist
 	my $this;
-	logger "INFO Trying to stream pid using type $prog_type\n";
+	logger "INFO: Trying to stream pid using type $prog_type\n";
 	logger "INFO: pid not found in $prog_type cache\n";
 	$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
 	# if only one type is specified then we can clean up the pid which might actually be a url
@@ -5067,7 +5067,7 @@ sub get_verpids {
 			$url = $1;
 		# iplayer Programmes page format (also rewrite the pid)
 		# href="http://www.bbc.co.uk/iplayer/episode/b00ldhj2"
-		} elsif ( $xml =~ m{href="http://www.bbc.co.uk/iplayer/episode/(b0[a-z0-9]{6})"} ) {
+		} elsif ( $xml =~ m{href="http://www.bbc.co.uk/iplayer/episode/([bp]0[a-z0-9]{6})"} ) {
 			$prog->{pid} = $1;
 			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
 		# live streams (e.g., olympics)
@@ -5080,6 +5080,10 @@ sub get_verpids {
 		# playlist embedded in JSON
 		} elsif ( $xml =~ m{"href":"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"} ) {
  			($url = $1) =~ s/\\//g;
+ 		# embedded player
+		} elsif ( $xml =~ m{emp\.load\("(http://www.bbc.co.uk/iplayer/playlist/([bp]0[a-z0-9]{6}))"\)} ) {
+ 			$url = $1;
+ 			$prog->{pid} = $2;
 		} elsif ( $url =~ m{^http.+.xml$} ) {
 			# Just keep the url as it is probably already an xml playlist
 		## playlist: "http://www.bbc.co.uk/iplayer/playlist/bbc_radio_one",
