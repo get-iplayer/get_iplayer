@@ -193,7 +193,7 @@ my $opt_format = {
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata (see --info for thumbnailN: to get size/index)"],
-	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names"],
+	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace (but remove most punctuation chars and all non-ASCII chars) in filenames."],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels!", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names!", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha!", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
@@ -2871,6 +2871,8 @@ sub cleanup {
 sub StringUtils::sanitize_path {
 	my $string = shift;
 	my $is_path = shift || 0;
+	# Replace leading ellipsis with _
+	$string =~ s/^\.+/_/;
 	# Replace forward slashes with _ if not path
 	$string =~ s/\//_/g unless $is_path;
 	# Replace backslashes with _ if not Windows path
@@ -2878,13 +2880,16 @@ sub StringUtils::sanitize_path {
 	# Remove extra/leading/trailing whitespace
 	$string =~ s/\s+/ /g;
 	$string =~ s/(^\s+|\s+$)//g;
-	# Replace whitespace with _ if required
+	# Replace whitespace with _ unless --whitespace
 	$string =~ s/\s+/_/g unless $opt->{whitespace};
 	# Truncate multiple replacement chars
 	$string =~ s/_+/_/g;
-	# Remove non-ASCII and forbidden chars if required
-	$string =~ s/[^\x{20}-\x{7E}]//g if $opt->{fatfilename};
+	# Remove non-ASCII and most punctuation unless --whitespace
+	$string =~ s/[^a-zA-Z0-9_\-\.\/\s]//gi unless $opt->{whitespace};
+	# Remove FAT forbidden chars if --fatfilename
 	$string =~ s/[\|\?\*\+\"\:\<\>\[\]]//g if $opt->{fatfilename};
+	# Remove non-ASCII if --fatfilename
+	$string =~ s/[^\x{20}-\x{7E}]//g if $opt->{fatfilename};
 	return $string;
 }
 
@@ -4613,10 +4618,6 @@ sub substitute {
 		# Remove unused tags
 		my $key = $tag_begin.'.*?'.$tag_end;
 		$string =~ s|$key||mg;
-		# Strip whitespace if required
-		$string =~ s/[\s_]+/_/g if ! $opt->{whitespace};
-		# Strip leading ellipsis
-		$string =~ s/^\.+/_/;
 		# Remove/replace all non-nice-filename chars if required
 		# Keep '/' (and '\' on Windows) if $sanitize_mode == 1
 		return StringUtils::sanitize_path( $string, $sanitize_mode );
