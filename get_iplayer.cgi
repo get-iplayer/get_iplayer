@@ -3060,7 +3060,7 @@ sub search_progs {
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, $text ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $text ) );
 			# Name / Series link
 			} elsif ( /^name$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
