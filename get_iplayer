@@ -166,6 +166,7 @@ my $opt_format = {
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record.  List is processed from left to right and first version found is downloaded.  Example: '--versions signed,audiodescribed,default' will prefer signed and audiodescribed programmes if available.  Default: 'default'"],
 
 	# Output
+	avi			=> [ 1, "avi", 'Output', '--avi', "Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output."],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	email		=> [ 1, "email=s", 'Output', '--email <address>', "Email HTML index of matching programmes to specified address"],
 	emailsmtp	=> [ 1, "emailsmtpserver|email-smtp=s", 'Output', '--email-smtp <hostname>', "SMTP server IP address to use to send email (default: localhost)"],
@@ -180,7 +181,7 @@ my $opt_format = {
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames and subdirectory paths"],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc, xbmc_movie, freevo, generic"],
-	mkv			=> [ 1, "mkv", 'Output', '--mkv', "Output video in MKV container instead of MP4. Currently no tagging supported from get_iplayer for MKV output"],
+	mkv			=> [ 1, "mkv", 'Output', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nowrite		=> [ 1, "no-write|nowrite|n!", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
@@ -7136,6 +7137,8 @@ sub download {
 			$prog->{ext} = 'm4a';
 		}
 	}
+	# Override ext based on  avi option
+	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 
@@ -8449,7 +8452,7 @@ sub get {
 				'-y', $prog->{filepart},
 			);
 		}
-	# Convert video flv to mp4/mkv if required
+	# Convert video flv to mp4/mkv/avi if required
 	} else {
 		@cmd = (
 			$bin->{ffmpeg},
