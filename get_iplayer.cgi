@@ -2725,7 +2725,7 @@ sub build_option_html {
 
 	# On/Off
 	} elsif ( $type eq 'boolean' ) {
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip },
 			checkbox(
 				-class		=> 'options',
@@ -2735,6 +2735,7 @@ sub build_option_html {
 				#-value 	=> 1,
 				-checked	=> $current,
 				-override	=> 1,
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
@@ -2763,7 +2764,7 @@ sub build_option_html {
 			my $val = $value->{shift @keylist};
 			$element .=
 				td( { -class => 'options' },
-					table ( { -class => 'options_embedded', -title => $tooltip }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
+					table ( { -class => 'options_embedded', -title => $tooltip, -role=>'presentation' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
 						checkbox(
 							-class		=> 'options',
 							-name		=> $webvar,
@@ -2772,8 +2773,9 @@ sub build_option_html {
 							-value 		=> $val,
 							-checked	=> $status->{$val},
 							-override	=> 1,
+							"aria-labelledby"		=> "label_option_${webvar}_$val",
 						),
-						$label->{$val}
+						span({ -id=> "label_option_${webvar}_$val" }, $label->{$val})
 					] ) ) )
 				);
 			# Spread over more rows if there are many elements
@@ -2790,7 +2792,7 @@ sub build_option_html {
 	# Popup type
 	} elsif ( $type eq 'popup' ) {
 		my @value = $arg->{value};
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip }, 
 			popup_menu(
 				-class		=> 'options',
@@ -2800,12 +2802,13 @@ sub build_option_html {
 				-labels		=> $label,
 				-default	=> $current,
 				-onChange	=> $arg->{onChange},
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
 	# text field
 	} elsif ( $type eq 'text' ) {
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip },
 			textfield(
 				-class		=> 'options',
@@ -2813,6 +2816,7 @@ sub build_option_html {
 				-value		=> $current,
 				-size		=> $value,
 				-onKeyDown	=> 'return submitonEnter(event);',
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
@@ -2935,7 +2939,7 @@ sub search_progs {
 
 		push @html, 
 			th( { -class => 'search' },
-				table( { -class => 'searchhead' },
+				table( { -class => 'searchhead', -role=>'presentation' },
 					Tr( { -class => 'search' }, [ 
 						th( { -class => 'search' },
 							label( {
@@ -3159,6 +3163,7 @@ sub search_progs {
 				-class		=> 'options_outer pointer_noul',
 				-title		=> 'Apply Current Options',
 				-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
+				-role	=> "button",
 				},
 				'Apply Settings',
 			),
@@ -3167,6 +3172,7 @@ sub search_progs {
 				-class		=> 'options_outer pointer_noul',
 				-title		=> 'Remember Current Options as Default',
 				-onClick	=> "BackupFormVars(form); form.SAVE.value=1; form.submit(); RestoreFormVars(form);",
+				-role	=> "button",
 				},
 				'Save As Default',
 			),
@@ -3192,7 +3198,7 @@ sub search_progs {
 		}
 		# Set the basic search tab to be rowspan=3
 		if ( $tabname eq 'BASICTAB' ) {
-			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}" },
+			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}", -role=>'search' },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
 			);
 		} else {
@@ -3204,7 +3210,7 @@ sub search_progs {
 
 	# Render outer options table frame (keeping some tabs hidden)
 	print $fh table( { -class=>'options_outer' },
-		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab' }, @optrows_nav ) ) ).
+		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab', -role=>'navigation', 'aria-label'=>'Settings' }, @optrows_nav ) ) ).
 		Tr( { -class=>'options_outer' }, (join '', @opt_td) ).
 		Tr( { -class=>'options_outer' }, td( { -class=>'options_outer' }, $options_buttons ) )
 	);
@@ -3302,7 +3308,7 @@ sub search_progs {
 	# Render action bar
 	my @actionbar;
 	if ( $opt->{HISTORY}->{current} ) {
-		push @actionbar, div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action', -role=>'navigation', 'aria-label'=>'Actions' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -3315,7 +3321,7 @@ sub search_progs {
 			),
 		);
 	} else {
-		push @actionbar, div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action', -role=>'navigation', 'aria-label'=>'Actions' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -3332,7 +3338,7 @@ sub search_progs {
 	
 	print $fh @actionbar;
 	print $fh @pagetrail;
-	print $fh table( {-class=>'search' }, @html );
+	print $fh table( {-class=>'search', -role=>'main' }, @html );
 	print $fh @pagetrail;
 	print $fh @actionbar;
 
@@ -3563,7 +3569,7 @@ sub form_header {
 	$class->{pvrlist}	= 'nav_tab_sel' if $nextpage =~ m{^(pvr_list|pvr_queue|pvr_del)$};
 	$class->{update}	= 'nav_tab_sel' if $nextpage eq 'update_script';
 
-	print $fh div( { -class=>'nav' },
+	print $fh div( { -class=>'nav', -role=>'navigation' },
 		ul( { -class=>'nav' },
 			li( { -id=>'logo', -class=>'nav_tab' },
 				span( { -class=>'logotext' }, 'get_iplayer' )
