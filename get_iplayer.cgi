@@ -3192,7 +3192,7 @@ sub search_progs {
 		}
 		# Set the basic search tab to be rowspan=3
 		if ( $tabname eq 'BASICTAB' ) {
-			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}" },
+			push @opt_td_basic, td( { -class=>'options_outer', -id=>"tab_${tabname}", -rowspan=>3, -style=>"$tab->{style}", -role=>'search' },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
 			);
 		} else {
@@ -3204,7 +3204,7 @@ sub search_progs {
 
 	# Render outer options table frame (keeping some tabs hidden)
 	print $fh table( { -class=>'options_outer' },
-		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab' }, @optrows_nav ) ) ).
+		Tr( { -class=>'options_outer' }, (join '', @opt_td_basic). td( { -class=>'options_outer' }, ul( { -class=>'options_tab', -role=>'navigation', 'aria-label'=>'Settings' }, @optrows_nav ) ) ).
 		Tr( { -class=>'options_outer' }, (join '', @opt_td) ).
 		Tr( { -class=>'options_outer' }, td( { -class=>'options_outer' }, $options_buttons ) )
 	);
@@ -3302,7 +3302,7 @@ sub search_progs {
 	# Render action bar
 	my @actionbar;
 	if ( $opt->{HISTORY}->{current} ) {
-		push @actionbar, div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action', -role=>'navigation', 'aria-label'=>'Actions' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -3315,7 +3315,7 @@ sub search_progs {
 			),
 		);
 	} else {
-		push @actionbar, div( { -class=>'action' },
+		push @actionbar, div( { -class=>'action', -role=>'navigation', 'aria-label'=>'Actions' },
 			ul( { -class=>'action' },
 				li( { -class=>'action' }, [
 					$action_button{'Search'},
@@ -3332,7 +3332,7 @@ sub search_progs {
 	
 	print $fh @actionbar;
 	print $fh @pagetrail;
-	print $fh table( {-class=>'search' }, @html );
+	print $fh table( {-class=>'search', -role=>'main' }, @html );
 	print $fh @pagetrail;
 	print $fh @actionbar;
 
@@ -3563,7 +3563,7 @@ sub form_header {
 	$class->{pvrlist}	= 'nav_tab_sel' if $nextpage =~ m{^(pvr_list|pvr_queue|pvr_del)$};
 	$class->{update}	= 'nav_tab_sel' if $nextpage eq 'update_script';
 
-	print $fh div( { -class=>'nav' },
+	print $fh div( { -class=>'nav', -role=>'navigation' },
 		ul( { -class=>'nav' },
 			li( { -id=>'logo', -class=>'nav_tab' },
 				span( { -class=>'logotext' }, 'get_iplayer' )
