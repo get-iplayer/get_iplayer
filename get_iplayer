@@ -5055,6 +5055,9 @@ sub get_verpids {
 	# EMP URL
 	} elsif ( $prog->{pid} =~ /^http/i ) {
 		$url = $prog->{pid};
+		if ( $HTML::Parser::VERSION < 3.71 ) {
+			main::logger "WARNING: Page parsing may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
+		}
 		# May aswell set the web page metadata here if not set
 		$prog->{web} = $prog->{pid} if ! $prog->{web};
 		# Scrape the EMP web page and get playlist URL
