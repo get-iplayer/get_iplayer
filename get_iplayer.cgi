@@ -2763,7 +2763,7 @@ sub build_option_html {
 			my $val = $value->{shift @keylist};
 			$element .=
 				td( { -class => 'options' },
-					table ( { -class => 'options_embedded', -title => $tooltip }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
+					table ( { -class => 'options_embedded', -title => $tooltip, -role=>'presentation' }, Tr( { -class => 'options_embedded' }, td( { -class => 'options_embedded' }, [
 						checkbox(
 							-class		=> 'options',
 							-name		=> $webvar,
@@ -2935,7 +2935,7 @@ sub search_progs {
 
 		push @html, 
 			th( { -class => 'search' },
-				table( { -class => 'searchhead' },
+				table( { -class => 'searchhead', -role=>'presentation' },
 					Tr( { -class => 'search' }, [ 
 						th( { -class => 'search' },
 							label( {
