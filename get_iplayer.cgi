@@ -2772,8 +2772,9 @@ sub build_option_html {
 							-value 		=> $val,
 							-checked	=> $status->{$val},
 							-override	=> 1,
+							"aria-labelledby"		=> "label_option_${webvar}_$val",
 						),
-						$label->{$val}
+						span({ -id=> "label_option_${webvar}_$val" }, $label->{$val})
 					] ) ) )
 				);
 			# Spread over more rows if there are many elements
