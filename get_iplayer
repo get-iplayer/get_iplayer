@@ -262,6 +262,7 @@ my $opt_format = {
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Use complete title (including series) instead of shorter episode title"],
 	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley supports --hdvideo argument for HD video flag"],
+	tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Tagging', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
 	tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Tagging', '--tag-longdesc', "AtomicParsley supports --longdesc argument for long description text"],
 	tag_longdescription => [ 1, "taglongdescription|tag-longdescription!", 'Tagging', '--tag-longdescription', "AtomicParsley supports --longDescription argument for long description text"],
 	tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
@@ -9868,6 +9869,9 @@ sub tag_file_id3 {
 		$mp3->{ID3v2}->remove_tag() if exists $mp3->{ID3v2};
 		$mp3->close();
 		# add metadata
+		if ( $opt->{tag_id3sync} ) {
+			MP3::Tag->config(id3v23_unsync => 0);
+		}
 		$mp3 = MP3::Tag->new($meta->{filename});
 		$mp3->select_id3v2_frame_by_descr('TCOP', $tags->{copyright});
 		$mp3->select_id3v2_frame_by_descr('TIT2', $tags->{title});
