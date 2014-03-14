@@ -269,7 +269,8 @@ my $opt_format = {
 	tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts"],
 	tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "AtomicParsley accepts UTF-8 input"],
 
-	# Deprecated
+	# Misc
+	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
 
@@ -593,8 +594,12 @@ my $pvr = Pvr->new();
 # Set some class-wide values
 $pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
 
+# Trim history
+if ( defined($opt->{trimhistory}) ) {
+	my $hist = History->new();
+	$hist->trim();
 # PVR functions
-if ( $opt->{pvradd} ) {
+} elsif ( $opt->{pvradd} ) {
 	if ( ! $opt->{pid} && $no_search_args ) {
 		main::logger "ERROR: Search term(s) or PID required for recording\n";
 		exit 1;
@@ -3627,6 +3632,55 @@ sub add_opt_object {
 	$History::optref = shift;
 }
 
+
+sub trim {
+	my $oldhistoryfile = "$historyfile.old";
+	my $newhistoryfile = "$historyfile.new";
+	if ( $opt->{trimhistory} =~ /^all$/i ) {
+		if ( ! copy($historyfile, $oldhistoryfile) ) {
+			die "ERROR: Cannot copy $historyfile to $oldhistoryfile: $!\n";
+		}
+		if ( ! unlink($historyfile) ) {
+			die "ERROR: Cannot delete $historyfile: $! \n";
+		}
+		main::logger "INFO: Deleted all entries from download history\n";
+		return;
+	}
+	if ( $opt->{trimhistory} !~ /^\d+$/ ) {
+		die "ERROR: --trim-history option must have a positive integer value, or use 'all' to completely delete download history.\n";
+	}
+	if ( $opt->{trimhistory} =~ /^0+$/ ) {
+		die "ERROR: Cannot specify 0 for --trim-history option.  Use 'all' to completely delete download history.\n";
+	}
+	if ( ! open(HIST, "< $historyfile") ) {
+		die "ERROR: Cannot read from $historyfile\n";
+	}
+	if ( ! open(NEWHIST, "> $newhistoryfile") ) {
+		die "ERROR: Cannot write to $newhistoryfile\n";
+	}
+	my $trim_limit = time() - ($opt->{trimhistory} * 86400);
+	my $deleted_count = 0;
+	while (<HIST>) {
+		chomp();
+		next if /^[\#\s]/;
+		my @record = split /\|/;
+		my $timeadded = $record[4];
+		if ( $timeadded >= $trim_limit ) {
+			print NEWHIST "$_\n";
+		} else {
+			$deleted_count++;
+		}
+	}
+	close HIST;
+	close NEWHIST;
+	if ( ! copy($historyfile, $oldhistoryfile) ) {
+		die "ERROR: Cannot copy $historyfile to $oldhistoryfile: $!\n";
+	}
+	if ( ! move($newhistoryfile, $historyfile) ) {
+		die "ERROR: Cannot move $newhistoryfile to $historyfile: $!\n";
+	}
+	main::logger "INFO: Deleted $deleted_count entries from download history\n";
+}
 
 # Uses global @history_format
 # Adds prog to history file (with a timestamp) so that it is not rerecorded after deletion
