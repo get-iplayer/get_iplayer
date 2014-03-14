@@ -4611,12 +4611,12 @@ sub substitute {
 		# special handling for <episode*>
 		$replace = '' if $replace eq '-' && $key =~ /episode/i;
 		# look for prefix in tag
-		my $pfx_key = $tag_begin.'([^A-Za-z'.$tag_end.']*?)'.$key.$tag_end;
-		(my $prefix = $1) if $string =~ m/$pfx_key/;
-		(my $pad = $1) if $prefix =~ m/^.*?(0+)/;
-		$replace = substr($pad.$replace, -(length($pad)+1)) if ($pad && $replace =~ m/^\d+$/);
-		$pfx_key = $tag_begin."\Q$prefix\E".$key.$tag_end;
-		$prefix =~ s/0+// if $pad;
+		my $pfx_key = $tag_begin.'([^A-Za-z1-9'.$tag_end.']*?)(0*?)'.$key.$tag_end;
+		my ($prefix, $pad) = $string =~ m/$pfx_key/;
+		if ( $replace =~ m/^\d+$/ && length($pad) > length($replace) ) {
+			$replace = substr($pad.$replace, -length($pad))
+		}
+		$pfx_key = $tag_begin."\Q$prefix$pad\E".$key.$tag_end;
 		$prefix = '' if ! $replace;
 		$string =~ s|$pfx_key|$prefix$replace|gi;
 	}
