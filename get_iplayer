@@ -5056,8 +5056,7 @@ sub download_thumbnail {
 
 	# Write to file
 	unlink($file);
-	open( my $fh, "> $file" );
-	binmode $fh;
+	open( my $fh, ">:raw", $file );
 	print $fh $image;
 	close $fh;
 
@@ -7311,7 +7310,6 @@ sub download_subtitles {
 			unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
 			main::logger "INFO: 'Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.ttxt'\n";
 			open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
-			binmode $fhraw;
 			print $fhraw $subs;
 			close $fhraw;
 		}
@@ -9906,8 +9904,7 @@ sub tag_file_id3 {
 		# add artwork if available
 		if ( -f $meta->{thumbfile}  && ! $opt->{noartwork} ) {
 			my $data;
-			open(THUMB, $meta->{thumbfile});
-			binmode(THUMB);
+			open(THUMB, "<:raw", $meta->{thumbfile});
 			read(THUMB, $data, stat($meta->{thumbfile})->size());
 			close(THUMB);
 			$mp3->select_id3v2_frame_by_descr('APIC', $data);
