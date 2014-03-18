@@ -2923,7 +2923,7 @@ sub search_progs {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
 			if ( /^thumbnail$/ ) {
 				# Assume a thumbnail prefix if one is missing for BBC iPlayer
-				if ( $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
+				if ( ! $prog{$pid}->{$_} && $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
 					$prog{$pid}->{$_} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
 				}
 				if ( $prog{$pid}->{$_} =~ m{^http://} ) {

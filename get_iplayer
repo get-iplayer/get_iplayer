@@ -6946,7 +6946,11 @@ sub get_links {
 
 			# Default to 150px width thumbnail;
 			my $thumbsize = $opt->{thumbsizecache} || 150;
-
+			my $thumbnail = $1 if $entry =~ m{<media:thumbnail.*?url="(.*?)"};
+			my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
+			if ( $thumbnail !~ /$suffix/ ) {
+				$thumbnail =~ s/_\d+_\d+\.jpg/$suffix/;
+			}
 			# build data structure
 			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
@@ -6959,7 +6963,7 @@ sub get_links {
 				'guidance'	=> $guidance,
 				'available'	=> 'Unknown',
 				'duration'	=> 'Unknown',
-				'thumbnail'	=> "${thumbnail_prefix}/${pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize },
+				'thumbnail'	=> $thumbnail,
 				'channel'	=> $channel,
 				'categories'	=> join(',', sort @category),
 				'type'		=> $prog_type,
@@ -7117,6 +7121,13 @@ sub get_links {
 
 					# Default to 150px width thumbnail;
 					my $thumbsize = $opt->{thumbsizecache} || 150;
+					my $thumbnail = $1 if $entry =~ m{<media:thumbnail.*?url="(.*?)"};
+					if ( $thumbnail ) {
+						my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
+						if ( $thumbnail !~ /$suffix/ ) {
+							$thumbnail =~ s/_\d+_\d+\.jpg/$suffix/;
+						}
+					}
 
 					# Don't create this prog instance if the availablity is in the past 
 					# this prevents programmes which never appear in iPlayer from being indexed
@@ -7133,7 +7144,7 @@ sub get_links {
 						'desc'		=> $desc,
 						'available'	=> $available,
 						'duration'	=> $duration,
-						'thumbnail'	=> "${thumbnail_prefix}/${pid}".Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize },
+						'thumbnail'	=> $thumbnail,
 						'channel'	=> $channel,
 						'type'		=> $prog_type,
 						'web'		=> "${bbc_prog_page_prefix}/${pid}.html",
