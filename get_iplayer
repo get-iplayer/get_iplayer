@@ -24,7 +24,7 @@
 #
 #
 package main;
-my $version = 2.85;
+my $version = 2.86;
 my $version_text;
 $version_text = sprintf("v%.2f", $version) unless $version_text;
 #
@@ -3207,7 +3207,7 @@ sub usage {
 	my @man;
 	my @dump;
 	push @man, 
-		'.TH GET_IPLAYER "1" "November 2013" "Phil Lewis" "get_iplayer Manual"',
+		'.TH GET_IPLAYER "1" "April 2014" "Phil Lewis" "get_iplayer Manual"',
 		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more',
 		'.SH SYNOPSIS',
 		'\fBget_iplayer\fR [<options>] [<regex|index> ...]',
