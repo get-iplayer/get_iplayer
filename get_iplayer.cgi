@@ -2906,8 +2906,7 @@ sub search_progs {
 			# Queue
 			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Queue' ).'<br />';
 			# Add Series
-			my $escaped_name = quotemeta $prog{$pid}->{name};
-			$escaped_name =~ s/\\(\S)/\\\\\1/g;
+			(my $escaped_name = $prog{$pid}->{name}) =~ s/(\p{P})/\\\\$1/g;
 			$links .= label( {
 				-id=>'nowrap', 
 				-class=>'search pointer_noul',
