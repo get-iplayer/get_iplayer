@@ -2725,7 +2725,7 @@ sub build_option_html {
 
 	# On/Off
 	} elsif ( $type eq 'boolean' ) {
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip },
 			checkbox(
 				-class		=> 'options',
@@ -2735,6 +2735,7 @@ sub build_option_html {
 				#-value 	=> 1,
 				-checked	=> $current,
 				-override	=> 1,
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
@@ -2791,7 +2792,7 @@ sub build_option_html {
 	# Popup type
 	} elsif ( $type eq 'popup' ) {
 		my @value = $arg->{value};
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip }, 
 			popup_menu(
 				-class		=> 'options',
@@ -2801,12 +2802,13 @@ sub build_option_html {
 				-labels		=> $label,
 				-default	=> $current,
 				-onChange	=> $arg->{onChange},
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
 	# text field
 	} elsif ( $type eq 'text' ) {
-		push @html, th( { -class => 'options', -title => $tooltip }, $title ).
+		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
 		td( { -class => 'options', -title => $tooltip },
 			textfield(
 				-class		=> 'options',
@@ -2814,6 +2816,7 @@ sub build_option_html {
 				-value		=> $current,
 				-size		=> $value,
 				-onKeyDown	=> 'return submitonEnter(event);',
+				"aria-labelledby"	=> "label_option_$webvar",
 			)
 		);
 
