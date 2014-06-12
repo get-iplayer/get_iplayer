@@ -120,6 +120,7 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  TV modes typically have two streams available."],
+	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them.  Applied only to RTMP streams."],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
@@ -5070,6 +5071,24 @@ sub download_thumbnail {
 }
 
 
+sub check_duration {
+	my $prog = shift;
+	return unless $prog->{duration} && $prog->{filename};
+	my $ffout = `"$bin->{ffmpeg}" -i "$prog->{filename}" 2>&1`;
+	if ( $ffout =~ /duration:\s+((\d+):(\d\d):(\d\d))/i ) {
+		my $expected_s = $prog->{duration};
+		my $expected = sprintf("%02d:%02d:%02d", $expected_s / 3600, ($expected_s % 3600) / 60, $expected_s % 60);
+		my $recorded_s = ($2 * 3600) + ($3 * 60) + $4;
+		my $recorded = $1;
+		my $diff_s = abs($recorded_s - $expected_s);
+		my $diff_sign = $recorded_s < $expected_s ? "-" : "";
+		my $diff = sprintf("$diff_sign%02d:%02d:%02d", $diff_s / 3600, ($diff_s % 3600) / 60, $diff_s % 60);
+		main::logger "\nINFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $prog->{filename}\n\n";
+	} else {
+		main::logger "WARNING: Could not determine recorded duration of file: $prog->{filename}\n";
+	}
+}
+
 
 ################### iPlayer Parent class #################
 package Programme::bbciplayer;
@@ -8745,7 +8764,10 @@ sub get {
 
 	# Retain raw flv format if required
 	if ( $opt->{raw} ) {
-		move($file_tmp, $prog->{filename}) if $file_tmp ne $prog->{filename} && ! $opt->{stdout};
+		if ( $file_tmp ne $prog->{filename} && ! $opt->{stdout} ) {
+			move($file_tmp, $prog->{filename});
+			$prog->check_duration() if $opt->{checkduration} && !$streamdata{live};
+		}
 		return 0;
 
 	# Convert flv to mp3/aac
@@ -8813,7 +8835,10 @@ sub get {
 		$prog->{filename} = $file_tmp;
 	}
 	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
+	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
+		move($prog->{filepart}, $prog->{filename}); 
+		$prog->check_duration() if $opt->{checkduration} && !$streamdata{live};
+	}
 	
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
