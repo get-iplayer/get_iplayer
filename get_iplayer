@@ -941,9 +941,11 @@ sub download_pid_not_in_cache {
 	# Display pid match for recording
 	if ( $opt->{history} ) {
 		$hist->list_progs( 'pid:'.$pid );
+	} else {
+		list_progs( { $this->{type} => 1 }, $this );
 	}
 	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} ) ) {
 		return $this->download_retry_loop( $hist );
 	}
 }
@@ -971,7 +973,7 @@ sub download_pid_in_cache {
 		list_progs( { $this->{type} => 1 }, $this );
 	}
 	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} ) ) {
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} ) ) {
 		$retcode = $this->download_retry_loop( $hist );
 	}
 	return $retcode;
@@ -1247,7 +1249,7 @@ sub list_progs {
 					}
 				# Normal mode
 				} else {
-					$this->list_entry( '', 0, $number_of_types );
+					$this->list_entry( '', 0, $number_of_types ) if ( $this->{name} );
 				}
 			}
 		}
