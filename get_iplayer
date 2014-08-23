@@ -3397,6 +3397,9 @@ sub add {
 	my $entry = get( $opt, $optfile );
 
 	# Add search args to opts
+	if ( defined $this_cmdline->{search} ) {
+		push @search_args, $this_cmdline->{search};
+	}
 	$this_cmdline->{search} = '('.(join '|', @search_args).')' if @search_args;
 
 	# Merge all cmdline opts into $entry except for these
@@ -3434,7 +3437,7 @@ sub del {
 	# Merge all cmdline opts into $entry except for these
 	my $regex = $opt->excludeopts;
 	for ( grep !/$regex/, keys %{ $this_cmdline } ) {
-		main::logger "INFO: Deleted option '$_' = '$this_cmdline->{$_}'\n" if defined $this_cmdline->{$_} && defined $entry->{$_};
+		main::logger "INFO: Deleted option '$_' = '$entry->{$_}'\n" if defined $this_cmdline->{$_} && defined $entry->{$_};
 		delete $entry->{$_} if defined $this_cmdline->{$_};
 	}
 
