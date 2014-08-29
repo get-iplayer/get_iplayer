@@ -599,6 +599,7 @@ my $pvr = Pvr->new();
 # Set some class-wide values
 $pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
 
+my $retcode = 0;
 # Trim history
 if ( defined($opt->{trimhistory}) ) {
 	my $hist = History->new();
@@ -643,19 +644,19 @@ if ( defined($opt->{trimhistory}) ) {
 } elsif ( $opt->{pvr} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	$pvr->run( @search_args );
+	$retcode = $pvr->run( @search_args );
 	unlink $lockfile;
 
 } elsif ( $opt->{pvrsingle} ) {
 	# PVR Lockfile detection (with 12 hrs stale lockfile check)
 	lockfile( 43200 ) if ! $opt->{test};
-	$pvr->run( '^'.$opt->{pvrsingle}.'$' );
+	$retcode = $pvr->run( '^'.$opt->{pvrsingle}.'$' );
 	unlink $lockfile;
 
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
-	find_pid_matches( $hist );
+	$retcode = find_pid_matches( $hist );
 
 # Show history
 } elsif ( $opt->{history} ) {
@@ -669,10 +670,10 @@ if ( defined($opt->{trimhistory}) ) {
 		exit 1;
 	}
 	my $hist = History->new();
-	download_matches( $hist, find_matches( $hist, @search_args ) );
+	$retcode = download_matches( $hist, find_matches( $hist, @search_args ) );
 	purge_downloaded_files( $hist, 30 );
 }
-exit 0;
+exit $retcode;
 
 
 
@@ -9677,6 +9678,7 @@ sub run {
 	# For each PVR search (or single one if specified)
 	my @names = ( grep !/$exclude_regex/i, grep /$pvr_name_regex/i, sort {lc $a cmp lc $b} keys %{$pvr} );
 
+	my $retcode = 0;
 	main::logger "Running PVR Searches:\n";
 	for my $name ( @names ) {
 		# Ignore if this search is disabled
@@ -9700,16 +9702,22 @@ sub run {
 		# Do the recording (force --get option)
 		$opt->{get} = 1 if ! $opt->{test};
 
+		my $failcount = 0;
 		# If this is a one-off queue pid entry then delete the PVR entry upon successful recording(s)
 		if ( $pvr->{$name}->{pid} && $name =~ /^ONCE_/ ) {
-			my $failcount = main::find_pid_matches( $hist );
+			$failcount = main::find_pid_matches( $hist );
 			$pvr->del( $name ) if not $failcount;
 
 		# Just make recordings of matching progs
 		} else {
-			main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
+			$failcount = main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
 		}
+		if ( $failcount ) {
+			main::logger "WARNING: PVR Run: $name: $failcount download failure(s)\n";
+		}
+		$retcode += $failcount
 	}
+	return $retcode;
 }
 
 
@@ -9727,7 +9735,10 @@ sub run_scheduler {
 		for ( keys %$memcache ) {
 			delete $memcache->{$_};
 		}
-		$pvr->run();
+		my $retcode = $pvr->run();
+		if ( $retcode ) {
+			main::logger "WARNING: PVR Scheduler: ".localtime().": $retcode download failure(s) \n";
+		}
 		my $remaining = $interval - ( time() - $start_time );
 		if ( $remaining > 0 ) {
 			main::logger "INFO: Sleeping for $remaining secs\n";
