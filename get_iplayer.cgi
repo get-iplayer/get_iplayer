@@ -3444,11 +3444,9 @@ sub form_header {
 	print $fh div( { -class=>'nav' },
 		ul( { -class=>'nav' },
 			li( { -id=>'logo', -class=>'nav_tab' },
-				a( { -class=>'nav', -href=>$request_host },
-					span( { -class=>'logotext' }, 'get_iplayer' )
-				),
+				span( { -class=>'logotext' }, 'get_iplayer' )
 			).
-			li( { -class=>$class->{search} }, a( { -class=>'nav', -title=>'Main search page', -href => $request_host }, 'Search' ) ).
+			li( { -class=>$class->{search} }, a( { -class=>'nav', -title=>'Main search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_progs'; formheader.submit(); RestoreFormVars(formheader);" }, 'Search' ) ).
 			li( { -class=>$class->{recordings} }, a( { -class=>'nav', -title=>'History search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);" }, 'Recordings' ) ).
 			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
 			li( { -class=>$class->{pvrrun} }, a( { -class=>'nav', -title=>'Run the PVR now - wait for the PVR to complete', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';" }, 'Run PVR' ) ).
