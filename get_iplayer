@@ -5228,7 +5228,7 @@ sub get_verpids {
 	} else {
 		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
 		# use the audiodescribed playlist url if non-default versions are specified
-		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/i;
+		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/;
 	}
 	
 	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
@@ -5367,7 +5367,7 @@ sub get_verpids {
 			if ( m{<alternate\s+id="(.+?)"} ) {
 				$curr_version = lc($1);
 				# Remap version name from 'default' => 'audiodescribed' if we are using the /ad playlist URL:
-				if ( defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/i ) {
+				if ( defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/ ) {
 					$curr_version = 'audiodescribed' if $curr_version eq 'default';
 				}
 			}
