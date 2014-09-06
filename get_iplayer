@@ -8689,11 +8689,6 @@ sub get {
 		unlink( $file_tmp );
 	}
 		
-	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
-	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
-	}
-
 	# rtmpdump version detection e.g. 'RTMPDump v2.4'
 	my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
 	if ( $opt->{verbose} ) {
@@ -8742,6 +8737,11 @@ sub get {
 	push @cmdopts, ( '--resume', '-o', $file_tmp ) if ! ( $opt->{stdout} && $opt->{nowrite} );
 	push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
 	
+	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
+	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
+		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
+	}
+
 	my $return;
 	# Different invocation depending on version
 	# if playpath is defined
