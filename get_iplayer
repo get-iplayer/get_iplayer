@@ -344,18 +344,24 @@ my $profile_dir;
 my $optfile_system;
 
 # Options directories specified by env vars
-if ( defined $ENV{GETIPLAYERUSERPREFS} && $ENV{GETIPLAYERSYSPREFS} ) {
+if ( defined $ENV{GETIPLAYERUSERPREFS} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYERUSERPREFS};
-	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
-
 # Otherwise look for windows style file locations
 } elsif ( defined $ENV{USERPROFILE} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
-	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
-
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
+}
+
+# System options file specified by env var
+if ( defined $ENV{GETIPLAYERSYSPREFS} ) {
+	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
+# Otherwise look for windows style file locations
+} elsif ( defined $ENV{ALLUSERSPROFILE} ) {
+	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+# System options on unix-like systems
+} else {
 	$optfile_system = '/etc/get_iplayer/options';
 	# Show warning if this deprecated location exists and is not a symlink
 	if ( -f '/var/lib/get_iplayer/options' && ! -l '/var/lib/get_iplayer/options' ) {
