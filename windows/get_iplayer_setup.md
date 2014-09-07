@@ -1,6 +1,6 @@
 ## get_player Windows installer
 
-This document contains instructions for building the `get_iplayer` Windows installer and provides additional notes for installer developers. The information below is current for version 4.7 of the installer.
+This document contains instructions for building the `get_iplayer` Windows installer and provides additional notes for installer developers. The information below is current for version 4.9 of the installer.
 
 ## Building the Installer
 
@@ -10,16 +10,16 @@ This document contains instructions for building the `get_iplayer` Windows insta
 
 	Source: <http://strawberryperl.com>
 
-	Version: 5.16.3.1
+	Version: 5.18.2.2 (32-bit)
 
-	The installer is built with the Strawberry Perl distribution that is in your system path.  If you are using a different version, you may need to uninstall it and temporarily install the appropriate version.  Note that Strawberry Perl 5.12+ provides a mechanism to switch between versions without uninstalling.
+	The installer is built with the Strawberry Perl portable distribution. Launch the appropriate version of `portableshell.bat` to build the installer.  Only use the 32-bit edition of Strawberry Perl.
 
 2. **Perl Modules**
 
 	Additional modules must be installed into the Strawberry Perl distribution used to build the installer:
 
-	* PAR::Packer (1.014) - Used to build installer
-    * HTML::Parser (3.71) - Used for downloading embedded clips (only install from CPAN if distributed version &lt; 3.71)
+	* PAR::Packer (1.020) - Used to build installer
+    * HTML::Parser (3.71) - Used for downloading embedded clips (only install from CPAN if distributed version lower than 3.71)
 	* MP3::Info (1.13) - Used in localfiles plugin
 	* MP3::Tag (1.24) - Used to enhance MP3 tagging
 	* Authen::SASL (2.16) - Used for SSL secure email
@@ -82,7 +82,7 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 
 3. **Check Build Configuration**
 
-	The script `make-init.cmd` sets the locations of Strawberry Perl, NSIS, and 7-Zip used for the build.  Edit the relevant values if necessary.
+	The script `make-init.cmd` sets the locations of Strawberry Perl, NSIS, and 7-Zip used for the build.  Edit the relevant values appropriately before attempting to build the installer.
 
 4. **Check Installer Version**
 
@@ -108,9 +108,9 @@ In the instructions below, replace with `C:\installer` with an appropriate locat
 
     The build script creates 4 files in the build directory:
 
-	* `get_iplayer_setup_4.7.exe` - `get_player` installer application
-	* `perlfiles_4.7.zip`             - Archive of Perl support files included in the installer
-	* `perlpar_4.7.exe`               - PAR (Perl ARchive) file used to create perlfiles.zip
+	* `get_iplayer_setup_4.9.exe` - `get_player` installer application
+	* `perlfiles_4.9.zip`         - Archive of Perl support files included in the installer
+	* `perlpar_4.9.exe`           - PAR (Perl ARchive) file used to create perlfiles.zip
 	* `make-installer.log`        - Log of output from build script
 
 	In the event of an error, the temporary folder used by the script (`make-installer.tmp`) will remain in the build directory.
@@ -197,19 +197,19 @@ The installer application is deployed in the directory corresponding to `http://
 
     `$ cd $WEBROOT/get_iplayer_win`
 
-2. Copy the installer application (e.g., `get_iplayer_setup_4.7.exe`) into the directory
+2. Copy the installer application (e.g., `get_iplayer_setup_4.9.exe`) into the directory
 
-    `$ cp $BUILDPATH/get_iplayer_setup_4.7.exe .`
+    `$ cp $BUILDPATH/get_iplayer_setup_4.9.exe .`
 
     **NOTE:** For installers version 4.2 and earlier, the application MUST be named in the form `get_iplayer_setup_N.N.exe` in order that it can be downloaded by those earlier installers.  Versions 4.3+ will download new installers via the symbolic link (below)
 
 3. Update the `get_iplayer_setup_latest.exe` symbolic link to refer to the new installer
 
-    `$ ln -sf get_iplayer_setup_4.7.exe get_iplayer_setup_latest.exe`
+    `$ ln -sf get_iplayer_setup_4.9.exe get_iplayer_setup_latest.exe`
 
-4. Update the contents of the installer version file with the new version (e.g. 4.7)
+4. Update the contents of the installer version file with the new version (e.g. 4.9)
 
-    `$ echo -n "4.7" > VERSION-get_iplayer-win-installer`
+    `$ echo -n "4.9" > VERSION-get_iplayer-win-installer`
 
     **NOTE:** For installers version 4.2 and earlier, the version file MUST NOT contain a trailing newline character after the version number (thus the `-n` option for `echo`).  A trailing newline character will break the installer update mechanism.  This is fixed in versions 4.3+.
 

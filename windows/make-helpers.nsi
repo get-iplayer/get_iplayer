@@ -24,12 +24,12 @@ Page instfiles
 ; TODO: finalise URLs
 ; URLs for helper app downloads
 
-!define MPLAYER_URL "http://sourceforge.net/projects/mplayerwin/files/MPlayer-MEncoder/r36348/mplayer-svn-36348.7z/download"
+!define MPLAYER_URL "http://sourceforge.net/projects/get-iplayer/files/win32/utils/mplayer-svn-r32050-4.5.0/mplayer.exe/download"
 !define LAME_URL "http://www.rarewares.org/files/mp3/lame3.99.5.zip"
-!define FFMPEG_URL "http://ffmpeg.zeranoe.com/builds/win32/static/ffmpeg-1.2-win32-static.7z"
-!define VLC_URL "http://get.videolan.org/vlc/2.0.6/win32/vlc-2.0.6-win32.7z"
-!define RTMPDUMP_URL "http://rtmpdump.mplayerhq.hu/download/rtmpdump-2.4-git-010913-windows.zip"
-!define ATOMICPARSLEY_URL "http://cdn.bitbucket.org/jonhedgerows/atomicparsley/downloads/AtomicParsley-0.9.4-hg103.396d3bd13c73.zip"
+!define FFMPEG_URL "http://ffmpeg.zeranoe.com/builds/win32/static/ffmpeg-2.2.3-win32-static.7z"
+!define VLC_URL "http://get.videolan.org/vlc/2.1.5/win32/vlc-2.1.5-win32.7z"
+!define RTMPDUMP_URL "http://ffmpeg.zeranoe.com/builds/win32/external_libs/rtmpdump-20140302-git-79459a2-win32.7z"
+!define ATOMICPARSLEY_URL "https://bitbucket.org/jonhedgerows/atomicparsley/downloads/AtomicParsley-0.9.6-hg109.9183fff907bf.zip"
 
 ; !define MPLAYER_URL "http://www.infradead.org/cgi-bin/get_iplayer.cgi?mplayer"
 ; !define LAME_URL "http://www.infradead.org/cgi-bin/get_iplayer.cgi?lame"

@@ -54,6 +54,8 @@ REM include optional modules - pp will check if present
 set PPMODS=-M MP3::Tag -M MP3::Info -M Net::SMTP -M Net::SMTP::SSL -M Authen::SASL -M Net::SMTP::TLS::ButMaintained
 REM force XML parsers into PAR
 set PPMODS=%PPMODS% -M XML::LibXML::SAX -M XML::LibXML::SAX::Parser -M XML::SAX::PurePerl -M XML::Parser
+REM force Encode::Byte into PAR
+set PPMODS=%PPMODS% -M Encode::Byte
 call :log Running pp...
 REM run pp
 call perl "%PP%" %PPMODS% -o "%TMPDIR%\%PAREXE%" "%GIPDIR%\get_iplayer" "%GIPDIR%\get_iplayer.cgi" >> "%LOG%" 2>&1
@@ -74,9 +76,8 @@ if not exist "%GIPPAR%" (
 :parskip
 REM unpack lib dir from PAR
 call :log Unpacking Perl library...
-REM filter out get_iplayer scripts and some unicore files
-"%P7ZIP%" x "%GIPPAR%" -o"%TMPDIR%" -aoa -xr^^!get_iplayer* -xr^^!lib\unicore\*.txt ^
-    -x^^!lib\unicore\mktables* -x^^!lib\unicore\TestProp.pl lib >> "%LOG%" 2>&1
+REM filter out get_iplayer scripts
+"%P7ZIP%" x "%GIPPAR%" -o"%TMPDIR%" -aoa -xr^^!get_iplayer*
 call :log ...Finished
 REM copy additional files from Strawberry Perl
 call :log Copying Perl support files...

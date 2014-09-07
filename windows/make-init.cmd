@@ -9,7 +9,7 @@ for %%D in (%CMDDIR%..\..) do (
     set BASEDIR=%%~fD
 )
 REM location of Strawberry Perl
-set PERLDIST=E:\perl-5.16.3.1
+set PERLDIST=E:\perl-5.18.2.2
 REM location of get_iplayer source
 set GIPDIR=%BASEDIR%\get_iplayer
 REM location of installer script
