@@ -428,6 +428,12 @@ Options->get_class_options( "Streamer::$_" ) for qw( mms rtmp rtsp iphone mms 3g
 # Parse the cmdline using the opt_format hash
 Options->usage( 0 ) if not $opt_cmdline->parse();
 
+# process --start and --stop if necessary
+foreach ('start', 'stop') {
+	if ($opt_cmdline->{$_} && $opt_cmdline->{$_} =~ /(\d\d):(\d\d)(:(\d\d))?/) {
+		$opt_cmdline->{$_} = $1 * 3600 +  $2 * 60 + $4;
+	}
+}
 
 # Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
 if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
@@ -563,13 +569,6 @@ if ( $opt->{webrequest} ) {
 	# Remove this option now we've processed it
 	delete $opt->{webrequest};
 	delete $opt_cmdline->{webrequest};
-}
-
-# process --start and --stop if necessary
-foreach ('start', 'stop') {
-	if ($opt->{$_} && $opt->{$_} =~ /(\d\d):(\d\d)(:(\d\d))?/) {
-		$opt->{$_} = $1 * 3600 +  $2 * 60 + $4;
-	}
 }
 
 # Add --search option to @search_args if specified
