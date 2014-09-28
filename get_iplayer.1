@@ -327,7 +327,7 @@ SMTP server IP address to use to send email (default: localhost)
 Email username
 .TP
 \fB\-\-fatfilename
-Omit characters forbidden by FAT filesystems from file and directory names.  Removes non\-ASCII (accented) characters. Ignored unless \-\-whitespace also specified. Set by default on Windows.
+Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides \-\-punctuation.
 .TP
 \fB\-\-file\-prefix <format>
 The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>\-<episode>\-<pid>'
@@ -336,13 +336,16 @@ The filename prefix (excluding dir and extension) using formatting fields. e.g. 
 Create Freevo FXD XML of matching programmes in specified file
 .TP
 \fB\-\-hfsfilename
-Remove colons in file and directory names. Useful ONLY to prevent OS X Finder displaying colon as forward slash. Ignored unless \-\-whitespace also specified.
+Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides \-\-punctuation.
 .TP
 \fB\-\-html <file>
 Create basic HTML index of matching programmes in specified file
 .TP
 \fB\-\-isodate
 Use ISO8601 dates (YYYY\-MM\-DD) in filenames and subdirectory paths
+.TP
+\fB\-\-keep\-all
+Keep whitespace, all possible punctuation and non\-ASCII characters in file and directory names. Shortcut for: \-\-whitespace \-\-non\-ascii \-\-punctuation.
 .TP
 \fB\-\-metadata <type>
 Create metadata info file after recording. Valid types are: xbmc (or kodi), xbmc_movie (or kodi_movie), freevo, generic
@@ -355,6 +358,9 @@ Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit
 .TP
 \fB\-\-mythtv <file>
 Create Mythtv streams XML of matching programmes in specified file
+.TP
+\fB\-\-non\-ascii, \-\-na
+Keep non\-ASCII characters in file and directory names. Default behaviour is to remove all non\-ASCII characters.
 .TP
 \fB\-\-nowrite, \-n
 No writing of file to disk (use with \-x to prevent a copy being stored on disk)
@@ -383,6 +389,9 @@ Output directory for tv recordings (overrides \-\-output)
 \fB\-\-player '<command> <options>'
 Use specified command to directly play the stream
 .TP
+\fB\-\-punctuation, \-\-pu
+Keep punctuation characters and symbols in file and directory names, with ellipsis always replaced by underscore. Default behaviour is to remove all punctuation and symbols except underscore, hyphen and full stop. Overridden by \-\-fatfilename and \-\-hfsfilename.
+.TP
 \fB\-\-stdout, \-x
 Additionally stream to STDOUT (so you can pipe output to a player)
 .TP
@@ -408,7 +417,7 @@ Default thumbnail size/index to use for the current recording and metadata (see 
 Default thumbnail size/index to use when building cache and index (see \-\-info for thumbnailN: to get size/index)
 .TP
 \fB\-\-whitespace, \-w
-Keep whitespace, punctuation chars and non\-ASCII chars in filenames. Without \-\-whitespace most punctuation chars and all non\-ASCII chars are removed and all whitespace is converted to underscores.
+Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores.
 .TP
 \fB\-\-xml\-alpha
 Create freevo/Mythtv menu sorted alphabetically by programme name

@@ -71,6 +71,7 @@ use POSIX qw(:termios_h);
 use strict;
 #use warnings;
 use Time::Local;
+use Unicode::Normalize;
 use URI;
 use open qw(:utf8);
 
@@ -177,18 +178,21 @@ my $opt_format = {
 	emailpassword	=> [ 1, "emailpassword|email-password=s", 'Output', '--email-password <password>', "Email password"],
 	emailport       => [ 1, "emailport|email-port=s", 'Output', '--email-port <port number>', "Email port number (default: appropriate port for --email-security)"],
 	emailuser	=> [ 1, "emailuser|email-user=s", 'Output', '--email-user <username>', "Email username"],
-	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Omit characters forbidden by FAT filesystems from file and directory names.  Removes non-ASCII (accented) characters. Ignored unless --whitespace also specified. Set by default on Windows."],
+	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Output', '--fatfilename', "Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides --punctuation."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Output', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
-	hfsfilename	=> [ 1, "hfsfilenames|hfsfilename!", 'Output', '--hfsfilename', "Remove colons in file and directory names. Useful ONLY to prevent OS X Finder displaying colon as forward slash. Ignored unless --whitespace also specified."],
+	hfsfilename	=> [ 1, "hfsfilenames|hfsfilename!", 'Output', '--hfsfilename', "Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides --punctuation."],
 	html		=> [ 1, "html=s", 'Output', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Output', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames and subdirectory paths"],
+	keepall		=> [ 1, "keepall|keep-all!", 'Output', '--keep-all', "Keep whitespace, all possible punctuation and non-ASCII characters in file and directory names. Shortcut for: --whitespace --non-ascii --punctuation."],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc (or kodi), xbmc_movie (or kodi_movie), freevo, generic"],
 	mkv			=> [ 1, "mkv", 'Output', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
 	mythtv		=> [ 1, "mythtv=s", 'Output', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
+	nonascii	=> [ 1, "na|nonascii|non-ascii!", 'Output', '--non-ascii, --na', "Keep non-ASCII characters in file and directory names. Default behaviour is to remove all non-ASCII characters."],
 	nowrite		=> [ 1, "no-write|nowrite|n!", 'Output', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	player		=> [ 0, "player=s", 'Output', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
+	punctuation	=> [ 1, "symbols|pu|punct|punctuation!", 'Output', '--punctuation, --pu', "Keep punctuation characters and symbols in file and directory names, with ellipsis always replaced by underscore. Default behaviour is to remove all punctuation and symbols except underscore, hyphen and full stop. Overridden by --fatfilename and --hfsfilename."],
 	stdout		=> [ 1, "stdout|x", 'Output', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
 	stream		=> [ 0, "stream!", 'Output', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
@@ -197,7 +201,7 @@ my $opt_format = {
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache and index (see --info for thumbnailN: to get size/index)"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata (see --info for thumbnailN: to get size/index)"],
-	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace, punctuation chars and non-ASCII chars in filenames. Without --whitespace most punctuation chars and all non-ASCII chars are removed and all whitespace is converted to underscores."],
+	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores."],
 	xmlchannels	=> [ 1, "xml-channels|fxd-channels!", 'Output', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
 	xmlnames	=> [ 1, "xml-names|fxd-names!", 'Output', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha!", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
@@ -330,8 +334,6 @@ $opt->{silent} = $opt->{quiet} = 1 if $opt_pre->{silent};
 $opt->{quiet} = 1 if $opt_pre->{quiet};
 $opt->{pvr} = 1 if $opt_pre->{pvr};
 $opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
-# force fatfilename as default on Windows
-$opt->{fatfilename} = 1 if $^O eq "MSWin32";
 
 # show version and exit
 if ( $opt_pre->{showver} ) {
@@ -413,7 +415,7 @@ if ( $opt_pre->{preset} ) {
 	# create dir if it does not exist
 	mkpath "${profile_dir}/presets/" if ! -d "${profile_dir}/presets/";
         # Sanitize preset file name
-	my $presetname = StringUtils::sanitize_path( $opt_pre->{preset} );
+	my $presetname = StringUtils::sanitize_path( $opt_pre->{preset}, 0, 1 );
 	$optfile_preset = "${profile_dir}/presets/${presetname}";
 	logger "INFO: Using user options preset '${presetname}'\n";
 }
@@ -683,6 +685,12 @@ exit $retcode;
 
 
 sub init_search {
+	if ( $opt->{keepall} ) {
+		$opt->{whitespace} = 1;
+		$opt->{nonascii} = 1;
+		$opt->{punctuation} = 1;
+	}
+	
 	# Set --subtitles if --subsonly is used
 	if ( $opt->{subsonly} ) {
 		$opt->{subtitles} = 1;
@@ -2899,6 +2907,73 @@ sub StringUtils::clean_utf8_and_whitespace {
 	$_[0] =~ s/(^\s+|\s+$)//g;
 }
 
+# Remove diacritical marks
+sub StringUtils::remove_marks {
+	my $string = shift;
+	$string = NFKD($string);
+	$string =~ s/\pM//g;
+	return $string;
+}
+
+# Convert unwanted punctuation to ASCII
+sub StringUtils::convert_punctuation {
+	my $string = shift;
+	# die smart quotes die
+	$string =~ s/[\x{0060}\x{00B4}\x{2018}\x{2019}\x{201A}\x{2039}\x{203A}]/'/g;
+	$string =~ s/[\x{201C}\x{201D}\x{201E}]/"/g;
+	$string =~ s/[\x{2013}\x{2014}]/-/g;
+	$string =~ s/[\x{2026}]/.../g;
+	return $string;
+}
+
+# Generic
+# Make a filename/path sane
+sub StringUtils::sanitize_path {
+	my $string = shift;
+	my $is_path = shift || 0;
+	my $force_default = shift || 0;
+	my $default_bad = '[^a-zA-Z0-9_\-\.\/\s]';
+	my $punct_bad = '[!"#$%&\'()*+,:;<=>?@[\]^`{|}~]';
+	my $fat_bad = '["\'*+,:;<=>?[\]^`|]';
+	my $hfs_bad = '[:]';
+	# Replace forward slashes with _ if not path
+	$string =~ s/\//_/g unless $is_path;
+	# Replace backslashes with _ if not Windows path
+	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
+	# ASCII-fy some punctuation
+	$string = StringUtils::convert_punctuation($string);
+	# Replace ellipsis with _
+	$string =~ s/\.{3}/_/g;
+	# Truncate duplicate colon/semi-colon/comma
+	$string =~ s/([:;,])(\1)+/$1/g;
+	# Add whitespace behind colon/semi-colon/comma if not present
+	$string =~ s/([:;,])(\S)/$1 $2/g;
+	# Remove extra/leading/trailing whitespace
+	$string =~ s/\s+/ /g;
+	$string =~ s/(^\s+|\s+$)//g;
+	# Replace whitespace with _ unless --whitespace
+	$string =~ s/\s/_/g unless $opt->{whitespace};
+	# Truncate multiple replacement chars
+	$string =~ s/_+/_/g;
+	# Remove non-ASCII chars unless --nonascii or force default
+	if ( $force_default || ! $opt->{nonascii} ) {
+		$string = StringUtils::remove_marks($string);
+		$string =~ s/[^\x{20}-\x{7e}]//g;
+	}
+	# Remove most punctuation chars unless --punctuation or force default
+	if ( $force_default || ! $opt->{punctuation} ) {
+		$string =~ s/$punct_bad//g
+	}
+	# Remove FAT-unfriendly chars if --fatfilename or Windows and not force default
+	if ( ! $force_default && ( $opt->{fatfilename} || $^O eq "MSWin32" ) ) {
+		$string =~ s/$fat_bad//g;
+	}
+	# Remove HFS-unfriendly chars if --hfsfilename or OS X and not force default
+	if ( ! $force_default && ( $opt->{hfsfilename} || $^O eq "darwin" ) ) {
+		$string =~ s/$hfs_bad//g;
+	}
+	return $string;
+}
 
 
 # Generic
@@ -2912,38 +2987,6 @@ sub cleanup {
 	$SIGORIG{$signal}->() if ref($SIGORIG{$signal}) eq 'CODE';
 	exit 1;
 }
-
-
-
-# Generic
-# Make a filename/path sane
-sub StringUtils::sanitize_path {
-	my $string = shift;
-	my $is_path = shift || 0;
-	# Replace leading/trailing ellipsis with _
-	$string =~ s/(^\.+|\.+$)/_/g;
-	# Replace forward slashes with _ if not path
-	$string =~ s/\//_/g unless $is_path;
-	# Replace backslashes with _ if not Windows path
-	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
-	# Remove extra/leading/trailing whitespace
-	$string =~ s/\s+/ /g;
-	$string =~ s/(^\s+|\s+$)//g;
-	# Replace whitespace with _ unless --whitespace
-	$string =~ s/\s+/_/g unless $opt->{whitespace};
-	# Truncate multiple replacement chars
-	$string =~ s/_+/_/g;
-	# Remove non-ASCII and most punctuation unless --whitespace
-	$string =~ s/[^a-zA-Z0-9_\-\.\/\s]//gi unless $opt->{whitespace};
-	# Remove FAT forbidden chars if --fatfilename and --whitespace
-	$string =~ s/[\|\?\*\+\"\:\<\>\[\]]//g if ($opt->{fatfilename} && $opt->{whitespace});
-	# Remove non-ASCII if --fatfilename and --whitespace
-	$string =~ s/[^\x{20}-\x{7E}]//g if ($opt->{fatfilename} && $opt->{whitespace});
-	# Remove colon if --hfsfilename and --whitespace
-	$string =~ s/://g if ($opt->{hfsfilename} && $opt->{whitespace});
-	return $string;
-}
-
 
 
 # Uses: global $lockfile
@@ -9969,7 +10012,7 @@ sub save {
 	my $name = shift;
 	my @options = @_;
 	# Sanitize name
-	$name = StringUtils::sanitize_path( $name );
+	$name = StringUtils::sanitize_path( $name, 0, 1 );
 	# Make dir if not existing
 	mkpath $vars{pvr_dir} if ! -d $vars{pvr_dir};
 	main::logger "INFO: Saving PVR search '$name':\n";

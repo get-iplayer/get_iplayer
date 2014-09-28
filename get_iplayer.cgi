@@ -2269,7 +2269,7 @@ sub search_absolute_path {
 	# rewrite win32 paths
 	if ( IS_WIN32 ) {
 		# add a hardcoded prefix for now if relative path (assume relative to local get_iplayer script)
-		if ( $filename !~ m{^[A-Za-z]:} && $filename =~ m{^(\.|\.\.|[A-Za-z])} ) {
+		if ( $filename !~ m{^[A-Za-z]:} && $filename =~ m{^(\.|\.\.|[A-Za-z_])} ) {
 			$filename = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
 		}
 		# twiddle the / to \
@@ -2415,8 +2415,11 @@ sub recordings_delete {
 		my $fileregex = basename( $filename );
 		# get the filename less the ext
 		$fileregex =~ s/\.\w+$//g;
+		# escape regex metachars
+		$fileregex =~ s/([\\\^\$\.\|\?\*\+\(\)\[\]])/\\$1/g;
 		$fileregex .= '\.\w+$';
 		# Find matching files <filename>.*
+		my $deleted;
 		if ( opendir DIR, $dir ) {
 			for my $file ( grep { /$fileregex/ } readdir(DIR) ) {
 				# Use absolute path
@@ -2424,12 +2427,17 @@ sub recordings_delete {
 				if ( -f $file ) {
 					if ( ! unlink( $file ) ) {
 						print $fh p("ERROR: Failed to delete $file");
+					} else {
+						$deleted = 1;
+						print $fh p("Successfully deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
 					}
 				} else {
 					print $fh p("ERROR: File does not exist for: $type: '$name - $episode', MODE: $mode, PID: $pid, FILENAME: $filename");
 				}
 			}
-			print $fh p("Successfully deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
+			if ( ! $deleted ) {
+				print $fh p("No files deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");				
+			}
 			closedir(DIR);
 		} else {
 			print $fh p("ERROR: Cannot open dir '$dir' for file deletion\n");
