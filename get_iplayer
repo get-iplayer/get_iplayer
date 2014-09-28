@@ -71,6 +71,8 @@ use strict;
 #use warnings;
 use Time::Local;
 use URI;
+use open qw(:utf8);
+
 my %SIGORIG;
 # Save default SIG actions
 $SIGORIG{$_} = $SIG{$_} for keys %SIG;
@@ -2620,9 +2622,10 @@ sub request_url_retry {
 
 	# Only return decoded content if gzip is used - otherwise this severely slows down stco scanning! Perl bug?
 	main::logger "DEBUG: ".($res->header('Content-Encoding') || 'No')." Encoding used on $url\n" if $opt->{debug};
-	return $res->decoded_content if defined $res->header('Content-Encoding') && $res->header('Content-Encoding') eq 'gzip';
-
-	return $res->content;
+	# this appears to be obsolete
+	# return $res->decoded_content if defined $res->header('Content-Encoding') && $res->header('Content-Encoding') eq 'gzip';
+	# return $res->content;
+	return $res->decoded_content;
 }
 
 
