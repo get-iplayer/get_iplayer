@@ -51,6 +51,7 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 # Known Issues:
 # * CAVEAT: The filenames and modes in the history are comma-separated if there was a multimode download. For now it just uses the first one.
 #
+use utf8;
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -10066,6 +10067,7 @@ sub enable {
 package Tagger;
 use Encode;
 use File::stat;
+use constant FB_EMPTY => sub { '' };
 
 # already in scope
 # my ($opt, $bin);
@@ -10148,6 +10150,9 @@ sub tags_from_metadata {
 		|| ( $opt->{tag_podcast_radio} && ! $tags->{is_video} )
 		|| ( $opt->{tag_podcast_tv} && $tags->{is_video} );
 	$tags->{cnID} = $self->tag_cnid_from_pid($meta->{pid}) if $opt->{tag_cnid};
+	while ( my ($key, $val) = each %{$tags} ) {
+		$tags->{$key} = StringUtils::convert_punctuation($val);
+	}
 	return $tags;
 }
 
@@ -10164,7 +10169,7 @@ sub tag_cnid_from_pid {
 	return $cnid;
 }
 
-# escape/enclose embedded quotes in command line parameters
+# in-place escape/enclose embedded quotes in command line parameters
 sub tags_escape_quotes {
 	my ($tags) = @_;
 	# only necessary for Windows
@@ -10175,6 +10180,14 @@ sub tags_escape_quotes {
 				$tags->{$key} = '"'.$val.'"';
 			}
 		}
+	}
+}
+
+# in-place encode metadata values to iso-8859-1
+sub tags_encode {
+	my ($tags) = @_;
+	while ( my ($key, $val) = each %{$tags} ) {
+		$tags->{$key} = encode("iso-8859-1", $val, FB_EMPTY);
 	}
 }
 
@@ -10212,9 +10225,7 @@ sub tag_file_id3 {
 			$tags->{$_} = '' if ! defined $tags->{$_};
 		}
 		# encode for MP3::Tag
-		while ( my ($key, $val) = each %{$tags} ) {
-			$tags->{$key} = encode("iso-8859-1", $val);
-		}
+		tags_encode($tags);
 		# remove existing tag(s) to avoid decoding errors
 		my $mp3 = MP3::Tag->new($meta->{filename});
 		$mp3->get_tags();
@@ -10294,9 +10305,7 @@ sub tag_file_id3_basic {
 		# handle embedded quotes
 		tags_escape_quotes($tags);
 		# encode for id3v2
-		while ( my ($key, $val) = each %{$tags} ) {
-			$tags->{$key} = encode("iso-8859-1", $val);
-		}
+		tags_encode($tags);
 		# build id3v2 command
 		my @cmd = (
 			$bin->{id3v2},
@@ -10334,14 +10343,11 @@ sub tag_file_mp4 {
 	if ( main::exists_in_path( 'atomicparsley' ) ) {
 		main::logger "INFO: MP4 tagging \U$meta->{ext}\E file\n";
 		# pretty copyright for MP4
-		$tags->{copyright} = "\xA9 $tags->{copyright}" if $tags->{copyright};
+		$tags->{copyright} = "© $tags->{copyright}" if $opt->{tag_utf8};
 		# handle embedded quotes
 		tags_escape_quotes($tags);
 		# encode metadata for atomicparsley
-		my $encoding = $opt->{tag_utf8} ? "utf8" : "iso-8859-1";
-		while ( my ($key, $val) = each %$tags ) {
-			$tags->{$key} = encode($encoding, $val);
-		}
+		tags_encode($tags) unless $opt->{tag_utf8};
 		# build atomicparsley command
 		my @cmd = (
 			$bin->{atomicparsley},
