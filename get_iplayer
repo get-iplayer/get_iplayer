@@ -5131,7 +5131,11 @@ sub get_verpids {
 		# flatten
 		$xml =~ s/\n/ /g;
 		# Find playlist URL in various guises
-		if ( $xml =~ m{<param\s+name="playlist"\s+value="(http.+?)"}i ) {
+ 		# JSON config block
+		if ( $xml =~ m{["\s]pid["\s]:\s?["']([bp]0[a-z0-9]{6})["']} ) {
+			$prog->{pid} = $1;
+			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
+		} elsif ( $xml =~ m{<param\s+name="playlist"\s+value="(http.+?)"}i ) {
 			$url = $1;
 		# setPlaylist("http://www.bbc.co.uk/mundo/meta/dps/2009/06/emp/090625_video_festival_ms.emp.xml")
 		# emp.setPlaylist("http://www.bbc.co.uk/learningzone/clips/clips/p_chin/bb/p_chin_ch_05303_16x9_bb.xml")
@@ -5230,7 +5234,9 @@ sub get_verpids {
 	$xml =~ s/\n/ /g;
 
 	# Detect noItems or no programmes
-	if ( $xml =~ m{<noItems\s+reason="noMedia"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+	if ( $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+		my $rc_json = $prog->get_verpids_json( $ua );
+		return 0 if ! $rc_json;
 		main::logger "\rWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 		return 1;
 	}
@@ -5334,6 +5340,51 @@ sub get_verpids {
 	return 0;
 }
 
+sub get_verpids_json {
+	my ( $prog, $ua ) = @_;
+	if ( $prog->{pid} =~ /^http/i ) {
+		if ( $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/ ) {
+			main::logger "WARNING: pid changed from $prog->{pid} to $1 for JSON playlist\n";
+			$prog->{pid} = $1; 
+		}
+	}
+	my $url = 'http://www.bbc.co.uk/programmes/'.$prog->{pid}.'/playlist.json';
+	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
+	my $json = main::request_url_retry( $ua, $url, 3 );
+	if ( ! $json ) {
+		main::logger "ERROR: Failed to get version pid metadata from iplayer site (JSON)\n";
+		return 1;
+	}
+	my $version_map = {
+		'IPlayerVersion' => 'default',
+		'Original' => 'default', 
+		'DubbedAudioDescribed' => 'audiodescribed', 
+		'Signed' => 'signed'
+	};
+	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
+	my ( $title, $prog_type );
+	$title = $1 if $default =~ /"title":"(.*?)"/;
+	$prog_type = 'tv' if $default =~ /"kind":"video"/;
+	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
+	my @versions = split /"markers"/, $versions;
+	pop @versions;
+	if ( $#versions < 0 ) {
+		main::logger "WARNING: No versions found in metadata retrieved from iplayer site (JSON)\n";
+		return 1;
+	}
+	for ( @versions ) {
+		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
+		my ($verpid, $version);
+		$version = $version_map->{$1} if /"types":\["(.+?)"/;
+		$verpid = $1 if /"vpid":"(.+?)"/;
+		next if ! ($verpid && $version);
+		$prog->{verpids}->{$version} = $verpid;
+		$prog->{durations}->{$version} = $1 if /"duration":(\d+)/;
+	}
+	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
+	$prog->{title} = decode_entities($title);
+	return 0
+}
 
 
 # get full episode metadata given pid and ua. Uses two different urls to get data
