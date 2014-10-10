@@ -5366,6 +5366,18 @@ sub get_verpids_json {
 	$title = $1 if $default =~ /"title":"(.*?)"/;
 	$prog_type = 'tv' if $default =~ /"kind":"video"/;
 	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
+	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.+?)"/;
+	$thumbnail =~ s/\\//g;
+	my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+	my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+	if ( ! $recipe ) {
+		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (JSON)\n";
+		$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
+	}
+	$thumbnail =~ s/\$recipe/$recipe/;
+	$prog->{thumbnail} = $thumbnail if $thumbnail && ! $prog->{thumbnail};
+	my $guidance = $2 if $default =~ /"guidance":(null|"(.+?)")/;
+	$prog->{guidance} = "Yes" if $guidance;
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
 	if ( $#versions < 0 ) {
@@ -6000,6 +6012,26 @@ sub thumb_url_suffixes {
 		5	=> '_528_297.jpg',
 		6	=> '_640_360.jpg',
 		7	=> '_832_468.jpg',
+	}
+}
+
+
+sub thumb_url_recipes {
+	return {
+		86	=> '86x48',
+		150	=> '150x84',
+		178	=> '178x100',
+		512	=> '512x288',
+		528	=> '528x297',
+		640	=> '640x360',
+		832	=> '832x468',
+		1	=> '86x48',
+		2	=> '150x84',
+		3	=> '178x100',
+		4	=> '512x288',
+		5	=> '528x297',
+		6	=> '640x360',
+		7	=> '832x468',
 	}
 }
 
