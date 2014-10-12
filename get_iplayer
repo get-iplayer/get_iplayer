@@ -5500,10 +5500,10 @@ sub get_metadata {
 		# Flatten
 		$entry =~ s|\n| |g;
 
-		if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
-			$expiry = $1;
-			$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
-		}
+		#if ( $entry =~ m{<dcterms:valid>\s*start=.+?;\s*end=(.*?);} ) {
+		#	$expiry = $1;
+		#	$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
+		#}
 		$available = $1 if $entry =~ m{<dcterms:valid>\s*start=(.+?);\s*end=.*?;};
 		$prog_type = $1 if $entry =~ m{medium=\"(\w+?)\"};
 		$prog_type = 'tv' if $prog_type eq 'video';
@@ -5668,6 +5668,11 @@ sub get_metadata {
 		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
 			next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
 			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 / 1024.0 );
+			# get expiry from stream data
+			if ( ! $expiry && $prog->{streams}->{$version}->{$mode}->{expires} ) {
+				$expiry = $prog->{streams}->{$version}->{$mode}->{expires};
+				$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
+			}
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
 		
@@ -6194,6 +6199,7 @@ sub get_stream_data_cdn {
 			identifier	=> $cattribs->{identifier},
 			authstring	=> $cattribs->{authString},
 			priority	=> $cattribs->{priority},
+			expires		=> $mattribs->{expires},
 		};
 
 		# Akamai CDN
