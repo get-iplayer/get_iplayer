@@ -5364,12 +5364,13 @@ sub get_verpids_json {
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
 	my ( $title, $prog_type );
 	$title = $1 if $default =~ /"title":"(.*?)"/;
+	$title =~ s/\\\//\//g;
 	$prog_type = 'tv' if $default =~ /"kind":"video"/;
 	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
 	my $channel = $1 if $default =~ /"masterBrandName":"(.+?)"/;
 	$prog->{channel} = $channel if $channel;
 	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.+?)"/;
-	$thumbnail =~ s/\\//g;
+	$thumbnail =~ s/\\\//\//g;
 	my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
 	my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
 	if ( ! $recipe ) {
