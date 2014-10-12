@@ -5617,21 +5617,6 @@ sub get_metadata {
 		# Detect if this is just a series pid and report other episodes in the
 		# form of <po:episode rdf:resource="/programmes/b00fyl5z#programme" />
 		my $rdftitle = $1 if $entry =~ m{<dc:title>(.+?)<};
-		if ( ! $category ) {
-			my @cats;
-			for (split /<po:genre/, $entry) {
-				push @cats, ucfirst($1) if /\/programmes\/genres\/(\w+)/;
-			}
-			$categories = join ',', @cats;
-			# capture first category, skip generic values
-			foreach my $cat ( @cats ) {
-				if ( ! grep(/$cat/i,  @ignore_categories) ) {
-					$category = $cat;
-					last
-				}
-			}
-			$categories = join ',', @cats;
-		}
 	}
 
 	# fallback category
