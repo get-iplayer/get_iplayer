@@ -5355,12 +5355,6 @@ sub get_verpids_json {
 		main::logger "ERROR: Failed to get version pid metadata from iplayer site (JSON)\n";
 		return 1;
 	}
-	my $version_map = {
-		'IPlayerVersion' => 'default',
-		'Original' => 'default', 
-		'DubbedAudioDescribed' => 'audiodescribed', 
-		'Signed' => 'signed'
-	};
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
 	my ( $title, $prog_type );
 	$title = $1 if $default =~ /"title":"(.*?)"/;
@@ -5387,10 +5381,15 @@ sub get_verpids_json {
 		main::logger "WARNING: No versions found in metadata retrieved from iplayer site (JSON)\n";
 		return 1;
 	}
+	my $version_map = {
+		'DubbedAudioDescribed' => 'audiodescribed', 
+		'Signed' => 'signed'
+	};
 	for ( @versions ) {
 		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
 		my ($verpid, $version);
 		$version = $version_map->{$1} if /"types":\["(.+?)"/;
+		$version = "default" unless $version;
 		$verpid = $1 if /"vpid":"(.+?)"/;
 		next if ! ($verpid && $version);
 		$prog->{verpids}->{$version} = $verpid;
