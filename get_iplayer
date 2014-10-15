@@ -74,6 +74,10 @@ use Time::Local;
 use Unicode::Normalize;
 use URI;
 use open qw(:utf8);
+use Encode qw(:default :fallback_all);
+use PerlIO::encoding;
+$PerlIO::encoding::fallback = XMLCREF;
+use constant FB_EMPTY => sub { '' };
 
 my %SIGORIG;
 # Save default SIG actions
@@ -278,6 +282,10 @@ my $opt_format = {
 	tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "AtomicParsley accepts UTF-8 input"],
 
 	# Misc
+	encodingconsolein	=> [ 1, "encodingconsolein|encoding-console-in=s", 'Misc', '--encoding-console-in <name>', "Character encoding for standard input (currently unused). Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
+	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
+	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
+	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
@@ -321,12 +329,46 @@ sub logger(@) {
 }
 
 
+# fallback encodings
+$opt->{encodinglocale} = $opt->{encodinglocalefs} = default_encodinglocale();
+$opt->{encodingconsoleout} = $opt->{encodingconsolein} = default_encodingconsoleout();
+# attempt to automatically determine encodings
+eval {
+	require Encode::Locale;
+};
+if (!$@) {
+	# set encodings unless already set by PERL_UNICODE or perl -C
+	$opt->{encodinglocale} = $Encode::Locale::ENCODING_LOCALE unless (${^UNICODE} & 32);
+	$opt->{encodinglocalefs} = $Encode::Locale::ENCODING_LOCALE_FS unless (${^UNICODE} & 32);
+	$opt->{encodingconsoleout} = $Encode::Locale::ENCODING_CONSOLE_OUT unless (${^UNICODE} & 6);
+	$opt->{encodingconsolein} = $Encode::Locale::ENCODING_CONSOLE_IN unless (${^UNICODE} & 1);
+}
+
 # Pre-Parse the cmdline using the opt_format hash so that we know some of the options before we properly parse them later
 # Parse options with passthru mode (i.e. ignore unknown options at this stage) 
 # need to save and restore @ARGV to allow later processing)
 my @argv_save = @ARGV;
 $opt_pre->parse( 1 );
 @ARGV = @argv_save;
+
+# set encodings ASAP
+my @encoding_opts = ('encodinglocale', 'encodinglocalefs', 'encodingconsoleout', 'encodingconsolein');
+foreach ( @encoding_opts ) {
+	$opt->{$_} = $opt_pre->{$_} if $opt_pre->{$_};
+}
+binmode(STDOUT, ":encoding($opt->{encodingconsoleout})");
+binmode(STDERR, ":encoding($opt->{encodingconsoleout})");
+binmode(STDIN, ":encoding($opt->{encodingconsolein})");
+
+# decode @ARGV unless already decoded by PERL_UNICODE or perl -C
+unless ( ${^UNICODE} & 32 ) {
+	@ARGV = map { decode($opt->{encodinglocale}, $_) } @ARGV;
+}
+# compose UTF-8 args if necessary
+if ( $opt->{encodinglocale} =~ /UTF-?8/i ) {
+	@ARGV = map { NFKC($_) } @ARGV;
+}
+
 # Copy a few options over to opt so that logger works
 $opt->{debug} = $opt->{verbose} = 1 if $opt_pre->{debug};
 $opt->{verbose} = 1 if $opt_pre->{verbose};
@@ -480,6 +522,12 @@ if ( $opt->{listplugins} ) {
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
 
+# show encodings in use
+if ( $opt->{verbose} ) {
+	logger "INFO: $_ = $opt->{$_}\n" for @encoding_opts;
+	logger "INFO: \${^UNICODE} = ${^UNICODE}\n" if $opt->{verbose};
+}
+
 # Display prefs dirs if required
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
 main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
@@ -548,8 +596,8 @@ if ( $opt->{webrequest} ) {
 	# parse GET args
 	my @webopts = split /[\&\?]/, $opt->{webrequest};
 	for (@webopts) {
-		# URL decode it
-		$_ = main::url_decode( $_ );
+		# URL decode it (value should then be decoded as UTF-8)
+		$_ = decode($opt->{encodinglocale}, main::url_decode( $_ ), FB_EMPTY);
 		my ( $optname, $value );
 		# opt val pair
 		if ( m{^\s*([\w\-]+?)[\s=](.+)$} ) {
@@ -3189,6 +3237,24 @@ sub regex_numbers {
 }
 
 
+sub default_encodinglocale {
+	return 'UTF-8' if (${^UNICODE} & 32);
+	return ($^O eq "MSWin32" ? 'cp1252' : 'UTF-8');
+}
+
+
+sub default_encodingconsoleout {
+	return 'UTF-8' if (${^UNICODE} & 6);
+	return ($^O eq "MSWin32" ? 'cp850' : 'UTF-8');
+}
+
+
+sub encode_fs {
+	my $string = shift;
+	return $string if $opt->{encodinglocalefs} =~ /UTF-?8/i;
+	return encode($opt->{encodinglocalefs}, $string, FB_EMPTY);
+}
+
 
 ############## OO ################
 
@@ -3436,7 +3502,7 @@ sub copy_set_options_from {
 
 # specify regex of options that cannot be saved
 sub excludeopts {
-	return '^(silent|help|debug|get|pvr|prefs|preset|warranty|conditions)';
+	return '^(encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions)';
 }
 
 
@@ -3611,7 +3677,8 @@ sub get {
 
 	# Load opts
 	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
-	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file $optfile\n");
+	my $opt_encoding = ( $^O eq "MSWin32" && $optfile eq $optfile_system ) ? $opt->{encodinglocalefs} : "utf8";
+	open (OPT, "<:encoding($opt_encoding)",  $optfile) || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
 		/^\s*([\w\-_]+)\s+(.*)\s*$/;
 		next if not defined $1;
@@ -3666,7 +3733,7 @@ sub display {
 	my $excluderegex = shift || 'ROGUEVALUE';
 	my $regex = $this->excludeopts;
 	main::logger "$title:\n";
-	for ( grep !/$regex/i, sort keys %{$this} ) {
+	for ( sort keys %{$this} ) {
 		main::logger "\t$_ = $this->{$_}\n" if defined $this->{$_} && $this->{$_};
 	}
 	main::logger "\n";
@@ -3681,6 +3748,7 @@ sub display {
 ################ History default class #################
 package History;
 
+use Encode;
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -3831,6 +3899,9 @@ sub load {
 		# Update fields in %history hash for $pid
 		for ( @history_format ) {
 			$record_entries->{$_} = ( shift @record ) || '';
+			if ( /^filename$/ ) {
+				$record_entries->{$_} = main::encode_fs($record_entries->{$_});
+			}
 		}
 		# Create new history entry
 		if ( defined $hist->{ $record_entries->{pid} } ) {
@@ -4811,8 +4882,20 @@ sub generate_filenames {
 		$prog->get_metadata_general();
 	}
 
+	# Create symlink filename if required
+	# do first before <dir> or <fileprefix> are encoded
+	if ( $opt->{symlink} ) {
+		# Substitute the fields for the pid
+		$prog->{symlink} = $prog->substitute( $opt->{symlink}, 1 );
+		$prog->{symlink} = main::encode_fs($prog->{symlink});
+		main::logger("INFO: Symlink file name will be '$prog->{symlink}'\n") if $opt->{verbose};
+		# remove old symlink
+		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
+	}
+
 	# Determine directory and find its absolute path
 	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
+	$prog->{dir} = main::encode_fs($prog->{dir});
 	
 	# Add modename to default format string if multimode option is used
 	$format .= ' <mode>' if $opt->{multimode};
@@ -4840,13 +4923,14 @@ sub generate_filenames {
 	# Don't allow <mode> in fileprefix as it can break when resumes fallback on differently numbered modes of the same type change for <modeshort>
 	$prog->{fileprefix} =~ s/<mode>/<modeshort>/g;
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
+	$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
 
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, 240 );
-	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	# Change the date in the filename to ISO8601 format if required
 	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
+	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	# Special case for history mode, parse the fileprefix and dir from filename if it is already defined
 	if ( $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
@@ -4867,12 +4951,14 @@ sub generate_filenames {
 			$subdir =~ s|(\d\d)[/](\d\d)[/](20\d\d)|$1_$2_$3|g;
 		}
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
+		$prog->{dir} = main::encode_fs($prog->{dir});
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
 	# Create a subdir if there are multiple parts
 	if ( $multipart ) {
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $prog->{fileprefix});
+		$prog->{dir} = main::encode_fs($prog->{dir});
 		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
@@ -4893,15 +4979,8 @@ sub generate_filenames {
 	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
 	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename} || $ext_changed;
 	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
-
-	# Create symlink filename if required
-	if ( $opt->{symlink} ) {
-		# Substitute the fields for the pid
-		$prog->{symlink} = $prog->substitute( $opt->{symlink}, 1 );
-		main::logger("INFO: Symlink file name will be '$prog->{symlink}'\n") if $opt->{verbose};
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
-	}
+	$prog->{filename} = main::encode_fs($prog->{filename});
+	$prog->{filepart} = main::encode_fs($prog->{filepart});
 
 	# overwrite/error if the file already exists and is going to be written to
 	if (
@@ -4928,6 +5007,7 @@ sub generate_filenames {
 		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
 		$ext = $opt->{thumbext} || $ext;
 		$prog->{thumbfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}");
+		$prog->{thumbfile} = main::encode_fs($prog->{thumbfile});
 	}
 
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
@@ -4957,6 +5037,7 @@ sub run_user_command {
 
 	# Substitute the fields for the pid (and sanitize for double-quoted shell use)
 	$command = $prog->substitute( $command, 4 );
+	$command = main::encode_fs($command);
 
 	# run command
 	main::logger "INFO: Running command '$command'\n" if $opt->{verbose};
@@ -5157,7 +5238,9 @@ sub check_duration {
 	my $prog = shift;
 	my $filename = shift || $prog->{filename};
 	return unless $prog->{duration} && $filename;
-	my $ffout = `"$bin->{ffmpeg}" -i "$filename" 2>&1`;
+	my $cmd = "\"$bin->{ffmpeg}\" -i \"$filename\" 2>&1";
+	$cmd = main::encode_fs($cmd);
+	my $ffout = `$cmd`;
 	if ( $ffout =~ /duration:\s+((\d+):(\d\d):(\d\d))/i ) {
 		my $expected_s = $prog->{duration};
 		my $expected = sprintf("%02d:%02d:%02d", $expected_s / 3600, ($expected_s % 3600) / 60, $expected_s % 60);
@@ -9273,6 +9356,7 @@ sub get {
 		#
 		#Exiting... (End of file)
 		$cmd = "\"$bin->{mplayer}\" ".(join ' ', @{ $binopts->{mplayer} } )." -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
+		$cmd = main::encode_fs($cmd);
 		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
 
 		# fork streaming threads
@@ -9776,7 +9860,14 @@ sub run {
 		}
 		main::logger "$name\n";
 		# Clear then Load options for specified pvr search name
+		my $opt_backup;
+		foreach ( @encoding_opts ) {
+			$opt_backup->{$_} = $opt->{$_} if $opt->{$_};
+		}
 		my @search_args = $pvr->load_options($name);
+		foreach ( @encoding_opts ) {
+			$opt->{$_} = $opt_backup->{$_} if $opt_backup->{$_};
+		}
 
 		## Display all options used for this pvr search
 		#$opt->display('Default Options', '(help|debug|get|^pvr)');
@@ -9886,7 +9977,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};

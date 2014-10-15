@@ -42,11 +42,15 @@ use IO::Handle;
 use Getopt::Long;
 use Cwd 'abs_path';
 use File::Basename;
+use Encode qw(:default :fallback_all);
+use PerlIO::encoding;
+$PerlIO::encoding::fallback = XMLCREF;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 $| = 1;
 my $fh;
 # Send log messages to this fh
 my $se = *STDERR;
+binmode $se, ':utf8';
 
 my $opt_cmdline;
 $opt_cmdline->{debug} = 0;
@@ -57,8 +61,9 @@ GetOptions(
 	"help|h"			=> \$opt_cmdline->{help},
 	"listen|address|l=s"		=> \$opt_cmdline->{listen},
 	"port|p=n"			=> \$opt_cmdline->{port},
-	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
+	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
+	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
 	"debug"				=> \$opt_cmdline->{debug},
 ) || die usage();
 
@@ -76,12 +81,13 @@ Copyright (C) 2009-2010 Phil Lewis
   See the GPLv3 for details.
 
 Options:
- --listen,-l       Use the built-in web server and listen on this interface address (default: 0.0.0.0)
- --port,-p         Use the built-in web server and listen on this TCP port
- --getiplayer,-g   Path to the get_iplayer script
- --ffmpeg          Path to the ffmpeg binary
- --debug           Debug mode
- --help,-h         This help text
+ --listen,-l        Use the built-in web server and listen on this interface address (default: 0.0.0.0)
+ --port,-p          Use the built-in web server and listen on this TCP port
+ --getiplayer,-g    Path to the get_iplayer script
+ --ffmpeg           Path to the ffmpeg binary
+ --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252) 
+ --debug            Debug mode
+ --help,-h          This help text
 EOF
 	print $text;
 	exit 1;
@@ -101,16 +107,32 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
 	exit 2;
 }
-if ( ! $opt_cmdline->{ffmpeg} ) {
-	chomp(my @ffmpegs = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () } 
+if ( ! $opt_cmdline->{encodinglocalefs} ) {
+	chomp(my @encodinglocalefs = map { s/^\s*encodinglocalefs\s*=\s*// ? $_ : () } 
 		get_cmd_output(
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nopurge',
 			'--nocopyright',
-			'--show-options'
+			'--showoptions'
 		)
 	);
-	$opt_cmdline->{ffmpeg} = pop @ffmpegs;
+	$opt_cmdline->{encodinglocalefs} = pop @encodinglocalefs;
+}
+$opt_cmdline->{encodinglocalefs} = (IS_WIN32 ? 'cp1252' : 'utf8') if ! $opt_cmdline->{encodinglocalefs};
+if ( ! $opt_cmdline->{ffmpeg} ) {
+	chomp(my @ffmpeg = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () } 
+		get_cmd_output(
+			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
+			'--nopurge',
+			'--nocopyright',
+			'--showoptions'
+		)
+	);
+	$opt_cmdline->{ffmpeg} = pop @ffmpeg;
 }
 $opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
 
@@ -194,7 +216,7 @@ my %prog_types_order = (
 );
 
 # Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--nopurge', '--nocopyright', '--listplugins' ) );
+chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--encoding-locale=UTF-8', '--encoding-console-out=UTF-8','--nopurge', '--nocopyright', '--listplugins' ) );
 for my $type (keys %prog_types) {
 	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
 		# delete from %prog_types hash
@@ -311,6 +333,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 				next;
 			}
 			# Child
+			binmode $se, IS_WIN32 ? ":encoding(cp1252)" : ':encoding(UTF-8)';
 			$client->autoflush(1);
 			my %request = ();
 			my $query_string;
@@ -438,7 +461,7 @@ sub parse_post_form_string {
 	my $form = $_[0];
 	my @data;
 	while ( $form =~ /Content-Disposition:(.+?)--/sg ) {
-		$_ = $1;
+		$_ = decode('UTF-8', $1);
 		# form-data; name = "KEY"
 		m{name.+?"(.+?)"[\n\r\s]*(.+)}sg;
 		my ($key, $val) = ( $1, $2 );
@@ -448,7 +471,8 @@ sub parse_post_form_string {
 		# Decode entities first
 		decode_entities($val);
 		# url encode each entry
-		$val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+		# $val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+		$val =~ uri_escape_utf8($1);
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
@@ -459,6 +483,7 @@ sub parse_post_form_string {
 sub run_cgi {
 	# Get filehandle for output
 	$fh = shift;
+	binmode $fh, ':utf8';
 	my $query_string = shift;
 	my $request_uri = shift;
 	my $request_host = shift;
@@ -489,6 +514,7 @@ sub run_cgi {
 
 	# Stream from get_iplayer STDOUT (optionally transcoding if required)
 	if ( $action eq 'stream' ) {
+		binmode $fh, ':raw';
 		my $ext = $cgi->param( 'OUTTYPE' ) || 'flv';
 		# Remove fileprefix
 		$ext =~ s/^.*\.//g;
@@ -559,6 +585,7 @@ sub run_cgi {
 		}
 
 	} elsif ( $action eq 'direct' ) {
+		binmode $fh, ':raw';
 		# get filename first
 		my $progtype = $cgi->param( 'PROGTYPES' );
 		my $pid = $cgi->param( 'PID' );
@@ -706,6 +733,8 @@ sub pvr_run {
 	print $se "INFO: Starting PVR Run\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nopurge',
 		'--nocopyright',
 		'--hash',
@@ -798,6 +827,8 @@ sub record_now {
 		my $comment = "$name - $episode";
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nopurge',
 			'--nocopyright',
 			'--expiry=999999999',
@@ -830,6 +861,8 @@ sub stream_prog {
 
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--hash',
 		'--expiry=999999999',
@@ -1015,6 +1048,8 @@ sub create_playlist_m3u_single {
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -1169,6 +1204,8 @@ sub get_opml {
 		# Extract and rewrite into playlist format
 		my @out = get_cmd_output(
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -1210,6 +1247,8 @@ sub get_opml {
 		# Extract and rewrite into playlist format
 		my @out = get_cmd_output(
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -1316,6 +1355,8 @@ sub update_script {
 	print $se "INFO: Updating get_iplayer\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--nopurge',
@@ -1532,6 +1573,7 @@ sub run_cmd {
 			# Not sure if these are necessary:
 			$fh_cmd_out->autoflush(1);
 			$from->autoflush(1);
+			binmode $from, ':utf8';
 			# Read each char from command output and push to socket fh
 			my $char;
 			my $bytes;
@@ -1562,6 +1604,7 @@ sub run_cmd {
 			# Not sure if these are necessary:
 			$fh_cmd_err->autoflush(1);
 			$err->autoflush(1);
+			binmode $err, ':utf8';
 			# Read each char from command output and push to socket fh
 			my $char;
 			my $bytes;
@@ -1659,6 +1702,7 @@ sub run_cmd_autorefresh {
 	my $buf;
 	my $bytes;
 	open( CMD, ( join ' ', @cmd ).'|' ) || die "can't open pipe: $!\n";
+	binmode CMD, ':utf8';
 	while ( $bytes = read( CMD, $buf, $size ) ) {
 		if ( $bytes <= 0 ) {
 			print $se "DEBUG: pipe fd closed - exiting thread\n";
@@ -1732,8 +1776,10 @@ sub get_cmd_output {
 		# Wait for child to complete
 
 		my $childpid = fork();
+		binmode $se, IS_WIN32 ? ":encoding(cp1252)" : ':encoding(UTF-8)';
 		# Child
 		if ( $childpid == 0 ) {
+			binmode $error, ':utf8';
 			while ( <$error> ) {
 				print $se "CMD STDERR: $_";
 			}
@@ -1741,6 +1787,7 @@ sub get_cmd_output {
 			exit 0;
 		# Parent
 		} elsif ( defined $childpid ) {
+			binmode $from, ':utf8';
 			while ( <$from> ) {
 				push @out_from, $_;
 			}
@@ -1776,6 +1823,7 @@ sub get_cmd_output_win32 {
 
 	print $se "DEBUG: Command: ".( join ' ', @cmd )."\n";
 	open( CMD, ( join ' ', @cmd ).'|' ) || print $se "ERROR: echo failed: $!\n";
+	binmode CMD, ':utf8';
 	my @out = <CMD>;
 	close CMD;
 
@@ -1811,6 +1859,8 @@ sub get_pvr_list {
 	my $pvrsearch;
 	my $out = join "\n", get_cmd_output(
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--pvrlist',
@@ -2119,6 +2169,8 @@ sub pvr_del {
 		chomp();
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -2151,6 +2203,8 @@ sub show_info {
 	chomp();
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2237,6 +2291,8 @@ sub get_direct_filename {
 	# Get the 'filename' entry from --history --info for this pid
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2254,7 +2310,9 @@ sub get_direct_filename {
 	} else {
 		$filename = $1 if $match =~ m{^filename: .+?\|\s*(.+?)\|$mode\s*$};
 	}
-
+ 	if ( $filename && $opt_cmdline->{encodinglocalefs} !~ /UTF-?8/i ) {
+	 	$filename = encode($opt_cmdline->{encodinglocalefs}, $filename, sub { '' });
+	}
 	return search_absolute_path( $filename );
 }
 
@@ -2282,6 +2340,10 @@ sub search_absolute_path {
 	# Try using CWD
 	if ( -f abs_path($filename) ) {
 		$abs_path = abs_path($filename);
+		# repair abs_path decomposition of UTF-8 filename
+		if ( $abs_path && $opt_cmdline->{encodinglocalefs} =~ /UTF-?8/i ) {
+			$abs_path = decode($opt_cmdline->{encodinglocalefs}, $abs_path, sub { '' });
+		}
 
 	# else try dir of get_iplayer
 	} elsif ( -f dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename ) {
@@ -2341,6 +2403,8 @@ sub pvr_queue {
 		$comment =~ s/_*$//g;
 		my @cmd = (
 			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
 			'--nocopyright',
 			'--expiry=999999999',
 			'--webrequest',
@@ -2501,6 +2565,8 @@ sub pvr_add {
 	# Remove a few options from leaking into a PVR search
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2555,6 +2621,8 @@ sub pvr_save {
 	my $searchname = $cgi->param( 'PVRSEARCH' );
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2569,6 +2637,8 @@ sub pvr_save {
 	# Add the new pvr entry
 	@cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
@@ -2723,6 +2793,8 @@ sub refresh {
 	print $se "INFO: Refreshing\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--webrequest',
 		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
@@ -2856,6 +2928,9 @@ sub search_progs {
 
 		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
 		if ( $opt->{HISTORY}->{current} && ! $opt->{HIDEDELETED}->{current} ) {
+			if ( $prog{$pid}->{filename} && $opt_cmdline->{encodinglocalefs} !~ /UTF-?8/i ) {
+				$prog{$pid}->{filename} = encode($opt_cmdline->{encodinglocalefs}, $prog{$pid}->{filename}, sub { '' });
+			}
 			if ( ( ! $prog{$pid}->{filename} ) || ! -f $prog{$pid}->{filename} ) {
 					$search_class = 'search darker';
 			}
@@ -3326,6 +3401,8 @@ sub get_progs {
 	# Run command
 	my @list = get_cmd_output(
 		$opt_cmdline->{getiplayer},
+		'--encoding-locale=UTF-8',
+		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
