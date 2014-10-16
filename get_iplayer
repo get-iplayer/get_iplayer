@@ -5342,13 +5342,12 @@ sub get_verpids {
 
 sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
+	my $pid;
 	if ( $prog->{pid} =~ /^http/i ) {
-		if ( $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/ ) {
-			main::logger "WARNING: pid changed from $prog->{pid} to $1 for JSON playlist\n";
-			$prog->{pid} = $1; 
-		}
+		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/ 
 	}
-	my $url = 'http://www.bbc.co.uk/programmes/'.$prog->{pid}.'/playlist.json';
+	$pid ||= $prog->{pid};
+	my $url = 'http://www.bbc.co.uk/programmes/'.$pid.'/playlist.json';
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3 );
 	if ( ! $json ) {
@@ -5356,11 +5355,12 @@ sub get_verpids_json {
 		return 1;
 	}
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
-	my ( $title, $prog_type );
-	$title = $1 if $default =~ /"title":"(.*?)"/;
+	my $title = $1 if $default =~ /"title":"(.*?)"/;
 	$title =~ s/\\\//\//g;
-	$prog_type = 'tv' if $default =~ /"kind":"video"/;
+	$prog->{title} = decode_entities($title) if $title;
+	my $prog_type = 'tv' if $default =~ /"kind":"video"/;
 	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
+	$prog->{type} = $prog_type if $prog_type;
 	my $channel = $1 if $default =~ /"masterBrandName":"(.+?)"/;
 	$prog->{channel} = $channel if $channel;
 	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.+?)"/;
@@ -5373,14 +5373,10 @@ sub get_verpids_json {
 	}
 	$thumbnail =~ s/\$recipe/$recipe/;
 	$prog->{thumbnail} = $thumbnail if $thumbnail && ! $prog->{thumbnail};
-	my $guidance = $2 if $default =~ /"guidance":(null|"(.+?)")/;
+	my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
 	$prog->{guidance} = "Yes" if $guidance;
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
-	if ( $#versions < 0 ) {
-		main::logger "WARNING: No versions found in metadata retrieved from iplayer site (JSON)\n";
-		return 1;
-	}
 	my $version_map = {
 		'DubbedAudioDescribed' => 'audiodescribed', 
 		'Signed' => 'signed'
@@ -5388,7 +5384,7 @@ sub get_verpids_json {
 	for ( @versions ) {
 		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
 		my ($verpid, $version);
-		$version = $version_map->{$1} if /"types":\["(.+?)"/;
+		$version = $version_map->{$1} if /"types":\["(.*?)"/;
 		$version = "default" unless $version;
 		$verpid = $1 if /"vpid":"(.+?)"/;
 		next if ! ($verpid && $version);
@@ -5396,8 +5392,19 @@ sub get_verpids_json {
 		$prog->{durations}->{$version} = $1 if /"duration":(\d+)/;
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	$prog->{title} = decode_entities($title);
-	return 0
+	if ( $prog->{pid} ne $pid ) {
+		main::logger "INFO: pid changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
+		$prog->{pid} = $pid; 
+	}
+	my $version_list = $opt->{versionlist} || 'default';
+	my $found;
+	for ( keys %{ $prog->{verpids} } ) {
+		$found = 1 if $version_list =~ /$_/ && $prog->{verpids}->{$_};
+		last if $found;
+	}
+	return 1 if ! $found;
+	return 0;
+}
 }
 
 
