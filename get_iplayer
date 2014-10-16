@@ -121,7 +121,7 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  TV modes typically have two streams available."],
-	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them.  Applied only to RTMP streams."],
+	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them."],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
@@ -5112,8 +5112,9 @@ sub download_thumbnail {
 
 sub check_duration {
 	my $prog = shift;
-	return unless $prog->{duration} && $prog->{filename};
-	my $ffout = `"$bin->{ffmpeg}" -i "$prog->{filename}" 2>&1`;
+	my $filename = shift || $prog->{filename};
+	return unless $prog->{duration} && $filename;
+	my $ffout = `"$bin->{ffmpeg}" -i "$filename" 2>&1`;
 	if ( $ffout =~ /duration:\s+((\d+):(\d\d):(\d\d))/i ) {
 		my $expected_s = $prog->{duration};
 		my $expected = sprintf("%02d:%02d:%02d", $expected_s / 3600, ($expected_s % 3600) / 60, $expected_s % 60);
@@ -5122,9 +5123,9 @@ sub check_duration {
 		my $diff_s = abs($recorded_s - $expected_s);
 		my $diff_sign = $recorded_s < $expected_s ? "-" : "";
 		my $diff = sprintf("$diff_sign%02d:%02d:%02d", $diff_s / 3600, ($diff_s % 3600) / 60, $diff_s % 60);
-		main::logger "\nINFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $prog->{filename}\n\n";
+		main::logger "\nINFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $filename\n\n";
 	} else {
-		main::logger "WARNING: Could not determine recorded duration of file: $prog->{filename}\n";
+		main::logger "WARNING: Could not determine recorded duration of file: $filename\n";
 	}
 }
 
@@ -9363,6 +9364,9 @@ sub get {
 			main::logger "ERROR: Recording of programme failed, skipping\n" if $opt->{verbose};
 			return 'next';
 		}
+	}
+	if ( $#file_tmp_list == 0 ) {
+		$prog->check_duration($file_tmp_list[0]) if $opt->{checkduration} && $prog->{type} !~ /live/;
 	}
 
 #	# Retain raw format if required
