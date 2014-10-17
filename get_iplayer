@@ -5235,6 +5235,8 @@ sub get_verpids {
 
 	# Detect noItems or no programmes
 	if ( $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+		# set title here - broken in JSON playlists
+		$prog->{title} = decode_entities($1) if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
 		my $rc_verpids = $prog->get_verpids_json( $ua );
 		if ( $rc_verpids ) {
 			$rc_verpids = $prog->get_verpids_html( $ua )
@@ -5343,6 +5345,9 @@ sub get_verpids {
 	return 0;
 }
 
+
+# Return hash of version => verpid given a pid
+# Uses JSON playlist: http://www.bbc.co.uk/programmes/<pid>/playlist.json
 sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
 	my $pid;
@@ -5350,6 +5355,10 @@ sub get_verpids_json {
 		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/ 
 	}
 	$pid ||= $prog->{pid};
+	if ( $prog->{pid} ne $pid ) {
+		main::logger "INFO: pid changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
+		$prog->{pid} = $pid;
+	}
 	my $url = 'http://www.bbc.co.uk/programmes/'.$pid.'/playlist.json';
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3 );
@@ -5358,15 +5367,13 @@ sub get_verpids_json {
 		return 1;
 	}
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
-	my $title = $1 if $default =~ /"title":"(.*?)"/;
-	$title =~ s/\\\//\//g;
-	$prog->{title} = decode_entities($title) if $title;
-	my $prog_type = 'tv' if $default =~ /"kind":"video"/;
-	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
-	$prog->{type} = $prog_type if $prog_type;
-	my $channel = $1 if $default =~ /"masterBrandName":"(.+?)"/;
+	my $channel = $1 if $default =~ /"masterBrandName":"(.*?)"/;
 	$prog->{channel} = $channel if $channel;
-	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.+?)"/;
+	my $descshort = $1 if $default =~ /"summary":"(.*?)"/;
+	$prog->{descshort} = $descshort if $descshort;
+	my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
+	$prog->{guidance} = "Yes" if $guidance;
+	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
 	$thumbnail =~ s/\\\//\//g;
 	my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
 	my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
@@ -5375,19 +5382,25 @@ sub get_verpids_json {
 		$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
 	}
 	$thumbnail =~ s/\$recipe/$recipe/;
-	$prog->{thumbnail} = $thumbnail if $thumbnail && ! $prog->{thumbnail};
-	my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
-	$prog->{guidance} = "Yes" if $guidance;
-	my @versions = split /"markers"/, $versions;
-	pop @versions;
-	my $version_map = {
+	$prog->{thumbnail} = $thumbnail if $thumbnail;
+	if ( ! $prog->{title} ) {
+		my $title = $1 if $default =~ /"title":"(.*?)"/;
+		$title =~ s/\\\//\//g;
+		$prog->{title} = decode_entities($title) if $title;
+	}
+	my $prog_type = 'tv' if $default =~ /"kind":"video"/;
+	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
+	$prog->{type} = $prog_type if $prog_type;
+	my $version_json = {
 		'DubbedAudioDescribed' => 'audiodescribed', 
 		'Signed' => 'signed'
 	};
+	my @versions = split /"markers"/, $versions;
+	pop @versions;
 	for ( @versions ) {
 		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
 		my ($verpid, $version);
-		$version = $version_map->{$1} if /"types":\["(.*?)"/;
+		$version = $version_json->{$1} if /"types":\["(.*?)"/;
 		$version = "default" unless $version;
 		$verpid = $1 if /"vpid":"(.+?)"/;
 		next if ! ($verpid && $version);
@@ -5395,11 +5408,24 @@ sub get_verpids_json {
 		$prog->{durations}->{$version} = $1 if /"duration":(\d+)/;
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: pid changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
-		$prog->{pid} = $pid; 
-	}
+	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
 	my $version_list = $opt->{versionlist} || 'default';
+	for ( split /,/, $version_list ) {
+		if ( $prog->{verpids}->{$_} ) {
+			my $episode_url;
+			if ( $prog->{type} eq 'tv' ) {
+				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+			} elsif ( $prog->{type} eq 'radio' ) {
+				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+			}
+			unless ( $prog->{player} ) {
+				$prog->{player} = $episode_url if $episode_url;
+			}
+			unless ( $prog->{web} ) {
+				$prog->{web} = $episode_url if $episode_url;
+			}
+		}
+	}
 	my $found;
 	for ( keys %{ $prog->{verpids} } ) {
 		$found = 1 if $version_list =~ /$_/ && $prog->{verpids}->{$_};
@@ -5410,6 +5436,9 @@ sub get_verpids_json {
 }
 
 
+# Return hash of version => verpid given a pid
+# Scrapes HTML from episode page: http://www.bbc.co.uk/iplayer/episode/<pid>
+# Only works for TV programmes
 sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
 	my $pid;
@@ -5417,8 +5446,12 @@ sub get_verpids_html {
 		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/
 	}
 	$pid ||= $prog->{pid};
+	if ( $prog->{pid} ne $pid ) {
+		main::logger "INFO: pid changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
+		$prog->{pid} = $pid;
+	}
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
-	for my $version ( keys %{$version_map} ) {
+	for my $version ( "default", "audiodescribed", "signed" ) {
 		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		my $html = main::request_url_retry( $ua, $url, 3 );
@@ -5433,21 +5466,20 @@ sub get_verpids_html {
 			main::logger "INFO: $version version not found in metadata retrieved from iplayer site (HTML)\n" if $opt->{verbose};
 			next;
 		}
-		if ( ! $prog->{title} ) {
-			my $title = $1 if $config =~ /"title":"(.*?)"/;
-			$title =~ s/\\\//\//g;
-			my $subtitle = $1 if $config =~ /"subtitle":"(.*?)"/;
-			$subtitle =~ s/\\\//\//g;
-			$title .= ": $subtitle" if $subtitle;
-			$prog->{title} = decode_entities($title) if $title;
-		}
-		$prog->{type} = "tv";
-		if ( ! $prog->{channel} ) {
-			my $channel = $1 if $config =~ /"masterBrandTitle":"(.+?)"/;
+		unless ( $prog->{channel} ) {
+			my $channel = $1 if $config =~ /"masterBrandTitle":"(.*?)"/;
 			$prog->{channel} = $channel if $channel;
 		}
-		if ( ! $prog->{thumbnail} ) {
-			my $thumbnail = $1 if $config =~ /"image":"(.+?)"/;
+		unless ( $prog->{descshort} ) {
+			my $descshort = $1 if $config =~ /"summary":"(.*?)"/;
+			$prog->{descshort} = $descshort if $descshort;
+		}
+		unless ( $prog->{guidance} ) {
+			my $guidance = $2 if $config =~ /"guidance":(null|"(.*?)")/;
+			$prog->{guidance} = "Yes" if $guidance;
+		}
+		unless ( $prog->{thumbnail} ) {
+			my $thumbnail = $1 if $config =~ /"image":"(.*?)"/;
 			$thumbnail =~ s/\\\//\//g;
 			my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
 			my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
@@ -5458,19 +5490,38 @@ sub get_verpids_html {
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
 		}
-		if ( ! $prog->{guidance} ) {
-			my $guidance = $2 if $config =~ /"guidance":(null|"(.*?)")/;
-			$prog->{guidance} = "Yes" if $guidance;
+		unless ( $prog->{title} ) {
+			my $title = $1 if $config =~ /"title":"(.*?)"/;
+			$title =~ s/\\\//\//g;
+			my $subtitle = $1 if $config =~ /"subtitle":"(.*?)"/;
+			$subtitle =~ s/\\\//\//g;
+			$title .= ": $subtitle" if $subtitle;
+			$prog->{title} = decode_entities($title) if $title;
+		}
+		unless ( $prog->{type} ) {
+			$prog->{type} = "tv";
 		}
 		$prog->{verpids}->{$version} = $verpid;
 		$prog->{durations}->{$version} = $1 if $config =~ /"duration":(\d+)/;
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: pid changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
-		$prog->{pid} = $pid;
-	}
 	my $version_list = $opt->{versionlist} || 'default';
+	for ( split /,/, $version_list ) {
+		if ( $prog->{verpids}->{$_} ) {
+			my $episode_url;
+			if ( $prog->{type} eq 'tv' ) {
+				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+			} elsif ( $prog->{type} eq 'radio' ) {
+				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+			}
+			unless ( $prog->{player} ) {
+				$prog->{player} = $episode_url if $episode_url;
+			}
+			unless ( $prog->{web} ) {
+				$prog->{web} = $episode_url if $episode_url;
+			}
+		}
+	}
 	my $found;
 	for ( keys %{ $prog->{verpids} } ) {
 		$found = 1 if $version_list =~ /$_/ && $prog->{verpids}->{$_};
@@ -5490,7 +5541,7 @@ sub get_metadata {
 	my $prog_feed_url = 'http://feeds.bbc.co.uk/iplayer/episode/'; # $pid
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 
-	my ($name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $player, $thumbnail, $seriestitle, $episodetitle, $nametitle, $seriesnum, $episodenum );
+	my ($title, $name, $episode, $desc, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $player, $thumbnail, $seriestitle, $episodetitle, $nametitle, $seriesnum, $episodenum );
 
 	# This URL works for all prog types:
 	# http://www.bbc.co.uk/iplayer/playlist/${pid}
@@ -5613,7 +5664,8 @@ sub get_metadata {
 		}
 		# Use the default cache thumbnail unless --thumbsize=NNN is used where NNN is either the width or thumbnail index number
 		$thumbnail = $thumbnails{ $opt->{thumbsize} } if defined $opt->{thumbsize};
-		( $name, $episode ) = Programme::bbciplayer::split_title( $1 ) if $entry =~ m{<title\s+type="text">\s*(.+?)\s*<};
+		$title = $1 if $entry =~ m{<title\s+type="text">\s*(.+?)\s*<};
+		( $name, $episode ) = Programme::bbciplayer::split_title( $title ) if $title;
 		$channel = $1 if $entry =~ m{<media:credit\s+role="Publishing Company"\s+scheme="urn:ebu">(.+?)<};
 
 		# Get the title from the atom link refs only to determine the episode and series number
@@ -5731,6 +5783,11 @@ sub get_metadata {
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
 	}
+	# Re-split title if changed in get_verpids()
+	if ( $prog->{title} && $prog->{title} ne $title ) {
+		$title = $prog->{title};
+		( $name, $episode ) = Programme::bbciplayer::split_title( $title );
+	}
 	$versions = join ',', sort keys %{ $prog->{verpids} };
 	my $modes;
 	my $mode_sizes;
@@ -5841,15 +5898,6 @@ sub get_metadata {
 	$episode = $episodetitle if length( $episodetitle ) > length( $episode );
 	$episode = $prog->{episode} if length( $prog->{episode} ) > length( $episode );
 
-	# Create a stripped episode and series with numbers removed + senum s##e## element.
-	$prog->{episodeshort} = $prog->{episode};
-	$prog->{episodeshort} =~ s/(^|:(\s+))\d+\.\s+/$1/i;
-	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
-	$prog->{nameshort} = $prog->{name};
-	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i; 
-
 	# Conditionally set the senum
 	$prog->{senum} = sprintf "s%02se%02s", $seriesnum, $episodenum if $seriesnum != 0 || $episodenum != 0;
 
@@ -5872,13 +5920,22 @@ sub get_metadata {
 	$prog->{category}	= $category || $prog->{category};
 	$prog->{desc}		= $longdesc || $meddesc || $desc || $prog->{desc} || $summary;
 	$prog->{descmedium}	= $meddesc;
-	$prog->{descshort}	= $summary;
-	$prog->{player}		= $player;
+	$prog->{descshort}	= $summary || $prog->{descshort};
+	$prog->{player}		= $player || $prog->{player};;
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
 	$prog->{modes}		= $modes;
 	$prog->{modesizes}	= $mode_sizes;
 	$prog->{episodenum}	= $episodenum;
 	$prog->{seriesnum}	= $seriesnum;
+
+	# Create a stripped episode and series with numbers removed + senum s##e## element.
+	$prog->{episodeshort} = $prog->{episode};
+	$prog->{episodeshort} =~ s/(^|:(\s+))\d+\.\s+/$1/i;
+	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
+	$prog->{nameshort} = $prog->{name};
+	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i; 
 
 	return 0;
 }
