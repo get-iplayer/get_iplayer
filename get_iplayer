@@ -8221,6 +8221,11 @@ sub get_links {
 			my $episode = 'live';
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 
+			(my $thumb_prog_type = $prog_type) =~ s/live//i;
+			my $thumb_pid = $pid;
+			$thumb_pid =~ s/^(bbc_one)$/${1}_london/;
+			$thumb_pid =~ s/^(bbc_two)$/${1}_england/;
+
 			# build data structure
 			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
@@ -8230,7 +8235,8 @@ sub get_links {
 				'desc'		=> "Live stream of $name",
 				'guidance'	=> '',
 				#'thumbnail'	=> "http://static.bbc.co.uk/mobile/iplayer_widget/img/ident_${pid}.png",
-				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/img/station_logos/${pid}.png",
+				#'thumbnail'	=> "http://www.bbc.co.uk/iplayer/img/station_logos/${pid}.png",
+				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/images/${thumb_prog_type}/${thumb_pid}_640_360.jpg",
 				'channel'	=> $channel,
 				#'categories'	=> join(',', @category),
 				'type'		=> $prog_type,
