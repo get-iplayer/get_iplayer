@@ -136,7 +136,7 @@ my $opt_format = {
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
 	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
-	pid		=> [ 2, "pid|url=s", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
+	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "When used with --pid record all the embedded pids if the pid is a series or brand pid."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'"],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv)"],
@@ -710,7 +710,17 @@ if ( defined($opt->{trimhistory}) ) {
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
-	$retcode = find_pid_matches( $hist );
+	my @pids;
+	if ( ref($opt->{pid}) eq 'ARRAY' ) {
+		push @pids, @{$opt->{pid}};
+	} else {
+		push @pids, $opt->{pid};
+	}
+	@pids = split( /,/, join( ',', @pids ) );	
+	for ( @pids ) {
+		$opt->{pid} = $_;
+		$retcode += find_pid_matches( $hist );
+	}
 
 # Show history
 } elsif ( $opt->{history} ) {
@@ -3733,7 +3743,13 @@ sub display {
 	my $regex = $this->excludeopts;
 	main::logger "$title:\n";
 	for ( sort keys %{$this} ) {
-		main::logger "\t$_ = $this->{$_}\n" if defined $this->{$_} && $this->{$_};
+		if ( defined $this->{$_} && $this->{$_} ) {
+			if ( ref($this->{$_}) eq 'ARRAY' ) {
+				main::logger "\t$_ = ".(join(',', @{$this->{$_}}))."\n";
+			} else {
+				main::logger "\t$_ = $this->{$_}\n";
+			}
+		}
 	}
 	main::logger "\n";
 	return 0;
