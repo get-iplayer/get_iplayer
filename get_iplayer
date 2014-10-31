@@ -5436,27 +5436,25 @@ sub get_verpids {
 	# flatten
 	$xml =~ s/\n/ /g;
 
+	# set title here - broken in JSON playlists
+	$prog->{title} = decode_entities($1) if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
+	$prog->{thumbnail} = $1 if $xml =~ m{<link rel="holding" href="(.*?)"};
+	$prog->{guidance} = $1 if $xml =~ m{<guidance.*?>(.*?)</guidance>};
+	$prog->{descshort} = $1 if $xml =~ m{<summary>(.*?)</summary>};
+	$prog->{type} = 'tv' if grep /kind="programme"/, $xml;
+	$prog->{type} = 'radio' if grep /kind="radioProgramme"/, $xml;
+
 	# Detect noItems or no programmes
 	if ( $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
-		# set title here - broken in JSON playlists
-		$prog->{title} = decode_entities($1) if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
-		my $rc_verpids = $prog->get_verpids_json( $ua );
-		if ( $rc_verpids ) {
-			$rc_verpids = $prog->get_verpids_html( $ua )
+		my $rc_json = $prog->get_verpids_json( $ua );
+		my $rc_html = 1;
+		if ( ! $prog->{type} || $prog->{type} eq 'tv' ) {
+			$rc_html = $prog->get_verpids_html( $ua );
 		}
-		return 0 if ! $rc_verpids;
-		main::logger "\rWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
+		return 0 if ! $rc_json || ! $rc_html;
+		main::logger "\nWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 		return 1;
 	}
-
-	# Get title
-	# <title>Amazon with Bruce Parry: Episode 1</title>
-	my ( $title, $prog_type );
-	$title = $1 if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
-
-	# Get type
-	$prog_type = 'tv' if grep /kind="programme"/, $xml;
-	$prog_type = 'radio' if grep /kind="radioProgramme"/, $xml;
 
 	# Split into <item kind="programme"> sections
 	my $prev_version = '';
@@ -5545,7 +5543,6 @@ sub get_verpids {
 
 	# Add to prog hash
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	$prog->{title} = decode_entities($title);
 	return 0;
 }
 
@@ -5571,30 +5568,37 @@ sub get_verpids_json {
 		return 1;
 	}
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
-	my $channel = $1 if $default =~ /"masterBrandName":"(.*?)"/;
-	$prog->{channel} = $channel if $channel;
-	my $descshort = $1 if $default =~ /"summary":"(.*?)"/;
-	$prog->{descshort} = $descshort if $descshort;
-	my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
-	$prog->{guidance} = "Yes" if $guidance;
-	my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
-	$thumbnail =~ s/\\\//\//g;
-	my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
-	my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-	if ( ! $recipe ) {
-		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (JSON)\n";
-		$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
+	unless ( $prog->{channel} ) {
+		$prog->{channel} = $1 if $default =~ /"masterBrandName":"(.*?)"/;
 	}
-	$thumbnail =~ s/\$recipe/$recipe/;
-	$prog->{thumbnail} = $thumbnail if $thumbnail;
-	if ( ! $prog->{title} ) {
+	unless ( $prog->{descshort} ) {
+		$prog->{descshort} = $1 if $default =~ /"summary":"(.*?)"/;
+	}
+	unless ( $prog->{guidance} ) {
+		my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
+		$prog->{guidance} = "Yes" if $guidance;
+	}
+	unless ( $prog->{thumbnail} ) {
+		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
+		$thumbnail =~ s/\\\//\//g;
+		my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+		my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+		if ( ! $recipe ) {
+			main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (JSON)\n";
+			$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
+		}
+		$thumbnail =~ s/\$recipe/$recipe/;
+		$prog->{thumbnail} = $thumbnail if $thumbnail;
+	}
+	unless ( $prog->{title} ) {
 		my $title = $1 if $default =~ /"title":"(.*?)"/;
 		$title =~ s/\\\//\//g;
 		$prog->{title} = decode_entities($title) if $title;
 	}
-	my $prog_type = 'tv' if $default =~ /"kind":"video"/;
-	$prog_type = 'radio' if $default =~ /"kind":"audio"/;
-	$prog->{type} = $prog_type if $prog_type;
+	unless ( $prog->{type} ) {
+		$prog->{type} = 'tv' if $default =~ /"kind":"video"/;
+		$prog->{type} = 'radio' if $default =~ /"kind":"audio"/;
+	}
 	my $version_json = {
 		'DubbedAudioDescribed' => 'audiodescribed', 
 		'Signed' => 'signed'
@@ -5624,6 +5628,7 @@ sub get_verpids_json {
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
+				last;
 			}
 		}
 	}
@@ -5651,8 +5656,10 @@ sub get_verpids_html {
 		main::logger "INFO: pid changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
 		$prog->{pid} = $pid;
 	}
+	my $version_list = $opt->{versionlist} || 'default';
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
 	for my $version ( "default", "audiodescribed", "signed" ) {
+		next if $version_list !~ /$version/ || $prog->{verpids}->{$version};
 		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		my $html = main::request_url_retry( $ua, $url, 3 );
@@ -5668,12 +5675,10 @@ sub get_verpids_html {
 			next;
 		}
 		unless ( $prog->{channel} ) {
-			my $channel = $1 if $config =~ /"masterBrandTitle":"(.*?)"/;
-			$prog->{channel} = $channel if $channel;
+			$prog->{channel} = $1 if $config =~ /"masterBrandTitle":"(.*?)"/;
 		}
 		unless ( $prog->{descshort} ) {
-			my $descshort = $1 if $config =~ /"summary":"(.*?)"/;
-			$prog->{descshort} = $descshort if $descshort;
+			$prog->{descshort} = $1 if $config =~ /"summary":"(.*?)"/;
 		}
 		unless ( $prog->{guidance} ) {
 			my $guidance = $2 if $config =~ /"guidance":(null|"(.*?)")/;
@@ -5706,7 +5711,6 @@ sub get_verpids_html {
 		$prog->{durations}->{$version} = $1 if $config =~ /"duration":(\d+)/;
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	my $version_list = $opt->{versionlist} || 'default';
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
@@ -5717,6 +5721,7 @@ sub get_verpids_html {
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
+				last;
 			}
 		}
 	}
@@ -5821,7 +5826,8 @@ sub get_metadata {
 	#</feed>
 
 	# Don't get metadata from this URL if the pid contains a full url (problem: this still tries for BBC iPlayer live channels)
-	if ( $prog->{pid} !~ m{^http}i ) {
+	# skip this section since BBC killed feeds, but keep code for reference
+	if ( $prog->{pid} !~ m{^http}i && 0) {
 		$entry = main::request_url_retry($ua, $prog_feed_url.$prog->{pid}, 3, '', '');
 		decode_entities($entry);
 		main::logger "DEBUG: $prog_feed_url.$prog->{pid}:\n$entry\n\n" if $opt->{debug};
@@ -5885,6 +5891,21 @@ sub get_metadata {
 		}
 	}
 
+	# Get list of available modes for each version available
+	# populate version pid metadata if we don't have it already
+	if ( keys %{ $prog->{verpids} } == 0 ) {
+		if ( $prog->get_verpids( $ua ) ) {
+			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
+			# Only return at this stage unless we want metadata/tags only for various reasons
+			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
+		}
+	}
+	# Re-split title if changed in get_verpids()
+	#if ( $prog->{title} && $prog->{title} ne $title ) {
+	#	$title = $prog->{title};
+	#	( $name, $episode ) = Programme::bbciplayer::split_title( $title );
+	#}
+	$versions = join ',', sort keys %{ $prog->{verpids} };
 
 	# Even more info...
 	#<?xml version="1.0" encoding="utf-8"?>                                  
@@ -5972,21 +5993,6 @@ sub get_metadata {
 	$categories ||= "get_iplayer";
 	$category ||= "get_iplayer";
 
-	# Get list of available modes for each version available
-	# populate version pid metadata if we don't have it already
-	if ( keys %{ $prog->{verpids} } == 0 ) {
-		if ( $prog->get_verpids( $ua ) ) {
-			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
-			# Only return at this stage unless we want metadata/tags only for various reasons
-			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
-		}
-	}
-	# Re-split title if changed in get_verpids()
-	if ( $prog->{title} && $prog->{title} ne $title ) {
-		$title = $prog->{title};
-		( $name, $episode ) = Programme::bbciplayer::split_title( $title );
-	}
-	$versions = join ',', sort keys %{ $prog->{verpids} };
 	my $modes;
 	my $mode_sizes;
 	my $first_broadcast;
