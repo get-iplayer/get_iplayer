@@ -4536,14 +4536,6 @@ sub download_retry_loop {
 				# quit if successful or skip (unless --multimode selected)
 				last if ( $retcode == 0 || $retcode == 2 ) && ! $opt->{multimode};
 			}
-			if ( $retcode && ! $opt->{multimode} && ! $opt->{test} ) {
-				if ( $prog->{type} eq 'radio' || $prog->{type} eq 'liveradio' ) {
-					if ( grep(/wma/, @available_modes) && ! grep(/wma/, @modes) ) {
-						main::logger "INFO: You may wish to try --modes=wma for version $version\n";
-						main::logger "INFO: Note that wma mode is real-time only, and thus is generally only suitable for recording live radio.\n";
-					}
-				}
-			}
 		}
 		# Break out of loop if we have a successful recording for this version and mode
 		return 0 if not $retcode;
