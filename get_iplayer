@@ -7454,15 +7454,15 @@ sub get_links {
 	my $prog = shift;
 	my $prog_type = shift;
  	my $feeds = lc($opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"});
-	main::logger "INFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
+	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	if ( $feeds eq 'schedule' ) {
-		return $self->get_links_schedule($prog, $prog_type, 0);
+		$self->get_links_schedule($prog, $prog_type, 0);
 	} else {
 		if ( $prog_type eq 'radio' ) {
-			return $self->get_links_aod($prog, $prog_type);
+			$self->get_links_aod($prog, $prog_type);
 		}
 		elsif ( $prog_type eq 'tv' ) {
-			return $self->get_links_ion($prog, $prog_type);
+			$self->get_links_ion($prog, $prog_type);
 		}
 	}
 
@@ -7605,20 +7605,12 @@ sub get_links_schedule_page {
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
 	my $now = time();
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $episodetitle, $nametitle, $seriestitle, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance, $descshort, $start );
-		$start = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
-		next if ! $start;
-		my $xstart = Programme::get_time_string( $start );
-		next if $future &&  $xstart < $now;
-		next if ! $future && $xstart >= $now;
-		next if ! $future && $limit && $xstart < $limit;
-		$available = $1 if $entry =~ m{<available_until>\s*(.+?)\s*</available_until>};
-		my $availability = $1 if $entry =~ m{<availability>.*?(Available).*?</availability>}i;
-		next if ! ( $available || $availability );
-		if ( $available ) {
-			my $xavailable = Programme::get_time_string( $available );
-			next if $xavailable < $now;
-		}
+		my ( $title, $name, $episode, $episodetitle, $nametitle, $seriestitle, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance, $descshort );
+		# Don't create this prog instance if the availablity is in the past 
+		# this prevents programmes which never appear in iPlayer from being indexed
+		$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
+		next if $future && Programme::get_time_string( $available ) < $now;
+		next if ! $future && $limit && Programme::get_time_string( $available ) < $limit;
 		$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
 		$episode = $1 if $entry =~ m{<programme\s+type="episode">.*?<title>\s*(.*?)\s*</title>};
 		$nametitle = $1 if $entry =~ m{<programme\s+type="brand">.*?<title>\s*(.*?)\s*</title>.*?</programme>};
@@ -7683,6 +7675,7 @@ sub get_links_schedule_page {
 		my $image_pid = $1 if $entry =~ m{<image><pid>(.*?)</pid>}s;
 		my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
 		my $thumbnail = "http://ichef.bbci.co.uk/programmeimages/${image_pid}/${pid}${suffix}";
+
 		# build data structure
 		$prog->{$pid} = main::progclass($prog_type)->new(
 			'pid'		=> $pid,
@@ -7692,7 +7685,7 @@ sub get_links_schedule_page {
 			'seriesnum'	=> $seriesnum,
 			'episodenum'	=> $episodenum,
 			'desc'		=> $desc,
-			'available'	=> $start,
+			'available'	=> $available,
 			'duration'	=> $duration,
 			'thumbnail'	=> $thumbnail,
 			'channel'	=> $channel,
@@ -7983,7 +7976,7 @@ use base 'Programme::bbciplayer';
 
 # Class vars
 sub index_min { return 10001 }
-sub index_max { return 19999 };
+sub index_max { return 39999 };
 sub channels_aod {
 	return {
 		# national stations
