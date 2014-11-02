@@ -7189,6 +7189,25 @@ sub get_links_aod {
 	my $prog = shift;
 	my $prog_type = shift;
 	return 1 if $prog_type ne "radio";
+	my %channel_map = (
+		'1xtra'			=> 'bbc_1xtra',
+		'radio1'		=> 'bbc_radio_one',
+		'radio2'		=> 'bbc_radio_two',
+		'radio3'		=> 'bbc_radio_three',
+		'radio4'		=> 'bbc_radio_four',
+		'radio4extra'	=> 'bbc_radio_four_extra',
+		'fivelive'		=> 'bbc_radio_five_live',
+		'sportsextra'	=> 'bbc_radio_five_live_sports_extra',
+		'6music'		=> 'bbc_6music',
+		'asiannetwork'	=> 'bbc_asian_network',
+		'radiofoyle'	=> 'bbc_radio_foyle',
+		'radioscotland'	=> 'bbc_radio_scotland',
+		'alba'			=> 'bbc_radio_nan_gaidheal',
+		'radioulster'	=> 'bbc_radio_ulster',
+		'radiowales'	=> 'bbc_radio_wales',
+		'radiocymru'	=> 'bbc_radio_cymru',
+		'worldservice'	=> 'bbc_world_service'
+	);
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
@@ -7255,6 +7274,8 @@ sub get_links_aod {
 			}
 			$version = 'default';
 			my @category;
+			my $thumb_pid = $channel_map{$channel_id} || $channel_id;
+			my $thumbnail = "http://www.bbc.co.uk/iplayer/images/radio/${thumb_pid}_640_360.jpg";
 			# build data structure
 			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
