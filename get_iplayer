@@ -7196,17 +7196,17 @@ sub get_links_aod {
 	my $ua = main::create_ua( 'desktop', 1 );
 	# Download index feed
 	my @channel_list = keys %channels;
- 	for ( @channel_list ) {
-		my $url = "http://www.bbc.co.uk/radio/aod/availability/${_}.xml";
+ 	for my $channel_id ( @channel_list ) {
+		my $url = "http://www.bbc.co.uk/radio/aod/availability/${channel_id}.xml";
 		main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
-		my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$_}\n");
+		my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id}\n");
 		decode_entities($xml);
 		# Parse XML
 		# get list of entries within <entry> </entry> tags
 		my @entries = split /<entry/, $xml;
 		# Discard first element == header
 		shift @entries;
-		main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$_}\n" if $opt->{verbose};
+		main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id}\n" if $opt->{verbose};
 		my $now = time();
 		foreach my $entry (@entries) {
 			my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
@@ -7247,7 +7247,7 @@ sub get_links_aod {
 			}
 			$desc = $1 if $entry =~ m{<synopsis>(.*?)</synopsis>};
 			# Extract channel
-			$channel = $channels{$_};
+			$channel = $channels{$channel_id};
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 			# Merge and Skip if this pid is a duplicate
 			if ( defined $prog->{$pid} ) {
