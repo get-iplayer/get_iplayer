@@ -6089,6 +6089,19 @@ sub get_metadata {
 		$episodenum = main::convert_words_to_number( $1 );
 	}
 
+	# last ditch web page scrap for radio programme series/episode numbers
+	if ( $prog->{type} eq "radio" && ( ! $seriesnum || ! $episodenum ) ) {
+		my $html = main::request_url_retry($ua, "http://www.bbc.co.uk/programmes/".$prog->{pid}, 3, '', '');
+		if ( $html ) {
+			if ( ! $seriesnum ) {
+				$seriesnum = $1 if $html =~ m{<span property="name">Series\s+(\d+)</span>}s;
+			}
+			if ( ! $episodenum ) {
+				$episodenum = $1 if $html =~ m{<span property="episodeNumber">(\d+)</span>}s;
+			}
+		}
+	}
+
 	# minimum episode number = 1 if not a film and series number == 0
 	$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog->{type} eq 'tv' && $categories !~ "Films" && $prog->{categories} !~ "Films" );
 	# minimum series number = 1 if episode number != 0
