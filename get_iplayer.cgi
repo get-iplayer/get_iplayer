@@ -34,7 +34,7 @@ use CGI::Cookie;
 use IO::File;
 use File::Copy;
 use HTML::Entities;
-use URI::Escape;
+use URI::Escape qw(uri_escape_utf8);
 use LWP::ConnCache;
 #use LWP::Debug qw(+);
 use LWP::UserAgent;
