@@ -5979,6 +5979,15 @@ sub get_metadata {
 				$genre =~ s/\b(\w)/\U$1/g;
 				push @cats, $genre unless grep(/$genre/i, @cats);
 			}
+			# parse subcategories
+			for (split /<po:genre/, $entry) {
+				my $genre = $1 if /\/programmes\/genres\/\w+\/(\w+)/;
+				next unless $genre;
+				$genre =~ s/northernireland/northern ireland/;
+				$genre =~ s/(\w)and(\w)/$1 & $2/;
+				$genre =~ s/\b(\w)/\U$1/g;
+				push @cats, $genre unless grep(/$genre/i, @cats);
+			}
 			$categories = join ',', @cats;
 			# capture first category, skip generic values
 			foreach my $cat ( @cats ) {
