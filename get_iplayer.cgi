@@ -42,7 +42,7 @@ use IO::Handle;
 use Getopt::Long;
 use Cwd 'abs_path';
 use File::Basename;
-use Encode qw(:default :fallback_all);
+use Encode qw(:DEFAULT :fallback_all);
 use PerlIO::encoding;
 $PerlIO::encoding::fallback = XMLCREF;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
