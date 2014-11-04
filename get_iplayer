@@ -5454,9 +5454,6 @@ sub get_verpids {
 		return 1;
 	}
 
-	# try json playlist for channel and any missing fields
-	$prog->get_verpids_json( $ua );
-
 	# Split into <item kind="programme"> sections
 	my $prev_version = '';
 	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
@@ -5542,6 +5539,9 @@ sub get_verpids {
 		main::logger "INFO: Version: $version, VersionPid: $verpid, Duration: $prog->{durations}->{$version}\n" if $opt->{verbose};  
 	}
 
+	# try json playlist for channel and any missing fields
+	$prog->get_verpids_json( $ua );
+
 	# Add to prog hash
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
 	return 0;
@@ -5611,6 +5611,7 @@ sub get_verpids_json {
 		my ($verpid, $version);
 		$version = $version_json->{$1} if /"types":\["(.*?)"/;
 		$version = "default" unless $version;
+		next if $prog->{verpids}->{$version};
 		$verpid = $1 if /"vpid":"(.+?)"/;
 		next if ! ($verpid && $version);
 		$prog->{verpids}->{$version} = $verpid;
