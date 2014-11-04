@@ -7505,8 +7505,17 @@ sub get_links_aod {
 			}
 			$version = 'default';
 			my @category;
-			my $thumb_pid = $channel_map{$channel_id} || $channel_id;
-			my $thumbnail = "http://www.bbc.co.uk/iplayer/images/radio/${thumb_pid}_640_360.jpg";
+			my ($thumb_pid, $thumb_type, $thumbnail);
+			($thumb_pid, $thumb_type) = ($1, lc($2)) if $entry =~ m{<parent\s+pid="(.*?)"\s+type="(Brand)">}i;
+			if ( ! ( $thumb_pid && $thumb_type ) ) {
+				($thumb_pid, $thumb_type) = ($1, lc($2)) if $entry =~ m{<parent\s+pid="(.*?)"\s+type="(Series)">}i;
+			}
+			if ( $thumb_pid && $thumb_type) {
+				$thumbnail = "http://ichef.bbci.co.uk/images/ic/640x360/legacy/${thumb_type}/${thumb_pid}.jpg";
+			} else {
+				$thumb_pid = $channel_map{$channel_id} || $channel_id;
+				$thumbnail = "http://www.bbc.co.uk/iplayer/images/radio/${thumb_pid}_640_360.jpg";
+			}
 			# build data structure
 			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
