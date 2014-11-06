@@ -99,7 +99,7 @@ my $default_modes = 'default';
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
-	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer' ) {
+	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer', '/usr/local/bin/get_iplayer' ) {
 		$opt_cmdline->{getiplayer} = $_ if -x $_;
 	}
 }
