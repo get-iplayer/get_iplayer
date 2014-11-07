@@ -644,6 +644,17 @@ if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fi
 	$opt->{pid} = $search_args[0];
 }
 
+if ( $opt->{pid} ) {
+	my @search_pids;
+	if ( ref($opt->{pid}) eq 'ARRAY' ) {
+		push @search_pids, @{$opt->{pid}};
+	} else {
+		push @search_pids, $opt->{pid};
+	}
+	$opt->{pid} = join( ',', @search_pids );
+	$opt_cmdline->{pid} = $opt->{pid};
+}
+
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
 my $lockfile;
 $lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
@@ -716,13 +727,7 @@ if ( defined($opt->{trimhistory}) ) {
 # Record prog specified by --pid option
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
-	my @pids;
-	if ( ref($opt->{pid}) eq 'ARRAY' ) {
-		push @pids, @{$opt->{pid}};
-	} else {
-		push @pids, $opt->{pid};
-	}
-	@pids = split( /,/, join( ',', @pids ) );	
+	my @pids = split( /,/, $opt->{pid} );	
 	for ( @pids ) {
 		$opt->{pid} = $_;
 		$retcode += find_pid_matches( $hist );
@@ -959,7 +964,7 @@ sub find_pid_matches {
 		return download_pid_in_cache( $hist, $prog->{$pid} );
 	}
 
-	my $totalretcode = 1;
+	my $totalretcode = 0;
 	my $quit_attempt = 0;
 	my %done_pids;
 	for my $prog_type ( @try_types ) {
@@ -1205,7 +1210,7 @@ sub download_matches {
 	my @match_list = @_;
 
 	# Do the recordings based on list of index numbers if required
-	my $failcount;
+	my $failcount = 0;
 	if ( $opt->{get} || $opt->{stdout} ) {
 		for my $this (@match_list) {
 			$failcount += $this->download_retry_loop( $hist );
@@ -10280,7 +10285,11 @@ sub run {
 		my $failcount = 0;
 		# If this is a one-off queue pid entry then delete the PVR entry upon successful recording(s)
 		if ( $pvr->{$name}->{pid} && $name =~ /^ONCE_/ ) {
-			$failcount = main::find_pid_matches( $hist );
+			my @pids = split( /,/, $pvr->{$name}->{pid}  );	
+			for ( @pids ) {
+				$opt->{pid} = $_;
+				$failcount += main::find_pid_matches( $hist );
+			}
 			$pvr->del( $name ) if not $failcount;
 
 		# Just make recordings of matching progs
