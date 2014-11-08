@@ -4828,8 +4828,9 @@ sub substitute {
 		$value = '' if not defined $value;
 		main::logger "DEBUG: Substitute ($version): '$key' => '$value'\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
-		if ($sanitize_mode == 0) {
-			$replace = StringUtils::sanitize_path( $value );
+		# Keep '/' (and '\' on Windows) if $sanitize_mode == 1
+		if ($sanitize_mode == 0 || $sanitize_mode == 1) {
+			$replace = StringUtils::sanitize_path( $value, $sanitize_mode );
 		# html entity encode
 		} elsif ($sanitize_mode == 3) {
 			$replace = encode_entities( $value, '&<>"\'' );
@@ -4860,12 +4861,8 @@ sub substitute {
 		# Remove unused tags
 		my $key = $tag_begin.'.*?'.$tag_end;
 		$string =~ s|$key||mg;
-		# Remove/replace all non-nice-filename chars if required
-		# Keep '/' (and '\' on Windows) if $sanitize_mode == 1
-		return StringUtils::sanitize_path( $string, $sanitize_mode );
-	} else {
-		return $string;
 	}
+	return $string;
 }
 
 	
