@@ -1839,7 +1839,9 @@ sub interpret_return_code {
 	my $rtn = shift;
 	# Interpret return code	and force return code 2 upon error      
 	my $return = $rtn >> 8;
-	if ( $rtn == -1 ) {
+	if ( $rtn == -1 && $IGNOREEXIT ) {
+		$return = 0;
+	} elsif ( $rtn == -1 ) {
 		print $se "ERROR: Command failed to execute: $!\n";
 		$return = 2 if ! $return;
 	} elsif ( $rtn & 128 ) {
