@@ -229,9 +229,9 @@ my $opt_format = {
 	refreshexcludegroups	=> [ 1, "refreshexcludegroups|refresh-exclude-groups=s", 'Config', '--refresh-exclude-groups', "Exclude channel groups when refreshing radio or tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupsradio	=> [ 1, "refreshexcludegroupsradio|refresh-exclude-groups-radio=s", 'Config', '--refresh-exclude-groups-radio', "Exclude channel groups when refreshing radio cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupstv	=> [ 1, "refreshexcludegroupstv|refresh-exclude-groups-tv=s", 'Config', '--refresh-exclude-groups-tv', "Exclude channel groups when refreshing tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
-	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Config', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'schedule'"],
-	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Config', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'schedule'"],
-	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Config', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'schedule'"],
+	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Config', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'ion','ion2','schedule'"],
+	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Config', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'ion','ion2','schedule'"],
+	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Config', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'ion','ion2','schedule'"],
 	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
 	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <integer>', "Number of days of programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <integer>', "Number of days of radio programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
@@ -7633,38 +7633,56 @@ sub get_links_ion {
 	my $self = shift;
 	my $prog = shift;
 	my $prog_type = shift;
+	my $atoz = shift;
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	# Setup User agent
 	my $ua = main::create_ua( 'desktop', 1 );
-	# Download index feed
-	my @channel_list;
-	@channel_list = sort keys %channels;
- 	for my $channel_id ( @channel_list ) {
-		my @ranges;
-		push @ranges, ('a-z', '0-9');
+	my $feed = 'listview';
+	my @biguns = ( 'bbc_radio_four', 'bbc_radio_three', 'bbc_world_service' );
+	my @dobs;
+	my $now = time();
+	for (my $i = 0; $i < 8; $i++) {
+		my $then = $now - $i * 86400;
+		my ($day, $mon, $year) = (gmtime($then))[3,4,5];
+		push @dobs, sprintf("/date/%04d-%02d-%02d", $year+1900, ++$mon, $day);
+	}
+	my @filters;
+	if ( $atoz ) {
+		$feed = 'atoz';
+		@filters = ( '/letters/a-z', '/letters/0-9' );
 		if ( $prog_type eq 'tv' ) {
-			push @ranges, ('signed_a-z', 'signed_0-9');
+			push @filters, ( '/letters/a-z/category/signed', '/letters/0-9/category/signed' );
 		}
-		for my $range ( @ranges ) {
-			my $cond = $range;
-			my $op = "letters";
-			my $cat;
-			if ( $cond =~ /signed_/ ) {
-				$cond =~ s/signed_//;
-				$cat = "category/signed";
+	} else {
+			@filters = ('');
+			if ( $prog_type eq 'tv' ) {
+				push @filters, '/category/signed';
 			}
-			my $url = "http://www.bbc.co.uk/iplayer/ion/atoz/format/xml/service_type/${prog_type}/masterbrand/$channel_id/$op/$cond/$cat";
+	}
+	my @channel_list = sort keys %channels;
+	for my $channel_id ( @channel_list ) {
+		my @channel_filters;
+		if ( grep(/^$channel_id$/, @biguns) ) {
+			for my $dob ( @dobs ) {
+				for my $filter ( @filters ) {
+					push @channel_filters, "$filter$dob";
+				}
+			}
+		} else {
+			@channel_filters = @filters;
+		}
+		for my $filter ( @channel_filters ) {
+			my $url = "http://www.bbc.co.uk/iplayer/ion/$feed/format/xml/block_type/episode/service_type/${prog_type}/masterbrand/$channel_id$filter";
 			main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
-			my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id} - $cond $cat\n");
+			my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id} - $filter\n");
 			decode_entities($xml);
 			# Parse XML
 			# get list of entries within <entry> </entry> tags
 			my @entries = split /<episode>/, $xml;
 			# Discard first element == header
 			shift @entries;
-			main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id} - $cond $cat\n" if $opt->{verbose};
+			main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id} - $filter\n" if $opt->{verbose};
 			foreach my $entry (@entries) {
 				my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
 				$pid = $1 if $entry =~ m{</passionsite_title>.*?<id>(.+?)</id>}s;
@@ -7774,6 +7792,10 @@ sub get_links {
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	if ( $feeds eq 'schedule' ) {
 		$self->get_links_schedule($prog, $prog_type, 0);
+	} elsif ( $feeds eq 'ion2' ) {
+		$self->get_links_ion($prog, $prog_type, 1);
+	} elsif ( $feeds eq 'ion' ) {
+		$self->get_links_ion($prog, $prog_type);
 	} else {
 		if ( $prog_type eq 'radio' ) {
 			$self->get_links_aod($prog, $prog_type);
