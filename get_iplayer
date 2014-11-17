@@ -129,7 +129,6 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
-	mediaselector	=> [ 1, "mediaselector|media-selector=s", 'Recording', '--mediaselector <identifier>', "Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mmsnothread	=> [ 1, "mmsnothread!", 'Recording', '--mmsnothread', "Disable parallel threaded recording for mms"],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode for available modes and defaults. Shortcuts: default,good,better(=default),best. Use --modes=best to select highest quality available (incl. HD TV)."],
@@ -6693,12 +6692,6 @@ sub parse_metadata {
 			# push to data structure
 			push @{ $mattribs->{connections} }, parse_attributes( $1 );
 		}
-		# mediaselector 5 -> 4 compatibility
-		for my $cattribs ( @{ $mattribs->{connections} } ) {
-			if ( ! $cattribs->{kind} && $cattribs->{supplier} ) {
-				$cattribs->{kind} = $cattribs->{supplier};
-			}
-		}
 		push @medias, $mattribs;
 	}
 
@@ -6761,12 +6754,7 @@ sub get_stream_data_cdn {
 		# Get authstring from more specific mediaselector if this mode is specified - fails sometimes otherwise
 		if ( $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ && (grep /^$mode$/, (split /,/, $mattribs->{modelist})) ) {
 			# Build URL
-			my $media_stream_data_prefix;
-			if ( $opt->{mediaselector} eq '4' ) {
-				$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid 
-			} else {
-				$media_stream_data_prefix = 'http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/pc/vpid/'; # $verpid
-			}
+			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
 			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
 			my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
@@ -6805,12 +6793,7 @@ sub get_stream_data_cdn {
 			# Maybe should this be general for all CDNs?
 			if ( ! $cattribs->{authString} ) {
 				# Build URL
-				my $media_stream_live_prefix;
-				if ( $opt->{mediaselector} eq '4' ) {
-					$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/';
-				} else {
-					$media_stream_live_prefix = 'http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/pc/vpid/'; # $verpid
-				}
+				my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/';
 				my $url = ${media_stream_live_prefix}."?server=$cattribs->{server}&identifier=$cattribs->{identifier}&kind=$cattribs->{kind}&application=$cattribs->{application}";
 				my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
 				main::logger "\n$xml\n" if $opt->{debug};
@@ -6987,15 +6970,8 @@ sub get_stream_set_type {
 sub get_stream_data {
 	my ( $prog, $verpid, $media ) = @_;
 	my $data = {};
-	my $media_stream_data_prefix;
-	my $media_stream_live_prefix;
-	if ( $opt->{mediaselector} eq '4' ) {
-		$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid 
-		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
-	} else {
-		$media_stream_data_prefix = 'http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/pc/vpid/'; # $verpid
-		$media_stream_live_prefix = $media_stream_data_prefix;
-	}
+	my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
+	my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 
 	# Setup user agent with redirection enabled
 	my $ua = main::create_ua( 'desktop' );
