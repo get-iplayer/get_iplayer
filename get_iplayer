@@ -398,7 +398,7 @@ my $optfile_system;
 if ( defined $ENV{GETIPLAYERUSERPREFS} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYERUSERPREFS};
 # Otherwise look for windows style file locations
-} elsif ( defined $ENV{USERPROFILE} ) {
+} elsif ( defined $ENV{USERPROFILE} && $^O eq "MSWin32" ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
@@ -409,7 +409,7 @@ if ( defined $ENV{GETIPLAYERUSERPREFS} ) {
 if ( defined $ENV{GETIPLAYERSYSPREFS} ) {
 	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
 # Otherwise look for windows style file locations
-} elsif ( defined $ENV{ALLUSERSPROFILE} ) {
+} elsif ( defined $ENV{ALLUSERSPROFILE} && $^O eq "MSWin32" ) {
 	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
 # System options on unix-like systems
 } else {

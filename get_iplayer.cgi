@@ -2326,14 +2326,17 @@ sub search_absolute_path {
 	my $abs_path;
 
 	# win32 doesn't seem to like abs_path
+	# abs_path croaks on cygwin if file not found
 	# rewrite win32 paths
-	if ( IS_WIN32 ) {
+	if ( IS_WIN32 || $^O eq "cygwin" ) {
 		# add a hardcoded prefix for now if relative path (assume relative to local get_iplayer script)
 		if ( $filename !~ m{^[A-Za-z]:} && $filename =~ m{^(\.|\.\.|[A-Za-z_])} ) {
 			$filename = dirname( abs_path( $opt_cmdline->{getiplayer} ) ).'/'.$filename;
 		}
-		# twiddle the / to \
-		$filename =~ s!(\\/|/|\/)!\\!g;
+		if ( IS_WIN32 ) {
+			# twiddle the / to \
+			$filename =~ s!(\\/|/|\/)!\\!g;
+		}
 		return $filename;
 	}
 
@@ -3432,7 +3435,7 @@ sub get_progs {
 		my $search_class = 'search';
 
 		# get the real path if file is defined
-		$record->{filename} = search_absolute_path( $record->{filename} ) if $record->{filename};
+		$record->{filename} = search_absolute_path( $record->{filename} ) if $record->{filename} && $record->{filename} ne "<filename>";
 
 		# store record in the prog global hash (prog => pid)
 		$prog{ $record->{'pid'} } = $record;
