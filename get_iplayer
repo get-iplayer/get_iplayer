@@ -7553,7 +7553,7 @@ sub get_links_aod {
 		main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id}\n" if $opt->{verbose};
 		my $now = time();
 		foreach my $entry (@entries) {
-			my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
+			my ( $title, $name, $brand_pid, $series_pid, $brand, $series, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
 			my ($start, $available) = ($1, $2) if $entry =~ m{<availability\s+start="(.*?)"\s+end="(.*?)"};
 			next if ! ( $start || $available );
 			if ( $start ) {
@@ -7567,11 +7567,27 @@ sub get_links_aod {
 			my $vpid = $1 if $entry =~ m{pid="(.+?)">};
 			$pid = $1 if $entry =~ m{<pid>(.+?)</pid>};
 			$duration = $1 if $entry =~ m{duration="(.*?)"};
-			$title = $1 if $entry =~ m{<title>(.*?)</title>};
-			# determine name and episode from title
-			( $name, $episode ) = Programme::bbciplayer::split_title( $title );
-			$episodetitle = $episode;
-			$nametitle = $name;
+			$desc = $1 if $entry =~ m{<synopsis>(.*?)</synopsis>};
+			$episode = $1 if $entry =~ m{<title>(.*?)</title>};
+			($brand_pid, $brand) = ($1, $2) if $entry =~ m{<parent.*?pid="(.*?)".*?type="Brand">(.*?)</parent>};
+			($series_pid, $series) = ($1, $2) if $entry =~ m{<parent.*?pid="(.*?)".*?type="Series">(.*?)</parent>};
+			$episode =~ s/^${brand}:\s+// if $brand;
+			$episode =~ s/^${series}:\s+// if $series;
+			if ( $brand ) {
+				if ( $series && $series ne $brand ) {
+					$name = "$brand: $series";
+				} else {
+					$name = $brand;
+				}
+			} else {
+					$name = $series;
+			}
+			unless ( $name ) {
+				# determine name and episode from title
+				#( $name, $episode ) = Programme::bbciplayer::split_title( $title );
+				$name = $brand = $episode;
+				$episode = "-";
+			}
 			# Extract the seriesnum
 			my $regex = 'Series\s+'.main::regex_numbers();
 			$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
@@ -7582,14 +7598,13 @@ sub get_links_aod {
 				$episodenum = main::convert_words_to_number( $1 );
 			} elsif ( $episode =~ m{$regex_2}i ) {
 				$episodenum = main::convert_words_to_number( $1 );
-			} elsif ( $episodetitle =~ m{$regex_2}i ) {
-				$episodenum = main::convert_words_to_number( $1 );
 			}
-			# Re-insert the episode number if the episode text doesn't have it
-			if ( $episodenum && $episodetitle =~ /^\d+\./ && $episode !~ /^(.+:\s+)?\d+\./ ) {
+			# insert episode number in $episode
+			my $episode_regex = 'Episode\s+'.main::regex_numbers();
+			my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
+			if ( $episodenum && $episode !~ /^(.+:\s+)?\d+\./ && $episode !~ $episode_regex && $episode !~ $date_regex ) {
 				$episode =~ s/^(.+:\s+)?(.*)$/$1$episodenum. $2/;
 			}
-			$desc = $1 if $entry =~ m{<synopsis>(.*?)</synopsis>};
 			# Extract channel
 			$channel = $channels{$channel_id};
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
@@ -7597,12 +7612,14 @@ sub get_links_aod {
 			if ( defined $prog->{$pid} ) {
 				next;
 			}
+			# only default for radio
 			$version = 'default';
+			# no categories in AOD
 			my @category;
 			my ($thumb_pid, $thumb_type, $thumbnail);
-			($thumb_pid, $thumb_type) = ($1, lc($2)) if $entry =~ m{<parent\s+pid="(.*?)"\s+type="(Brand)">}i;
+			($thumb_pid, $thumb_type) = ( $brand_pid , "brand" ) if $brand_pid;
 			if ( ! ( $thumb_pid && $thumb_type ) ) {
-				($thumb_pid, $thumb_type) = ($1, lc($2)) if $entry =~ m{<parent\s+pid="(.*?)"\s+type="(Series)">}i;
+			($thumb_pid, $thumb_type) = ( $series_pid , "series" ) if $series_pid;
 			}
 			if ( $thumb_pid && $thumb_type) {
 				$thumbnail = "http://ichef.bbci.co.uk/images/ic/640x360/legacy/${thumb_type}/${thumb_pid}.jpg";
@@ -7692,14 +7709,27 @@ sub get_links_ion {
 			shift @entries;
 			main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id} - $filter\n" if $opt->{verbose};
 			foreach my $entry (@entries) {
-				my ( $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
-				$pid = $1 if $entry =~ m{</passionsite_title>.*?<id>(.+?)</id>}s;
+				my ( $brand, $series, $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
+				$pid = $1 if $entry =~ m{<passionsite_title.*?<id>(.+?)</id>}s;
 				$duration = $1 if $entry =~ m{<duration>(.*?)</duration>};
+				$desc = $1 if $entry =~ m{<short_synopsis>(.*?)</short_synopsis>};
+				$brand = $1 if $entry =~ m{<brand_title>(.*?)</brand_title>};
+				$series = $1 if $entry =~ m{<series_title>(.*?)</series_title>};
+				$episode = $1 if $entry =~ m{<tag_schemes.*?<title>(.*?)</title>}s;
 				$title = $1 if $entry =~ m{<complete_title>(.*?)</complete_title>};
-				# determine name and episode from title
-				( $name, $episode ) = Programme::bbciplayer::split_title( $title );
-				$episodetitle = $1 if $entry =~ m{<short_synopsis>.*?<title>(.*?)</title>}s;
-				$nametitle = $name;
+				if ( $brand ) {
+					if ( $series && $series ne $brand ) {
+						$name = "$brand: $series";
+					} else {
+						$name = $brand;
+					}
+				} else {
+						$name = $series;
+				}
+				unless ( $name ) {
+					$name = $brand = $episode;
+					$episode = "-";
+				}
 				# Extract the seriesnum
 				my $regex = 'Series\s+'.main::regex_numbers();
 				$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
@@ -7710,14 +7740,17 @@ sub get_links_ion {
 					$episodenum = main::convert_words_to_number( $1 );
 				} elsif ( $episode =~ m{$regex_2}i ) {
 					$episodenum = main::convert_words_to_number( $1 );
-				} elsif ( $episodetitle =~ m{$regex_2}i ) {
-					$episodenum = main::convert_words_to_number( $1 );
 				}
-				# Re-insert the episode number if the episode text doesn't have it
-				if ( $episodenum && $episodetitle =~ /^\d+\./ && $episode !~ /^(.+:\s+)?\d+\./ ) {
+				# insert episode number in $episode
+				my $episode_regex = 'Episode\s+'.main::regex_numbers();
+				my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
+				if ( $episodenum && $episode !~ /^(.+:\s+)?\d+\./ && $episode !~ $episode_regex && $episode !~ $date_regex) {
 					$episode =~ s/^(.+:\s+)?(.*)$/$1$episodenum. $2/;
 				}
-				$desc = $1 if $entry =~ m{<short_synopsis>(.*?)</short_synopsis>};
+				# Extract channel
+				$channel = $1 if $entry =~ m{<masterbrand_title>(.*?)</masterbrand_title>};
+				main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
+				# categories
 				my @category;
 				my @lines = split /<category>/, $entry;
 				shift @lines;
@@ -7726,9 +7759,6 @@ sub get_links_ion {
 				}
 				# strip commas - they confuse sorting and spliting later
 				s/,//g for @category;
-				# Extract channel
-				$channel = $1 if $entry =~ m{<masterbrand_title>(.*?)</masterbrand_title>};
-				main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 				# Merge and Skip if this pid is a duplicate
 				if ( defined $prog->{$pid} ) {
 					main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
@@ -7746,12 +7776,6 @@ sub get_links_ion {
 					$prog->{$pid}->{versions} = join ',', main::make_array_unique_ordered( (split /,/, $prog->{$pid}->{versions}), $version );
 					next;
 				}
-				$guidance = $1 if $entry =~ m{<has_guidance>(.*?)</has_guidance>};
-				if ( $guidance ) {
-					$guidance = "Yes";
-				} else {
-					$guidance = undef;
-				}
 				# Check for signed-only or audiodescribed-only version from category
 				if ( grep /Sign Zone/, @category ) {
 					$version = 'signed';
@@ -7760,10 +7784,17 @@ sub get_links_ion {
 				} else {
 					$version = 'default';
 				}
+				$guidance = $1 if $entry =~ m{<has_guidance>(.*?)</has_guidance>};
+				if ( $guidance ) {
+					$guidance = "Yes";
+				} else {
+					undef $guidance;
+				}
 				# Default to 150px width thumbnail;
 				my $thumbsize = $opt->{thumbsizecache} || 150;
 				my $image_template_url = $1 if $entry =~ m{<image_template_url>(.*?)</image_template_url>};
 				my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+				$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
 				my $thumbnail = $image_template_url;
 				$thumbnail =~ s/\$recipe/$recipe/;
 				# build data structure
@@ -7956,30 +7987,34 @@ sub get_links_schedule_page {
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
 	my $now = time();
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $episodetitle, $nametitle, $seriestitle, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance, $descshort );
-		# Don't create this prog instance if the availablity is in the past 
+		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance, $descshort );
+		# Don't create this prog instance if the availability is in the past 
 		# this prevents programmes which never appear in iPlayer from being indexed
 		$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
 		next if $future && Programme::get_time_string( $available ) < $now;
 		next if ! $future && $limit && Programme::get_time_string( $available ) < $limit;
 		$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
+		$desc = $1 if $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>};
+		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
 		$episode = $1 if $entry =~ m{<programme\s+type="episode">.*?<title>\s*(.*?)\s*</title>};
-		$nametitle = $1 if $entry =~ m{<programme\s+type="brand">.*?<title>\s*(.*?)\s*</title>.*?</programme>};
-		$seriestitle = $1 if $entry =~ m{<programme\s+type="series">.*?<title>\s*(.*?)\s*</title>.*?</programme>};
-		# Set name
-		if ( $nametitle && $seriestitle ) {
-			$name = "$nametitle: $seriestitle";
-		} elsif ( $seriestitle && ! $nametitle ) {
-			$name = $seriestitle;
-		# Fallback to episode name if the BBC missed out both Series and Name
-		} elsif ( ( ! $seriestitle ) && ! $nametitle ) {
-			$name = $episode;
+		($brand_pid, $brand) = ($1, $2) if $entry =~ m{<programme\s+type="brand">.*?<pid>\s*(.*?)\s*</pid>.*?<title>\s*(.*?)\s*</title>.*?</programme>};
+		($series_pid, $series) = ($1, $2) if $entry =~ m{<programme\s+type="series">.*?<pid>\s*(.*?)\s*</pid>.*?<title>\s*(.*?)\s*</title>.*?</programme>};
+		if ( $brand ) {
+			if ( $series && $series ne $brand ) {
+				$name = "$brand: $series";
+			} else {
+				$name = $brand;
+			}
 		} else {
-			$name = $nametitle;
+			$name = $series;
+		}
+		unless ( $name ) {
+			$name = $brand = $episode;
+			$episode = "-";
 		}
 		# Extract the seriesnum
 		my $regex = 'Series\s+'.main::regex_numbers();
-		$seriesnum = main::convert_words_to_number( $1 ) if $seriestitle =~ m{$regex}i;
+		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		my $series_position = $1 if $entry =~ m{<programme\s+type="series">.*?<position>\s*(.+?)\s*</position>};
 		$seriesnum ||= $series_position;
 		# Extract the episode num
@@ -7992,19 +8027,12 @@ sub get_links_schedule_page {
 		}
 		my $episode_position = $1 if $entry =~ m{<programme\s+type="episode">.*?<position>\s*(.+?)\s*</position>};
 		$episodenum ||= $episode_position;
-		# extract desc
-		if ( $entry =~ m{<long_synopsis>\s*(.+?)\s*</long_synopsis>} ) {
-			$desc = $1;
-		} elsif ( $entry =~ m{<medium_synopsis>\s*(.+?)\s*</medium_synopsis>} ) {
-			$desc = $1;
-		} elsif ( $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>} ) {
-			$desc = $1;
-		};
-		# Remove unwanted html tags
-		$desc =~ s!</?(br|b|i|p|strong)\s*/?>!!gi;
-		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
-		# Extract channel nice name
-		# $channel = $channels{$channel_id};
+		# insert episode number in $episode
+		my $episode_regex = 'Episode\s+'.main::regex_numbers();
+		my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
+		if ( $episodenum && $episode !~ /^(.+:\s+)?\d+\./ && $episode !~ $episode_regex && $episode !~ $date_regex) {
+			$episode =~ s/^(.+:\s+)?(.*)$/$1$episodenum. $2/;
+		}
 		main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 		# Merge and Skip if this pid is a duplicate
 		if ( defined $prog->{$pid} ) {
@@ -8017,6 +8045,7 @@ sub get_links_schedule_page {
 			#$prog->{$pid}->{available} = $available;
 			next;
 		}
+		# only default version in schedules
 		$version = 'default';
 		# thumbnail options
 		# http://ichef.bbci.co.uk/programmeimages/p01m1x5p/b04l8sml_640_360.jpg
@@ -8025,8 +8054,8 @@ sub get_links_schedule_page {
 		my $thumbsize = $opt->{thumbsizecache} || 150;
 		my $image_pid = $1 if $entry =~ m{<image><pid>(.*?)</pid>}s;
 		my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
+		$suffix = Programme::bbciplayer->thumb_url_suffixes->{ 150 } unless $suffix;
 		my $thumbnail = "http://ichef.bbci.co.uk/programmeimages/${image_pid}/${pid}${suffix}";
-
 		# build data structure
 		$prog->{$pid} = main::progclass($prog_type)->new(
 			'pid'		=> $pid,
