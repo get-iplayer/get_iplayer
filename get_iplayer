@@ -224,6 +224,7 @@ my $opt_format = {
 	preset		=> [ 1, "preset|z=s", 'Config', '--preset, -z <name>', "Use specified user options preset"],
 	presetlist	=> [ 1, "listpresets|list-presets|presetlist|preset-list!", 'Config', '--preset-list', "Show all valid presets"],
 	profiledir	=> [ 1, "profiledir|profile-dir=s", 'Config', '--profile-dir <dir>', "Override the user profile directory/folder"],
+	refreshabortonerror	=> [ 1, "refreshabortonerror|refresh-abortonerror!", 'Config', '--refresh-abortonerror', "Abort cache refresh for programme type if data for any channel fails to download. Use --refresh-exclude to temporarily skip failing channels."],
 	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
 	refreshexcludegroups	=> [ 1, "refreshexcludegroups|refresh-exclude-groups=s", 'Config', '--refresh-exclude-groups', "Exclude channel groups when refreshing radio or tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
@@ -1738,7 +1739,7 @@ sub get_links {
 		# Get links for specific type of programme class into %prog 
 		if ( progclass( $prog_type )->get_links( $prog, $prog_type ) != 0 ) {
 			# failed - leave cache unchanged
-			main::logger "ERROR: Failed to retrieve programmes for $prog_type - skipping\n";
+			main::logger "ERROR: Errors encountered when retrieving $prog_type programmes - skipping\n";
 			return 0;
 		}
 
@@ -7509,7 +7510,6 @@ sub get_links_aod {
 	my $self = shift;
 	my $prog = shift;
 	my $prog_type = shift;
-	return 1 if $prog_type ne "radio";
 	my %channel_map = (
 		'1xtra'			=> 'bbc_1xtra',
 		'radio1'		=> 'bbc_radio_one',
@@ -7540,6 +7540,10 @@ sub get_links_aod {
 		my $url = "http://www.bbc.co.uk/radio/aod/availability/${channel_id}.xml";
 		main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
 		my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id}\n");
+		if ( ! $xml ) {
+			return 1 if $opt->{refreshabortonerror};
+			next;
+		}
 		decode_entities($xml);
 		# Parse XML
 		# get list of entries within <entry> </entry> tags
@@ -7676,6 +7680,10 @@ sub get_links_ion {
 			my $url = "http://www.bbc.co.uk/iplayer/ion/$feed/format/xml/block_type/episode/service_type/${prog_type}/masterbrand/$channel_id$filter";
 			main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
 			my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id} - $filter\n");
+			if ( ! $xml ) {
+				return 1 if $opt->{refreshabortonerror};
+				next;
+			}
 			decode_entities($xml);
 			# Parse XML
 			# get list of entries within <entry> </entry> tags
@@ -7790,23 +7798,26 @@ sub get_links {
 	my $prog_type = shift;
  	my $feeds = lc($opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"});
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
+	my $rc = 0;
 	if ( $feeds eq 'schedule' ) {
-		$self->get_links_schedule($prog, $prog_type, 0);
+		$rc = $self->get_links_schedule($prog, $prog_type, 0);
 	} elsif ( $feeds eq 'ion2' ) {
-		$self->get_links_ion($prog, $prog_type, 1);
+		$rc = $self->get_links_ion($prog, $prog_type, 1);
 	} elsif ( $feeds eq 'ion' ) {
-		$self->get_links_ion($prog, $prog_type);
+		$rc = $self->get_links_ion($prog, $prog_type);
 	} else {
 		if ( $prog_type eq 'radio' ) {
-			$self->get_links_aod($prog, $prog_type);
+			$rc = $self->get_links_aod($prog, $prog_type);
 		}
 		elsif ( $prog_type eq 'tv' ) {
-			$self->get_links_ion($prog, $prog_type);
+			$rc = $self->get_links_ion($prog, $prog_type);
 		}
 	}
+	return 1 if $rc && $opt->{refreshabortonerror};
 
 	if ( $opt->{refreshfuture} ) {
-		$self->get_links_schedule($prog, $prog_type, 1);
+		$rc = $self->get_links_schedule($prog, $prog_type, 1);
+		return 1 if $rc && $opt->{refreshabortonerror};
 	}
 	
 	main::logger "\n";
@@ -7849,7 +7860,8 @@ sub get_links_schedule {
 			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
 			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channels{$channel_id}, $future, $url, $limit);
 			if ( $rc ) {
-				main::logger("\nWARNING: Failed to get programme schedule feed for $channel_id from iplayer site\n");
+				return 1 if $opt->{refreshabortonerror};
+				next;
 			}
 		}
 	}
