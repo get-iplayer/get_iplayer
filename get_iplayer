@@ -5624,17 +5624,21 @@ sub get_verpids_json {
 		$prog->{type} = 'tv' if $default =~ /"kind":"video"/;
 		$prog->{type} = 'radio' if $default =~ /"kind":"audio"/;
 	}
-	my $version_json = {
-		'DubbedAudioDescribed' => 'audiodescribed', 
-		'Signed' => 'signed'
-	};
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
 	for ( @versions ) {
 		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
 		my ($verpid, $version);
-		$version = $version_json->{$1} if /"types":\["(.*?)"/;
-		$version = "default" unless $version;
+		my $type = $1 if /"types":\["(.*?)"/;
+		if ( $type =~ /describe/i ) {
+			$version = "audiodescribed";
+		} elsif ($type =~ /sign/i ) {
+			$version = "signed";
+		} elsif ($type =~ /original/i ) {
+			$version = "default";
+		} else {
+			($version = lc($type)) =~ s/\s+.*$//;
+		}
 		next if $prog->{verpids}->{$version};
 		$verpid = $1 if /{"vpid":"(\w+)","kind":"(programme|radioProgramme)"/i;
 		next if ! ($verpid && $version);
