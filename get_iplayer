@@ -5906,20 +5906,18 @@ sub get_metadata {
 							$version = "audiodescribed";
 						} elsif ($type =~ /sign/i ) {
 							$version = "signed";
-						} elsif ($type =~ /iplayer/i ) {
-							$version = "iplayer";
-						} else  {
+						} elsif ($type =~ /original/i ) {
 							$version = "default";
+						} else {
+							($version = lc($type)) =~ s/\s+.*$//;
 						}
 						$prog->{verpids}->{$version} = $ver->{pid}->[0];
 						$prog->{durations}->{$version} = $ver->{duration}->[0];
 					}
-					# prefer iplayer version as default
-					if ( $prog->{verpids}->{iplayer} ) {
+					# prefer iplayer version as default (for web only content)
+					if ( $prog->{verpids}->{iplayer} && ! $prog->{durations}->{default} ) {
 						$prog->{verpids}->{default} = $prog->{verpids}->{iplayer};
 						$prog->{durations}->{default} = $prog->{durations}->{iplayer};
-						delete $prog->{verpids}->{iplayer};
-						delete $prog->{durations}->{iplayer};
 					}
 					$got_metadata = 1;
 				} else {
