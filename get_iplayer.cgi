@@ -533,6 +533,7 @@ sub run_cgi {
 			avi	=> 'video/x-flv',
 			flv	=> 'video/x-flv',
 			asf	=> 'video/x-ms-asf',
+			ts => 'video/mp2ts',
 		);
 
 		# Default mime type depending on mode
@@ -561,7 +562,7 @@ sub run_cgi {
 			if ( $opt->{PROGTYPES}->{current} eq 'livetv' ) {
 				print $se "INFO: Transcoding disabled for livetv\n";
 				$notranscode = 1;
-				$ext = 'flv';
+				$ext = 'ts';
 			}
 			# No conversion for iphone radio as mp3
 			$ext = undef if $opt->{MODES}->{current} eq 'iphone' && $ext eq 'mp3';
@@ -1527,6 +1528,11 @@ sub run_cmd {
 	my $from = new IO::Handle;
 	my $err = new IO::Handle;
 	my @cmd = ( @_ );
+	my $direct = grep(/$opt_cmdline->{ffmpeg}/, @cmd);
+	my $stream = grep(/stream%3D1/, @cmd);
+	my $livetv = grep(/type%3Dlivetv/, @cmd);
+	my $filter_ffmpeg_progress = (! $stream && $livetv);
+	my $stdout_raw = ($direct || $stream);
 	my $rtn;
 
 	$fh_cmd_out->autoflush(1);
@@ -1573,7 +1579,11 @@ sub run_cmd {
 			# Not sure if these are necessary:
 			$fh_cmd_out->autoflush(1);
 			$from->autoflush(1);
-			binmode $from, ':utf8';
+			if ( $stdout_raw)  {
+				binmode $from, ':raw';
+			} else {
+				binmode $from, ':utf8';
+			}
 			# Read each char from command output and push to socket fh
 			my $char;
 			my $bytes;
@@ -1610,14 +1620,36 @@ sub run_cmd {
 			my $bytes;
 			# Assume that we don't want to buffer STDERR output of the command
 			$size = 1;
-			while ( $bytes = read( $err, $char, $size ) ) {
-				if ( $bytes <= 0 ) {
-					print $se "DEBUG: STDERR fd closed - exiting thread\n";
-					exit 0;
-				} else {
-					print $fh_cmd_err $char;
+			if ( $filter_ffmpeg_progress) {
+				my ($count, $buf);
+				while ( $bytes = read( $err, $char, $size ) ) {
+					if ( $bytes <= 0 ) {
+						print $se "DEBUG: STDERR fd closed - exiting thread\n";
+						exit 0;
+					} else {
+						if ( $char =~ /[\r\n]/ ) {
+							if ( $buf =~ /size=/ ) {
+								print $fh_cmd_err "$buf\n" if ! ($count++ % 10);
+							} else {
+								print $fh_cmd_err "$buf\n";
+							}
+							$buf = '';
+						} else {
+							$buf .= $char;
+						}
+					}
+					last if $bytes < $size;
 				}
-				last if $bytes < $size;
+			} else {
+				while ( $bytes = read( $err, $char, $size ) ) {
+					if ( $bytes <= 0 ) {
+						print $se "DEBUG: STDERR fd closed - exiting thread\n";
+						exit 0;
+					} else {
+						print $fh_cmd_err $char;
+					}
+					last if $bytes < $size;
+				}
 			}
 			#print $se "CMD STDERR FH EMPTY\n";
 			exit 0;
@@ -2988,7 +3020,7 @@ sub search_progs {
 		# Search mode
 		} else {
 			# Play
-			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
+			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -target=>'_newtab_play_$pid', -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current} ) }, 'Play' ).'<br />';
 			# Record
 			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='record_now'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.target='_newtab_$pid'; form.submit(); RestoreFormVars(form); form.target='';" }, 'Record' ).'<br />';
 			# Queue
