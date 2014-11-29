@@ -5793,7 +5793,7 @@ sub get_metadata {
 	eval "use XML::Simple";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple perl module for more accurate programme metadata.\n";
-	} elsif ( $prog->{pid} =~ /^\w{8}$/ && ! $opt->{playlistmetadata} ) {
+	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ && ! $opt->{playlistmetadata} ) {
 		my $url = $prog_data_url.$prog->{pid}.".xml";
 		my $xml = main::request_url_retry($ua, $url, 3, '', '');
 		if ( $xml ) {
@@ -5972,7 +5972,7 @@ sub get_metadata {
 			}
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
-		next unless $prog->{verpids}->{$version} =~ /^\w{8}$/;
+		next unless $prog->{verpids}->{$version} =~ /^[bp]0[a-z0-9]{6}$/;
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
 		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
@@ -6115,7 +6115,7 @@ sub get_metadata_fallback {
 	#</rdf:RDF>
 	# Get metadata from this URL only if the pid contains a standard BBC iPlayer PID)
 
-	if ( $prog->{pid} =~ /^\w{8}$/ ) {
+	if ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
 		my $rdf_url = $prog_data_url.$prog->{pid}.'.rdf';
 		my $entry = main::request_url_retry($ua, $rdf_url, 3, '', '');
 		decode_entities($entry);
@@ -6198,7 +6198,7 @@ sub get_metadata_fallback {
 		}
 
 		unless ( ( $prog->{seriesnum} || $seriesnum ) && ( $prog->{episodenum} || $episodenum ) ) {
-			if ( $prog->{pid} =~ /^\w{8}$/ && $opt->{scrapemetadata} ) {
+			if ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ && $opt->{scrapemetadata} ) {
 				# last ditch web page scrape for series/episode numbers
 				my $html = main::request_url_retry($ua, "http://www.bbc.co.uk/programmes/".$prog->{pid}, 3, '', '');
 				if ( $html ) {
@@ -6228,7 +6228,7 @@ sub get_metadata_fallback {
 	}
 
 	unless ( $prog->{player} ) {
-		if ( $prog->{pid} =~ /^\w{8}$/ ) {
+		if ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
 			if ( $prog->{type} eq "tv" ) {
 				$prog->{player} = "http://www.bbc.co.uk/iplayer/episode/$prog->{pid}";
 			} else {
