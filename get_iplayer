@@ -6036,9 +6036,10 @@ sub get_metadata {
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
 	$prog->{category}	= $category || $prog->{category};
-	$prog->{desc}		= $longdesc || $meddesc || $prog->{desc} || $summary;
-	$prog->{descmedium}	= $meddesc || $summary;
-	$prog->{descshort}	= $summary;
+	$prog->{desc}		= $summary || $prog->{desc};
+	$prog->{desclong}	= $longdesc || $meddesc || $summary || $prog->{desclong};
+	$prog->{descmedium}	= $meddesc || $summary || $prog->{descmedium};
+	$prog->{descshort}	= $summary || $prog->{descshort};
 	$prog->{player}		= $player || $prog->{player};
 	$prog->{web}		= $web || $prog->{web};
 	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
@@ -6122,8 +6123,9 @@ sub get_metadata_fallback {
 		main::logger "DEBUG: $rdf_url:\n$entry\n\n" if $opt->{debug};
 		# Flatten
 		$entry =~ s|[\n\r]| |g;
-		my $desc = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>};
-		$prog->{desc} = $desc if $desc;
+		$prog->{desclong} = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>};
+		$prog->{descmedium} = $1 if $entry =~ m{<po:medium_synopsis>\s*(.+?)\s*</po:medium_synopsis>};
+		$prog->{descshort} = $1 if $entry =~ m{<po:short_synopsis>\s*(.+?)\s*</po:short_synopsis>};
 		# extract categories from RDF
 		if ( ! $prog->{categories} ) {
 			my $genres = genres();
@@ -10838,11 +10840,11 @@ sub tags_from_metadata {
 	$tags->{tracknum} = $meta->{episodenum};
 	$tags->{disk} = $meta->{seriesnum};
 	# generate lyrics text with links if available
-	$tags->{lyrics} = $meta->{desc};
+	$tags->{lyrics} = $meta->{desclong};
 	$tags->{lyrics} .= "\n\nEPISODE\n$meta->{player}" if $meta->{player};
 	$tags->{lyrics} .= "\n\nSERIES\n$meta->{web}" if $meta->{web};
 	$tags->{description} = $meta->{descshort};
-	$tags->{longDescription} = $meta->{desc};
+	$tags->{longDescription} = $meta->{desclong};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
 	$tags->{TVShowName} = $meta->{name};
 	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
