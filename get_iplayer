@@ -5899,11 +5899,7 @@ sub get_metadata {
 					$seriesnum = $seriesnum2 if $seriesnum2;
 					$episodenum = $episodenum2 if $episodenum2;
 					# insert episode number in $episode
-					my $episode_regex = 'Episode\s+'.main::regex_numbers();
-					my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-					if ( $episodenum && $episode !~ /^\d+\./ && $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
-						$episode =~ s/^(.*)$/$episodenum. $1/;
-					}
+					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
 					# minimum episode number = 1 if not a film and series number == 0
 					$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
 					# minimum series number = 1 if episode number != 0
@@ -6058,10 +6054,11 @@ sub get_metadata {
 	# Create a stripped episode and series with numbers removed + senum s##e## element.
 	$prog->{episodeshort} = $prog->{episode};
 	$prog->{episodeshort} =~ s/(^|:(\s+))\d+\.\s+/$1/i;
+	my $no_number = $prog->{episodeshort};
 	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
 	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} = $prog->{episode} if $prog->{episodeshort} eq '';
-	$prog->{nameshort} = $prog->{name};
+	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
+	$prog->{nameshort} = $prog->{brand};
 	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i;
 	return 0;
 }
@@ -6127,9 +6124,9 @@ sub get_metadata_fallback {
 		my $entry = main::request_url_retry($ua, $rdf_url, 3, '', '');
 		decode_entities($entry);
 		main::logger "DEBUG: $rdf_url:\n$entry\n\n" if $opt->{debug};
+		$prog->{desclong} = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>}s;
 		# Flatten
 		$entry =~ s|[\n\r]| |g;
-		$prog->{desclong} = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>};
 		$prog->{descmedium} = $1 if $entry =~ m{<po:medium_synopsis>\s*(.+?)\s*</po:medium_synopsis>};
 		$prog->{descshort} = $1 if $entry =~ m{<po:short_synopsis>\s*(.+?)\s*</po:short_synopsis>};
 		# extract categories from RDF
@@ -6207,14 +6204,8 @@ sub get_metadata_fallback {
 
 		$prog->{seriesnum} ||= $seriesnum;
 		$prog->{episodenum} ||= $episodenum;
-
-		# Re-insert the episode number if the episode text doesn't have it
-		my $episode_regex = 'Episode\s+'.main::regex_numbers();
-		my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-		if ( $prog->{episodenum} && $prog->{episode} !~ /^\d+\./ && $prog->{episode} !~ /$episode_regex/ && $prog->{episode} !~ /$date_regex/ ) {
-			$prog->{episode} =~ s/^(.*)$/$episodenum. $1/;
-		}
-
+		# insert episode number in $episode
+		$prog->{episode} = Programme::bbciplayer::insert_episode_number($prog->{episode}, $prog->{episodenum});
 		# minimum episode number = 1 if not a film and series number == 0
 		$prog->{episodenum} = 1 if ( $prog->{seriesnum} == 0 && $prog->{episodenum} == 0 && $prog->{type} eq 'tv' && $prog->{categories} !~ "Films" );
 		# minimum series number = 1 if episode number != 0
@@ -6653,6 +6644,17 @@ sub split_title {
 	return ( $name, $episode );
 }
 
+
+sub insert_episode_number {
+	my $episode = shift;
+	my $episodenum = shift;
+	#my $episode_regex = 'Episode\s+'.main::regex_numbers();
+	#my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
+	if ( $episodenum && $episode !~ /^\d+\./ ) { #&& $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
+		$episode =~ s/^(.*)$/$episodenum. $1/;
+	}
+	return $episode;
+}
 
 
 # Returns hash
@@ -7596,11 +7598,7 @@ sub get_links_aod {
 				$episodenum = main::convert_words_to_number( $1 );
 			}
 			# insert episode number in $episode
-			my $episode_regex = 'Episode\s+'.main::regex_numbers();
-			my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-			if ( $episodenum && $episode !~ /^\d+\./ && $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
-				$episode =~ s/^(.*)$/$episodenum. $1/;
-			}
+			$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
 			# Extract channel
 			$channel = $channels{$channel_id};
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
@@ -7738,11 +7736,7 @@ sub get_links_ion {
 					$episodenum = main::convert_words_to_number( $1 );
 				}
 				# insert episode number in $episode
-				my $episode_regex = 'Episode\s+'.main::regex_numbers();
-				my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-				if ( $episodenum && $episode !~ /^\d+\./ && $episode !~ /$episode_regex/ && $episode !~ /$date_regex/) {
-					$episode =~ s/^(.*)$/$episodenum. $1/;
-				}
+				$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
 				# Extract channel
 				$channel = $1 if $entry =~ m{<masterbrand_title>(.*?)</masterbrand_title>};
 				main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
@@ -8024,11 +8018,7 @@ sub get_links_schedule_page {
 		my $episode_position = $1 if $entry =~ m{<programme\s+type="episode">.*?<position>\s*(.+?)\s*</position>};
 		$episodenum ||= $episode_position;
 		# insert episode number in $episode
-		my $episode_regex = 'Episode\s+'.main::regex_numbers();
-		my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-		if ( $episodenum && $episode !~ /^\d+\./ && $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
-			$episode =~ s/^(.*)$/$episodenum. $1/;
-		}
+		$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
 		main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 		# Merge and Skip if this pid is a duplicate
 		if ( defined $prog->{$pid} ) {
