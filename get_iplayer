@@ -5799,6 +5799,7 @@ sub get_metadata {
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple perl module for more accurate programme metadata.\n";
 	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ && ! $opt->{playlistmetadata} ) {
+		main::logger "INFO: Using XML programme page as metadata source.\n" if $opt->{verbose};
 		my $url = $prog_data_url.$prog->{pid}.".xml";
 		my $xml = main::request_url_retry($ua, $url, 3, '', '');
 		if ( $xml ) {
