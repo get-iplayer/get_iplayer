@@ -281,14 +281,18 @@ my $opt_format = {
 	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file.  All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
-	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Use complete title (including series) instead of shorter episode title"],
-	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley supports --hdvideo argument for HD video flag"],
+	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Prepend album/show title to track title"],
+	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley accepts --hdvideo argument for HD video flag"],
 	tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Tagging', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
-	tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Tagging', '--tag-longdesc', "AtomicParsley supports --longdesc argument for long description text"],
-	tag_longdescription => [ 1, "taglongdescription|tag-longdescription!", 'Tagging', '--tag-longdescription', "AtomicParsley supports --longDescription argument for long description text"],
+	tag_isodate		=> [ 1, "tagisodate|tag-isodate!",  'Tagging', '--tag-isodate', "Use ISO8601 dates (YYYY-MM-DD) in album/show names and track titles"],
+	tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Tagging', '--tag-longdesc', "AtomicParsley accepts --longdesc argument for long description text"],
+	tag_longdescription => [ 1, "taglongdescription|tag-longdescription!", 'Tagging', '--tag-longdescription', "AtomicParsley accepts --longDescription argument for long description text"],
+	tag_longepisode => [ 1, "taglongepisode|tag-longepisode!", 'Tagging', '--tag-longepisode', "Use <episode> instead of <episodeshort> for track title"],
+	tag_longtitle => [ 1, "taglongtitle|tag-longtitle!", 'Tagging', '--tag-longtitle', "Prepend <series> (if available) to track title. Ignored with --tag-fulltitle."],
 	tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 	tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 	tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts"],
+	tag_shortname => [ 1, "tagshortname|tag-shortname!", 'Tagging', '--tag-shortname', "Use <nameshort> instead of <name> for album/show title"],
 	tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "AtomicParsley accepts UTF-8 input"],
 
 	# Misc
@@ -10780,6 +10784,8 @@ sub new {
 sub tags_from_metadata {
 	my ($self, $meta) = @_;
 	my $tags;
+	my $name = $opt->{tag_shortname} ? $meta->{nameshort} : $meta->{name};
+	my $episode = $opt->{tag_longepisode} ? $meta->{episode} : $meta->{episodeshort};
 	# iTunes media kind
 	$tags->{stik} = 'Normal';
 	if ( $meta->{ext} =~ /(mp4|m4v)/i) {
@@ -10790,16 +10796,17 @@ sub tags_from_metadata {
 	$tags->{copyright} = substr($meta->{dldate}, 0, 4)." British Broadcasting Corporation, all rights reserved";
 	# select version of of episode title to use
 	if ( $opt->{tag_fulltitle} ) {
-		$tags->{title} = $meta->{title};
+		$tags->{title} = "$name: $episode";
 	} else {
 		# fix up episode if necessary
-		(my $title = $meta->{episode}) =~ s/[\s\-]+$//;
-		$tags->{title} = $title ? $title : $meta->{name};
+		(my $title = $episode) =~ s/[\s\-]+$//;
+		$title = "$meta->{series}: $title" if $opt->{tag_longtitle} && $meta->{series};
+		$tags->{title} = $title ? $title : $name;
 	}
 	$tags->{artist} = $meta->{channel};
 	# album artist from programme type
 	($tags->{albumArtist} = "BBC " . ucfirst($meta->{type})) =~ s/tv/TV/i;
-	$tags->{album} = $meta->{name};
+	$tags->{album} = $name;
 	$tags->{grouping} = $meta->{categories};
 	# composer references iPlayer
 	$tags->{composer} = "BBC iPlayer";
@@ -10828,7 +10835,7 @@ sub tags_from_metadata {
 	$tags->{description} = $meta->{descshort};
 	$tags->{longDescription} = $meta->{desclong};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
-	$tags->{TVShowName} = $meta->{name};
+	$tags->{TVShowName} = $name;
 	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
 	$tags->{TVSeasonNum} = $tags->{disk};
 	$tags->{TVEpisodeNum} = $tags->{tracknum};
@@ -10847,6 +10854,11 @@ sub tags_from_metadata {
 		|| ( $opt->{tag_podcast_radio} && ! $tags->{is_video} )
 		|| ( $opt->{tag_podcast_tv} && $tags->{is_video} );
 	$tags->{cnID} = $self->tag_cnid_from_pid($meta->{pid}) if $opt->{tag_cnid};
+	if ( $opt->{tag_isodate} ) {
+		for my $field ( 'title', 'album', 'TVShowName' ) {
+			$tags->{$field} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
+		}
+	}
 	while ( my ($key, $val) = each %{$tags} ) {
 		$tags->{$key} = StringUtils::convert_punctuation($val);
 	}
