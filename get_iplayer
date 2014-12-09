@@ -5913,19 +5913,22 @@ sub get_metadata {
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						my $type = $ver->{types}->[0]->{type}->[0];
-						my $version;
-						if ( $type =~ /describe/i ) {
-							$version = "audiodescribed";
-						} elsif ($type =~ /sign/i ) {
-							$version = "signed";
-						} elsif ($type =~ /original/i ) {
-							$version = "default";
-						} else {
-							($version = lc($type)) =~ s/\s+.*$//;
+						for my $type ( @{$ver->{types}->[0]->{type}} ) {
+							my $version;
+							if ( $type =~ /describe/i ) {
+								$version = "audiodescribed";
+							} elsif ($type =~ /sign/i ) {
+								$version = "signed";
+							} elsif ($type =~ /original/i ) {
+								$version = "default";
+							} else {
+								($version = lc($type)) =~ s/\s+.*$//;
+							}
+							unless ( $prog->{verpids}->{$version} ) {
+								$prog->{verpids}->{$version} = $ver->{pid}->[0];
+								$prog->{durations}->{$version} = $ver->{duration}->[0];
+							}
 						}
-						$prog->{verpids}->{$version} = $ver->{pid}->[0];
-						$prog->{durations}->{$version} = $ver->{duration}->[0];
 					}
 					$got_metadata = 1;
 				} else {
@@ -5939,16 +5942,20 @@ sub get_metadata {
 		}
 	}
 
+	# use fallback metadata if necessary
+	unless ( $got_metadata ) {
+		$prog->get_metadata_fallback( $ua );
+	}
+
 	# Get list of available modes for each version available
 	# populate version pid metadata if we don't have it already
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
-			# Only return at this stage unless we want metadata/tags only for various reasons
+			# Return at this stage unless we want metadata/tags only for various reasons
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
 	}
-	$versions = join ',', sort keys %{ $prog->{verpids} };
 
 	my $modes;
 	my $mode_sizes;
@@ -5956,12 +5963,14 @@ sub get_metadata {
 	my $last_broadcast;
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		# Set duration for this version if it is not defined
-		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
 		# Try to get stream data for this version if it isn't already populated
 		if ( not defined $prog->{streams}->{$version} ) {
 			# Add streamdata to object
 			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version} );
+		}
+		if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
+			main::logger "INFO: No modes available for $version version - skipping\n" if $opt->{verbose};
+			next;
 		}
 		$modes->{$version} = join ',', sort keys %{ $prog->{streams}->{$version} };
 		# Estimate the file sizes for each mode
@@ -5976,6 +5985,8 @@ sub get_metadata {
 			}
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
+		# Set duration for this version if it is not defined
+		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
 		next unless $prog->{verpids}->{$version} =~ /^[bp]0[a-z0-9]{6}$/;
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
@@ -6022,16 +6033,30 @@ sub get_metadata {
 		}
 	}
 
-	# use fallback metadata if necessary
-	unless ( $got_metadata ) {
-		$prog->get_metadata_fallback( $ua );
+	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		# remove versions with no modes
+		if ( ! $modes->{$version} ) {
+			main::logger "INFO: No modes available for $version version - deleting\n" if $opt->{verbose};
+			delete $prog->{verpids}->{$version};
+			delete $prog->{streams}->{$version};
+			delete $prog->{durations}->{$version};
+			delete $modes->{$version};
+			delete $mode_sizes->{$version};
+			delete $prog->{firstbcast}->{$version};
+			delete $prog->{lastbcast}->{$version};
+			delete $prog->{firstbcastrel}->{$version};
+			delete $prog->{lastbcastrel}->{$version};
+			delete $prog->{firstbcastdate}->{$version};
+			delete $prog->{lastbcastdate}->{$version};
+		}
 	}
 
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		# use iplayer version if default missing (for web only content)
-		if ( $version =~ /iplayer/ && $modes->{$version} && ! $modes->{default} ) {
+		if ( $version =~ /(iplayer|shortened|lengthened)/ && $modes->{$version} && ! $modes->{default} ) {
 			main::logger "INFO: Using $version version as default\n";
 			$prog->{verpids}->{default} = $prog->{verpids}->{$version};
+			$prog->{streams}->{default} = $prog->{streams}->{$version};
 			$prog->{durations}->{default} = $prog->{durations}->{$version};
 			$modes->{default} = $modes->{$version};
 			$mode_sizes->{default} = $mode_sizes->{$version};
@@ -6047,7 +6072,15 @@ sub get_metadata {
 		}
 	}
 
-	# Fill in from cache if not got from metadata
+	# make sure at least one version available
+	if ( keys %{ $prog->{verpids} } == 0 ) {
+		main::logger "ERROR: No programme versions found\n" if $opt->{verbose};
+		# Return at this stage unless we want metadata/tags only for various reasons
+		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
+	}
+
+	$versions = join ',', sort keys %{ $prog->{verpids} };
+
 	$prog->{title} 		= $title || $prog->{title};
 	$prog->{name} 		= $name || $prog->{name};
 	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
