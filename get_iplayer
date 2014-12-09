@@ -5930,11 +5930,6 @@ sub get_metadata {
 						$prog->{verpids}->{$version} = $ver->{pid}->[0];
 						$prog->{durations}->{$version} = $ver->{duration}->[0];
 					}
-					# prefer iplayer version as default (for web only content)
-					if ( $prog->{verpids}->{iplayer} ) {
-						$prog->{verpids}->{default} = $prog->{verpids}->{iplayer};
-						$prog->{durations}->{default} = $prog->{durations}->{iplayer};
-					}
 					$got_metadata = 1;
 				} else {
 					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode. Download may fail and metadata may be inaccurate.\n";
@@ -6033,6 +6028,17 @@ sub get_metadata {
 	# use fallback metadata if necessary
 	unless ( $got_metadata ) {
 		$prog->get_metadata_fallback( $ua );
+	}
+
+	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		# use iplayer version if default missing (for web only content)
+		if ( $version =~ /iplayer/ && $modes->{$version} && ! $modes->{default} ) {
+			main::logger "INFO: Using $version version as default\n";
+			$prog->{verpids}->{default} = $prog->{verpids}->{$version};
+			$prog->{durations}->{default} = $prog->{durations}->{$version};
+			$modes->{default} = $modes->{$version};
+			last;
+		}
 	}
 
 	# Fill in from cache if not got from metadata
