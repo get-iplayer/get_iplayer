@@ -4469,10 +4469,9 @@ sub download_retry_loop {
 	# Setup user-agent
 	my $ua = main::create_ua( 'desktop' );
 
-	# This pre-gets all the metadata - not entirely necessary but it does help - maybe only have when --metadata or --command is used
-	# Also need full metadata for AtomicParsley or if --fileprefix is used
+	# This pre-gets all the metadata - necessary to avoid get_verpids() below if possible
 	$prog->get_metadata_general();
-	if ( $opt->{fileprefix} || $opt->{metadata} || $opt->{command} || main::exists_in_path( 'atomicparsley' ) ) {
+	if ( ! $prog->{name} ) {
 		if ( $prog->get_metadata( $ua ) ) {
 			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
 			return 1;
