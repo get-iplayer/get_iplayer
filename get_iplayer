@@ -6677,6 +6677,10 @@ sub thumb_url_suffixes {
 		528	=> '_528_297.jpg',
 		640	=> '_640_360.jpg',
 		832	=> '_832_468.jpg',
+		1024	=> '_1024_576.jpg',
+		1280	=> '_1280_720.jpg',
+		1600	=> '_1600_900.jpg',
+		1920	=> '_1920_1080.jpg',
 		1	=> '_86_48.jpg',
 		2	=> '_150_84.jpg',
 		3	=> '_178_100.jpg',
@@ -6684,6 +6688,10 @@ sub thumb_url_suffixes {
 		5	=> '_528_297.jpg',
 		6	=> '_640_360.jpg',
 		7	=> '_832_468.jpg',
+		8	=> '_1024_576.jpg',
+		9	=> '_1280_720.jpg',
+		10	=> '_1600_900.jpg',
+		11	=> '_1920_1080.jpg',
 	}
 }
 
@@ -6697,6 +6705,10 @@ sub thumb_url_recipes {
 		528	=> '528x297',
 		640	=> '640x360',
 		832	=> '832x468',
+		1024	=> '1024x576',
+		1280	=> '1280x720',
+		1600	=> '1600x900',
+		1920	=> '1920x1080',
 		1	=> '86x48',
 		2	=> '150x84',
 		3	=> '178x100',
@@ -6704,6 +6716,10 @@ sub thumb_url_recipes {
 		5	=> '528x297',
 		6	=> '640x360',
 		7	=> '832x468',
+		8	=> '1024x576',
+		9	=> '1280x720',
+		10	=> '1600x900',
+		11	=> '1920x1080',
 	}
 }
 
@@ -7849,13 +7865,16 @@ sub get_links_aod {
 			$version = 'default';
 			# no categories in AOD
 			my @category;
+			my $thumbsize = $opt->{thumbsizecache} || 150;
 			my ($thumb_pid, $thumb_type, $thumbnail);
 			($thumb_pid, $thumb_type) = ( $brand_pid , "brand" ) if $brand_pid;
 			if ( ! ( $thumb_pid && $thumb_type ) ) {
-			($thumb_pid, $thumb_type) = ( $series_pid , "series" ) if $series_pid;
+				($thumb_pid, $thumb_type) = ( $series_pid , "series" ) if $series_pid;
 			}
 			if ( $thumb_pid && $thumb_type) {
-				$thumbnail = "http://ichef.bbci.co.uk/images/ic/640x360/legacy/${thumb_type}/${thumb_pid}.jpg";
+				my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+				$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } unless $recipe;
+				$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/legacy/${thumb_type}/${thumb_pid}.jpg";
 			} else {
 				$thumb_pid = $channel_map{$channel_id} || $channel_id;
 				$thumbnail = "http://www.bbc.co.uk/iplayer/images/radio/${thumb_pid}_640_360.jpg";
