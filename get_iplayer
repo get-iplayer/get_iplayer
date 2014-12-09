@@ -4471,11 +4471,9 @@ sub download_retry_loop {
 
 	# This pre-gets all the metadata - necessary to avoid get_verpids() below if possible
 	$prog->get_metadata_general();
-	if ( ! $prog->{name} ) {
-		if ( $prog->get_metadata( $ua ) ) {
-			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
-			return 1;
-		}
+	if ( $prog->get_metadata( $ua ) ) {
+		main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
+		return 1;
 	}
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
