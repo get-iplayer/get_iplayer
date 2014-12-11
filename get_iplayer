@@ -5913,21 +5913,20 @@ sub get_metadata {
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						for my $type ( @{$ver->{types}->[0]->{type}} ) {
-							my $version;
-							if ( $type =~ /describe/i ) {
-								$version = "audiodescribed";
-							} elsif ($type =~ /sign/i ) {
-								$version = "signed";
-							} elsif ($type =~ /original/i ) {
-								$version = "default";
-							} else {
-								($version = lc($type)) =~ s/\s+.*$//;
-							}
-							unless ( $prog->{verpids}->{$version} ) {
-								$prog->{verpids}->{$version} = $ver->{pid}->[0];
-								$prog->{durations}->{$version} = $ver->{duration}->[0];
-							}
+						my $type = @{$ver->{types}->[0]->{type}}[-1];
+						my $version;
+						if ( $type =~ /describe/i ) {
+							$version = "audiodescribed";
+						} elsif ($type =~ /sign/i ) {
+							$version = "signed";
+						} elsif ($type =~ /original/i ) {
+							$version = "default";
+						} else {
+							($version = lc($type)) =~ s/\s+.*$//;
+						}
+						unless ( $prog->{verpids}->{$version} ) {
+							$prog->{verpids}->{$version} = $ver->{pid}->[0];
+							$prog->{durations}->{$version} = $ver->{duration}->[0];
 						}
 					}
 					$got_metadata = 1;
@@ -6033,8 +6032,8 @@ sub get_metadata {
 		}
 	}
 
+	# remove versions with no modes
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		# remove versions with no modes
 		if ( ! $modes->{$version} ) {
 			main::logger "INFO: No modes available for $version version - deleting\n" if $opt->{verbose};
 			delete $prog->{verpids}->{$version};
@@ -6051,10 +6050,10 @@ sub get_metadata {
 		}
 	}
 
+	# use alternate version if default missing
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		# use iplayer version if default missing (for web only content)
-		if ( $version =~ /(iplayer|shortened|lengthened)/ && $modes->{$version} && ! $modes->{default} ) {
-			main::logger "INFO: Using $version version as default\n";
+		if ( ! $modes->{default} && $version !~ /(audiodescribed|signed)/i && $modes->{$version} ) {
+			main::logger "INFO: Using '$version' version as default\n";
 			$prog->{verpids}->{default} = $prog->{verpids}->{$version};
 			$prog->{streams}->{default} = $prog->{streams}->{$version};
 			$prog->{durations}->{default} = $prog->{durations}->{$version};
@@ -6072,7 +6071,7 @@ sub get_metadata {
 		}
 	}
 
-	# make sure at least one version available
+	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		main::logger "ERROR: No programme versions found\n" if $opt->{verbose};
 		# Return at this stage unless we want metadata/tags only for various reasons
