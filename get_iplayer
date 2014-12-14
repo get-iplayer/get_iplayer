@@ -5863,18 +5863,18 @@ sub get_metadata {
 						$title = "$name: $episode";
 					}
 					# categories
-					my (@cats, @ncats, @bcats);
-					for my $cat ( @{$doc->{categories}->[0]->{category}} ) {
-						push @cats, $cat->{title}->[0];
-						for my $ncat ( @{$cat->{narrower}->[0]->{category}} ) {
-							push @ncats, $ncat->{title}->[0];
-						}
-						for my $bcat ( @{$cat->{broader}->[0]->{category}} ) {
-							push @bcats, $bcat->{title}->[0];
+					my (@cats1, @cats2, @cats3);
+					for my $cat1 ( @{$doc->{categories}->[0]->{category}} ) {
+						unshift @cats1, $cat1->{title}->[0];
+						for my $cat2 ( @{$cat1->{broader}->[0]->{category}} ) {
+							unshift @cats2, $cat2->{title}->[0];
+							for my $cat3 ( @{$cat2->{broader}->[0]->{category}} ) {
+								unshift @cats3, $cat3->{title}->[0];
+							}
 						}
 					}
 					my %seen;
-					my @categories = grep { ! $seen{$_}++ } ( @bcats, @cats, @ncats );
+					my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
 					$categories = join(',', @categories);
 					foreach my $cat ( @categories ) {
 						if ( ! grep(/$cat/i, @ignore_categories) ) {
@@ -6187,10 +6187,11 @@ sub get_metadata_fallback {
 		if ( ! $prog->{categories} ) {
 			my $genres = genres();
 			my $subgenres = subgenres();
+			my $subsubgenres = subsubgenres();
 			my $formats = formats();
 			my @cats;
 			for my $po_genre (split /<po:genre/, $entry) {
-				my ($genre, $subgenre) = ($1, $3) if $po_genre =~ m{/programmes/genres/(\w+)(/(\w+))?};
+				my ($genre, $subgenre, $subsubgenre) = ($1, $3, $5) if $po_genre =~ m{/programmes/genres/(\w+)(/(\w+)(/(\w+))?)?};
 				next unless $genre;
 				my $format = $1 if $po_genre =~ m{/programmes/formats/(\w+)};
 				my $genre_title = $genres->{$genre};
@@ -6198,6 +6199,10 @@ sub get_metadata_fallback {
 				if ( $subgenre ) {
 					my $subgenre_title = $subgenres->{$genre}->{$subgenre};
 					push @cats, $subgenre_title if $subgenre_title;
+				}
+				if ( $subsubgenre ) {
+					my $subsubgenre_title = $subsubgenres->{$genre}->{$subgenre}->{$subsubgenre};
+					push @cats, $subsubgenre_title if $subsubgenre_title;
 				}
 				if ( $format ) {
 					my $format_title = $formats->{$format};
@@ -6457,6 +6462,64 @@ sub subgenres {
 		weather => {
 		}
 	};
+}
+
+sub subsubgenres {
+	return {
+		factual => {
+			artscultureandthemedia => {
+				arts => "Arts"
+			},
+			scienceandnature => {
+				natureandenvironment => "Nature & Environment",
+				scienceandtechnology => "Science & Technology"
+			},
+		},
+		music => {
+			classicpopandrock => {
+				experimentalandnew => "Experimental & New",
+			},
+			classical => {
+				chamberandrecital => "Chamber & Recital",
+				choral => "Choral",
+				earlymusic => "Early Music",
+				experimentalandnew => "Experimental & New",
+				opera => "Opera",
+				orchestral => "Orchestral"
+			},
+			country => {
+				experimentalandnew => "Experimental & New",
+			},
+			folk => {
+				experimentalandnew => "Experimental & New",
+			},			
+			hiphoprnbanddancehall => {
+				hiphop => " Hip Hop",
+				rnb => " RnB",
+			},
+			jazzandblues => {
+				blues => "Blues",
+				experimentalandnew => "Experimental & New",
+				jazz => "Jazz",
+			},
+			soulandreggae => {
+				gospel => "Gospel",
+				reggae => "Reggae",
+				soul => "Soul",
+			},
+			world => {
+				africa => "Arrica",
+				americas => "Americas",
+				asiapacific => "Asia Pacific",
+				europe => "Europe",
+			},
+		},
+		sport => {
+			rugbyunion => {
+				rugbyworldcup => "Rugby World Cup",
+			},
+		}
+	}
 }
 
 sub formats {
