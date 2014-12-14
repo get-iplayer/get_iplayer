@@ -483,7 +483,7 @@ logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr );
 Options->get_class_options( progclass($_) ) for progclass();
-Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast rtsp iphone mms 3gp http );
+Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls rtsp iphone mms 3gp http );
 
 
 # Parse the cmdline using the opt_format hash
@@ -7134,12 +7134,6 @@ sub get_stream_data_cdn {
 		} elsif ( $cattribs->{kind} eq 'asx' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
-		# shoutcast stream
-		} elsif ( $cattribs->{kind} =~ /icy/ ) {
-			$conn->{streamurl} = decode_entities($cattribs->{href});
-			$conn->{kind} = $mattribs->{kind};
-			$conn->{live} = 1 if $mattribs->{service} =~ /simulcast/i;
-
 		# hls stream
 		} elsif ( $cattribs->{kind} =~ /hls/ ) {
 			$conn->{streamurl} = $cattribs->{href};
@@ -7251,12 +7245,11 @@ sub get_stream_data {
 	my $media_stream_data_prefix;
 	my $media_stream_live_prefix;
 	my $media_stream_mobile_prefix;
-	my $media_stream_shoutcast_prefix;
 	if ( $opt->{mediaselector} eq '4' ) {
 		$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid 
 		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 	} else {
-		my ($mediaset, $mobile_mediaset, $shoutcast_mediaset);
+		my ($mediaset, $mobile_mediaset);
 		# assume URL in $verpid is XML playlist from news site
 		if ( $verpid =~ /http:/ ) {
 			$mediaset = 'journalism-pc';
@@ -7264,12 +7257,10 @@ sub get_stream_data {
 		} else {
 			$mediaset = 'pc';
 			$mobile_mediaset = 'mobile-tablet-main';
-			$shoutcast_mediaset = 'http-icy-aac-lc-a';
 		}
 		$media_stream_data_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
 		$media_stream_live_prefix = $media_stream_data_prefix;
 		$media_stream_mobile_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mobile_mediaset/vpid/"; # $verpid
-		$media_stream_shoutcast_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$shoutcast_mediaset/vpid/"; # $verpid
 	}
 
 	# Setup user agent with redirection enabled
@@ -7370,13 +7361,6 @@ sub get_stream_data {
 			}
 		}
 		push @medias, @hls_medias;
-		if ( $prog->{type} eq 'liveradio' ) {
-			# get Shoutcast streams
-			$xml = main::request_url_retry( $ua, $media_stream_shoutcast_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			my @shoutcast_medias = parse_metadata( $xml );
-			push @medias, @shoutcast_medias;
-		}
 	}
 
 	# Parse and dump structure
@@ -7425,20 +7409,6 @@ sub get_stream_data {
 				} elsif ( $mattribs->{service} !~ /3gp/ ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlsaaclow', 'hls', $ext );
 				}
-			}
-
-		} elsif ( $mattribs->{type} =~ /x-scpls/ ) {
-			# shoutcastaachigh
-			if (  $mattribs->{bitrate} >= 192 ) {
-				get_stream_data_cdn( $data, $mattribs, 'shoutcastaachigh', 'shoutcast', 'm4a' );
-
-			# shoutcastaacstd
-			} elsif ( $mattribs->{bitrate} >= 96 ) {
-				get_stream_data_cdn( $data, $mattribs, 'shoutcastaacstd', 'shoutcast', 'm4a' );
-
-			# shoutcastaaclow
-			} elsif ( $mattribs->{service} !~ /3gp/ ) {
-				get_stream_data_cdn( $data, $mattribs, 'shoutcastaaclow', 'shoutcast', 'm4a' );
 			}
 
 		# flashhd modes
@@ -8434,10 +8404,6 @@ sub download {
 		main::logger "\nWARNING: Required ffmpeg does not exist - cannot download HLS audio/video\n";
 		return 'next';
 	}
-	if ( $mode =~ /^shoutcast/ && (! main::exists_in_path('ffmpeg')) ) {
-		main::logger "\nWARNING: Required ffmpeg does not exist - cannot download Shoutcast audio\n";
-		return 'next';
-	}
 
 	# Get extension from streamdata if defined and raw not specified
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
@@ -8463,7 +8429,6 @@ sub download {
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^hls/;
-	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcast/;
 
 	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
@@ -9422,7 +9387,7 @@ sub modelist {
 		if ( ! main::exists_in_path('rtmpdump') ) {
 			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};		
 		} elsif ( ! main::exists_in_path('ffmpeg') ) {
-			main::logger "WARNING: Not using HLS and Shoutcast modes since ffmpeg is not found\n" if $opt->{verbose};
+			main::logger "WARNING: Not using HLS modes since ffmpeg is not found\n" if $opt->{verbose};
 		} else {
 			$mlist = 'default';
 		}
@@ -9443,8 +9408,6 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hls');
 	$mlist = main::expand_list($mlist, 'hls', 'hlsaac');
 	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaaclow');
-	$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac');
-	$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
 
 	return $mlist;
 }
@@ -10002,7 +9965,6 @@ sub get {
 	my $file_tmp;
 	my @cmd;
 	my @cmdopts;
-	my $return;
 	my $url = $streamdata{streamurl};
 	my $ab = $streamdata{audio_bitrate};
 	my $vb = $streamdata{video_bitrate};
@@ -10016,7 +9978,7 @@ sub get {
 		$file_tmp = $prog->{filepart}.".ts"
 	}
 
-	# Remove failed file recording (below a certain size)
+	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
 		unlink( $file_tmp );
 	}
@@ -10063,6 +10025,7 @@ sub get {
 	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
 		push @globals, ( '-loglevel', 'error', '-stats' );
 	}
+	my $return;
 	@cmd = (
 		$bin->{ffmpeg},
 		@{$binopts->{ffmpeg}},
@@ -10171,183 +10134,6 @@ sub get {
 	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
 	} else {
 		main::logger "WARNING: ts conversion failed - retaining ts file\n";
-		unlink $prog->{filepart};
-		$prog->{filepart} = $file_tmp;
-		$prog->{filename} = $file_tmp;
-	}
-	# Moving file into place as complete (if not stdout)
-	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
-		move($prog->{filepart}, $prog->{filename}); 
-		$prog->check_duration() if $opt->{checkduration} && ! $live;
-	}
-	
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
-	main::logger "INFO: Recorded $prog->{filename}\n";
-	return 0;
-}
-
-################### Streamer::shoutcast class #################
-package Streamer::shoutcast;
-
-# Inherit from Streamer class
-use base 'Streamer';
-use File::Copy;
-use File::Path;
-use File::stat;
-use strict;
-
-sub opt_format {
-	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-	};
-}
-
-
-# %prog (only for {ext} and {mode})
-# Actually do the shoutcast streaming
-sub get {
-	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
-	my $file_tmp;
-	my @cmd;
-	my @cmdopts;
-	my $return;
-	my $url = $streamdata{streamurl};
-	my $kind = $streamdata{kind};
-	my $live = $streamdata{live};
-	my $mode = $prog->{mode};
-
-	if ( $opt->{raw} ) {
-		$file_tmp = $prog->{filepart};
-	} else {
-		$file_tmp = $prog->{filepart}.".aac"
-	}
-
-	# Remove failed file recording (below a certain size)
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
-		unlink( $file_tmp );
-	}
-	
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
-
-	# Deal with stdout streaming
-	#if ( $opt->{stdout} && not $opt->{nowrite} ) {
-	#	main::logger "ERROR: Cannot stream Shoutcast to STDOUT and file simultaneously\n";
-	#	exit 4;
-	#}
-	
-	# Add start stop options if defined
-	if ( $opt->{start} || $opt->{stop} ) {
-		push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-		push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
-	}
-	push @cmdopts, ( '-acodec', 'copy', '-vn' );
-
-	# Add custom options to ffmpeg for this type if specified with --hls-<type>-opts
-	if ( defined $opt->{'shoutcast'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'hls'.$prog->{type}.'opts'} );
-	}
-
-	my @globals = ( '-y' );
-	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
-	}
-	@cmd = (
-		$bin->{ffmpeg},
-		@{$binopts->{ffmpeg}},
-		@globals,
-		'-i', $url,
-	);
-	if ( ! $opt->{nowrite} ) {
-		push @cmd, @cmdopts;
-		push @cmd, ( $file_tmp );
-	}
-	if ( $opt->{stdout} ) {
-		push @cmd, @cmdopts;
-		push @cmd, ( '-f', 'adts', 'pipe:1' );
-	}
-
-	$return = main::run_cmd( 'normal', @cmd );
-
-	# exit behaviour when streaming
-	if ( $opt->{nowrite} && $opt->{stdout} ) {
-		if ( $return == 0 ) {
-			main::logger "\nINFO: Streaming completed successfully\n";
-			return 0;
-		} else {
-			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'abort';
-		}
-	}
-
-	# if we fail during the hls streaming, try to resume (this gets new streamdata again so that it isn't stale)
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
-
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp via Shoutcast\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-	
-	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
-	my @ffmpeg_opts = ();
-	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
-	}
-
-	# Retain raw aac format if required
-	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} && ! $opt->{stdout} ) {
-			move($file_tmp, $prog->{filename});
-			$prog->check_duration() if $opt->{checkduration} && ! $live;
-		}
-		return 0;
-
-	# Convert aac to aac/mp4a/mp3
-	} elsif ( $mode =~ /shoutcastaac/ ) {
-		# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
-		if ( $opt->{aactomp3} ) {
-			my @br_opts = ('-ab', '128k');
-			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
-				@br_opts = ('-aq', $opt->{mp3vbr});
-			}
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-		} else {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				'-absf', 'aac_adtstoasc',
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-		}
-	}
-
-	# Run aac conversion and delete source file on success
-	$return = main::run_cmd( 'STDERR', @cmd );
-
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
-			unlink( $file_tmp );
-	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
-	} else {
-		main::logger "WARNING: aac conversion failed - retaining aac file\n";
 		unlink $prog->{filepart};
 		$prog->{filepart} = $file_tmp;
 		$prog->{filename} = $file_tmp;
