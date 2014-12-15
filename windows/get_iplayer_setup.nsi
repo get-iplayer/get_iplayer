@@ -3,9 +3,9 @@
 ;#######################################
 
 !define PRODUCT "get_iplayer"
-!define VERSION "4.9"
+!define VERSION "4.10"
 ; VERSION where Perl support last changed
-!define PERLFILESVER "4.9"
+!define PERLFILESVER "4.10"
 
 ;#######################################
 ;# Build Setup

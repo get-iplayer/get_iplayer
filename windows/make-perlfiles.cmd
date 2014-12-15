@@ -53,7 +53,9 @@ set PP=%PERLDIST%\perl\site\bin\pp
 REM include optional modules - pp will check if present
 set PPMODS=-M MP3::Tag -M MP3::Info -M Net::SMTP -M Net::SMTP::SSL -M Authen::SASL -M Net::SMTP::TLS::ButMaintained
 REM force XML parsers into PAR
-set PPMODS=%PPMODS% -M XML::LibXML::SAX -M XML::LibXML::SAX::Parser -M XML::SAX::PurePerl -M XML::Parser
+set PPMODS=%PPMODS% -M XML::LibXML::SAX -M XML::LibXML::SAX::Parser -M XML::SAX::PurePerl -M XML::SAX::Expat -M XML::Parser
+REM force JSON modules into PAR
+set PPMODS=%PPMODS% -M JSON -M JSON::XS -M JSON::PP
 REM force Encode::Byte into PAR
 set PPMODS=%PPMODS% -M Encode::Byte
 call :log Running pp...
