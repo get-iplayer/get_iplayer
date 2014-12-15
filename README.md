@@ -14,21 +14,21 @@
 * Runs on Linux (Debian, Ubuntu, openSUSE and many others), OS X (10.5+) and Windows (XP/Vista/7/8)
 * Requires perl 5.8.8+ with LWP module
 
-**NOTE:** get_iplayer can only search programmes broadcast within the previous 7 days, even if they are available for 30 days on the iPlayer web site.  See [FAQ #1](https://github.com/dinkypumpkin/get_iplayer/wiki/faq).
+**NOTE:** get_iplayer can only search programmes broadcast within the previous 7 days, even if they are available for 30 days on the iPlayer web site.  See [FAQ #1](https://github.com/get-iplayer/get_iplayer/wiki/faq).
 
 ## Documentation
 
-<https://github.com/dinkypumpkin/get_iplayer/wiki>
+<https://github.com/get-iplayer/get_iplayer/wiki>
 	
 ## Support
 
-<https://github.com/dinkypumpkin/get_iplayer/wiki/help>
+<https://github.com/get-iplayer/get_iplayer/wiki/help>
 
 ## Installation (Linux/Unix/OS X)
 
 * Download latest release:
 
-	<https://raw.github.com/dinkypumpkin/get_iplayer/latest/get_iplayer>
+	<https://raw.github.com/get-iplayer/get_iplayer/latest/get_iplayer>
 
 * After downloading the script make it executable:
 

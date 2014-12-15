@@ -473,7 +473,7 @@ Section "get_iplayer" section1
   FileWrite $0 "$\r$\n"
   FileClose $0
   ; URLs
-  WriteINIStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "https://github.com/dinkypumpkin/get_iplayer/wiki/documentation"
+  WriteINIStr "$INSTDIR\command_examples.url" "InternetShortcut" "URL" "https://github.com/get-iplayer/get_iplayer/wiki/documentation"
   WriteINIStr "$INSTDIR\pvr_manager.url" "InternetShortcut" "URL" "http://localhost:1935"
   WriteINIStr "$INSTDIR\strawberry_docs.url" "InternetShortcut" "URL" "http://strawberryperl.com/"
   ; root start menu items
