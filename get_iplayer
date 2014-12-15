@@ -7031,8 +7031,14 @@ sub parse_hls_playlist {
 				$hls_media->{service} = "hls_iplayer_$hls_media->{bitrate}";
 			}
 			my $hls_conn = dclone($conn);
+			my $uri1 = URI->new($hls_conn->{href});
+			my $qs1 = $uri1->query;
+			my $uri2 = URI->new($stream->{URL});
+			my $qs2 = $uri2->query;
+			$qs2 .= "&" if $qs2 && $qs1;
+			$uri2->query($qs2.$qs1);
 			delete $hls_conn->{href};
-			$hls_conn->{href} = $stream->{URL}, 
+			$hls_conn->{href} = $uri2->as_string;
 			@{$hls_media->{connections}} = ( $hls_conn );
 			push @hls_medias, $hls_media;
 		}
