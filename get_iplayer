@@ -5975,12 +5975,16 @@ sub get_metadata {
 		# Estimate the file sizes for each mode
 		my @sizes;
 		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
-			next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
-			push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 / 1024.0 );
 			# get expiry from stream data
 			if ( ! $expiry && $prog->{streams}->{$version}->{$mode}->{expires} ) {
 				$expiry = $prog->{streams}->{$version}->{$mode}->{expires};
 				$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
+			}
+			if ( $prog->{streams}->{$version}->{$mode}->{size} ) {
+				push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{size} / 1048576.0 );
+			} else {
+				next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
+				push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 / 1024.0 );
 			}
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
@@ -7105,6 +7109,7 @@ sub get_stream_data_cdn {
 			authstring	=> $cattribs->{authString},
 			priority	=> $cattribs->{priority},
 			expires		=> $mattribs->{expires},
+			size			=>  $mattribs->{media_file_size},
 		};
 
 		# Akamai CDN
@@ -7240,6 +7245,7 @@ sub get_stream_data_cdn {
 			my $flashmode = $mode.$count_rtsp;
 			my $rtspmode = $flashmode;
 			$rtspmode =~ s/^flash/rtsp/g;
+			$data->{$rtspmode}->{size} = $data->{$flashmode}->{size};
 			$data->{$rtspmode}->{bitrate} = $data->{$flashmode}->{bitrate};
 			$data->{$rtspmode}->{encoding} = $data->{$flashmode}->{encoding};
 			$data->{$rtspmode}->{type} = $data->{$flashmode}->{type};
