@@ -5914,21 +5914,20 @@ sub get_metadata {
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						for my $type ( @{$ver->{types}->[0]->{type}} ) {
-							my $version;
-							if ( $type =~ /describe/i ) {
-								$version = "audiodescribed";
-							} elsif ($type =~ /sign/i ) {
-								$version = "signed";
-							} elsif ($type =~ /original/i ) {
-								$version = "default";
-							} else {
-								($version = lc($type)) =~ s/\s+.*$//;
-							}
-							unless ( $prog->{verpids}->{$version} ) {
-								$prog->{verpids}->{$version} = $ver->{pid}->[0];
-								$prog->{durations}->{$version} = $ver->{duration}->[0];
-							}
+						my $type = @{$ver->{types}->[0]->{type}}[-1];
+						my $version;
+						if ( $type =~ /describe/i ) {
+							$version = "audiodescribed";
+						} elsif ($type =~ /sign/i ) {
+							$version = "signed";
+						} elsif ($type =~ /original/i ) {
+							$version = "default";
+						} else {
+							($version = lc($type)) =~ s/\s+.*$//;
+						}
+						unless ( $prog->{verpids}->{$version} ) {
+							$prog->{verpids}->{$version} = $ver->{pid}->[0];
+							$prog->{durations}->{$version} = $ver->{duration}->[0];
 						}
 					}
 					$got_metadata = 1;
@@ -10046,7 +10045,6 @@ sub get {
 	my $file_tmp;
 	my @cmd;
 	my @cmdopts;
-	my $return;
 	my $url = $streamdata{streamurl};
 	my $ab = $streamdata{audio_bitrate};
 	my $vb = $streamdata{video_bitrate};
@@ -10075,8 +10073,10 @@ sub get {
 	#}
 	
 	# Add start stop options if defined
-	push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-	push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
+	if ( $opt->{start} || $opt->{stop} ) {
+		push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
+		push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
+	}
 	if ( $live ) {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
@@ -10103,14 +10103,9 @@ sub get {
 
 	my @globals = ( '-y' );
 	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
-		if ( $bin->{ffmpeg} =~ /avconv/ ) {
-			# need info for progress output and SIGPIPE generation
-			push @globals, ( '-loglevel', 'warning', '-stats' );
-		} else {
-			# need -stats for progress output and SIGPIPE generation
-			push @globals, ( '-loglevel', 'fatal', '-stats' );
-		}
+		push @globals, ( '-loglevel', 'error', '-stats' );
 	}
+	my $return;
 	@cmd = (
 		$bin->{ffmpeg},
 		@{$binopts->{ffmpeg}},
@@ -10151,21 +10146,12 @@ sub get {
 		unlink $file_tmp;
 		return 'next';
 	}
-
+	
 	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
 	my @ffmpeg_opts = ();
 	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
 		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
 	}
-
-	# use backwards-compatible option for ffmpeg
-	my @filter_opts;
-	if ( $bin->{ffmpeg} =~ /avconv/ ) {
-		push @filter_opts, '-bsf:a';
-	} else {
-		push @filter_opts, '-absf';
-	}
-	push @filter_opts, 'aac_adtstoasc';
 
 	# Retain raw ts format if required
 	if ( $opt->{raw} ) {
@@ -10201,7 +10187,7 @@ sub get {
 				'-i', $file_tmp,
 				'-vn',
 				'-acodec', 'copy',
-				@filter_opts,
+				'-absf', 'aac_adtstoasc',
 				@ffmpeg_opts,
 				$prog->{filepart},
 			);
@@ -10214,14 +10200,14 @@ sub get {
 			'-i', $file_tmp,
 			'-vcodec', 'copy',
 			'-acodec', 'copy',
-			@filter_opts,
+			'-absf', 'aac_adtstoasc',
 			@ffmpeg_opts,
 			$prog->{filepart},
 		);
 	}
 
 	# Run ts conversion and delete source file on success
-	$return = main::run_cmd( 'STDERR', @cmd );
+	my $return = main::run_cmd( 'STDERR', @cmd );
 	
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
 			unlink( $file_tmp );
