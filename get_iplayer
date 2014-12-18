@@ -139,7 +139,7 @@ my $opt_format = {
 	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "When used with --pid record all the embedded pids if the pid is a series or brand pid."],
-	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'"],
+	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes, e.g., ffmpeg."],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (rtmp and realaudio only)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
@@ -807,8 +807,10 @@ sub init_search {
 	}
 
 	# Web proxy
+	(my $proxy = $opt->{proxy}) =~ s/^prepend://i;
 	$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
 	logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
+	$ENV{http_proxy} = $proxy if $proxy;
 
 	# Set --get && --nowrite if --metadataonly is used
 	if ( $opt->{metadataonly} ) {
@@ -10046,6 +10048,7 @@ sub get {
 	my $file_tmp;
 	my @cmd;
 	my @cmdopts;
+	my $return;
 	my $url = $streamdata{streamurl};
 	my $ab = $streamdata{audio_bitrate};
 	my $vb = $streamdata{video_bitrate};
@@ -10074,10 +10077,8 @@ sub get {
 	#}
 	
 	# Add start stop options if defined
-	if ( $opt->{start} || $opt->{stop} ) {
-		push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-		push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
-	}
+	push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
+	push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
 	if ( $live ) {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
@@ -10104,9 +10105,12 @@ sub get {
 
 	my @globals = ( '-y' );
 	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
+		if ( $live && $kind eq 'video') {
+			push @globals, ( '-loglevel', 'error', '-stats' );
+		} else {
+			push @globals, ( '-loglevel', 'info', '-stats' );
+		}
 	}
-	my $return;
 	@cmd = (
 		$bin->{ffmpeg},
 		@{$binopts->{ffmpeg}},
@@ -10147,12 +10151,21 @@ sub get {
 		unlink $file_tmp;
 		return 'next';
 	}
-	
+
 	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
 	my @ffmpeg_opts = ();
 	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
 		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
 	}
+
+	# use backwards-compatible option for ffmpeg
+	my @filter_opts;
+	if ( $bin->{ffmpeg} =~ /avconv/ ) {
+		push @filter_opts, '-bsf:a';
+	} else {
+		push @filter_opts, '-absf';
+	}
+	push @filter_opts, 'aac_adtstoasc';
 
 	# Retain raw ts format if required
 	if ( $opt->{raw} ) {
@@ -10188,7 +10201,7 @@ sub get {
 				'-i', $file_tmp,
 				'-vn',
 				'-acodec', 'copy',
-				'-absf', 'aac_adtstoasc',
+				@filter_opts,
 				@ffmpeg_opts,
 				$prog->{filepart},
 			);
@@ -10201,14 +10214,14 @@ sub get {
 			'-i', $file_tmp,
 			'-vcodec', 'copy',
 			'-acodec', 'copy',
-			'-absf', 'aac_adtstoasc',
+			@filter_opts,
 			@ffmpeg_opts,
 			$prog->{filepart},
 		);
 	}
 
 	# Run ts conversion and delete source file on success
-	my $return = main::run_cmd( 'STDERR', @cmd );
+	$return = main::run_cmd( 'STDERR', @cmd );
 	
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
 			unlink( $file_tmp );
@@ -10219,8 +10232,8 @@ sub get {
 		$prog->{filepart} = $file_tmp;
 		$prog->{filename} = $file_tmp;
 	}
-	# Moving file into place as complete (if not stdout)
-	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
+	# Moving file into place as complete
+	if ( $prog->{filepart} ne $prog->{filename} ) {
 		move($prog->{filepart}, $prog->{filename}); 
 		$prog->check_duration() if $opt->{checkduration} && ! $live;
 	}
