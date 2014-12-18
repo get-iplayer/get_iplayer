@@ -5914,20 +5914,21 @@ sub get_metadata {
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						my $type = @{$ver->{types}->[0]->{type}}[-1];
-						my $version;
-						if ( $type =~ /describe/i ) {
-							$version = "audiodescribed";
-						} elsif ($type =~ /sign/i ) {
-							$version = "signed";
-						} elsif ($type =~ /original/i ) {
-							$version = "default";
-						} else {
-							($version = lc($type)) =~ s/\s+.*$//;
-						}
-						unless ( $prog->{verpids}->{$version} ) {
-							$prog->{verpids}->{$version} = $ver->{pid}->[0];
-							$prog->{durations}->{$version} = $ver->{duration}->[0];
+						for my $type ( @{$ver->{types}->[0]->{type}} ) {
+							my $version;
+							if ( $type =~ /describe/i ) {
+								$version = "audiodescribed";
+							} elsif ($type =~ /sign/i ) {
+								$version = "signed";
+							} elsif ($type =~ /original/i ) {
+								$version = "default";
+							} else {
+								($version = lc($type)) =~ s/\s+.*$//;
+							}
+							unless ( $prog->{verpids}->{$version} ) {
+								$prog->{verpids}->{$version} = $ver->{pid}->[0];
+								$prog->{durations}->{$version} = $ver->{duration}->[0];
+							}
 						}
 					}
 					$got_metadata = 1;
