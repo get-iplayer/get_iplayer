@@ -2268,10 +2268,10 @@ sub show_info {
 				a(
 					{
 						-class=>'action',
-						-title => 'Go Back',
-						-onClick  => "history.back()",
+						-title => 'Close',
+						-onClick  => "window.close()",
 					},
-					'Back'
+					'Close'
 				),
 				a(
 					{
@@ -3055,7 +3055,7 @@ sub search_progs {
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, "${years}$t[7]d $t[2]h ago" ) );
 			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
@@ -3110,7 +3110,7 @@ sub search_progs {
 				push @row, td( {-class=>$search_class}, @cats );
 			# Every other column type
 			} else {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.submit(); RestoreFormVars(form);" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>$search_class}, @row );
