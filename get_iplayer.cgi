@@ -34,7 +34,7 @@ use CGI::Cookie;
 use IO::File;
 use File::Copy;
 use HTML::Entities;
-use URI::Escape qw(uri_escape_utf8);
+use URI::Escape qw(uri_escape);
 use LWP::ConnCache;
 #use LWP::Debug qw(+);
 use LWP::UserAgent;
@@ -472,7 +472,7 @@ sub parse_post_form_string {
 		decode_entities($val);
 		# url encode each entry
 		# $val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
-		$val = uri_escape_utf8($val);
+		$val = uri_escape($val);
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
