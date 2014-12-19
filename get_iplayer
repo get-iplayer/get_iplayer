@@ -9275,7 +9275,7 @@ sub hls_pid_map {
 # Class cmdline Options
 sub opt_format {
 	return {
-		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow. Shortcuts: default,good,better(=default),best,rtmp,flash. ('default'=flashvhigh,flashhigh,flashstd,flashnormal,flashlow)"],
+		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hlshd,hlssd,hlsvhigh,hlshigh,hlsstd,hlsnormal,hlslow. Shortcuts: default,good,better(=default),vbetter,best,hls. ('default'=hlsvhigh,hlshigh,hlsstd,hlslow)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings (overrides --output)"],
 		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to rtmpdump for livetv"],
 		hlslivetvopts	=> [ 1, "hls-livetv-opts|hlslivetvopts=s", 'Recording', '--hls-livetv-opts <options>', "Add custom options to ffmpeg HLS download encoding for livetv"],
@@ -9310,6 +9310,9 @@ sub modelist {
 			$mlist = 'default';
 		}
 	}
+	# deal with obsolete values
+	$mlist =~ s/(flash|rtmp)/hls/g;
+	$mlist =~ s/normal/std/g;
 	# Deal with BBC TV fallback modes and expansions
 	$mlist = main::expand_list($mlist, 'default', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'best', 'hlsbest');
