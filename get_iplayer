@@ -5185,6 +5185,10 @@ sub get_time_string {
 	$_ = shift;
 	my $diff = shift;
 
+	# suppress warnings for > 32-bit dates in obsolete Perl versions
+	local $SIG{__WARN__} = sub {
+			warn @_ unless $_[0] =~ m(^.* too (?:big|small));
+	};
 	# extract $year $mon $mday $hour $min $sec $tzhour $tzmin
 	my ($year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin);
 	if ( m{(\d\d\d\d)\-(\d\d)\-(\d\d)T(\d\d):(\d\d):(\d\d)} ) {
