@@ -9168,11 +9168,14 @@ sub get_links {
 			my $thumb_pid = $pid;
 			$thumb_pid =~ s/^(bbc_one).*$/${1}_london/;
 			$thumb_pid =~ s/^(bbc_two).*$/${1}_england/;
+			my $thumbnail = "http://www.bbc.co.uk/iplayer/images/${thumb_prog_type}/${thumb_pid}_640_360.jpg";
+			if ( $channel =~ /s4c/i ) {
+				$thumbnail = "http://www.s4c.co.uk/static/img/s4c.png";
+			}
 			my $web_pid = $pid;
 			if ( $prog_type eq 'livetv' ) {
 				($web_pid = lc($channel)) =~ s/ //g;
 			}
-
 			# build data structure
 			$prog->{$pid} = main::progclass($prog_type)->new(
 				'pid'		=> $pid,
@@ -9183,7 +9186,7 @@ sub get_links {
 				'guidance'	=> '',
 				#'thumbnail'	=> "http://static.bbc.co.uk/mobile/iplayer_widget/img/ident_${pid}.png",
 				#'thumbnail'	=> "http://www.bbc.co.uk/iplayer/img/station_logos/${pid}.png",
-				'thumbnail'	=> "http://www.bbc.co.uk/iplayer/images/${thumb_prog_type}/${thumb_pid}_640_360.jpg",
+				'thumbnail'	=> $thumbnail,
 				'channel'	=> $channel,
 				#'categories'	=> join(',', @category),
 				'type'		=> $prog_type,
