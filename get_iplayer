@@ -168,7 +168,7 @@ my $opt_format = {
 	history		=> [ 1, "history!", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 0, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', keys %prog_types).",all (tv is default)"],
-	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record.  List is processed from left to right and first version found is downloaded.  Example: '--versions signed,audiodescribed,default' will prefer signed and audiodescribed programmes if available.  Default: 'default'"],
+	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record.  List is processed from left to right and first version found is downloaded.  Example: '--versions signed,audiodescribed,default' will prefer signed and audiodescribed programmes if available.  Default: 'default,signed,audiodescribed'"],
 
 	# Output
 	aactomp3	=> [ 1, "aactomp3|mp3", 'Output', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg/avconv (CBR 128k unless --mp3vbr is specified).  Applied only to radio programmes. (Synonyms: --mp3)"],
@@ -4427,7 +4427,7 @@ sub generate_version_list {
 	my $prog = shift;
 	
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @version_search_order = qw/ default original signed audiodescribed opensubtitled shortened lengthened other /;
+	my @version_search_order = qw/ default original iplayer technical editorial opensubtitled shortened lengthened other signed audiodescribed /;
 	@version_search_order = split /,/, $opt->{versionlist} if $opt->{versionlist};
 
 	# check here for no matching verpids for specified version search list???
@@ -5483,6 +5483,7 @@ sub get_verpids {
 		}
 		return 0 if ! $rc_json || ! $rc_html;
 		main::logger "\nWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
+		main::logger "WARNING: You may receive this message if you are using get_iplayer outside the UK\n";
 		return 1;
 	}
 
@@ -5654,10 +5655,8 @@ sub get_verpids_json {
 			$version = "audiodescribed";
 		} elsif ($type =~ /sign/i ) {
 			$version = "signed";
-		} elsif ($type =~ /original/i ) {
-			$version = "default";
 		} else {
-			($version = lc($type)) =~ s/\s+.*$//;
+			$version = "default";
 		}
 		next if $prog->{verpids}->{$version};
 		$verpid = $1 if /{"vpid":"(\w+)","kind":"(programme|radioProgramme)"/i;
@@ -5921,22 +5920,22 @@ sub get_metadata {
 					# minimum series number = 1 if episode number != 0
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
+					my %found;
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						for my $type ( @{$ver->{types}->[0]->{type}} ) {
-							my $version;
-							if ( $type =~ /describe/i ) {
-								$version = "audiodescribed";
-							} elsif ($type =~ /sign/i ) {
-								$version = "signed";
-							} elsif ($type =~ /original/i ) {
-								$version = "default";
-							} else {
-								($version = lc($type)) =~ s/\s+.*$//;
-							}
-							unless ( $prog->{verpids}->{$version} ) {
-								$prog->{verpids}->{$version} = $ver->{pid}->[0];
-								$prog->{durations}->{$version} = $ver->{duration}->[0];
-							}
+						my $type;
+						# check for audiodescribed and signed first
+						if ( grep /describe/i, @{$ver->{types}->[0]->{type}} ) {
+							$type = "audiodescribed";
+						} elsif ( grep /sign/i, @{$ver->{types}->[0]->{type}} ) {
+							$type = "signed";
+						} else {
+							($type = lc($ver->{types}->[0]->{type}->[0])) =~ s/\s+.*$//;
+						}
+						if ( $type ) {
+							my $version = $type;
+							$version .= $found{$type} if ++$found{$type} > 1;
+							$prog->{verpids}->{$version} = $ver->{pid}->[0];
+							$prog->{durations}->{$version} = $ver->{duration}->[0];
 						}
 					}
 					$got_metadata = 1;
@@ -5978,7 +5977,7 @@ sub get_metadata {
 			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version} );
 		}
 		if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
-			main::logger "INFO: No modes available for $version version - skipping\n" if $opt->{verbose};
+			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping\n" if $opt->{verbose};
 			next;
 		}
 		$modes->{$version} = join ',', sort keys %{ $prog->{streams}->{$version} };
@@ -6046,48 +6045,68 @@ sub get_metadata {
 		}
 	}
 
-	# remove versions with no modes
+	my @fields1 = qw(verpids streams durations);
+	my @fields2 = qw(firstbcast lastbcast firstbcastrel lastbcastrel firstbcastdate lastbcastdate);
+	
+	# remove versions with no streams
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		if ( ! $modes->{$version} ) {
-			main::logger "INFO: No modes available for $version version - deleting\n" if $opt->{verbose};
-			delete $prog->{verpids}->{$version};
-			delete $prog->{streams}->{$version};
-			delete $prog->{durations}->{$version};
+			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
 			delete $modes->{$version};
 			delete $mode_sizes->{$version};
-			delete $prog->{firstbcast}->{$version};
-			delete $prog->{lastbcast}->{$version};
-			delete $prog->{firstbcastrel}->{$version};
-			delete $prog->{lastbcastrel}->{$version};
-			delete $prog->{firstbcastdate}->{$version};
-			delete $prog->{lastbcastdate}->{$version};
+			for my $key ( @fields1, @fields2 ) {
+	 			delete $prog->{$key}->{$version};
+			}
 		}
 	}
 
-	# use alternate version if default missing
+	# collapse alternate versions with same base name
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		if ( ! $modes->{default} && $version !~ /(audiodescribed|signed)/i && $modes->{$version} ) {
-			main::logger "INFO: Using '$version' version as default\n";
-			$prog->{verpids}->{default} = $prog->{verpids}->{$version};
-			$prog->{streams}->{default} = $prog->{streams}->{$version};
-			$prog->{durations}->{default} = $prog->{durations}->{$version};
-			$modes->{default} = $modes->{$version};
-			$mode_sizes->{default} = $mode_sizes->{$version};
-			if ( $prog->{firstbcast}->{$version} ) {
-				$prog->{firstbcast}->{default} = $prog->{firstbcast}->{$version};
-				$prog->{lastbcast}->{default} = $prog->{lastbcast}->{$version};
-				$prog->{firstbcastrel}->{default} = $prog->{firstbcastrel}->{$version};
-				$prog->{lastbcastrel}->{default} = $prog->{lastbcastrel}->{$version};
-				$prog->{firstbcastdate}->{default} = $prog->{firstbcastdate}->{$version};
-				$prog->{lastbcastdate}->{default} = $prog->{lastbcastdate}->{$version};
+		next if $version !~ /\d+$/;
+		(my $base_version = $version) =~ s/\d+$//;
+		if ( ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) && $modes->{$version} ) {
+			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as $base_version\n";
+			$modes->{$base_version} = $modes->{$version};
+			$mode_sizes->{$base_version} = $mode_sizes->{$version};
+			for my $key ( @fields1 ) {
+				$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
 			}
-			last;
+			if ( $prog->{firstbcast}->{$version} ) {
+				for my $key ( @fields2 ) {
+					$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
+				}
+			}
+			delete $modes->{$version};
+			delete $mode_sizes->{$version};
+			for my $key ( @fields1, @fields2 ) {
+	 			delete $prog->{$key}->{$version};
+			}
+		}
+	}
+
+	# use first/longest available variants, ensure default version if possible
+	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		next if $version =~ /(audiodescribed|signed)/;
+		my $base_version = "default";
+		if ( ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) && $modes->{$version} ) {
+			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as $base_version\n" if $version ne "default";
+			$modes->{$base_version} = $modes->{$version};
+			$mode_sizes->{$base_version} = $mode_sizes->{$version};
+			for my $key ( @fields1 ) {
+				$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
+			}
+			if ( $prog->{firstbcast}->{$version} ) {
+				for my $key ( @fields2 ) {
+					$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
+				}
+			}
 		}
 	}
 
 	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		main::logger "WARNING: No programme versions found\n";
+		main::logger "WARNING: You may receive this message if you are using get_iplayer outside the UK\n";
 		# Return at this stage unless we want metadata/tags only for various reasons
 		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 	}
