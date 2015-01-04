@@ -4720,7 +4720,7 @@ sub create_metadata_file {
 		<outline>[desc]</outline>
 		<plot>[desclong]</plot>
 		<tagline>[descshort]</tagline>
-		<runtime>[duration]</runtime>
+		<runtime>[runtime]</runtime>
 		<thumb>[thumbnail]</thumb>
 		<id>[pid]</id>
 		<filenameandpath>[dir]/[fileprefix].[ext]</filenameandpath>
@@ -4764,7 +4764,7 @@ sub create_metadata_file {
 				<tagline>[episode]</tagline>
 				<year>[firstbcast]</year>
 				<genre>[categories]</genre>
-				<runtime>[duration]</runtime>
+				<runtime>[runtime] minutes</runtime>
 				<channel>[channel]</channel>
 			</info>
 		</FREEVOTYPE>
@@ -4827,6 +4827,7 @@ sub substitute {
 
 	# Make 'duration' == 'length' for the selected version
 	$self->{duration} = $self->{durations}->{$version} if $self->{durations}->{$version};
+	$self->{runtime} = int($self->{duration} / 60);
 
 	# Tokenize and substitute $format
 	for my $key ( keys %{$self} ) {
