@@ -5795,7 +5795,7 @@ sub get_metadata {
 	my $prog_data_url = 'http://www.bbc.co.uk/programmes/'; # $pid
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 	
-	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum );
+	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart );
 
 	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/programmes/{pid}.xml
@@ -5844,13 +5844,20 @@ sub get_metadata {
 						$player = "http://www.bbc.co.uk/programmes/$pid";
 					}
 					# title strings
+					my ($series_position, $subseries_position);
 					$episode = $doc->{title}->[0];
 					for my $ancestor ($parent, $grandparent, $greatgrandparent) {
 						if ( $ancestor->{type} && $ancestor->{title}->[0] ) {
 							if ( $ancestor->{type} eq "brand" ) {
 								$brand = $ancestor->{title}->[0];
 							} else {
+								# handle rare subseries
+								if ( $series ) {
+									$episode = "$series $episode";
+									$subseries_position = $series_position;
+								}
 								$series = $ancestor->{title}->[0];
+								$series_position = $ancestor->{position}->[0];
 							}
 						}
 					}
@@ -5893,8 +5900,12 @@ sub get_metadata {
 					$categories ||= "get_iplayer";
 					$category ||= $categories[0] || "get_iplayer";
 					# series/episode numbers
-					$episodenum = $doc->{position}->[0];
-					$seriesnum = $parent->{position}->[0];
+					if ( $subseries_position ) {
+						my @parts = ("a".."z");
+						$episodepart = $parts[$doc->{position}->[0] - 1];
+					}
+					$episodenum = $subseries_position || $doc->{position}->[0];
+					$seriesnum = $series_position || $parent->{position}->[0];
 					# the Doctor Who fudge
 					my ($seriesnum2, $episodenum2);
 					# Extract the seriesnum
@@ -5914,7 +5925,7 @@ sub get_metadata {
 					$seriesnum = $seriesnum2 if $seriesnum2;
 					$episodenum = $episodenum2 if $episodenum2;
 					# insert episode number in $episode
-					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
+					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
 					# minimum episode number = 1 if not a film and series number == 0
 					$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
 					# minimum series number = 1 if episode number != 0
@@ -6135,12 +6146,13 @@ sub get_metadata {
 	$prog->{modes}		= $modes;
 	$prog->{modesizes}	= $mode_sizes;
 	$prog->{episodenum}	= $episodenum || $prog->{episodenum};
+	$prog->{episodepart}	= $episodepart || $prog->{episodepart};
 	$prog->{seriesnum}	= $seriesnum || $prog->{seriesnum};
 	# Conditionally set the senum
-	$prog->{senum} = sprintf "s%02se%02s", $prog->{seriesnum}, $prog->{episodenum} if $prog->{seriesnum} != 0 || $prog->{episodenum} != 0;
+	$prog->{senum} = sprintf "s%02se%02s%s", $prog->{seriesnum}, $prog->{episodenum}, $prog->{episodepart} if $prog->{seriesnum} != 0 || $prog->{episodenum} != 0;
 	# Create a stripped episode and series with numbers removed + senum s##e## element.
 	$prog->{episodeshort} = $prog->{episode};
-	$prog->{episodeshort} =~ s/(^|:(\s+))\d+\.\s+/$1/i;
+	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
 	my $no_number = $prog->{episodeshort};
 	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
 	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
@@ -6798,10 +6810,11 @@ sub split_title {
 sub insert_episode_number {
 	my $episode = shift;
 	my $episodenum = shift;
+	my $episodepart = shift;
 	#my $episode_regex = 'Episode\s+'.main::regex_numbers();
 	#my $date_regex = '^(\d{2}\/\d{2}\/\d{4}|\d{4}\-\d{2}\-\d{2})';
-	if ( $episodenum && $episode !~ /^\d+\./ ) { #&& $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
-		$episode =~ s/^(.*)$/$episodenum. $1/;
+	if ( $episodenum && $episode !~ /^\d+[a-z]?\./ ) { #&& $episode !~ /$episode_regex/ && $episode !~ /$date_regex/ ) {
+		$episode =~ s/^(.*)$/$episodenum$episodepart. $1/;
 	}
 	return $episode;
 }
@@ -8116,13 +8129,17 @@ sub get_links_ion {
 			shift @entries;
 			main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id} - $filter\n" if $opt->{verbose};
 			foreach my $entry (@entries) {
-				my ( $brand, $series, $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
+				my ( $brand, $series, $subseries, $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
 				$pid = $1 if $entry =~ m{<passionsite_title.*?<id>(.+?)</id>}s;
 				$duration = $1 if $entry =~ m{<duration>(.*?)</duration>};
 				$desc = $1 if $entry =~ m{<short_synopsis>(.*?)</short_synopsis>};
 				$brand = $1 if $entry =~ m{<brand_title>(.*?)</brand_title>};
 				$series = $1 if $entry =~ m{<series_title>(.*?)</series_title>};
+				$subseries = $1 if $entry =~ m{<subseries_title>(.*?)</subseries_title>};
 				$episode = $1 if $entry =~ m{<tag_schemes.*?<title>(.*?)</title>}s;
+				if ( $subseries ) {
+					$episode = "$subseries $episode";
+				}
 				$title = $1 if $entry =~ m{<complete_title>(.*?)</complete_title>};
 				if ( $brand ) {
 					if ( $series && $series ne $brand ) {
