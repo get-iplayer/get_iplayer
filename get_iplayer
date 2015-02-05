@@ -5950,11 +5950,6 @@ sub get_metadata {
 		}
 	}
 
-	# use fallback metadata if necessary
-	unless ( $got_metadata ) {
-		$prog->get_metadata_fallback( $ua );
-	}
-
 	# Get list of available modes for each version available
 	# populate version pid metadata if we don't have it already
 	if ( keys %{ $prog->{verpids} } == 0 ) {
@@ -5963,6 +5958,11 @@ sub get_metadata {
 			# Return at this stage unless we want metadata/tags only for various reasons
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
+	}
+
+	# use fallback metadata if necessary
+	unless ( $got_metadata ) {
+		$prog->get_metadata_fallback( $ua );
 	}
 
 	my $modes;
