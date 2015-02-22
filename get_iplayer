@@ -484,7 +484,7 @@ logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr );
 Options->get_class_options( progclass($_) ) for progclass();
-Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast rtsp iphone mms 3gp http );
+Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast rtsp iphone mms 3gp http ddlaac );
 
 
 # Parse the cmdline using the opt_format hash
@@ -7304,6 +7304,10 @@ sub get_stream_data_cdn {
 			$conn->{kind} = $mattribs->{kind};
 			$conn->{live} = 1 if $mattribs->{service} =~ /simulcast/i;
 
+		# ddlaac stream
+		} elsif ( $cattribs->{kind} eq 'sis_http_open' ) {
+			$conn->{streamurl} = $cattribs->{href};
+
 		# Unknown CDN
 		} else {
 			new_stream_report($mattribs, $cattribs) if $opt->{verbose};
@@ -7526,6 +7530,15 @@ sub get_stream_data {
 				my @mobile_medias = parse_metadata( $xml );
 				for my $mobile_media ( @mobile_medias ) {
 					for my $mobile_conn ( @{$mobile_media->{connections}} ) {
+						# direct download AAC files
+						if ( $mobile_media->{kind} eq 'audio' && $mobile_conn->{supplier} eq "sis_http_open" ) {
+							my $ddl_conn = dclone($mobile_conn);
+							my $ddl_media = dclone($mobile_media);
+							$ddl_media->{service} .= '_ddlaac';
+							$ddl_media->{connections} = [ $ddl_conn ];
+							push @medias, $ddl_media;
+							next;
+						}
 						next if $mobile_conn->{transferFormat} ne 'hls';
 						next if $mobile_conn->{supplier} =~ /$exclude_regex/;
 						$stream_key = "$mobile_media->{service}-$mobile_conn->{protocol}-$mobile_conn->{supplier}";
@@ -7705,6 +7718,20 @@ sub get_stream_data {
 				}
 			} else {
 				get_stream_data_cdn( $data, $mattribs, "shoutcast${enc}low", 'shoutcast', $ext );
+			}
+
+		} elsif ( $mattribs->{kind} eq 'audio' && $mattribs->{service} =~ /ddlaac/ ) {
+			if ( $mattribs->{kind} =~ 'audio' ) {
+				my $ext = "aac";
+				if (  $mattribs->{bitrate} >= 192 ) {
+					get_stream_data_cdn( $data, $mattribs, 'ddlaachigh', 'ddlaac', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, 'ddlaacstd', 'ddlaac', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, 'ddlaacmed', 'ddlaac', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, 'ddlaaclow', 'ddlaac', $ext );
+				}
 			}
 
 		# flashhd modes
@@ -9255,6 +9282,8 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'hls', 'hlsaac');
 	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaacnonuk');
 	$mlist = main::expand_list($mlist, 'hlsaacnonuk', 'hlsaaclow');
+	$mlist = main::expand_list($mlist, 'ddl', 'ddlaac');
+	$mlist = main::expand_list($mlist, 'ddlaac', 'ddlaachigh,ddlaacstd,ddlaaclow');
 
 	return $mlist;
 }
@@ -11058,7 +11087,6 @@ sub get {
 }
 
 
-
 package Streamer::http;
 
 # Inherit from Streamer class
@@ -11123,6 +11151,101 @@ sub get {
 	}
 
 	return 0;
+}
+
+
+################### Streamer::ddlaac class #################
+package Streamer::ddlaac;
+
+use File::Copy;
+use File::Path;
+use File::stat;
+use strict;
+
+# Inherit from Streamer::http class
+use base 'Streamer::http';
+
+sub get {
+	my $self = shift;
+	my ( $ua, $url, $prog ) = @_;
+	my $rc = $self->SUPER::get(@_);
+	return $rc if $rc;
+	return 0 if $opt->{raw};
+	my $part_tmp = $prog->{filepart};
+	my $file_tmp = $prog->{filename};
+	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
+	my @ffmpeg_opts = ();
+	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
+		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
+	}
+	# use backwards-compatible option for ffmpeg
+	my @filter_opts;
+	if ( $bin->{ffmpeg} =~ /avconv/ ) {
+		push @filter_opts, '-bsf:a';
+	} else {
+		push @filter_opts, '-absf';
+	}
+	push @filter_opts, 'aac_adtstoasc';
+	my @globals = ( '-y' );
+	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
+		push @globals, ( '-loglevel', 'error', '-stats' );
+	}
+	my @cmd;
+	# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
+	if ( $opt->{aactomp3} ) {
+		$prog->{filepart} =~ s/\.aac/\.mp3/;
+		$prog->{filename} =~ s/\.aac/\.mp3/;
+		my @br_opts = ('-ab', '128k');
+		if ( $opt->{mp3vbr} =~ /^\d$/ ) {
+			@br_opts = ('-aq', $opt->{mp3vbr});
+		}
+		@cmd = (
+			$bin->{ffmpeg},
+			@{ $binopts->{ffmpeg} },
+			@globals,
+			'-i', $file_tmp,
+			'-vn',
+			'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
+			@ffmpeg_opts,
+			$prog->{filepart},
+		);
+	} else {
+		$prog->{filepart} =~ s/\.aac/\.m4a/;
+		$prog->{filename} =~ s/\.aac/\.m4a/;
+		@cmd = (
+			$bin->{ffmpeg},
+			@{ $binopts->{ffmpeg} },
+			@globals,
+			'-i', $file_tmp,
+			'-vn',
+			'-acodec', 'copy',
+			@filter_opts,
+			@ffmpeg_opts,
+			$prog->{filepart},
+		);
+	}
+	my $return = main::run_cmd( 'STDERR', @cmd );
+	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
+		unlink( $file_tmp );
+	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
+	} else {
+		main::logger "WARNING: aac conversion failed - retaining aac file\n";
+		unlink $prog->{filepart};
+		$prog->{filepart} = $part_tmp;
+		$prog->{filename} = $file_tmp;
+	}
+	# Moving file into place as complete (if not stdout)
+	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
+		move($prog->{filepart}, $prog->{filename}); 
+		$prog->check_duration() if $opt->{checkduration};
+	}
+	
+	# Re-symlink file
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
+
+	main::logger "INFO: Recorded $prog->{filename}\n";
+	return 0;
+		
 }
 
 
