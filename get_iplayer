@@ -5820,7 +5820,7 @@ sub get_metadata {
 		if ( $xml ) {
 			my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
 			if ( ! $@ ) {
-				if ( $doc->{type} eq "episode" ) {
+				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
 					my $parent = $doc->{parent}->[0]->{programme}->[0];
 					my $grandparent = $parent->{parent}->[0]->{programme}->[0];
 					my $greatgrandparent = $grandparent->{parent}->[0]->{programme}->[0];
@@ -5839,7 +5839,7 @@ sub get_metadata {
 					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
 					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
 					$web = "http://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
-					if ( $prog_type eq "tv" ) {
+					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
 						$player = "http://www.bbc.co.uk/iplayer/episode/$pid";
 					} else {
 						$player = "http://www.bbc.co.uk/programmes/$pid";
@@ -5851,7 +5851,7 @@ sub get_metadata {
 						if ( $ancestor->{type} && $ancestor->{title}->[0] ) {
 							if ( $ancestor->{type} eq "brand" ) {
 								$brand = $ancestor->{title}->[0];
-							} else {
+							} elsif ( $ancestor->{type} eq "series" ) {
 								# handle rare subseries
 								if ( $series ) {
 									$episode = "$series $episode";
