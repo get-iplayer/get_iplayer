@@ -7149,7 +7149,6 @@ sub get_stream_data_cdn {
 	#	$data->{$mode}->{bitrate} = 480; # ??
 
 	my $count = 1;
-	my $count_rtsp = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
 
 		decode_entities($cattribs->{authString});
@@ -7294,40 +7293,6 @@ sub get_stream_data_cdn {
 		$data->{$mode.$count} = $conn;
 		$count++;
 
-		# synthesized rtsp modes
-		if ( $mode =~ /^flash/ && ! $conn->{live} ) {
-			my $flashmode = $mode.$count_rtsp;
-			my $rtspmode = $flashmode;
-			$rtspmode =~ s/^flash/rtsp/g;
-			$data->{$rtspmode}->{size} = $data->{$flashmode}->{size};
-			$data->{$rtspmode}->{bitrate} = $data->{$flashmode}->{bitrate};
-			$data->{$rtspmode}->{encoding} = $data->{$flashmode}->{encoding};
-			$data->{$rtspmode}->{type} = $data->{$flashmode}->{type};
-			$data->{$rtspmode}->{type} =~ s/streaming_/streaming_rtsp_/g;
-			$data->{$rtspmode}->{identifier} =  $data->{$flashmode}->{identifier};
-			# Audio
-			if ($mode =~ /(audio|aac)/) {
-				$data->{$rtspmode}->{identifier} =~ s|^mp[34]:secure/(\w+?)/(.+$)|$1/secure_auth/$2|;
-			# Video
-			} else {
-				# convert from akamai format
-				$data->{$rtspmode}->{identifier} =~ s|^mp[34]:secure/(\w+?/.+$)|iplayerstream/secure_auth/$1|;
-				# convert from level3
-				$data->{$rtspmode}->{identifier} =~ s|^mp[34]:(\d{3,4}\w+?/.+$)|iplayerstream/secure_auth/$1|;
-			}
-			$data->{$rtspmode}->{identifier} =~ s/^mp[34]://;
-			$data->{$rtspmode}->{ext} = $data->{$flashmode}->{identifier};
-			$data->{$rtspmode}->{ext} =~ s/^(mp[34]):.*$/$1/g;
-			# use .aac ext for audio mp4
-			$data->{$rtspmode}->{ext} = 'aac' if $data->{$rtspmode}->{ext} eq 'mp4' && $mode =~ /(audio|aac)/;
-			$data->{$rtspmode}->{streamurl} = "rtsp://3gp-acl.bbc.net.uk:554/".$data->{$rtspmode}->{identifier};
-			$data->{$rtspmode}->{streamurl} .= '.'.$data->{$rtspmode}->{ext} if $data->{$rtspmode}->{streamurl} !~ m{\.mp[34]$};
-			# Mplayer fails fo some reason - use vlc for now
-			# $data->{$rtspmode}->{streamer} = 'rtsp';
-			$data->{$rtspmode}->{streamer} = '3gp';
-			get_stream_set_type( $data->{$rtspmode} ) if ! $data->{$rtspmode}->{type};
-			$count_rtsp++;
-		}
 	}
 
 	# Add to data structure hased by priority
