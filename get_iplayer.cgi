@@ -29,12 +29,11 @@ my $VERSION_TEXT = "2.92-dev";
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use strict;
-use CGI ':all';
+use CGI qw(-utf8 :all);
 use CGI::Cookie;
 use IO::File;
 use File::Copy;
 use HTML::Entities;
-use URI::Escape qw(uri_escape);
 use LWP::ConnCache;
 #use LWP::Debug qw(+);
 use LWP::UserAgent;
@@ -456,12 +455,18 @@ sub cleanup {
 }
 
 
+# wrap HTML::Entities::encode_entities to limit encoding
+sub encode_entities {
+	my $value = shift;
+	return HTML::Entities::encode_entities( $value, '&<>"\'' );
+}
+
 
 sub parse_post_form_string {
 	my $form = $_[0];
 	my @data;
 	while ( $form =~ /Content-Disposition:(.+?)--/sg ) {
-		$_ = decode('UTF-8', $1);
+		$_ = $1;
 		# form-data; name = "KEY"
 		m{name.+?"(.+?)"[\n\r\s]*(.+)}sg;
 		my ($key, $val) = ( $1, $2 );
@@ -472,7 +477,7 @@ sub parse_post_form_string {
 		decode_entities($val);
 		# url encode each entry
 		# $val =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
-		$val = uri_escape($val);
+		$val = CGI::escape($val);
 		push @data, "$key=$val";
 	}
 	return join '&', @data;
