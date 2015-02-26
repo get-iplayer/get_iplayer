@@ -7500,17 +7500,14 @@ sub get_stream_data {
 				if ( $prog->{type} =~ /tv/ ) {
 					$uk = @medias;
 					$media = { encoding => "h264", kind => "video", type => "video/mp4" };
-					# HD and SD UK only
 					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifests/hds/pc";
 					$href_ext = ".f4m";
-					$min_bitrate = 2000; 
+					$min_bitrate = 0; 
 				} else {
 					$uk = grep { $_->{bitrate} >= 120 } @medias;
 					$media = { encoding => "aac", kind => "audio", type => "audio/mp4" };
-					# 320k UK only
-					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/uk/sbr_high";
-					# 96k non-UK
-					$href_prefix_nonuk = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk/sbr_low";
+					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/uk";
+					$href_prefix_nonuk = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk";
 					$href_ext = ".m3u8";
 					$min_bitrate = 0; 
 				} 
@@ -7522,20 +7519,36 @@ sub get_stream_data {
 					$priority++;
 					my $conn = { supplier => "gip_${cdn}_hls_live", priority => $priority, transferFormat => 'hls', protocol => 'http' };
 					$conn->{kind} = $conn->{supplier};
-					$conn->{href} = "${href_prefix}/${cdn}/${verpid}${href_ext}";
 					my @hls_medias;
 					if ( $prog->{type} =~ /tv/ ) {
-						if ( $uk || $opt->{livetvuk}) {
-							@hls_medias = parse_hds_connection( $media, $conn, $min_bitrate );
+						if ( $uk || $opt->{livetvuk} ) {
+							$conn->{href} = "${href_prefix}/${cdn}/${verpid}${href_ext}";
+							push @hls_medias, parse_hds_connection( $media, $conn, $min_bitrate );
 						}
 					} else {
 						if ( $uk || $opt->{liveradiouk} ) {
-							@hls_medias = parse_hls_connection( $media, $conn, $min_bitrate);
+							for my $id ( 'sbr_high', 'sbr_med' ) {
+								$conn->{href} = "${href_prefix}/${id}/${cdn}/${verpid}${href_ext}";
+								push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+							}
 						}
-						$conn->{href} = "${href_prefix_nonuk}/${cdn}/${verpid}${href_ext}";
-						push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+						for my $id ( 'sbr_low', 'sbr_vlow' ) {
+							$conn->{href} = "${href_prefix_nonuk}/${id}/${cdn}/${verpid}${href_ext}";
+							push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+						}
 					}
-					push @medias, @hls_medias;
+					for my $hls_media ( @hls_medias ) {
+						for my $hls_conn ( @{$hls_media->{connections}} ) {
+							$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							($stream_key = $hls_conn->{href}) =~ s/\?.*//;
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							push @medias, $hls_media;
+							last;
+						}
+					}
 				}
 			}
 			# generate shoutcast streams
