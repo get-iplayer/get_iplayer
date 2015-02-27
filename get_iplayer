@@ -8603,8 +8603,11 @@ sub get_links_schedule_page {
 			$prog->{$pid}->{duration} = $duration;
 			$prog->{$pid}->{episodenum} = $episodenum if ! $prog->{$pid}->{episodenum};
 			$prog->{$pid}->{seriesnum} = $seriesnum if ! $prog->{$pid}->{seriesnum};
-			# don't add this as some progs are already available
-			#$prog->{$pid}->{available} = $available;
+			# use listing with earliest availability
+			if ( $available lt $prog->{$pid}->{available} ) {
+				$prog->{$pid}->{available} = $available;
+				$prog->{$pid}->{channel} = $channel;
+			}
 			next;
 		}
 		# only default version in schedules
