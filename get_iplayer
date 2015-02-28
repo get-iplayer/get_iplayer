@@ -7492,6 +7492,8 @@ sub get_stream_data {
 								($stream_key = $hls_conn->{href}) =~ s/\?.*//;
 								next if $seen{$stream_key};
 								$seen{$stream_key}++;
+								# ensure higher priority for UK live streams
+								$hls_conn->{priority} += 100 if $prog->{type} =~ /live/;
 								push @medias, $hls_media;
 								last;
 							}
@@ -7522,7 +7524,9 @@ sub get_stream_data {
 				push @rand_cdns, $rand_cdns[0] eq "ak" ? "llnw" : "ak";
 				for my $cdn ( @rand_cdns ) {
 					$priority++;
-					my $conn = { supplier => "gip_${cdn}_hls_live", priority => $priority, transferFormat => 'hls', protocol => 'http' };
+					my $conn_priority = $priority % ($#rand_cdns + 1);
+					$conn_priority++;
+					my $conn = { supplier => "gip_${cdn}_hls_live", priority => $conn_priority, transferFormat => 'hls', protocol => 'http' };
 					$conn->{kind} = $conn->{supplier};
 					my @hls_medias;
 					if ( $prog->{type} =~ /tv/ ) {
