@@ -818,6 +818,9 @@ sub init_search {
 		$ENV{http_proxy} = $proxy if $proxy;
 	}
 
+	# process conflicting live radio options
+	delete $opt->{liveradiouk} if $opt->{liveradiointl};
+
 	# Set --get && --nowrite if --metadataonly is used
 	if ( $opt->{metadataonly} ) {
 		if ( ! $opt->{metadata} ) {
@@ -4545,8 +4548,8 @@ sub download_retry_loop {
 					$available_modes_short{$modename}++;
 				}
 				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version'\n";
-				main::logger "INFO: Try using --modes=".(join ',', sort keys %available_modes_short).")\n" if $modelist !~ /nonuk/;
-				main::logger "INFO: You may receive this message if you are using get_iplayer outside the UK\n" if ( $#available_modes < 0 || $modelist =~ /nonuk/ );
+				main::logger "INFO: Try using --modes=".(join ',', sort keys %available_modes_short).")\n";
+				main::logger "INFO: You may receive this message if you are using get_iplayer outside the UK\n" if $#available_modes < 0;
 				next;
 			}
 			main::logger "INFO: ".join(',', @modes)." modes will be tried for version $version\n";
@@ -7541,9 +7544,11 @@ sub get_stream_data {
 								push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
 							}
 						}
-						for my $id ( 'sbr_low', 'sbr_vlow' ) {
-							$conn->{href} = "${href_prefix_nonuk}/${id}/${cdn}/${verpid}${href_ext}";
-							push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+						if ( ! $uk || $opt->{liveradiointl} ) {
+							for my $id ( 'sbr_low', 'sbr_vlow' ) {
+								$conn->{href} = "${href_prefix_nonuk}/${id}/${cdn}/${verpid}${href_ext}";
+								push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+							}
 						}
 					}
 					for my $hls_media ( @hls_medias ) {
@@ -9222,7 +9227,6 @@ sub modelist {
 		}
 	}
 	# Deal with BBC Radio fallback modes and expansions
-	$mlist = main::expand_list($mlist, 'nonuk', 'flashaacnonuk');
 	$mlist = main::expand_list($mlist, 'best', 'default');
 	$mlist = main::expand_list($mlist, 'vbetter', 'default');
 	$mlist = main::expand_list($mlist, 'better', 'default');
@@ -9230,17 +9234,14 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'default', 'flash');
 	$mlist = main::expand_list($mlist, 'rtmp', 'flash');
 	$mlist = main::expand_list($mlist, 'flash', 'flashaachigh,flashaacstd,flashaaclow');
-	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaacnonuk');
-	$mlist = main::expand_list($mlist, 'flashaacnonuk', 'flashaaclow');
-	$mlist = main::expand_list($mlist, 'hlsnonuk', 'hlsaacnonuk');
+	$mlist = main::expand_list($mlist, 'flashaac', 'flashaachigh,flashaacstd,flashaaclow');
 	$mlist = main::expand_list($mlist, 'hlsbest', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hls');
 	$mlist = main::expand_list($mlist, 'hls', 'hlsaac');
-	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaacnonuk');
-	$mlist = main::expand_list($mlist, 'hlsaacnonuk', 'hlsaaclow');
+	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaaclow');
 	$mlist = main::expand_list($mlist, 'ddl', 'ddlaac');
 	$mlist = main::expand_list($mlist, 'ddlaac', 'ddlaachigh,ddlaacstd,ddlaaclow');
 
@@ -9648,7 +9649,8 @@ sub opt_format {
 		hlsliveradioopts	=> [ 1, "hls-liveradio-opts|hlsliveradioopts=s", 'Recording', '--hls-liveradio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for liveradio"],
 		ffmpegliveradioopts => [ 1, "ffmpeg-liveradio-opts|ffmpegliveradioopts=s", 'Recording', '--ffmpeg-liveradio-opts <options>', "Add custom options to ffmpeg re-muxing for liveradio"],
 		shoutcastliveradioopts	=> [ 1, "shoutcast-liveradio-opts|shoutcastliveradioopts=s", 'Recording', '--shoutcast-liveradio-opts <options>', "Add custom options to ffmpeg Shoutcast download re-muxing for liveradio"],
-		liveradiouk	=> [ 1, "liveradio-uk|liveradiouk!", 'Recording', '--liveradio-uk', "Force generation of 320k streams for live radio"],
+		liveradiouk	=> [ 1, "liveradio-uk|liveradiouk!", 'Recording', '--liveradio-uk', "Force generation of additional UK-only high quality streams for live radio"],
+		liveradiointl	=> [ 1, "liveradio-intl|liveradiointl!", 'Recording', '--liveradio-intl', "Force generation of additional international low quality streams for live radio (overrides --liveradio-uk)"],
 	};
 }
 
@@ -9687,21 +9689,18 @@ sub modelist {
 	# deal with obsolete values
 	$mlist =~ s/(flash|rtmp)/hls/g;
 	# Deal with BBC Radio fallback modes and expansions
-	$mlist = main::expand_list($mlist, 'nonuk', 'hlsaacnonuk');
 	$mlist = main::expand_list($mlist, 'default', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'best', 'hlsbest');
 	$mlist = main::expand_list($mlist, 'vbetter', 'hlsvbetter');
 	$mlist = main::expand_list($mlist, 'better', 'hlsbetter');
 	$mlist = main::expand_list($mlist, 'good', 'hlsgood');
-	$mlist = main::expand_list($mlist, 'nonuk', 'hlsaacnonuk');
 	$mlist = main::expand_list($mlist, 'hlsbest', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hls');
 	$mlist = main::expand_list($mlist, 'hls', 'hlsaac');
-	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaacnonuk');
-	$mlist = main::expand_list($mlist, 'hlsaacnonuk', 'hlsaacmed,hlsaaclow');
+	$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaachigh,hlsaacstd,hlsaacmed,hlsaaclow');
 	$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastmp3');
 	$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
 	$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
