@@ -818,8 +818,6 @@ sub init_search {
 		$ENV{http_proxy} = $proxy if $proxy;
 	}
 
-	# process conflicting live radio options
-	delete $opt->{liveradiouk} if $opt->{liveradiointl};
 
 	# Set --get && --nowrite if --metadataonly is used
 	if ( $opt->{metadataonly} ) {
@@ -7539,66 +7537,73 @@ sub get_stream_data {
 			# generate additional live streams
 			if ( $prog->{type} =~ /live/ && $verpid ne 'bbc_world_service') {
 				my ( $media, $href_prefix, $href_prefix_nonuk, $href_ext, $min_bitrate, $uk );
+				# override other HLS streams if requested
+				if ( ( $prog->{type} =~ /tv/ && $opt->{livetvuk} ) || ( $prog->{type} =~ /radio/ && ( $opt->{liveradiouk} || $opt->{liveradiointl} ) ) ) {
+					@medias = ();
+					%seen = ();
+				}
 				if ( $prog->{type} =~ /tv/ ) {
 					$uk = @medias;
+					$uk = 1 if $opt->{livetvuk};
 					$media = { encoding => "h264", kind => "video", type => "video/mp4" };
 					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifests/hds/pc";
 					$href_ext = ".f4m";
-					$min_bitrate = 0; 
+					$min_bitrate = $opt->{livetvuk} ? 0 : 2000; 
 				} else {
 					$uk = grep { $_->{bitrate} >= 120 } @medias;
+					$uk = 0 if $opt->{liveradiointl};
+					$uk = 1 if $opt->{liveradiouk};
 					$media = { encoding => "aac", kind => "audio", type => "audio/mp4" };
-					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/uk";
-					$href_prefix_nonuk = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls/nonuk";
+					$href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls";
 					$href_ext = ".m3u8";
 					$min_bitrate = 0; 
 				} 
+				my @hls_medias;
 				my $priority = 0;
 				my @cdns = ( "ak", "llnw" );
 				my @rand_cdns = $cdns[rand @cdns];
 				push @rand_cdns, $rand_cdns[0] eq "ak" ? "llnw" : "ak";
 				for my $cdn ( @rand_cdns ) {
+					my $conn_priority = ( $priority % ($#rand_cdns + 1) ) + 1;
 					$priority++;
-					my $conn_priority = $priority % ($#rand_cdns + 1);
-					$conn_priority++;
 					my $conn = { supplier => "gip_${cdn}_hls_live", priority => $conn_priority, transferFormat => 'hls', protocol => 'http' };
 					$conn->{kind} = $conn->{supplier};
-					my @hls_medias;
 					if ( $prog->{type} =~ /tv/ ) {
-						if ( $uk || $opt->{livetvuk} ) {
+						if ( $uk ) {
 							$conn->{href} = "${href_prefix}/${cdn}/${verpid}${href_ext}";
 							push @hls_medias, parse_hds_connection( $media, $conn, $min_bitrate );
 						}
 					} else {
-						if ( $uk || $opt->{liveradiouk} ) {
-							for my $id ( 'sbr_high', 'sbr_med' ) {
-								$conn->{href} = "${href_prefix}/${id}/${cdn}/${verpid}${href_ext}";
-								push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
-							}
+						my $loc;
+						my @sbr;
+						if ( $uk ) {
+							$loc = 'uk';
+							@sbr = ( 'sbr_high', 'sbr_med', 'sbr_low', 'sbr_vlow' );
+						} else {
+							$loc = 'nonuk';
+							@sbr = ( 'sbr_low', 'sbr_vlow' );
 						}
-						if ( ! $uk || $opt->{liveradiointl} ) {
-							for my $id ( 'sbr_low', 'sbr_vlow' ) {
-								$conn->{href} = "${href_prefix_nonuk}/${id}/${cdn}/${verpid}${href_ext}";
-								push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
-							}
+						for my $sbr ( @sbr ) {
+							$conn->{href} = "${href_prefix}/${loc}/${sbr}/${cdn}/${verpid}${href_ext}";
+							push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate);
 						}
 					}
-					for my $hls_media ( @hls_medias ) {
-						for my $hls_conn ( @{$hls_media->{connections}} ) {
-							$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							($stream_key = $hls_conn->{href}) =~ s/\?.*//;
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							push @medias, $hls_media;
-							last;
-						}
+				}
+				for my $hls_media ( @hls_medias ) {
+					for my $hls_conn ( @{$hls_media->{connections}} ) {
+						$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						($stream_key = $hls_conn->{href}) =~ s/\?.*//;
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						push @medias, $hls_media;
+						last;
 					}
 				}
 			}
 			# generate shoutcast streams
-			if ( $prog->{type} =~ /liveradio/ ) {
+			if ( $prog->{type} eq 'liveradio' ) {
 				for my $media_stream_shoutcast_prefix ( @media_stream_shoutcast_prefixes ) {
 					$xml = main::request_url_retry( $ua, $media_stream_shoutcast_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
 					main::logger "\n$xml\n" if $opt->{debug};
@@ -9510,13 +9515,13 @@ sub hls_pid_map {
 # Class cmdline Options
 sub opt_format {
 	return {
-		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hlshd,hlssd,hlsvhigh,hlshigh,hlsstd,hlsnormal,hlslow. Shortcuts: default,good,better(=default),vbetter,best,hls. ('default'=hlsvhigh,hlshigh,hlsstd,hlslow)"],
+		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hlshd,hlssd,hlsvhigh,hlshigh,hlsstd,hlslow. Shortcuts: default,good,better(=default),vbetter,best,hls. ('default'=hlsvhigh,hlshigh,hlsstd,hlslow)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings (overrides --output)"],
 		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Recording', '--rtmp-livetv-opts <options>', "Add custom options to rtmpdump for livetv"],
 		hlslivetvopts	=> [ 1, "hls-livetv-opts|hlslivetvopts=s", 'Recording', '--hls-livetv-opts <options>', "Add custom options to ffmpeg HLS download encoding for livetv"],
 		ffmpeglivetvopts	=> [ 1, "ffmpeg-livetv-opts|ffmpeglivetvopts=s", 'Recording', '--ffmpeg-livetv-opts <options>', "Add custom options to ffmpeg re-muxing for livetv"],
 		hdslivetv	=> [ 1, "hds-livetv|hdslivetv!", 'Recording', '--hds-livetv (IGNORED)', "Use Adobe HDS manifests to locate live tv streams (for live HD tv where available)"],
-		livetvuk	=> [ 1, "livetv-uk|livetvuk!", 'Recording', '--livetv-uk', "Force generation of HD/SD streams for live TV"],
+		livetvuk	=> [ 1, "livetv-uk|livetvuk!", 'Recording', '--livetv-uk', "Force use of hard-coded UK streams for HLS live tv"],
 	};
 }
 
@@ -9675,14 +9680,14 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaaclow)"],
+		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: hlsaachigh,hlsaacstd,hlsaacmed,hlsaaclow,shoutcastmp3std,shoutcastaachigh(R3 only, UK only). Shortcuts: default,good,better(=default),best,hls. ('default'=hlsaachigh,hlsaacstd,hlsaacmed,hlsaaclow)"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings (overrides --output)"],
 		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Recording', '--rtmp-liveradio-opts <options>', "Add custom options to rtmpdump for liveradio"],
 		hlsliveradioopts	=> [ 1, "hls-liveradio-opts|hlsliveradioopts=s", 'Recording', '--hls-liveradio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for liveradio"],
 		ffmpegliveradioopts => [ 1, "ffmpeg-liveradio-opts|ffmpegliveradioopts=s", 'Recording', '--ffmpeg-liveradio-opts <options>', "Add custom options to ffmpeg re-muxing for liveradio"],
 		shoutcastliveradioopts	=> [ 1, "shoutcast-liveradio-opts|shoutcastliveradioopts=s", 'Recording', '--shoutcast-liveradio-opts <options>', "Add custom options to ffmpeg Shoutcast download re-muxing for liveradio"],
-		liveradiouk	=> [ 1, "liveradio-uk|liveradiouk!", 'Recording', '--liveradio-uk', "Force generation of additional UK-only high quality streams for live radio"],
-		liveradiointl	=> [ 1, "liveradio-intl|liveradiointl!", 'Recording', '--liveradio-intl', "Force generation of additional international low quality streams for live radio (overrides --liveradio-uk)"],
+		liveradiouk	=> [ 1, "liveradio-uk|liveradiouk!", 'Recording', '--liveradio-uk', "Force use of hard-coded UK streams for HLS live radio (overrides --liveradio-intl). Ignored for World Service"],
+		liveradiointl	=> [ 1, "liveradio-intl|liveradiointl!", 'Recording', '--liveradio-intl', "Force use of hard-coded international streams for HLS live radio.  Ignored for World Service"],
 	};
 }
 
@@ -9710,9 +9715,7 @@ sub modelist {
 	
 	# Defaults
 	if ( ! $mlist ) {
-		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};		
-		} elsif ( ! main::exists_in_path('ffmpeg') ) {
+		if ( ! main::exists_in_path('ffmpeg') ) {
 			main::logger "WARNING: Not using HLS and Shoutcast modes since ffmpeg is not found\n" if $opt->{verbose};
 		} else {
 			$mlist = 'default';
