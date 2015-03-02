@@ -218,7 +218,7 @@ my $opt_format = {
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],	
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
-	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update!", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest"],
+	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update!", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest versions. get_iplayer main script also will be updated if a newer version is available.)"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add!", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del!", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
 	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear!", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
@@ -240,7 +240,7 @@ my $opt_format = {
 	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <integer>', "Number of days of radio programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	refreshlimittv	=> [ 1, "refreshlimittv|refresh-limit-tv=n", 'Config', '--refresh-limit-tv <integer>', "Number of days of TV programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
-	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer one exists"],
+	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer version is available. If so, plugins also will be updated if newer versions available."],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
 	# Display
@@ -2201,12 +2201,6 @@ sub update_script {
 		exit 1;
 	} 
 
-	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-	if ( ! -w $script_file ) {
-		logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
-		exit 1;
-	}
-
 	# Force update if no plugins dir
 	if ( ! -d "$profile_dir/plugins" ) {
 		mkpath "$profile_dir/plugins";
@@ -2273,6 +2267,11 @@ sub update_script {
 			# All available plugins in all plugin dirs are writable:
 			# update script if required
 			if ( $latest_ver > $version || $opt->{force} ) {
+				# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
+				if ( ! -w $script_file ) {
+					logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
+					exit 1;
+				}
 				logger "INFO: Updating $script_file (from $version to $latest_ver)\n";
 				update_file( $ua, $script_url, $script_file ) if ! $opt->{test};
 			}
