@@ -6106,6 +6106,7 @@ sub get_metadata {
 	# use first/longest available variants, ensure default version if possible
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		next if $version =~ /(audiodescribed|signed)/;
+		next if $modes->{$version} =~ /^subtitles\d+$/;
 		my $base_version = "default";
 		if ( ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) && $modes->{$version} ) {
 			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as $base_version\n" if $version ne "default";
