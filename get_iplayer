@@ -5296,6 +5296,11 @@ sub check_duration {
 	my $ffout = `$cmd`;
 	if ( $ffout =~ /duration:\s+((\d+):(\d\d):(\d\d))/i ) {
 		my $expected_s = $prog->{duration};
+		if ( $opt->{start} && ! $opt->{stop} ) {
+			$expected_s -= $opt->{start};
+		} elsif ( $opt->{stop} ) {
+			$expected_s = $opt->{stop} - $opt->{start};
+		}		
 		my $expected = sprintf("%02d:%02d:%02d", $expected_s / 3600, ($expected_s % 3600) / 60, $expected_s % 60);
 		my $recorded_s = ($2 * 3600) + ($3 * 60) + $4;
 		my $recorded = $1;
