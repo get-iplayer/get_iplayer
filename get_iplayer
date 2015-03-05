@@ -10132,7 +10132,9 @@ sub get {
 	}
 
 	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+	unless ( $return == 2 && $opt->{stop} ) {
+		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+	}
 
 	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
