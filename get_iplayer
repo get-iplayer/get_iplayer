@@ -10298,7 +10298,9 @@ sub get {
 	
 	# Add start stop options if defined
 	push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-	push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
+	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if $opt->{stop};
+	# requires ffmpeg 1.2
+	# push @cmdopts, ( '-to', $opt->{stop} ) if $opt->{stop};
 	if ( $live ) {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
