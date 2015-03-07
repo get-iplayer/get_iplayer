@@ -6013,11 +6013,17 @@ sub get_metadata {
 				$expiry = $prog->{streams}->{$version}->{$mode}->{expires};
 				$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
 			}
+			my $size;
 			if ( $prog->{streams}->{$version}->{$mode}->{size} ) {
-				push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{size} / 1048576.0 );
+				$size = $prog->{streams}->{$version}->{$mode}->{size};
 			} else {
 				next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
-				push @sizes, sprintf( "%s=%.0fMB", $mode, $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 / 1024.0 );
+				$size = $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 * 1024.0;
+			}
+			if ( $size < 1048576 ) {
+				push @sizes, sprintf( "%s=%.0fKB", $mode, $size / 1024.0 );
+			} else {
+				push @sizes, sprintf( "%s=%.0fMB", $mode, $size / 1048576.0 );
 			}
 		}
 		$mode_sizes->{$version} = join ',', @sizes;
