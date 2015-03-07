@@ -4428,6 +4428,10 @@ sub download_subtitles {
 }
 
 
+sub default_version_list {
+	return qw/ default original iplayer technical editorial lengthened shortened opensubtitled other signed audiodescribed /;
+}
+
 
 # Usage: generate_version_list ($prog)
 # Returns sorted array of versions
@@ -4435,7 +4439,7 @@ sub generate_version_list {
 	my $prog = shift;
 	
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @version_search_order = qw/ default original iplayer technical editorial opensubtitled shortened lengthened other signed audiodescribed /;
+	my @version_search_order = default_version_list();
 	@version_search_order = split /,/, $opt->{versionlist} if $opt->{versionlist};
 
 	# check here for no matching verpids for specified version search list???
@@ -6001,7 +6005,7 @@ sub get_metadata {
 			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version} );
 		}
 		if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
-			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping\n" if $opt->{verbose};
+			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping RDF\n" if $opt->{verbose};
 			next;
 		}
 		$modes->{$version} = join ',', sort keys %{ $prog->{streams}->{$version} };
@@ -6080,7 +6084,7 @@ sub get_metadata {
 	
 	# remove versions with no streams
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		if ( ! $modes->{$version} ) {
+		if ( ! $modes->{$version} || $modes->{$version} =~ /^subtitles\d+$/ ) {
 			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
 			delete $modes->{$version};
 			delete $mode_sizes->{$version};
@@ -6093,9 +6097,10 @@ sub get_metadata {
 	# collapse alternate versions with same base name
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		next if $version !~ /\d+$/;
+		next if ! $modes->{$version};
 		(my $base_version = $version) =~ s/\d+$//;
-		if ( ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) && $modes->{$version} ) {
-			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as $base_version\n";
+		if ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) {
+			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as '$base_version'\n";
 			$modes->{$base_version} = $modes->{$version};
 			$mode_sizes->{$base_version} = $mode_sizes->{$version};
 			for my $key ( @fields1 ) {
@@ -6114,13 +6119,21 @@ sub get_metadata {
 		}
 	}
 
-	# use first/longest available variants, ensure default version if possible
+	my @default_versions = $prog->default_version_list();
+	# incorporate unknown versions
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		if ( ! grep /$version/, @default_versions ) {
+			push @default_versions, $version;
+		}
+	}
+	
+	# use first/longest available variants, ensure default version if possible
+	for my $version ( @default_versions ) {
 		next if $version =~ /(audiodescribed|signed)/;
-		next if $modes->{$version} =~ /^subtitles\d+$/;
+		next if ! $modes->{$version};
 		my $base_version = "default";
-		if ( ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) && $modes->{$version} ) {
-			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as $base_version\n" if $version ne "default";
+		if ( ! $modes->{$base_version} || $prog->{durations}->{$base_version} < $prog->{durations}->{$version} ) {
+			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as '$base_version'\n" if $version ne "default";
 			$modes->{$base_version} = $modes->{$version};
 			$mode_sizes->{$base_version} = $mode_sizes->{$version};
 			for my $key ( @fields1 ) {
@@ -6131,7 +6144,15 @@ sub get_metadata {
 					$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
 				}
 			}
+			# delete $modes->{$version};
+			# delete $mode_sizes->{$version};
+			# for my $key ( @fields1, @fields2 ) {
+			# 	delete $prog->{$key}->{$version};
+			# }
 		}
+	}
+	if ( ! $modes->{default} ) {
+		main::logger "WARNING: The 'default' programme version could not be determined\n";
 	}
 
 	# check at least one version available
