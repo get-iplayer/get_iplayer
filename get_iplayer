@@ -7410,6 +7410,9 @@ sub get_stream_data {
 	my @media_stream_mobile_prefixes;
 	my @media_stream_shoutcast_prefixes;
 	my ( $pc_mediaset, @mobile_mediasets, @shoutcast_mediasets );
+	# use mediaselector/4 for obvious archive programmes
+	my $mediaselector = $opt->{mediaselector};
+	$opt->{mediaselector} = '4' if $verpid =~ /http:.+?\/archive\/xml\//;
 	if ( $opt->{mediaselector} eq '4' ) {
 		$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid 
 		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
@@ -7907,7 +7910,8 @@ sub get_stream_data {
 		}	
 	}
 
-
+	$opt->{mediaselector} = $mediaselector;
+	
 	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
 	# Skip check if the modelist selected excludes iphone
 	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && $verpid !~ /^http:/ && grep /^iphone/, split ',', $prog->modelist() ) {
