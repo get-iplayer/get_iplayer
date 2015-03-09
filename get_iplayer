@@ -7421,7 +7421,7 @@ sub get_stream_data {
 		} else {
 			$pc_mediaset = 'pc';
 			@mobile_mediasets = ( 'apple-ipad-hls' ); 
-			if ( $prog->{type} =~ "radio" ) {
+			if ( $prog->{type} =~ /radio/ ) {
 				push @mobile_mediasets, 'apple-iphone4-ipad-hls-3g'; 
 			}
 			if ( $prog->{type} eq "liveradio" ) {
@@ -7570,7 +7570,7 @@ sub get_stream_data {
 				}
 			}
 			# generate additional live streams
-			if ( $prog->{type} =~ /live/ && $verpid ne 'bbc_world_service') {
+			if ( $prog->{type} =~ /live/ ) {
 				my ( $media, $href_prefix, $href_prefix_nonuk, $href_ext, $min_bitrate, $uk );
 				# override other HLS streams if requested
 				if ( ( $prog->{type} =~ /tv/ && $opt->{livetvuk} ) || ( $prog->{type} =~ /radio/ && ( $opt->{liveradiouk} || $opt->{liveradiointl} ) ) ) {
@@ -7608,6 +7608,9 @@ sub get_stream_data {
 							$conn->{href} = "${href_prefix}/${cdn}/${verpid}${href_ext}";
 							push @hls_medias, parse_hds_connection( $media, $conn, $min_bitrate );
 						}
+					} elsif ( $verpid eq 'bbc_world_service' ) {
+							$conn->{href} = 'http://bbcwsen-lh.akamaihd.net/i/WSEIEUK_1@189911/master.m3u8';
+							push @hls_medias, parse_hls_connection( $media, $conn, $min_bitrate );
 					} else {
 						my $loc;
 						my @sbr;
