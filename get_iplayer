@@ -7413,9 +7413,10 @@ sub get_stream_data {
 	my $data = {};
 	my $media_stream_data_prefix;
 	my $media_stream_live_prefix;
+	my @media_stream_pc_prefixes;
 	my @media_stream_mobile_prefixes;
 	my @media_stream_shoutcast_prefixes;
-	my ( $pc_mediaset, @mobile_mediasets, @shoutcast_mediasets );
+	my ( @pc_mediasets, @mobile_mediasets, @shoutcast_mediasets );
 	# use mediaselector/4 for obvious archive programmes
 	my $mediaselector = $opt->{mediaselector};
 	$opt->{mediaselector} = '4' if $verpid =~ /http:.+?\/archive\/xml\//;
@@ -7425,10 +7426,13 @@ sub get_stream_data {
 	} else {
 		# assume URL in $verpid is XML playlist from news site
 		if ( $verpid =~ /http:/ ) {
-			$pc_mediaset = 'journalism-pc'; 
+			@pc_mediasets = ( 'journalism-pc' ); 
 			@mobile_mediasets = ('journalism-http-tablet');
 		} else {
-			$pc_mediaset = 'pc';
+			@pc_mediasets = ( 'pc' );
+			if ( $prog->{type} =~ /tv/ ) {
+				push @pc_mediasets, 'apple-ipad-hls'; 
+			}
 			@mobile_mediasets = ( 'apple-ipad-hls' ); 
 			if ( $prog->{type} =~ /radio/ ) {
 				push @mobile_mediasets, 'apple-iphone4-ipad-hls-3g'; 
@@ -7441,8 +7445,11 @@ sub get_stream_data {
 				}
 			}
 		}
-		$media_stream_data_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$pc_mediaset/vpid/"; # $verpid
+		$media_stream_data_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$pc_mediasets[0]/vpid/"; # $verpid
 		$media_stream_live_prefix = $media_stream_data_prefix;
+		for my $mediaset ( @pc_mediasets ) {
+			push @media_stream_pc_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
+		}
 		for my $mediaset ( @mobile_mediasets ) {
 			push @media_stream_mobile_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
 		}
@@ -7520,20 +7527,22 @@ sub get_stream_data {
 		} else { 
 			# get Flash streams for on-demand
 			if ( $prog->{type} !~ /live/ ) {
-				$xml = main::request_url_retry( $ua, $media_stream_data_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
-				main::logger "\n$xml\n" if $opt->{debug};
-				my @pc_medias = parse_metadata( $xml );
-				for my $pc_media ( @pc_medias ) {
-					my @pc_conns;
-					for my $pc_conn ( @{$pc_media->{connections}} ) {
-						next if ( $pc_conn->{supplier} =~ /$exclude_regex/ );
-						$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
-						next if $seen{$stream_key};
-						$seen{$stream_key}++;
-						push @pc_conns, $pc_conn;
+				for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
+					$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+					main::logger "\n$xml\n" if $opt->{debug};
+					my @pc_medias = parse_metadata( $xml );
+					for my $pc_media ( @pc_medias ) {
+						my @pc_conns;
+						for my $pc_conn ( @{$pc_media->{connections}} ) {
+							next if ( $pc_conn->{supplier} =~ /$exclude_regex/ );
+							$stream_key = "$pc_conn->{identifier}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							push @pc_conns, $pc_conn;
+						}
+						@{$pc_media->{connections}} = @pc_conns;
+						push @medias, $pc_media;
 					}
-					@{$pc_media->{connections}} = @pc_conns;
-					push @medias, $pc_media;
 				}
 			}
 			# get HLS streams from mobile data
@@ -7726,12 +7735,12 @@ sub get_stream_data {
 					get_stream_data_cdn( $data, $mattribs, 'hlsstd', 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 300 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlslow', 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 200 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsvlow', 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 100 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsvvlow', 'hls', $ext );
-				} else {
-					get_stream_data_cdn( $data, $mattribs, 'hlsvvvlow', 'hls', $ext );
+				#} elsif ( $mattribs->{bitrate} > 200 ) {
+				#	get_stream_data_cdn( $data, $mattribs, 'hlsvlow', 'hls', $ext );
+				#} elsif ( $mattribs->{bitrate} > 100 ) {
+				#	get_stream_data_cdn( $data, $mattribs, 'hlsvvlow', 'hls', $ext );
+				#} else {
+				#	get_stream_data_cdn( $data, $mattribs, 'hlsvvvlow', 'hls', $ext );
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
