@@ -2,7 +2,7 @@ dummy:
 	@echo No need to make anything.
 
 ifdef VERSION
-release:
+tag:
 	@git update-index --refresh --unmerged
 	@if git diff-index --name-only HEAD | grep ^ ; then \
 		echo Uncommitted changes in above files; exit 1; fi
@@ -15,9 +15,7 @@ release:
 	sed -i.bak -e 's/\(The latest version is v\)[0-9]\{1,\}\.[0-9]\{1,\}/\1$(VERSION)/' html/get_iplayer.html
 	rm -f get_iplayer.bak get_iplayer.1.bak html/get_iplayer.html.bak
 	@git log --format='%aN' |sort -u > CONTRIBUTORS; git add CONTRIBUTORS
-	@git commit -m "Release v$(VERSION)" get_iplayer get_iplayer.1 html/get_iplayer.html CONTRIBUTORS get_iplayer.cgi
-
-tag: release
+	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 html/get_iplayer.html CONTRIBUTORS get_iplayer.cgi
 	@git tag v$(VERSION)
 
 tarball:
