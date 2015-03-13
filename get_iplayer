@@ -4725,38 +4725,37 @@ sub create_metadata_file {
 
 	# XML template for XBMC/Kodi movies - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#Movies
 	$filename->{xbmc_movie} = "$prog->{dir}/$prog->{fileprefix}.nfo";
-	$template->{xbmc_movie} = '
-	<movie>
-		<title>[name] - [episode]</title>
-		<outline>[desc]</outline>
-		<plot>[desclong]</plot>
-		<tagline>[descshort]</tagline>
-		<runtime>[runtime]</runtime>
-		<thumb>[thumbnail]</thumb>
-		<id>[pid]</id>
-		<filenameandpath>[dir]/[fileprefix].[ext]</filenameandpath>
-		<trailer></trailer>
-		<genre>[categories]</genre>
-		<year>[firstbcast]</year>
-		<credits>[channel]</credits>
-    </movie>
-	';
+	($template->{xbmc_movie} = <<'	XBMC_MOVIE') =~ s/^\s{2}//gm;
+		<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+		<movie>
+			<title>[name]</title>
+			<plot>[desclong]</plot>
+			<outline>[descmedium]</outline>
+			<tagline>[descshort]</tagline>
+			<thumb>[thumbnail]</thumb>
+			<genre>[categories]</genre>
+			<id>[pid]</id>
+		</movie>
+	XBMC_MOVIE
 	$filename->{kodi_movie} = $filename->{xbmc_movie};
 	$template->{kodi_movie} = $template->{xbmc_movie};
 
 	# XML template for XBMC - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#TV_Episodes
 	$filename->{xbmc} = "$prog->{dir}/$prog->{fileprefix}.nfo";
-	$template->{xbmc} = '
-	<episodedetails>
-		<title>[name] - [episode]</title>
-		<rating>10.00</rating>
-		<season>[seriesnum]</season>
-		<episode>[episodenum]</episode>
-		<plot>[desclong]</plot>
-		<credits>[channel]</credits>
-		<aired>[firstbcast]</aired>
-	</episodedetails>
-	';
+	($template->{xbmc} = <<'	XBMC') =~ s/^\s{2}//gm;
+		<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+		<episodedetails>
+			<title>[episodeshort]</title>
+			<plot>[desclong]</plot>
+			<thumb>[thumbnail]</thumb>
+			<aired>[lastbcastdate]</aired>
+			<season>[seriesnum]</season>
+			<episode>[episodenum]</episode>
+			<studio>[channel]</studio>
+			<genre>[categories]</genre>
+			<id>[pid]</id>
+		</episodedetails>
+	XBMC
 	$filename->{kodi} = $filename->{xbmc};
 	$template->{kodi} = $template->{xbmc};
 
@@ -4807,6 +4806,13 @@ sub create_metadata_file {
 				$text =~ s/FREEVOTYPE/audio/g;
 			} else {
 				$text =~ s/FREEVOTYPE/movie/g;
+			}
+		}
+		if ( $opt->{metadata} =~ /(xbmc|kodi)/ ) {
+			my $cats = $1 if $text =~ /<genre>(.+?)<\/genre>/;
+			if ( $cats ) {
+				$cats =~ s/,/<\/genre><genre>/g;
+				$text =~ s/<genre>.+?<\/genre>/<genre>$cats<\/genre>/;
 			}
 		}
 		print XML $text;
