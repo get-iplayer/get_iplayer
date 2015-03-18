@@ -82,6 +82,8 @@ my %SIGORIG;
 # Save default SIG actions
 $SIGORIG{$_} = $SIG{$_} for keys %SIG;
 $|=1;
+# Save proxy env var
+my $ENV_HTTP_PROXY = $ENV{HTTP_PROXY} || $ENV{http_proxy};
 
 # Hash of where plugin files were found so that the correct ones can be updated
 my %plugin_files;
@@ -137,11 +139,11 @@ my $opt_format = {
 	multimode	=> [ 1, "multimode!", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
-	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)"],
+	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails). If specified, value of http_proxy environment variable (if any) in parent process is retained and passed to child processes."],
 	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "When used with --pid record all the embedded pids if the pid is a series or brand pid."],
-	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes, e.g., ffmpeg."],
+	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless --partial-proxy is specified."],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (rtmp and realaudio only)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (can be used to limit live rtmp recording length) rtmp and realaudio only"],
@@ -811,11 +813,14 @@ sub init_search {
 	# Web proxy
 	if ( $opt->{noproxy} ) {
 		delete $opt->{proxy};
+		$ENV{http_proxy} = $ENV_HTTP_PROXY;
 	} else {
 		(my $proxy = $opt->{proxy}) =~ s/^prepend://i;
-		$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy} if not $opt->{proxy};
+		$opt->{proxy} = $ENV_HTTP_PROXY if not $opt->{proxy};
+		# set proxy env var for child processes unless --partial-proxy
+		$ENV{http_proxy} = $proxy if $proxy && ! $opt->{partialproxy};
 		logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
-		$ENV{http_proxy} = $proxy if $proxy;
+		logger "INFO: \$ENV{http_proxy} = $ENV{http_proxy}\n" if $ENV{http_proxy} && $opt->{verbose};
 	}
 
 
