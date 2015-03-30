@@ -3,7 +3,7 @@
 ## Features
 
 * Downloads MP4 streams from BBC iPlayer site with better quality than Flash player streams
-* Downloads Flash AAC/MP3 and WMA streams for radio programmes
+* Downloads Flash AAC streams for radio programmes
 * Allow multiple programmes to be downloaded using a single command
 * Indexing of all available iPlayer programs
 * Caching of Index (default 4h)
@@ -12,9 +12,9 @@
 * PVR capability (may be used from crontab)
 * Full HTTP Proxy support
 * Runs on Linux (Debian, Ubuntu, openSUSE and many others), OS X (10.5+) and Windows (XP/Vista/7/8)
-* Requires perl 5.8.8+ with LWP module
+* Requires perl 5.8.8+ with LWP and XML::Simple modules
 
-**NOTE:** get_iplayer can only search programmes broadcast within the previous 7 days, even if they are available for 30 days on the iPlayer web site.  See [FAQ #1](https://github.com/get-iplayer/get_iplayer/wiki/faq).
+**NOTE: get_iplayer can only search programmes broadcast within the previous 7 days, even if they are available for 30 days on the iPlayer web site.**  See [FAQ #1](https://github.com/get-iplayer/get_iplayer/wiki/faq).
 
 ## Documentation
 
@@ -40,7 +40,7 @@
 
 	`export IPLAYER_OUTDIR="/path/to/my/output/dir"`
 
-* The first time you run the script it will create a settings directory (~/.get_iplayer) and download plugins.  It will then access the BBC website and create an index of all TV programmes currently on iPlayer.
+* The first time you run the script it will create a settings directory (`$HOME/.get_iplayer` [Linux/Unix/OSX] `%USERPROFILE%\.get_iplayer` [Windows]) and download plugins.  It will then access the BBC website and create an index of all TV programmes currently on iPlayer.
 
 ## Installation (Windows)
 
