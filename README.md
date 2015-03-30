@@ -92,9 +92,17 @@ See documentation for Windows installation information.
 
 	`get_iplayer --channel= "BBC One" --category=sport`
 
-* List all Radio 4 Extra programmes categorised as "drama":
+* List all Radio 4 Extra programmes:
 
-	`get_iplayer --type=radio --channel "Radio 4 Extra" --category=drama`
+	`get_iplayer --type=radio --channel "Radio 4 Extra"`
+	
+	*(Category searches are not supported for radio programmes)*
+
+* List all Radio 4 programmes:
+
+	`get_iplayer --type=radio --channel "Radio 4$"`
+
+	*(The `$` regular expression metacharacter matches "Radio 4" only at the end of the channel name, thus avoiding matches against "Radio 4 Extra")*
 
 * Record programme number 208 (index from search results) in SD:
 
