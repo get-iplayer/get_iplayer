@@ -52,6 +52,25 @@ perl.exe .\get_iplayer.cgi -p 1935 [-g \path\to\get_iplayer] [-l 127.0.0.1] [--f
 	
 http://localhost:1935/
 
+To allow access from remote machines
+------------------------------------
+This capability should only be used on a secure, trusted network. If this UI is exposed to the internet then the computer running the code will quickly be compromised.
+
+1) Unix based hosts
+Edit /etc/default/get_iplayer_web_pvr and comment the line
+# LISTEN=127.0.0.1
+and uncomment the line 
+LISTEN=0.0.0.0
+start the web server with the command 
+kevin$ get_iplayer_web_pvr
+
+2) Windows
+
+edit "get_iplayer.cgi.cmd", which on XP is in C:\Program Files\get_iplayer\
+
+change --listen=127.0.0.1 to --listen=0.0.0.0
+after a restart of the web ui it will then listen for incoming connections on all adapters not just localhost
+
 
 Installation as Apache CGI script
 ---------------------------------
