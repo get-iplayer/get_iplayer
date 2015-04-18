@@ -655,9 +655,15 @@ my $no_search_args = $#search_args < 0;
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0] && ! $opt->{pid};
 
-# Auto-detect http:// url or <type>:http:// in a search term and set it as a --pid option (disable if --fields is used).
-if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fields} ) ) {
-	$opt->{pid} = $search_args[0];
+# Auto-detect http://, <type>:http:// or bbc-ipd: in a search term and set it as a --pid option (disable if --fields is used).
+if ( ! $opt->{pid} && ! $opt->{fields} ) {
+	if ( $search_args[0] =~ m{^(\w+:)?http://} ) {
+		$opt->{pid} = $search_args[0];
+	}
+	elsif ( $search_args[0] =~ m{^bbc-ipd:download/(\w+)/\w+/(\w+)/} ) {
+		$opt->{pid} = $1;
+		$opt->{modes} ||= "best" if $2 eq "hd";
+	}
 }
 
 if ( ! $opt->{pid} ) {
