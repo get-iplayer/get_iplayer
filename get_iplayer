@@ -7085,8 +7085,23 @@ sub parse_hls_connection {
 	my $media = shift;
 	my $conn = shift;
 	my $min_bitrate = shift;
+	my $pc_medias = shift;
+	my $conn_href;
+	for my $pc_media ( @{$pc_medias} ) {
+		if ( $pc_media->{bitrate} > 2000 ) {
+			for my $pc_conn ( @{$pc_media->{connections}} ) {
+				(my $hd_id = $pc_conn->{identifier}) =~ s/(^mp4:(secure\/)?|\.mp4$)//g;
+				if ( $hd_id ) {
+					($conn_href = $conn->{href}) =~ s/(\*\~hmac|\,\.mp4\.csmil)/,${hd_id}$1/g;
+					last;
+				}
+			}
+		}
+		last if $conn_href;
+	}
+	$conn_href ||= $conn->{href};
 	my @hls_medias;
-	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
+	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn_href, 3, undef, undef, 1 );
 	my @lines = split(/\r*\n|\r\n*/, $data);
 	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
 		main::logger "WARNING: Invalid HLS playlist, no header ($conn->{href})\n";
@@ -7575,7 +7590,7 @@ sub get_stream_data {
 						($stream_key = $mobile_conn->{href}) =~ s/\?.*//;
 						next if $seen{$stream_key};
 						$seen{$stream_key}++;
-						my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn );
+						my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, 0, \@medias );
 						for my $hls_media ( @hls_medias ) {
 							for my $hls_conn ( @{$hls_media->{connections}} ) {
 								$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
@@ -7729,9 +7744,9 @@ sub get_stream_data {
 
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
-				if ( $mattribs->{bitrate} > 3000 ) {
+				if ( $mattribs->{bitrate} > 3000 or $mattribs->{width} > 1200 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlshd', 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 2000 ) {
+				} elsif ( $mattribs->{bitrate} > 2000 or $mattribs->{width} > 1000 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlssd', 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 1200 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlsvhigh', 'hls', $ext );
