@@ -659,6 +659,17 @@ if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fi
 	$opt->{pid} = $search_args[0];
 }
 
+if ( ! $opt->{pid} ) {
+	# default live streams are BBC One London and BBC Two England
+	if ( $opt->{type} =~ "livetv" ) {
+		@search_args = map { /(One|Two)$/i ? "$_\$" : $_ } @search_args;
+		if ( $opt->{channel} ) {
+			$opt->{channel} =~ s/(One|Two)$/$1\$/i;
+			$opt_cmdline->{channel} = $opt->{channel} if $opt_cmdline->{channel};
+		}
+	}
+}
+
 if ( $opt->{pid} ) {
 	my @search_pids;
 	if ( ref($opt->{pid}) eq 'ARRAY' ) {
@@ -9594,6 +9605,12 @@ sub channels {
 			'bbc_parliament'	=> 'BBC Parliament',
 			'bbc_alba'		=> 'BBC Alba',
 			's4cpbs'		=> 'S4C',
+			'bbc_one_northern_ireland_hd'	=> 'BBC One Northern Ireland',
+			'bbc_one_scotland_hd'	=> 'BBC One Scotland',
+			'bbc_one_wales_hd'	=> 'BBC One Wales',
+			'bbc_two_northern_ireland_digital'	=> 'BBC Two Northern Ireland',
+			'bbc_two_scotland'	=> 'BBC Two Scotland',
+			'bbc_two_wales_digital'	=> 'BBC Two Wales',
 		}
 	};
 }
