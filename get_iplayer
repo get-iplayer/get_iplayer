@@ -4432,7 +4432,7 @@ sub download_subtitles {
 
 
 sub default_version_list {
-	return qw/ default original iplayer technical editorial lengthened shortened opensubtitled other signed audiodescribed /;
+	return qw/ default original iplayer technical editorial lengthened shortened opensubtitles other signed audiodescribed /;
 }
 
 
@@ -5966,6 +5966,8 @@ sub get_metadata {
 							$type = "audiodescribed";
 						} elsif ( grep /sign/i, @{$ver->{types}->[0]->{type}} ) {
 							$type = "signed";
+						} elsif ( grep /open subtitles/i, @{$ver->{types}->[0]->{type}} ) {
+							$type = "opensubtitles";
 						} else {
 							($type = lc($ver->{types}->[0]->{type}->[0])) =~ s/\s+.*$//;
 						}
@@ -6132,7 +6134,7 @@ sub get_metadata {
 	my @default_versions = $prog->default_version_list();
 	# incorporate unknown versions
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		if ( ! grep /$version/, @default_versions ) {
+		if ( ! grep /^${version}$/, @default_versions ) {
 			push @default_versions, $version;
 		}
 	}
