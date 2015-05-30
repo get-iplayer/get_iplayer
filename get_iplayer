@@ -4204,7 +4204,7 @@ sub channels_filtered {
 	my $channelsref = shift;
 	# assume class method call
 	(my $prog_type = $prog) =~ s/Programme:://;
-	my $exclude = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
+	my $exclude = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'} || 'local';
 	my %channels;
 	for my $x ( qw(national regional local) ) {
 		@channels{ keys %{$channelsref->{$x}} } = values %{$channelsref->{$x}} unless $exclude =~ /\b$x\b/;
@@ -8539,30 +8539,19 @@ sub get_links {
 	my $self = shift; # ignore obj ref
 	my $prog = shift;
 	my $prog_type = shift;
- 	my $feeds = lc($opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"});
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	my $rc = 0;
-	if ( $feeds eq 'schedule' ) {
+	if ( $prog_type eq 'radio' ) {
+		$rc = $self->get_links_aod($prog, $prog_type);
+	}
+	elsif ( $prog_type eq 'tv' ) {
 		$rc = $self->get_links_schedule($prog, $prog_type, 0);
-	} elsif ( $feeds eq 'ion2' ) {
-		$rc = $self->get_links_ion($prog, $prog_type, 1);
-	} elsif ( $feeds eq 'ion' ) {
-		$rc = $self->get_links_ion($prog, $prog_type);
-	} else {
-		if ( $prog_type eq 'radio' ) {
-			$rc = $self->get_links_aod($prog, $prog_type);
-		}
-		elsif ( $prog_type eq 'tv' ) {
-			$rc = $self->get_links_ion($prog, $prog_type);
-		}
 	}
 	return 1 if $rc && $opt->{refreshabortonerror};
-
 	if ( $opt->{refreshfuture} ) {
 		$rc = $self->get_links_schedule($prog, $prog_type, 1);
 		return 1 if $rc && $opt->{refreshabortonerror};
 	}
-	
 	main::logger "\n";
 	return 0;
 }
@@ -8699,12 +8688,24 @@ sub get_links_schedule_page {
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
 	my $now = time();
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $duration, $thumbnail, $version, $guidance, $descshort );
+		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $until, $duration, $thumbnail, $version, $guidance, $descshort );
 		# Don't create this prog instance if the availability is in the past 
 		# this prevents programmes which never appear in iPlayer from being indexed
-		$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
-		next if $future && Programme::get_time_string( $available ) < $now;
-		next if ! $future && $limit && Programme::get_time_string( $available ) < $limit;
+		if ( $future ) {
+			$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
+		} else {
+			$available = $1 if $entry =~ m{<actual_start>\s*(.+?)\s*</actual_start>};
+		}
+		next if ! $available;
+		if ( $future ) {
+			next if Programme::get_time_string( $available ) < $now;
+		} else {
+			next if Programme::get_time_string( $available ) > $now;
+			next if $limit && Programme::get_time_string( $available ) < $limit;
+			$until = $1 if $entry =~ m{<available_until>\s*(.+?)\s*</available_until>};
+			next if ! $until;
+			next if Programme::get_time_string( $until ) < $now;
+		}
 		$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
 		$desc = $1 if $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>};
 		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
