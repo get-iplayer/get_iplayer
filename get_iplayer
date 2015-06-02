@@ -7105,21 +7105,22 @@ sub parse_hls_connection {
 	my @hls_medias;
 	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn_href, 3, undef, undef, 1 );
 	my @lines = split(/\r*\n|\r\n*/, $data);
-	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
-		main::logger "WARNING: Invalid HLS playlist, no header ($conn->{href})\n";
+	if ( @lines < 1 || $lines[0] !~ '^#EXTM3U' ) {
+		main::logger "WARNING: Invalid HLS playlist, no header ($conn->{href})\n" if $opt->{verbose};
 		return;
 	}
 
 	if (!grep { /^#EXTINF:/ } @lines) {
 		my (@streams, $last_stream);
 		foreach my $line (@lines) {
+			next if ($line =~ /^#/ && $line !~ /^#EXT/) || $line =~ /^\s*$/;
 			if ($line =~ /^#EXT-X-STREAM-INF:(.*)$/) {
 				$last_stream = { parse_m3u_attribs($conn->{href}, $1) };
 				push @streams, $last_stream;
 			} elsif ($line !~ /^#EXT/) {
 				if ( ! defined $last_stream ) {
-					main::logger "WARNING: Missing #EXT-X-STREAM-INF for URL: $line ($conn->{href})\n" ;
-					return
+					main::logger "WARNING: Missing #EXT-X-STREAM-INF for URL: $line ($conn->{href})\n" if $opt->{verbose};
+					return;
 				}
 				$last_stream->{'URL'} = $line;
 				$last_stream = undef;
