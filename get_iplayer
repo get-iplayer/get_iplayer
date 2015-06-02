@@ -5433,7 +5433,23 @@ sub get_verpids {
 		}
 		# URL decode url
 		$url = main::url_decode( $url );
-	# iPlayer LiveTV or PID
+	# iPlayer LiveTV
+	} elsif ( $prog->{type} =~ 'live' && $prog->{pid} =~ /^[a-z_]+$/) {
+		my ($verpid, $version);
+		my $hls_pid_map;
+		if ( $prog->{type} eq 'livetv' ) {
+			$hls_pid_map = Programme::livetv->hls_pid_map();
+		} else {
+			$hls_pid_map = Programme::liveradio->hls_pid_map();
+		}
+		my $hls_pid = $hls_pid_map->{$prog->{pid}};
+		$verpid = $hls_pid || $prog->{pid};
+		main::logger "INFO: Using $prog->{type}: $verpid\n" if $opt->{verbose} && $verpid;
+		$version = 'default';
+		$prog->{verpids}->{$version} = $verpid;
+		$prog->{versions} = join ',', keys %{ $prog->{verpids} };
+		return 0;
+	# iPlayer PID
 	} else {
 		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
 		# use the audiodescribed playlist url if non-default versions are specified
