@@ -84,20 +84,14 @@ See documentation for Windows installation information.
 
 	`get_iplayer --type tv,radio "doctor who"`
 
-* List all TV programmes categorised as "comedy":
+* List all BBC One TV programmes:
 
-	`get_iplayer --category=comedy`
-
-* List all BBC One TV programmes categorised as "sport":
-
-	`get_iplayer --channel= "BBC One" --category=sport`
+	`get_iplayer --channel= "BBC One"`
 
 * List all Radio 4 Extra programmes:
 
 	`get_iplayer --type=radio --channel "Radio 4 Extra"`
 	
-	*(Category searches are not supported for radio programmes)*
-
 * List all Radio 4 programmes:
 
 	`get_iplayer --type=radio --channel "Radio 4$"`
@@ -140,5 +134,3 @@ See documentation for Windows installation information.
 Notes:
 
 * Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC  programmes may not be available from iPlayer.
-
-
