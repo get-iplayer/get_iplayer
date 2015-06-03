@@ -4215,7 +4215,10 @@ sub channels_filtered {
 	my $channelsref = shift;
 	# assume class method call
 	(my $prog_type = $prog) =~ s/Programme:://;
-	my $exclude = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'} || 'local';
+	my $exclude = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
+	if ( $prog_type eq "tv" ) {
+		$exclude = "local" unless $exclude;
+	}
 	my %channels;
 	for my $x ( qw(national regional local) ) {
 		@channels{ keys %{$channelsref->{$x}} } = values %{$channelsref->{$x}} unless $exclude =~ /\b$x\b/;
