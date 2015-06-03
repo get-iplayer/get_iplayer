@@ -7131,6 +7131,10 @@ sub parse_hls_connection {
 	$conn_href ||= $conn->{href};
 	my @hls_medias;
 	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn_href, 3, undef, undef, 1 );
+	if ( ! $data ) {
+		main::logger "WARNING: No HLS playlist returned ($conn->{href})\n" if $opt->{verbose};
+		return;
+	}
 	my @lines = split(/\r*\n|\r\n*/, $data);
 	if ( @lines < 1 || $lines[0] !~ '^#EXTM3U' ) {
 		main::logger "WARNING: Invalid HLS playlist, no header ($conn->{href})\n" if $opt->{verbose};
