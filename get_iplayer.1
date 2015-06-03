@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "March 2015" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "June 2015" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more
 .SH SYNOPSIS
@@ -36,7 +36,7 @@ In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a
 Limit search to programmes added to the cache before N hours ago
 .TP
 \fB\-\-category <string>
-Narrow search to matched categories (regex or comma separated values)
+Narrow search to matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes).
 .TP
 \fB\-\-channel <string>
 Narrow search to matched channel(s) (regex or comma separated values)
@@ -45,7 +45,7 @@ Narrow search to matched channel(s) (regex or comma separated values)
 Narrow search to exclude matched programme names (regex or comma separated values)
 .TP
 \fB\-\-exclude\-category <string>
-Narrow search to exclude matched categories (regex or comma separated values)
+Narrow search to exclude matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes).
 .TP
 \fB\-\-exclude\-channel <string>
 Narrow search to exclude matched channel(s) (regex or comma separated values)
@@ -199,9 +199,6 @@ Start recording matching programmes. Search terms required unless \-\-pid specif
 \fB\-\-hash
 Show recording progress as hashes
 .TP
-\fB\-\-hds\-livetv (IGNORED)
-Use Adobe HDS manifests to locate live tv streams (for live HD tv where available)
-.TP
 \fB\-\-hls\-liveradio\-opts <options>
 Add custom options to ffmpeg HLS download re\-muxing for liveradio
 .TP
@@ -251,7 +248,7 @@ Ignore \-\-proxy setting in preferences
 Overwrite recordings if they already exist
 .TP
 \fB\-\-partial\-proxy
-Only uses web proxy where absolutely required (try this extra option if your proxy fails)
+Only uses web proxy where absolutely required (try this extra option if your proxy fails). If specified, value of http_proxy environment variable (if any) in parent process is retained and passed to child processes.
 .TP
 \fB\-\-pid <pid>
 Record an arbitrary pid that does not necessarily appear in the index.
@@ -260,7 +257,7 @@ Record an arbitrary pid that does not necessarily appear in the index.
 When used with \-\-pid record all the embedded pids if the pid is a series or brand pid.
 .TP
 \fB\-\-proxy, \-p <url>
-Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes, e.g., ffmpeg.
+Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless \-\-partial\-proxy is specified.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
 Radio recording modes: flashaachigh,flashaacstd,flashaudio,flashaaclow,wma. Shortcuts: default,good,better(=default),best,rtmp,flash,flashaac. ('default'=flashaachigh,flashaacstd,flashaudio,flashaaclow)
@@ -682,7 +679,7 @@ Character encoding used to encode file and directory names. Encoding name must b
 \fB\-\-no\-scrape\-versions
 Do not scrape episode web pages as extra measure to find audiodescribed/signed versions (only applies with \-\-playlist\-metadata).
 .TP
-\fB\-\-playlist\-metadata
+\fB\-\-playlist\-metadata (IGNORED)
 Force use of playlists (XML and JSON) for programme metadata instead of /programmes data endpoints.
 .TP
 \fB\-\-trim\-history <# days to retain>
@@ -692,7 +689,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v2.92, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v2.93, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
