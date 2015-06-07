@@ -12,7 +12,7 @@
 * PVR capability (may be used from crontab)
 * Full HTTP Proxy support
 * Runs on Linux (Debian, Ubuntu, openSUSE and many others), OS X (10.5+) and Windows (XP/Vista/7/8)
-* Requires perl 5.8.8+ with LWP and XML::Simple modules
+* Requires perl 5.8.8+ with LWP, URI and XML::Simple modules
 
 **NOTE: get_iplayer can only search programmes broadcast within the previous 7 days, even if they are available for 30 days on the iPlayer web site.**  See [FAQ #1](https://github.com/get-iplayer/get_iplayer/wiki/faq).
 
