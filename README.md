@@ -40,6 +40,10 @@
 
 	`export IPLAYER_OUTDIR="/path/to/my/output/dir"`
 
+* Install dependencies (the first is required, the others allow you to download more formats).  On Ubuntu this can be done as follows:
+
+	`sudo apt-get install libxml-simple-perl ffmpeg rtmpdump`
+
 * The first time you run the script it will create a settings directory (`$HOME/.get_iplayer` [Linux/Unix/OSX] `%USERPROFILE%\.get_iplayer` [Windows]) and download plugins.  It will then access the BBC website and create an index of all TV programmes currently on iPlayer.
 
 ## Installation (Windows)
