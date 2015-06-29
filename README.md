@@ -24,27 +24,11 @@
 
 <https://github.com/get-iplayer/get_iplayer/wiki/help>
 
-## Installation (Linux/Unix/OS X)
+## Installation (all platforms)
 
-* Download latest release:
+See documentation:
 
-	<https://raw.github.com/get-iplayer/get_iplayer/latest/get_iplayer>
-
-* After downloading the script make it executable:
-
-	`chmod 755 ./get_iplayer`
-  
-	The script may optionally be installed to a location in PATH.
-
-* You can set the default download directory by putting the following in your shell environment (e.g. ~/.bashrc):
-
-	`export IPLAYER_OUTDIR="/path/to/my/output/dir"`
-
-* The first time you run the script it will create a settings directory (`$HOME/.get_iplayer` [Linux/Unix/OSX] `%USERPROFILE%\.get_iplayer` [Windows]) and download plugins.  It will then access the BBC website and create an index of all TV programmes currently on iPlayer.
-
-## Installation (Windows)
-
-See documentation for Windows installation information.
+<https://github.com/get-iplayer/get_iplayer/wiki/installation>
 
 ## Usage 
   
