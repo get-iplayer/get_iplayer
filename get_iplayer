@@ -654,8 +654,8 @@ my $no_search_args = $#search_args < 0;
 # Assume search term is '.*' if nothing is specified - i.e. lists all programmes
 push @search_args, '.*' if ! $search_args[0] && ! $opt->{pid};
 
-# Auto-detect http:// url or <type>:http:// in a search term and set it as a --pid option (disable if --fields is used).
-if ( $search_args[0] =~ m{^(\w+:)?http://} && ( ! $opt->{pid} ) && ( ! $opt->{fields} ) ) {
+# Auto-detect http://, <type>:http:// or bbc-ipd: in a search term and set it as a --pid option (disable if --fields is used).
+if ( $search_args[0] =~ m{^(?:(?:\w+:)?http://|bbc-ipd:download/)} && ( ! $opt->{pid} ) && ( ! $opt->{fields} ) ) {
 	$opt->{pid} = $search_args[0];
 }
 
@@ -5386,6 +5386,13 @@ sub get_verpids {
 		$prog->{versions} = join ',', keys %{ $prog->{verpids} };
 		$prog->{title} = decode_entities($title);
 		return 0;
+
+        # Handle bbc-ipd: URIs used by the iPlayer "Download Programme" links
+        } elsif ( $prog->{pid} =~ m{^bbc-ipd:download/(\w+)/\w+/(\w+)/} ) {
+		my $pid = $1;
+		my $quality = $2;	# FIXME: make use of this?
+		$url = 'http://www.bbc.co.uk/iplayer/playlist/'. $pid;
+		$prog->{pid} = $pid;
 	
 	# Determine if the is a standard pid, Live TV or EMP TV URL
 	# EMP URL
@@ -12529,3 +12536,8 @@ sub tag_file_mp4 {
 }
 
 ############## End OO ##############
+
+# Local Variables:
+# perl-indent-level: 8
+# indent-tabs-mode: t
+# End:
