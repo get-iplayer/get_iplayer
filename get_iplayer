@@ -7187,11 +7187,19 @@ sub parse_hls_connection {
 			}
 			my $hls_conn = dclone($conn);
 			my $uri1 = URI->new($hls_conn->{href});
-			my $qs1 = $uri1->query;
 			my $uri2 = URI->new($stream->{URL});
+			my $qs1 = $uri1->query;
 			my $qs2 = $uri2->query;
-			$qs2 .= "&" if $qs2 && $qs1;
-			$uri2->query($qs2.$qs1);
+			if ( ! $uri2->has_recognized_scheme ) {				
+				my @segs1 = $uri1->path_segments;
+				my @segs2 = $uri2->path_segments;
+				pop @segs1;
+				push @segs1, @segs2;
+				$uri2 = dclone($uri1);
+				$uri2->path_segments(@segs1);
+			}
+			$qs1 .= "&" if $qs1 && $qs2;
+			$uri2->query($qs1.$qs2);
 			delete $hls_conn->{href};
 			$hls_conn->{href} = $uri2->as_string;
 			$hls_media->{connections} = [ $hls_conn ];
