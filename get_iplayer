@@ -10514,12 +10514,8 @@ sub get {
 	}
 
 	my @globals = ( '-y' );
-	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
-		if ( $live && $kind eq 'video') {
-			push @globals, ( '-loglevel', 'error', '-stats' );
-		} else {
-			push @globals, ( '-loglevel', 'info', '-stats' );
-		}
+	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
+		push @globals, ( '-loglevel', 'error', '-stats' );
 	}
 	@cmd = (
 		$bin->{ffmpeg},
@@ -10539,6 +10535,8 @@ sub get {
 		push @cmd, ( '-f', 'mpegts', 'pipe:1' );
 	}
 	
+	main::logger "INFO: Begin recording $prog->{filename}\n";
+
 	$return = main::run_cmd( 'normal', @cmd );
 
 	# exit behaviour when streaming
@@ -10711,7 +10709,7 @@ sub get {
 	}
 
 	my @globals = ( '-y' );
-	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
+	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
 		push @globals, ( '-loglevel', 'error', '-stats' );
 	}
 	@cmd = (
@@ -10729,6 +10727,8 @@ sub get {
 		push @cmd, ( '-f', 'adts', 'pipe:1' );
 	}
 	
+	main::logger "INFO: Begin recording $prog->{filename}\n";
+
 	$return = main::run_cmd( 'normal', @cmd );
 
 	# exit behaviour when streaming
