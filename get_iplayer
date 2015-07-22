@@ -7145,12 +7145,16 @@ sub parse_hls_connection {
 		return;
 	}
 
+	my $best_audio;
 	if (!grep { /^#EXTINF:/ } @lines) {
 		my (@streams, $last_stream);
 		foreach my $line (@lines) {
 			next if ($line =~ /^#/ && $line !~ /^#EXT/) || $line =~ /^\s*$/;
 			if ($line =~ /^#EXT-X-STREAM-INF:(.*)$/) {
 				$last_stream = { parse_m3u_attribs($conn->{href}, $1) };
+				if ( $last_stream->{RESOLUTION} && $last_stream->{AUDIO} ) {
+					$best_audio->{$last_stream->{RESOLUTION}} = $last_stream->{AUDIO};
+				}
 				push @streams, $last_stream;
 			} elsif ($line !~ /^#EXT/) {
 				if ( ! defined $last_stream ) {
@@ -7168,6 +7172,7 @@ sub parse_hls_connection {
 
 		main::logger "WARNING: non-numeric bandwidth in HLS playlist\n" if grep { $_->{'BANDWIDTH'} =~ /\D/ } @streams;
 		for my $stream ( @streams ) {
+			next if $stream->{AUDIO} && $best_audio->{$stream->{RESOLUTION}} && $stream->{AUDIO} ne $best_audio->{$stream->{RESOLUTION}};
 			my $hls_media = dclone($media);
 			delete $hls_media->{width};
 			delete $hls_media->{height};
@@ -7179,11 +7184,12 @@ sub parse_hls_connection {
 			next if $min_bitrate && $hls_media->{bitrate} < $min_bitrate;
 			if ( $stream->{RESOLUTION} ) {
 				($hls_media->{width}, $hls_media->{height}) = split(/x/, $stream->{RESOLUTION});
-			} 
+			}
+			my $pfx = $conn->{supplier} =~ /mf_/ ? "hvf" : "hls"; 
 			if ( $stream->{URL} =~ /live/ ) {
-				$hls_media->{service} = "gip_hls_simulcast_$hls_media->{bitrate}";
+				$hls_media->{service} = "gip_${pfx}_simulcast_$hls_media->{bitrate}";
 			} else {
-				$hls_media->{service} = "gip_hls_iplayer_$hls_media->{bitrate}";
+				$hls_media->{service} = "gip_${pfx}_iplayer_$hls_media->{bitrate}";
 			}
 			my $hls_conn = dclone($conn);
 			my $uri1 = URI->new($hls_conn->{href});
@@ -7526,16 +7532,22 @@ sub get_stream_data {
 	}
 	
   my @exclude_supplier = split(/,/, $opt->{excludesupplier});
-  if ( grep /akamai/, @exclude_supplier ) {
+  if ( grep /^akamai/, @exclude_supplier ) {
 		push @exclude_supplier, 'ak';
   }
-  if ( grep /limelight/, @exclude_supplier ) {
+  if ( grep /^limelight/, @exclude_supplier ) {
 		push @exclude_supplier, 'll';
   }
-  if ( ! grep /bidi/, @exclude_supplier ) {
+  if ( ! grep /^bidi/, @exclude_supplier ) {
 		push @exclude_supplier, 'bidi';
   }
-  my $exclude_regex = '('.(join('|', @exclude_supplier)).')';
+  if ( ! grep /^mf_bidi/, @exclude_supplier ) {
+		push @exclude_supplier, 'mf_bidi';
+  }
+	my $exclude_regex = '^ROGUEVALUE$';
+	if ( @exclude_supplier ) {
+	  $exclude_regex = '^('.(join('|', @exclude_supplier)).')';
+	}
 
 	# Setup user agent with redirection enabled
 	my $ua = main::create_ua( 'desktop' );
@@ -7601,7 +7613,7 @@ sub get_stream_data {
 					for my $pc_media ( @pc_medias ) {
 						my @pc_conns;
 						for my $pc_conn ( @{$pc_media->{connections}} ) {
-							next if ( $pc_conn->{supplier} =~ /$exclude_regex/ );
+							next if $pc_conn->{supplier} =~ /$exclude_regex/;
 							$stream_key = "$pc_conn->{identifier}-$pc_conn->{protocol}-$pc_conn->{supplier}";
 							next if $seen{$stream_key};
 							$seen{$stream_key}++;
@@ -7786,28 +7798,29 @@ sub get_stream_data {
 			}
 			get_stream_data_cdn( $data, $mattribs, 'iphone', 'iphone', 'mov' );
 		
-		} elsif (	$mattribs->{service} =~ /hls/ ) {
+		} elsif (	$mattribs->{service} =~ /(hls|hvf)/ ) {
 
 			if ( $mattribs->{kind} =~ 'video' ) {
+				my $pfx = $mattribs->{service} =~ /hls/ ? "hls" : "hvf";
 				my $ext = "mp4";
 				if ( $mattribs->{bitrate} > 3000 or $mattribs->{width} > 1200 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlshd', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}hd", 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 2000 or $mattribs->{width} > 1000 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlssd', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}sd", 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 1200 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsvhigh', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}vhigh", 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlshigh', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}high", 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 400  ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsstd', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}std", 'hls', $ext );
 				} elsif ( $mattribs->{bitrate} > 300 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlslow', 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "${pfx}low", 'hls', $ext );
 				#} elsif ( $mattribs->{bitrate} > 200 ) {
-				#	get_stream_data_cdn( $data, $mattribs, 'hlsvlow', 'hls', $ext );
+				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vlow", 'hls', $ext );
 				#} elsif ( $mattribs->{bitrate} > 100 ) {
-				#	get_stream_data_cdn( $data, $mattribs, 'hlsvvlow', 'hls', $ext );
+				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vvlow", 'hls', $ext );
 				#} else {
-				#	get_stream_data_cdn( $data, $mattribs, 'hlsvvvlow', 'hls', $ext );
+				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vvvlow", 'hls', $ext );
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
@@ -8139,6 +8152,7 @@ sub opt_format {
 		vlc		=> [ 1, "vlc=s", 'External Program', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 		hlstvopts	=> [ 1, "hls-tv-opts|hlstvopts=s", 'Recording', '--hls-tv-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for tv"],
+		hvftvopts	=> [ 1, "hvf-tv-opts|hvftvopts=s", 'Recording', '--hvf-tv-opts <options>', "Add custom options to ffmpeg HVF download re-muxing for tv"],
 		ffmpegtvopts	=> [ 1, "ffmpeg-tv-opts|ffmpegtvopts=s", 'Recording', '--ffmpeg-tv-opts <options>', "Add custom options to ffmpeg re-muxing for tv"],
 	};
 }
@@ -8186,6 +8200,12 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlsbetter');
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvhigh,hlsgood');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlslow');
+	$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
+	$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbetter');
+	$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfbetter');
+	$mlist = main::expand_list($mlist, 'hvfvbetter', 'hvfbetter');
+	$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfvhigh,hvfgood');
+	$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfstd,hvflow');
 
 	return $mlist;
 }
@@ -10442,6 +10462,7 @@ sub get {
 	my $kind = $streamdata{kind};
 	my $live = $streamdata{live};
 	my $mode = $prog->{mode};
+	my $pfx = substr($mode, 0, 3);
 
 	if ( $opt->{raw} ) {
 		$file_tmp = $prog->{filepart};
@@ -10488,8 +10509,8 @@ sub get {
  	}
 
 	# Add custom options to ffmpeg for this type if specified with --hls-<type>-opts
-	if ( defined $opt->{'hls'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'hls'.$prog->{type}.'opts'} );
+	if ( defined $opt->{$pfx.$prog->{type}.'opts'} ) {
+		push @cmdopts, ( split /\s+/, $opt->{$pfx.$prog->{type}.'opts'} );
 	}
 
 	my @globals = ( '-y' );
