@@ -154,6 +154,7 @@ my $opt_format = {
 	subsraw		=> [ 1, "subsraw!", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
 	subsrequired		=> [ 1, "subsrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
 	tagonly		=> [ 1, "tagonly|tag-only!", 'Recording', '--tag-only', "Only update the programme tag and not download the programme (can also be used with --history)"],
+	tagonlyfilename		=> [ 1, "tagonlyfilename|tag-only-filename=s", 'Recording', '--tag-only-filename <filename>', "Add metadata tags to specified file (ignored unless used with --tag-only)"],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
@@ -1060,7 +1061,7 @@ sub download_pid_not_in_cache {
 		list_progs( { $this->{type} => 1 }, $this );
 	}
 	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} ) ) {
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} ) ) {
 		return $this->download_retry_loop( $hist );
 	}
 }
@@ -1088,7 +1089,7 @@ sub download_pid_in_cache {
 		list_progs( { $this->{type} => 1 }, $this );
 	}
 	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} ) ) {
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} ) ) {
 		$retcode = $this->download_retry_loop( $hist );
 	}
 	return $retcode;
@@ -4673,8 +4674,6 @@ sub mode_ver_download_retry_loop {
 				if ( ! $opt->{nowrite} ) {
 					$hist->add( $prog );
 					$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
-				} elsif ( $opt->{tagonly} ) {
-					$prog->tag_file;
 				}
 				if ( $opt->{command} && ! $opt->{nowrite} ) {
 					$prog->run_user_command( $opt->{command} );
@@ -4721,6 +4720,28 @@ sub tag_metadata {
 # add metadata tags to file
 sub tag_file {
 	my $prog = shift;
+	if ( $opt->{tagonly} ) {
+		if ( $opt->{tagonlyfilename} ) {
+			$prog->{filename} = $opt->{tagonlyfilename};
+			(undef, undef, $prog->{ext}) = fileparse($prog->{filename}, qr/\.[^.]*/);
+			$prog->{ext} =~ s/^\.//;
+		} 
+		elsif ( $prog->{filename} =~ /\.EXT$/ ) {
+			for my $ext ( 'mp4', 'm4a', 'mp3' ) {
+				(my $filename = $prog->{filename}) =~ s/\.EXT$/\.$ext/;
+				if ( -f $filename ) {
+					$prog->{filename} = $filename;
+					$prog->{ext} = $ext;
+					last;
+				}
+			}
+		}
+		if ( ! -f $prog->{filename} ) {
+			main::logger "WARNING: Cannot tag missing file $prog->{filename}\n";
+			return;
+		}
+		main::logger "INFO: Tagging file $prog->{filename}\n";
+	}
 	# return if file does not exist
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
@@ -5008,8 +5029,11 @@ sub generate_filenames {
 	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
+	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
+		$prog->{filename} = $opt->{tagonlyfilename};
+	}
 	# Special case for history mode, parse the fileprefix and dir from filename if it is already defined
-	if ( $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
+	if ( ( $opt->{history} || $opt->{tagonly} ) && defined $prog->{filename} && $prog->{filename} ne '' ) {
 		( $prog->{fileprefix}, $prog->{dir}, $prog->{ext} ) = fileparse($prog->{filename}, qr/\.[^.]*/);
 		# Fix up file path components
 		$prog->{ext} =~ s/\.//;
