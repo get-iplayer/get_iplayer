@@ -6790,10 +6790,11 @@ sub parse_rdf_series {
 		return '';
 	}
 	my @pids = ();
-	my $spid = extract_pid( $rdf->{'po:Series'}->{'rdf:about'} );
-	main::logger "INFO:    Series: '".$rdf->{'po:Series'}->{'dc:title'}."' ($spid)\n";
+	my ($series) = ensure_array($rdf->{'po:Series'});
+	my $spid = extract_pid( $series->{'rdf:about'} );
+	main::logger "INFO:    Series: '".$series->{'dc:title'}."' ($spid)\n";
 	main::logger "INFO:      From Brand PID '".$rdf->{'po:Brand'}->{'rdf:about'}."'\n" if $opt->{debug};
-	for my $episode_element (ensure_array($rdf->{'po:Series'}->{'po:episode'})) {
+	for my $episode_element (ensure_array($series->{'po:episode'})) {
 		my $pid = extract_pid( $episode_element->{'po:Episode'}->{'rdf:about'} );
 		main::logger "INFO:      Episode '".$episode_element->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
 		push @pids, $pid;
