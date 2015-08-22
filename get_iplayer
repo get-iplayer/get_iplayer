@@ -10546,8 +10546,12 @@ sub get {
 	}
 
 	my @globals = ( '-y' );
-	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
+	if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}} ) ) {
+		if ( $live && $kind eq 'video') {
+			push @globals, ( '-loglevel', 'error', '-stats' );
+		} else {
+			push @globals, ( '-loglevel', 'info', '-stats' );
+		}
 	}
 	@cmd = (
 		$bin->{ffmpeg},
