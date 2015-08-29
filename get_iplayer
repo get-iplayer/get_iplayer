@@ -95,6 +95,8 @@ my %prog_types = (
 	radio		=> 'Programme::radio',
 	liveradio	=> 'Programme::liveradio',
 	livetv		=> 'Programme::livetv',
+	podcast		=> 'Programme::podcast',
+	localfiles	=> 'Programme::localfiles',
 );
 
 
@@ -572,13 +574,7 @@ if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	exit 1;
 }
 
-# Force plugins update if no plugins found
-if ( ! keys %plugin_files && ! $opt->{packagemanager}) {
-	logger "WARNING: Running the updater again to obtain plugins.\n";
-	$opt->{pluginsupdate} = 1;
-}
-# Update this script if required
-update_script() if $opt->{update} || $opt->{pluginsupdate};
+update_script() if $opt->{update};
 
 
 
@@ -2191,14 +2187,7 @@ sub open_file_append {
 # Updates and overwrites this script - makes backup as <this file>.old
 # Update logic:
 # If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-# If any available plugins in $plugin_dir_system are not writable then abort
-# If all available plugins in $plugin_dir_system are writable then:
-#	if any available plugins in $plugin_dir_user are not writable then abort
-#	if all available plugins in $plugin_dir_user are writable then:
 #		update script
-#		update matching plugins in $plugin_dir_system
-#		update matching plugins in $plugin_dir_user
-#		warn of any plugins that are not in $plugin_dir_system or $plugin_dir_user and not available
 sub update_script {
 	my $version_url	= 'http://www.infradead.org/get_iplayer/VERSION-get_iplayer';
 	my $update_url	= 'http://www.infradead.org/get_iplayer/';
@@ -2222,22 +2211,12 @@ sub update_script {
 		exit 1;
 	} 
 
-	# Force update if no plugins dir
-	if ( ! -d "$profile_dir/plugins" ) {
-		mkpath "$profile_dir/plugins";
-		if ( ! -d "$profile_dir/plugins" ) {
-			logger "ERROR: Cannot create '$profile_dir/plugins' - no plugins will be downloaded.\n";
-			return 1;
-		}
-		$opt->{pluginsupdate} = 1;
-	}
-
 	logger "INFO: Current version is ".(sprintf '%.2f', $version)."\n";
 	logger "INFO: Checking for latest version from www.infradead.org\n";
 	if ( $latest_ver = request_url_retry($ua, $version_url, 3 ) ) {
 		chomp($latest_ver);
 		# Compare version numbers
-		if ( $latest_ver > $version || $opt->{force} || $opt->{pluginsupdate} ) {
+		if ( $latest_ver > $version || $opt->{force} ) {
 			# reformat version number
 			$latest_ver = sprintf('%.2f', $latest_ver);
 			logger "INFO: Newer version $latest_ver available\n" if $latest_ver > $version;
@@ -2256,36 +2235,9 @@ sub update_script {
 				my ( $type, $url) = split /\s/;
 				if ( $type eq 'bin' ) {
 					$script_url =  $url;
-				} elsif ( $type eq 'plugins' ) {
-					my $filename = $url;
-					$filename =~ s|^.+/(.+?)$|$1|g;
-					$plugin_url{$filename} = $url;
 				}
 			}
 
-			# Now decide whether to update based on write permissions
-			# %plugin_files:      contains hash of current full_path_to_plugin_file -> plugin_filename
-			# %plugin_url:      contains a hash of plugin_filename -> update_url for available plugins from the update site
-
-			# If any available plugins in $plugin_dir_system are not writable then abort
-			# if any available plugins in $plugin_dir_user are not writable then abort
-
-			# loop through each currently installed plugin
-			for my $path ( keys %plugin_files ) {
-				my $file = $plugin_files{$path};
-				# If this in the list of available plugins
-				if ( $plugin_url{$file} ) {
-					if ( ! -w $path ) {
-						logger "ERROR: Cannot write plugin $path - aborting update\n";
-						exit 1;
-					}
-				# warn of any plugins that are not in $plugin_dir_system or $plugin_dir_user and not available
-				} else {
-					logger "WARNING: Plugin $path is not managed - not updating this plugin\n";
-				}
-			}
-
-			# All available plugins in all plugin dirs are writable:
 			# update script if required
 			if ( $latest_ver > $version || $opt->{force} ) {
 				# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
@@ -2295,33 +2247,6 @@ sub update_script {
 				}
 				logger "INFO: Updating $script_file (from $version to $latest_ver)\n";
 				update_file( $ua, $script_url, $script_file ) if ! $opt->{test};
-			}
-			for my $path ( keys %plugin_files ) {
-				my $file = $plugin_files{$path};
-				# If there is an update available for this plugin file...
-				if ( $plugin_url{$file} ) {
-					logger "INFO: Updating $path\n";
-					# update matching plugin
-					update_file( $ua, $plugin_url{$file}, $path ) if ! $opt->{test};
-				}
-			}
-
-			# Install plugins which are currently not installed
-			for my $file ( keys %plugin_url ) {
-				# Not found in either system or user plugins dir
-				if ( ( ! -f "$plugin_dir_system/$file" ) && ( ! -f "$plugin_dir_user/$file" ) ) {
-					logger "INFO: Found new plugin $file\n";
-					# Is the system plugin dir writable?
-					if ( -d $plugin_dir_system && -w $plugin_dir_system ) {
-						logger "INFO: Installing $file in $plugin_dir_system\n";
-						update_file( $ua, $plugin_url{$file}, "$plugin_dir_system/$file" ) if ! $opt->{test};
-					} elsif ( -d $plugin_dir_user && -w $plugin_dir_user ) {
-						logger "INFO: Installing $file in $plugin_dir_user\n";
-						update_file( $ua, $plugin_url{$file}, "$plugin_dir_user/$file" ) if ! $opt->{test};
-					} else {
-						logger "INFO: Cannot install $file, plugin dirs are not writable\n";
-					}
-				}
 			}
 
 			# Show changelog since last version if this is an upgrade
@@ -9937,6 +9862,539 @@ sub modelist {
 # Default minimum expected download size for a programme type
 sub min_download_size {
 	return 102400;
+}
+
+
+################### Podcast class #################
+package Programme::podcast;
+
+use Env qw[@PATH];
+use Fcntl;
+use File::Copy;
+use File::Path;
+use File::stat;
+use HTML::Entities;
+use HTTP::Cookies;
+use HTTP::Headers;
+use IO::Seekable;
+use IO::Socket;
+use LWP::ConnCache;
+use LWP::UserAgent;
+use POSIX qw(mkfifo);
+use strict;
+use Time::Local;
+use URI;
+# Inherit from Programme class
+use base 'Programme';
+# Class vars
+# Global options
+my $opt;
+
+# Constructor
+# Usage: $prog{$pid} = Programme->new( 'pid' => $pid, 'name' => $name, <and so on> );
+sub new {
+	my $type = shift;
+	my %params = @_;
+	my $self = {};
+	for (keys %params) {
+		$self->{$_} = $params{$_};
+	}
+	# Ensure the subclass $opt var is pointing to the Superclass global optref
+	$opt = $Programme::optref;
+	bless $self, $type;
+}
+
+sub index_min { return 200001 }
+sub index_max { return 299999 }
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		outputpodcast	=> [ 1, "outputpodcast=s", 'Output', '--outputpodcast <dir>', "Output directory for podcast recordings (overrides --output)"],
+	};
+}
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	my $prog = shift;
+	my @format;
+	for ( qw/ available channel categories / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
+}
+
+# Returns the modes to try for this prog type
+sub modelist {
+	return 'podcast';
+}
+
+# Feed info:
+#	# Also see http://derivadow.com/2008/07/18/interesting-bbc-data-to-hack-with/
+#	# All podcasts menu (iphone)
+#	http://www.bbc.co.uk/radio/podcasts/ip/
+#	# All radio1 podcasts
+#	http://www.bbc.co.uk/radio/podcasts/ip/lists/radio1.sssi
+#	# All radio1 -> moyles podcasts
+#	http://www.bbc.co.uk/radio/podcasts/moyles/assets/iphone_keepnet.sssi
+#	# RSS Feed (indexed from?)
+#	http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml
+#	# aod by channel see http://docs.google.com/View?docid=d9sxx7p_38cfsmxfcq
+#	# http://www.bbc.co.uk/radio/aod/availability/<channel>.xml
+
+# Usage: Programme::podcast->get_links( $prog, 'podcast' );
+sub get_links {
+	shift; # ignore obj ref
+	my $prog = shift;
+	my $prog_type = shift;
+	my $podcast_index_feed_url = 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
+	my $xml;
+	my $res;
+	main::logger "INFO: Getting podcast Index Feeds\n";
+	# Setup User agent
+	my $ua = main::create_ua('get_iplayer');
+	
+	# Method
+	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
+	# http://downloads.bbc.co.uk/podcasts/$channel/$name/rss.xml =>
+
+	# Download index feed
+	my $xmlindex = main::request_url_retry($ua, $podcast_index_feed_url, 3, '.', "WARNING: Failed to get prodcast index from site\n");
+	$xmlindex =~ s/\n/ /g;
+
+	# Every RSS feed has an extry like below (all in a text block - not formatted like below)
+	#  <program xmlns="" language="en-gb" typicalDuration="P30M" active="true" public="true" bbcFlavour="Programme Highlights" region="all" wwpid="0">
+	#    <title>Best of Chris Moyles</title>
+	#    <shortTitle>moyles</shortTitle>
+	#    <description>Weekly highlights from the award-winning Chris Moyles breakfast show, as broadcast by Chris and team every morning from 6.30am to 10am.</description>
+	#    <network id="radio1" name="BBC Radio 1" />
+	#    <image use="itunes" url="http://www.bbc.co.uk/radio/podcasts/moyles/assets/_300x300.jpg" />
+	#    <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
+	#    <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
+	#    <link target="currentItem" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/moyles_20080926-0630a.mp3">
+	#      <title>Moyles: Guestfest. 26 Sep 08</title>
+	#      <description>Rihanna, Ross Kemp, Jack Osbourne, John
+	#      Barrowman, Cheggars, the legend that is Roy Walker and more,
+	#      all join the team in a celeb laden bundle of mirth and
+	#      merriment. It&#226;&#8364;&#8482;s all the best bits of the
+	#      week from The Chris Moyles Show on BBC Radio 1.</description>
+	#      <publishDate>2008-09-26T06:30:00+01:00</publishDate>
+	#    </link>
+	#    <bbcGenre id="entertainment" name="Entertainment" />
+	#    <systemRef systemId="podcast" key="42" />
+	#    <systemRef systemId="pid.brand" key="b006wkqb" />
+	#    <feed mimeType="audio/mpeg" content="audio" audioCodec="mp3" audioProfile="cbr" />
+	#  </program>
+
+	for ( split /<program/, $xmlindex ) {
+		# Extract channel name, rss feed data
+		my ($channel, $url, $web);
+		# <network id="radio1" name="BBC Radio 1" />
+		$channel = $1 if m{<network\s+id=".*?"\s+name="(.*?)"\s*\/>};
+		# <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
+		$url = $1 if m{<link\s+target="feed"\s+url="(.*?)"\s*\/>};
+		# <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
+		$web = $1 if m{<link\s+target="homepage"\s+url="(.*?)"\s*\/>};
+		# Skip if there is no feed data for channel
+		next if ! ($channel || $url);
+		my ( $name, $episode, $desc, $pid, $available, $duration, $thumbnail );
+		# Get RSS feeds for each podcast programme
+		main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
+		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
+		$xml = main::request_url_retry($ua, $url, 3, '.', '') if ! $opt->{verbose};
+		# skip if no data
+		next if ! $xml;
+		main::logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt->{verbose};
+		decode_entities($xml);
+	
+		# First entry is channel data
+		# <?xml version="1.0" encoding="utf-8"?>
+		#<rss xmlns:media="http://search.yahoo.com/mrss/"
+		#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+		#version="2.0">
+		#  <channel>
+		#    <title>Stuart Maconie's Freak Zone</title>
+		#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+		#    <description>Weekly highlights from Stuart Maconie's
+		#    ...podcast is only available in the UK.</description>
+		#    <itunes:summary>Weekly highlights from Stuart Maconie's
+		#    ...podcast is only available in the UK.</itunes:summary>
+		#    <itunes:author>BBC 6 Music</itunes:author>
+		#    <itunes:owner>
+		#      <itunes:name>BBC</itunes:name>
+		#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
+		#    </itunes:owner>
+		#    <language>en</language>
+		#    <ttl>720</ttl>
+		#    <image>
+		#      <url>
+		#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
+		#      <title>Stuart Maconie's Freak Zone</title>
+		#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+		#    </image>
+		#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+		#    <copyright>(C) BBC 2008</copyright>
+		#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
+		#    <itunes:category text="Music" />
+		#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
+		#    freakzone, macoonie</itunes:keywords>
+		#    <media:keywords>Stewart Maconie, Macconie, freekzone,
+		#    freakzone, macoonie</media:keywords>
+		#   <itunes:explicit>no</itunes:explicit>
+		#    <media:rating scheme="urn:simple">nonadult</media:rating>
+
+		# Parse XML
+		# get list of entries within <entry> </entry> tags
+		my @entries = split /<item>/, $xml;
+		# first element == <channel> header
+		my $header = shift @entries;
+		# Get podcast name
+		$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
+		# Parse the categories into hash
+		# <itunes:category text="Music" />
+		my @category;
+		for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
+			push @category, $1 if $line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
+		}
+		# Get thumbnail from header
+		# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+		$thumbnail = $1 if $header =~ m{<itunes:image href="\s*(.+?)\s*"};
+
+		# Followed by items:
+		#    <item>
+		#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
+		#      pop francais?</title>
+		#      <description>Stuart and Justin discuss the sub-genre of
+		#      French 'cold wave' in this week's module.</description>
+		#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
+		#      French 'cold wave' in this week's
+		#      module....</itunes:subtitle>
+		#      <itunes:summary>Stuart and Justin discuss the sub-genre of
+		#      French 'cold wave' in this week's module.</itunes:summary>
+		#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+		#      <itunes:duration>14:23</itunes:duration>
+		#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+		#      length="13891916" type="audio/mpeg" />
+		#      <guid isPermaLink="false">
+		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
+		#      <link>
+		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+		#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+		#      fileSize="13891916" type="audio/mpeg" medium="audio"
+		#      expression="full" duration="863" />
+		#      <itunes:author>BBC 6 Music</itunes:author>
+		#    </item>
+	
+		foreach my $entry (@entries) {
+			$entry =~ s/[\r\n]+/ /g;
+			# Use the link as a guid
+			# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+			$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
+			# Skip if this pid is a duplicate
+			if ( defined $prog->{$pid} ) {
+				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
+				next;
+			}
+			# parse episode
+			# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
+			$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
+			# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+			$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
+			# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
+			$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
+			# Duration
+			$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
+			# build data structure
+			$prog->{$pid} = Programme::podcast->new(
+				'pid'		=> $pid,
+				'name'		=> $name,
+				'versions'	=> 'default',
+				'episode'	=> $episode,
+				'desc'		=> $desc,
+				'available'	=> $available,
+				'duration'	=> $duration,
+				'thumbnail'	=> $thumbnail,
+				'channel'	=> $channel,
+				'categories'	=> join(',', @category),
+				'type'		=> $prog_type,
+				'web'		=> $web,
+			);
+		}
+	}
+	main::logger "\n";
+	return 0;
+}
+
+# Gets media streams data for this version pid
+# $media = http|undef
+sub get_stream_data {
+	my ( $prog, $verpid, $media ) = @_;
+	my $data = {};
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+	$data->{podcast}->{ext} = $prog->{pid};
+	$data->{podcast}->{ext} =~ s|^.*\.(\w+)$|$1|g;
+	$data->{podcast}->{streamer} = 'http';
+	$data->{podcast}->{streamurl} = $prog->{pid};
+	$data->{podcast}->{type} = 'Podcast stream';
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return $data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data->{$media}->{exists} = 0 if not defined $data->{$media};
+		return $data->{$media};
+	}
+}
+
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
+	# Determine the correct filename and extension for this download
+	my $filename_orig = $prog->{pid};
+	$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	# Determine the correct filenames for this download
+	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
+	# Create dir for prog if not streaming-only
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		$prog->create_dir();
+	}
+	# Skip from here if we are only testing downloads
+	return 1 if $opt->{test};
+	# Instantiate new streamer based on streamdata
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+	my $stream = $class->new;
+	return $stream->get( $ua, $prog->{pid}, $prog );
+}
+
+
+################### Localfiles class #################
+package Programme::localfiles;
+
+use Env qw[@PATH];
+#use MP3::Info; # better eval this module
+use Fcntl;
+use HTML::Entities;
+use strict;
+use URI;
+use Cwd 'abs_path';
+use File::Basename;
+# Inherit from Programme class
+use base 'Programme';
+# Class vars
+# Global options
+my $opt;
+
+# Constructor
+# Usage: $prog{$pid} = Programme->new( 'pid' => $pid, 'name' => $name, <and so on> );
+sub new {
+	my $type = shift;
+	my %params = @_;
+	my $self = {};
+	for (keys %params) {
+		$self->{$_} = $params{$_};
+	}
+	# Ensure the subclass $opt var is pointing to the Superclass global optref
+	$opt = $Programme::optref;
+	bless $self, $type;
+}
+
+sub index_min { return 900001 }
+sub index_max { return 999999 }
+
+# Class cmdline Options
+sub opt_format {
+	return {
+		localfilesdirs		=> [ 0, "localfilesdirs=s", 'Config', '--localfilesdirs <dir>[,dir,]', "Directories/Folders to scan for new files"],
+		outputlocalfiles	=> [ 1, "outputlocalfiles=s", 'Output', '--outputlocalfiles <dir>', "Output directory for localfiles recordings (overrides --output)"],
+	};
+}
+
+# Method to return optional list_entry format
+sub optional_list_entry_format {
+	my $prog = shift;
+	my @format;
+	for ( qw/ channel categories / ) {
+		push @format, $prog->{$_} if defined $prog->{$_};
+	}
+	return ', '.join ', ', @format;
+}
+
+# cache expiry in seconds
+sub expiry {
+	return ( 999999999999 ); # forever
+}
+
+# Returns the modes to try for this prog type
+sub modelist {
+	return 'localfiles';
+}
+
+# Recursive function to recursively find files in a directory
+sub find_matching_files {
+	my $dir = shift;
+	my $file_regex = shift || '.+';
+	$dir =~ s|\/+$||g;
+	my @filelist;
+	my ( $node, $lvl_counter, $list_length );
+	if ( opendir( DIR, $dir ) ) {
+		my @lines = grep !/^(\.\.|\.)\/?$/, readdir( DIR );
+		closedir( DIR );
+		for ( @lines ) {
+			$node = $dir.'/'.$_;
+			if( -d $node && ! -l $node ) {
+				push @filelist, find_matching_files( $node, $file_regex );
+				#main::logger "DEBUG: dir = $node\n";
+			} elsif ( $node =~ m{$file_regex}i ) {
+				push @filelist, $node;
+				#main::logger "DEBUG: file = $node\n";
+			}
+		}
+	}
+	return @filelist;
+}
+
+# Usage: Programme::localfiles->get_links( $progref, 'localfiles' );
+sub get_links {
+	shift; # ignore obj ref
+	my $progref = shift;
+	my $prog_type = shift;
+	# Check if we have MP3::Info
+	eval "use MP3::Info";
+	if ($@) {
+		main::logger "WARNING: Please install the MP3::Info perl module to use '$prog_type' plugin\n";
+		#main::logger "WARNING: Please download and run latest installer or install the MP3::Info perl module to use '$prog_type' plugin\n";
+		return 0;
+	};
+	# ensure options initialised (for localfilesdirs)
+	$prog_types{$prog_type}->new();
+	# error if no dirs specified
+	if ( ! $opt->{localfilesdirs} ) {
+		main::logger "ERROR: Please set --localfilesdirs to point to your collection if using the '$prog_type' plugin\n";
+		return 1;
+	}
+	main::logger "INFO: Getting Local Files Index from $opt->{localfilesdirs}\n";
+	# Get mp3 file list
+	my @files;
+	my $ext = 'mp3';
+	for my $scandir ( split /,/, $opt->{localfilesdirs} ) {
+		main::logger "INFO: Scanning $scandir\n";
+		my @scan = find_matching_files( $scandir, '.+\.'.$ext.'$' );
+		main::logger "INFO: Got ".($#scan+1)." $ext files\n";
+		push @files, @scan;
+	}
+
+	for my $file ( @files ) {
+		chomp( $file );
+		my $pid = abs_path( $file );
+		# Read MP3 tags into a hash for file
+		my $info = get_mp3info( $file );
+		my $tag = get_mp3tag( $file, undef, undef, 1 );
+		# dump tags
+		#main::logger "TAG: $_=$tag->{$_}\n" for keys %{ $tag };
+		# Clean data - removes unicode :-(
+		#StringUtils::clean_utf8_and_whitespace( $tag->{$_} ) for keys %{ $tag };
+		# TAGS: YEAR,RIPPING TOOL,ARTIST,COMMENT,TITLE,ALBUM,RELEASE TYPE,GENRE,RIP DATE,TRACKNUM,TAGVERSION,SOURCE
+		# INFO: SIZE,OFFSET,MS,STEREO,SECS,PADDING,LAME,MM,COPYRIGHT,SS,LAYER,MODE,FREQUENCY,VBR,TIME,FRAMES,BITRATE,VBR_SCALE,VERSION,FRAME_LENGTH
+		# Skip if there is no track name
+		if ( ! ( $tag->{'TITLE'} && $tag->{'ALBUM'} && $tag->{'ARTIST'} ) ) {
+			## Maybe guess the metadata from the filename here?
+			#main::logger "WARNING: $pid has no title - skipping\n" if $opt->{verbose};
+			#next;
+			main::logger "WARNING: $pid has no title - guessing\n" if $opt->{verbose};
+			if ( basename( $file ) =~ m{^(\d*?)[\w\-]*?(.+?)\.(\w+)$} ) {
+				#$tag->{'TITLE'} = "$tag->{'TRACKNUM'}_$tag->{'ALBUM'}" if $tag->{'TRACKNUM'} && $tag->{'ALBUM'} && ! $tag->{'TITLE'};
+				$tag->{'TITLE'} = $tag->{'TITLE'} || $2;
+				$tag->{'ALBUM'} = $tag->{'ALBUM'} || $2;
+				$tag->{'ARTIST'} = $tag->{'ARTIST'} || $2;
+			}
+		}
+		main::logger '.';
+		my @category;
+		push @category, $tag->{'GENRE'};
+		my @description;
+		for ( "($info->{'BITRATE'}kbps/$info->{'FREQUENCY'}kHz)", $tag->{'COMMENT'}, $tag->{'RIPPING TOOL'} ) {
+			push @description, $_ if $_;
+		}
+		# Get thumbnail from header
+		my $thumbnail;
+		my $dir = dirname( $file );
+		# better to use opendir and regex search filename
+		for ( qw/ front.jpg cover.jpg AlbumArtSmall.jpg / ) {
+			$thumbnail = "file://${dir}/${_}" if -f "${dir}/${_}";
+		}
+		# Skip if this pid is a duplicate
+		if ( defined $progref->{$pid} ) {
+			main::logger "WARNING: '$pid, $progref->{$pid}->{name} - $progref->{$pid}->{episode}, $progref->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
+			next;
+		}
+		# build data structure
+		$progref->{$pid} = Programme::localfiles->new(
+			'pid'		=> $pid,
+			'name'		=> $tag->{'ALBUM'},
+			'versions'	=> 'default',
+			'episode'	=> $tag->{'TITLE'},
+			'desc'		=> join(', ', @description),
+			'available'	=> $tag->{'YEAR'} || $tag->{'RIP DATE'},
+			'duration'	=> $info->{'SECS'},
+			'thumbnail'	=> $thumbnail,
+			'channel'	=> $tag->{'ARTIST'},
+			'categories'	=> join(',', @category),
+			'type'		=> $prog_type,
+			'web'		=> "file://${file}",
+		);
+		# Sanitize element values
+		for ( values %{ $progref->{$pid} } ) {
+			s/[\n\r]/ /g;
+			s/(^[\s_,]+|[\s_,]+$)//g;
+		}
+	}
+	main::logger "\n";
+	return 0;
+}
+
+# Gets media streams data for this version pid
+# $media = file|undef
+sub get_stream_data {
+	my ( $prog, $verpid, $media ) = @_;
+	my $data = {};
+	$opt->{quiet} = 0 if $opt->{streaminfo};
+	$data->{localfiles}->{ext} = $prog->{web};
+	$data->{localfiles}->{ext} =~ s|^.*\.(\w+)$|$1|g;
+	$data->{localfiles}->{streamer} = 'filestreamonly';
+	$data->{localfiles}->{streamurl} = $prog->{web};
+	$data->{localfiles}->{type} = 'Local File stream';
+	# Return a hash with media => url if '' is specified - otherwise just the specified url
+	if ( ! $media ) {
+		return $data;
+	} else {
+		# Make sure this hash exists before we pass it back...
+		$data->{$media}->{exists} = 0 if not defined $data->{$media};
+		return $data->{$media};
+	}
+}
+
+sub download {
+	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
+	# if subsonly required then skip
+	return 'skip' if $opt->{subsonly};
+	# Determine the correct filename and extension for this download
+	my $filename_orig = $prog->{pid};
+	$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	# Determine the correct filenames for this download
+	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
+	# Create dir for prog if not streaming-only
+	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
+		$prog->create_dir();
+	}
+	# Skip from here if we are only testing downloads
+	return 1 if $opt->{test};
+	# Instantiate new streamer based on streamdata
+	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+	my $stream = $class->new;
+	return $stream->get( $ua, $prog->{pid}, $prog );
 }
 
 
