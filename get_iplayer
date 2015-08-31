@@ -8365,195 +8365,29 @@ sub get_links_aod {
 }
 
 
-sub get_links_ion {
-	my $self = shift;
-	my $prog = shift;
-	my $prog_type = shift;
-	my $atoz = shift;
-	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
-	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels() ) };
-	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	my $ua = main::create_ua( 'desktop', 1 );
-	my $feed = 'listview';
-	my @biguns = ( 'bbc_radio_four', 'bbc_radio_three', 'bbc_world_service' );
-	my @dobs;
-	my $now = time();
-	for (my $i = 0; $i < 8; $i++) {
-		my $then = $now - $i * 86400;
-		my ($day, $mon, $year) = (gmtime($then))[3,4,5];
-		push @dobs, sprintf("/date/%04d-%02d-%02d", $year+1900, ++$mon, $day);
-	}
-	my @filters;
-	if ( $atoz ) {
-		$feed = 'atoz';
-		@filters = ( '/letters/a-z', '/letters/0-9' );
-		if ( $prog_type eq 'tv' ) {
-			push @filters, ( '/letters/a-z/category/signed', '/letters/0-9/category/signed' );
-		}
-	} else {
-			@filters = ('');
-			if ( $prog_type eq 'tv' ) {
-				push @filters, '/category/signed';
-				push @filters, '/category/dubbedaudiodescribed';
-			}
-	}
-	my @channel_list = sort keys %channels;
-	for my $channel_id ( @channel_list ) {
-		my @channel_filters;
-		if ( grep(/^$channel_id$/, @biguns) ) {
-			for my $dob ( @dobs ) {
-				for my $filter ( @filters ) {
-					push @channel_filters, "$filter$dob";
-				}
-			}
-		} else {
-			@channel_filters = @filters;
-		}
-		for my $filter ( @channel_filters ) {
-			my $url = "http://www.bbc.co.uk/iplayer/ion/$feed/format/xml/block_type/episode/service_type/${prog_type}/masterbrand/$channel_id$filter";
-			main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
-			my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id} - $filter\n");
-			if ( ! $xml ) {
-				return 1 if $opt->{refreshabortonerror};
-				next;
-			}
-			decode_entities($xml);
-			# Parse XML
-			# get list of entries within <entry> </entry> tags
-			my @entries = split /<episode>/, $xml;
-			# Discard first element == header
-			shift @entries;
-			main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id} - $filter\n" if $opt->{verbose};
-			foreach my $entry (@entries) {
-				my ( $brand, $series, $subseries, $title, $name, $episode, $episodetitle, $nametitle, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
-				$pid = $1 if $entry =~ m{<passionsite_title.*?<id>(.+?)</id>}s;
-				$duration = $1 if $entry =~ m{<duration>(.*?)</duration>};
-				$desc = $1 if $entry =~ m{<short_synopsis>(.*?)</short_synopsis>};
-				$brand = $1 if $entry =~ m{<brand_title>(.*?)</brand_title>};
-				$series = $1 if $entry =~ m{<series_title>(.*?)</series_title>};
-				$subseries = $1 if $entry =~ m{<subseries_title>(.*?)</subseries_title>};
-				$episode = $1 if $entry =~ m{<tag_schemes.*?<title>(.*?)</title>}s;
-				if ( $subseries ) {
-					$episode = "$subseries $episode";
-				}
-				$title = $1 if $entry =~ m{<complete_title>(.*?)</complete_title>};
-				if ( $brand ) {
-					if ( $series && $series ne $brand ) {
-						$name = "$brand: $series";
-					} else {
-						$name = $brand;
-					}
-				} else {
-						$name = $series;
-				}
-				unless ( $name ) {
-					$name = $brand = $episode;
-					$episode = "-";
-				}
-				# Extract the seriesnum
-				my $regex = 'Series\s+'.main::regex_numbers();
-				$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
-				# Extract the episode num
-				my $regex_1 = 'Episode\s+'.main::regex_numbers();
-				my $regex_2 = '^'.main::regex_numbers().'\.\s+';
-				if ( "$name $episode" =~ m{$regex_1}i ) { 
-					$episodenum = main::convert_words_to_number( $1 );
-				} elsif ( $episode =~ m{$regex_2}i ) {
-					$episodenum = main::convert_words_to_number( $1 );
-				}
-				# insert episode number in $episode
-				#$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
-				# Extract channel
-				$channel = $1 if $entry =~ m{<masterbrand_title>(.*?)</masterbrand_title>};
-				main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
-				# categories
-				my @category;
-				my @lines = split /<category>/, $entry;
-				shift @lines;
-				for my $line ( @lines ) {
-					push @category, $1 if $line =~ m{<title>(.*?)</title>};
-				}
-				# strip commas - they confuse sorting and spliting later
-				s/,//g for @category;
-				# Merge and Skip if this pid is a duplicate
-				if ( defined $prog->{$pid} ) {
-					main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-					# Since we use the 'Signed' (or 'Audio Described') channel to get sign zone/audio described data, merge the categories from this entry to the existing entry
-					if ( $prog->{$pid}->{categories} ne join(',', sort @category) ) {
-						my %cats;
-						$cats{$_} = 1 for ( @category, split /,/, $prog->{$pid}->{categories} );
-						main::logger "INFO: Merged categories for $pid from $prog->{$pid}->{categories} to ".join(',', sort keys %cats)."\n" if $opt->{verbose};
-						$prog->{$pid}->{categories} = join(',', sort keys %cats);
-					}
-					# If this is a duplicate pid and the channel is now Signed then both versions are available
-					$version = 'signed' if grep /Sign Zone/, @category;
-					$version = 'audiodescribed' if grep /Audio Described/, @category;
-					# Add version to versions for existing prog
-					$prog->{$pid}->{versions} = join ',', main::make_array_unique_ordered( (split /,/, $prog->{$pid}->{versions}), $version );
-					next;
-				}
-				# Check for signed-only or audiodescribed-only version from category
-				if ( grep /Sign Zone/, @category ) {
-					$version = 'signed';
-				} elsif ( grep /Audio Described/, @category ) {
-					$version = 'audiodescribed';
-				} else {
-					$version = 'default';
-				}
-				$guidance = $1 if $entry =~ m{<has_guidance>(.*?)</has_guidance>};
-				if ( $guidance ) {
-					$guidance = "Yes";
-				} else {
-					undef $guidance;
-				}
-				# Default to 150px width thumbnail;
-				my $thumbsize = $opt->{thumbsizecache} || 150;
-				my $image_template_url = $1 if $entry =~ m{<image_template_url>(.*?)</image_template_url>};
-				my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-				$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
-				my $thumbnail = $image_template_url;
-				$thumbnail =~ s/\$recipe/$recipe/;
-				# build data structure
-				$prog->{$pid} = main::progclass($prog_type)->new(
-					'pid'		=> $pid,
-					'name'		=> $name,
-					'versions'	=> $version,
-					'episode'	=> $episode,
-					'seriesnum'	=> $seriesnum,
-					'episodenum'	=> $episodenum,
-					'desc'		=> $desc,
-					'guidance'	=> $guidance,
-					'available'	=> 'Unknown',
-					'duration'	=> $duration || 'Unknown',
-					'thumbnail'	=> $thumbnail,
-					'channel'	=> $channel,
-					'categories'	=> join(',', sort @category),
-					'type'		=> $prog_type,
-					'web'		=> "${bbc_prog_page_prefix}/${pid}",
-				);
-			}
-		}
-	}
-}
-
-
 # Usage: Programme::tv->get_links( \%prog, 'tv' );
 # Uses: %{ channels() }, \%prog
 sub get_links {
 	my $self = shift; # ignore obj ref
 	my $prog = shift;
 	my $prog_type = shift;
+	my $now = time();
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	my $rc = 0;
+	my $feeds = $opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"};
 	if ( $prog_type eq 'radio' ) {
-		$rc = $self->get_links_aod($prog, $prog_type);
+		if ( $feeds eq "aod" ) {
+			$rc = $self->get_links_aod($prog, $prog_type, $now);
+		} else {
+			$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
+		}
 	}
 	elsif ( $prog_type eq 'tv' ) {
-		$rc = $self->get_links_schedule($prog, $prog_type, 0);
+		$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
 	}
 	return 1 if $rc && $opt->{refreshabortonerror};
 	if ( $opt->{refreshfuture} ) {
-		$rc = $self->get_links_schedule($prog, $prog_type, 1);
+		$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
 		return 1 if $rc && $opt->{refreshabortonerror};
 	}
 	main::logger "\n";
