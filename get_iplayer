@@ -219,6 +219,7 @@ my $opt_format = {
 	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha!", 'Output', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
 
 	# Config
+	cachereset	=> [ 1, "resetcache|reset-cache|cachereset|cache-reset!", 'Config', '--cache-reset', "Reset cache to retain only latest update and discard previous contents."],
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	refresh		=> [ 2, "refresh|flush|f!", 'Config', '--refresh, --flush, -f', "Refresh cache"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
@@ -233,16 +234,19 @@ my $opt_format = {
 	presetlist	=> [ 1, "listpresets|list-presets|presetlist|preset-list!", 'Config', '--preset-list', "Show all valid presets"],
 	profiledir	=> [ 1, "profiledir|profile-dir=s", 'Config', '--profile-dir <dir>', "Override the user profile directory/folder"],
 	refreshabortonerror	=> [ 1, "refreshabortonerror|refresh-abortonerror!", 'Config', '--refresh-abortonerror', "Abort cache refresh for programme type if data for any channel fails to download. Use --refresh-exclude to temporarily skip failing channels."],
-	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values)"],
-	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values)"],
+	refreshinclude	=> [ 1, "refreshinclude|refresh-include=s", 'Config', '--refresh-include <string>', "Include matched channel(s) when refreshing cache (regex or comma separated values). Overrides --refresh-exclude-groups[-{tv,radio}] status for specified channel(s)"],
+	refreshexclude	=> [ 1, "refreshexclude|refresh-exclude|ignorechannels=s", 'Config', '--refresh-exclude <string>', "Exclude matched channel(s) when refreshing cache (regex or comma separated values). Overrides --refresh-include-groups[-{tv,radio}] status for specified channel(s)"],
+	refreshincludegroups	=> [ 1, "refreshincludegroups|refresh-include-groups=s", 'Config', '--refresh-include-groups', "Include channel groups when refreshing radio or tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
+	refreshincludegroupsradio	=> [ 1, "refreshincludegroupsradio|refresh-include-groups-radio=s", 'Config', '--refresh-include-groups-radio', "Include channel groups when refreshing radio cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
+	refreshincludegroupstv	=> [ 1, "refreshincludegroupstv|refresh-include-groups-tv=s", 'Config', '--refresh-include-groups-tv', "Include channel groups when refreshing tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroups	=> [ 1, "refreshexcludegroups|refresh-exclude-groups=s", 'Config', '--refresh-exclude-groups', "Exclude channel groups when refreshing radio or tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupsradio	=> [ 1, "refreshexcludegroupsradio|refresh-exclude-groups-radio=s", 'Config', '--refresh-exclude-groups-radio', "Exclude channel groups when refreshing radio cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupstv	=> [ 1, "refreshexcludegroupstv|refresh-exclude-groups-tv=s", 'Config', '--refresh-exclude-groups-tv', "Exclude channel groups when refreshing tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
-	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Config', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'ion','ion2','schedule'"],
-	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Config', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'ion','ion2','schedule'"],
-	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Config', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'ion','ion2','schedule'"],
-	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache (between 7-14 days)"],
-	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <integer>', "Number of days of programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
+	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Config', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'schedule', 'aod' (radio only)"],
+	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Config', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'schedule', 'aod'"],
+	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Config', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'schedule'"],
+	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache"],
+	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <integer>', "Minimum number of days of programmes to cache (max: 30)"],
 	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <integer>', "Number of days of radio programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	refreshlimittv	=> [ 1, "refreshlimittv|refresh-limit-tv=n", 'Config', '--refresh-limit-tv <integer>', "Number of days of TV programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
@@ -968,6 +972,7 @@ sub find_pid_matches {
 	my $hist = shift;
 	my @search_args = @_;
 	my ( $type, $prog, $index_prog ) = init_search( @search_args );
+	my $now = time();
 
 	# Get prog by arbitrary '<type>:<pid>' or just '<pid>' (using the specified types)(then exit)
 	my @try_types;
@@ -995,7 +1000,7 @@ sub find_pid_matches {
 	my $load_from_file_only;
 	$load_from_file_only = 1 if $#try_types == 0;
 	for my $t ( @try_types ) {
-		get_links( $prog, $index_prog, $t, $load_from_file_only );
+		get_links( $prog, $index_prog, $t, $load_from_file_only, $now );
 	}
 
 	# Simply record pid if we find it in the caches
@@ -1107,6 +1112,7 @@ sub find_matches {
 	my $hist = shift;
 	my @search_args = @_;
 	my ( $type, $prog, $index_prog ) = init_search( @search_args );
+	my $now = time();
 
 	# We don't actually need to get the links first for the specifiied type(s) if we have only index number specified (and not --list)
 	my %got_cache;
@@ -1125,7 +1131,7 @@ sub find_matches {
 	if ( $need_get_links || $opt->{list} ) {
 		# Get stream links from web site or from cache (also populates all hashes) specified in --type option
 		for my $t ( keys %{ $type } ) {
-			get_links( $prog, $index_prog, $t );
+			get_links( $prog, $index_prog, $t, 0, $now );
 			$got_cache{ $t } = 1;
 		}
 	}
@@ -1179,7 +1185,7 @@ sub find_matches {
 				# Add new prog types to the type list
 				$type->{$prog_type} = 1;
 				# Get $prog_type stream links
-				get_links( $prog, $index_prog, $prog_type );
+				get_links( $prog, $index_prog, $prog_type, 0, $now );
 				$got_cache{$prog_type} = 1;
 			}
 		}
@@ -1215,7 +1221,7 @@ sub find_matches {
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
 			my $available = Programme::get_time_string( $this->{available} );
-			if ( $available && $available > $now ) {
+			if ( $available && ( $available > $now ) ) {
 				logger "DEBUG: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{debug};
 			} else {
 				push @pruned, $this;
@@ -1291,6 +1297,7 @@ sub list_progs {
 			index		=> 1,
 			duration	=> 1,
 			timeadded	=> 1,
+			expires => 1,
 		);
 		my $sort_prog;
 		for my $this ( @matches ) {
@@ -1701,10 +1708,10 @@ sub get_links {
 	my $index_prog = shift;
 	my $prog_type = shift;
 	my $only_load_from_cache = shift;
+	my $now = shift || time();
 	# Define cache file format (this is overridden by the header line of the cache file)
-	my @cache_format = qw/index type name pid available episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
+	my @cache_format = qw/index type name pid available expires episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
 
-	my $now = time();
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
 
 	# Read cache into $pid_old and $index_prog_old hashes if cache exists
@@ -1768,19 +1775,36 @@ sub get_links {
 	) {
 
 		# Get links for specific type of programme class into %prog 
-		if ( progclass( $prog_type )->get_links( $prog, $prog_type ) != 0 ) {
+		if ( progclass( $prog_type )->get_links( $prog, $prog_type, $now ) != 0 ) {
 			# failed - leave cache unchanged
 			main::logger "ERROR: Errors encountered when retrieving $prog_type programmes - skipping\n";
 			return 0;
 		}
 
+		# Back up cache file before write
+		my $oldcachefile = "${cachefile}.old";
+		if ( -e $cachefile && ! copy($cachefile, $oldcachefile) ) {
+			die "ERROR: Cannot copy $cachefile to $oldcachefile: $!\n";
+		}
+		if ( ! $opt->{cachereset} && $prog_type =~ /^(radio|tv)$/ ) {
+			my $min_timeadded = $now - (30 * 86400);
+			# Retain old cache entries that are not expired or superseded
+			for my $pid ( keys %{$prog_old} ) {
+				if ( ! $prog_old->{$pid}->{expires} || $prog_old->{$pid}->{expires} < $now || $prog_old->{$pid}->{timeadded} < $min_timeadded ) {
+					main::logger "DEBUG: Expired: $prog_type - $pid - $prog_old->{$pid}->{name} - $prog_old->{$pid}->{episode} expires=$prog_old->{$pid}->{expires} timeadded=$prog_old->{$pid}->{timeadded} now=$now\n" if $opt->{debug};
+				} 
+				elsif ( ! $prog->{$pid} && $prog_old->{$pid} ) {
+					$prog->{$pid} = main::progclass($prog_type)->new(%{$prog_old->{$pid}});
+				}
+			}
+		}
+		
 		# Sort index for this prog type from cache file
 		# sorts and references %prog objects into %index_prog
 		sort_index( $prog, $index_prog, $prog_type );
 
 		# Open cache file for writing
 		unlink $cachefile;
-		my $now = time();
 		if ( open(CACHE, "> $cachefile") ) {
 			print CACHE "#".(join '|', @cache_format)."\n";
 			# loop through all progs just obtained through get_links above (in numerical index order)
@@ -4084,7 +4108,7 @@ use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(mkfifo);
+use POSIX qw(mkfifo strftime);
 use strict;
 use Time::Local;
 use URI;
@@ -4109,30 +4133,47 @@ sub opt_format {
 # Filter channel names matched with options --refreshexclude/--refreshinclude
 sub channels_filtered {
 	my $prog = shift;
-	my $channelsref = shift;
+	my $channel_groups = shift;
 	# assume class method call
 	(my $prog_type = $prog) =~ s/Programme:://;
-	my $exclude = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
-	if ( $prog_type eq "tv" ) {
-		$exclude = "local" unless $exclude;
-	}
+	my $exclude_groups = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
+	my $include_groups = $opt->{'refreshincludegroups'.$prog_type} || $opt->{'refreshincludegroups'};
 	my %channels;
-	for my $x ( qw(national regional local) ) {
-		@channels{ keys %{$channelsref->{$x}} } = values %{$channelsref->{$x}} unless $exclude =~ /\b$x\b/;
-	}
+	my %group_channels;
 	# include/exclude matching channels as required
 	my $include_regex = '.*';
 	my $exclude_regex = '^ROGUEVALUE$';
 	# Create a regex from any comma separated values
 	$exclude_regex = '('.(join '|', ( split /,/, $opt->{refreshexclude} ) ).')' if $opt->{refreshexclude};
 	$include_regex = '('.(join '|', ( split /,/, $opt->{refreshinclude} ) ).')' if $opt->{refreshinclude};
-	for my $channel ( keys %channels ) {
-		if ( $channels{$channel} !~ /$exclude_regex/i && $channels{$channel} =~ /$include_regex/i ) {
-			main::logger "INFO: Will refresh channel $channels{$channel}\n" if $opt->{verbose};
-		} else {
-			delete $channels{$channel};
+	for my $group ( keys %{$channel_groups} ) {
+		my %channel_group = %{$channel_groups->{$group}};
+		@channels{ keys %channel_group } = values %channel_group;
+		if ( ( $exclude_groups && $exclude_groups !~ /\b$group\b/ ) || ( $include_groups && $include_groups =~ /\b$group\b/ ) ) {
+			@group_channels{ keys %channel_group } = values %channel_group;
 		}
 	}
+	my $use_group_channels = scalar keys %group_channels;
+	for my $channel ( keys %channels ) {
+		if ( $use_group_channels ) {
+			if ( $exclude_regex ne '^ROGUEVALUE$' && $group_channels{$channel} =~ /$exclude_regex/i ) {
+				delete $group_channels{$channel};
+			}
+			if ( $include_regex ne '.*' && $channels{$channel} =~ /$include_regex/i ) {
+				$group_channels{$channel} = $channels{$channel} unless $group_channels{$channel};
+			}
+		}
+		unless ( $channels{$channel} !~ /$exclude_regex/i && $channels{$channel} =~ /$include_regex/i ) {
+			delete $channels{$channel};
+		}
+		if ( $use_group_channels ) {
+ 			delete $channels{$channel} if ( $channels{$channel} && ! $group_channels{$channel} );
+ 			$channels{$channel} = $group_channels{$channel} if ( ! $channels{$channel} && $group_channels{$channel} );
+		}
+	}
+	if ( $opt->{verbose} ) {
+ 		main::logger "INFO: Will refresh channel $_\n" for sort values %channels;
+ 	}
 	return \%channels;
 }
 
@@ -4277,13 +4318,22 @@ sub display_metadata {
 	shift;
 	my @keys = @_;
 	@keys = keys %data if $#_ < 0;
+	my $now = time();
 	main::logger "\n";
 	for (@keys) {
 		# Format timeadded field nicely
 		if ( /^timeadded$/ ) {
 			if ( $data{$_} ) {
-				my @t = gmtime( time() - $data{$_} );
-				main::logger sprintf "%-15s %s\n", $_.':', "$t[7] days $t[2] hours ago ($data{$_})";
+				my @t = gmtime( $now - $data{$_} );
+				my $ts = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($data{$_}));
+				main::logger sprintf "%-15s %s\n", $_.':', "$t[7] days $t[2] hours ago ($ts)";
+			}
+		} elsif ( /^expires$/ ) {
+			if ( $data{$_} && $data{$_} > $now ) {
+				my @t = gmtime( $data{$_} - $now );
+				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
+				my $ts = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($data{$_}));
+				main::logger sprintf "%-15s %s\n", $_.':', "in ${years}$t[7] days $t[2] hours ($ts)";
 			}
 		# Streams data
 		} elsif ( /^streams$/ ) {
@@ -4847,6 +4897,9 @@ sub substitute {
 		# html entity encode
 		} elsif ($sanitize_mode == 3) {
 			$replace = encode_entities( $value, '&<>"\'' );
+			if ( $key =~ /^(expires|timeadded)$/ ) {
+				$replace = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($replace));
+			}
 		# escape these chars: ! ` \ "
 		} elsif ($sanitize_mode == 4) {
 			$replace = $value;
@@ -5110,8 +5163,17 @@ sub list_entry {
 	} elsif ( $opt->{series} && $episode_width && $episode_count && ! $opt->{tree} ) {
 		main::logger sprintf( "%s%-${episode_width}s %5s %s\n", $prefix, $prog->{name}, "($episode_count)", $prog->{categories} );
 	} elsif ( $opt->{long} ) {
-		my @time = gmtime( time() - $prog->{timeadded} );
-		main::logger "${prefix}$prog->{index}:\t${prog_type}${name}$prog->{episode}".$prog->optional_list_entry_format.", $time[7] days $time[2] hours ago - $prog->{desc}\n";
+		my $now = time();
+		my @time = gmtime( $now - $prog->{timeadded} );
+		my $expires;
+		if ( $prog->{type} =~ /^(tv|radio)$/ ) {
+			if ( $prog->{expires} && $prog->{expires} > $now ) {
+				my @t = gmtime( $prog->{expires} - $now );
+				my $years = ($t[5]-70)." years " if ($t[5]-70) > 0;
+				$expires = ", expires in ${years}$t[7] days $t[2] hours";
+			}
+		}
+		main::logger "${prefix}$prog->{index}:\t${prog_type}${name}$prog->{episode}".$prog->optional_list_entry_format.", added $time[7] days $time[2] hours ago${expires} - $prog->{desc}\n";
 	} elsif ( $opt->{terse} ) {
 		main::logger "${prefix}$prog->{index}:\t${prog_type}${name}$prog->{episode}\n";
 	} else {
@@ -5811,7 +5873,7 @@ sub get_metadata {
 	my $prog_data_url = 'http://www.bbc.co.uk/programmes/'; # $pid
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 	
-	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expiry, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart );
+	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart );
 
 	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/programmes/{pid}.xml
@@ -6014,9 +6076,8 @@ sub get_metadata {
 		my @sizes;
 		for my $mode ( sort keys %{ $prog->{streams}->{$version} } ) {
 			# get expiry from stream data
-			if ( ! $expiry && $prog->{streams}->{$version}->{$mode}->{expires} ) {
-				$expiry = $prog->{streams}->{$version}->{$mode}->{expires};
-				$prog->{expiryrel} = Programme::get_time_string( $expiry, time() );
+			if ( ! $expires && $prog->{streams}->{$version}->{$mode}->{expires} ) {
+				$expires = Programme::get_time_string( $prog->{streams}->{$version}->{$mode}->{expires} );
 			}
 			my $size;
 			if ( $prog->{streams}->{$version}->{$mode}->{size} ) {
@@ -6173,7 +6234,8 @@ sub get_metadata {
 	$prog->{series} 	= $series;
 	$prog->{type}		= $prog_type || $prog->{type};
 	$prog->{channel}	= $channel || $prog->{channel};
-	$prog->{expiry}		= $expiry;
+	$prog->{expires}		= $expires || $prog->{expires};
+	$prog->{expiresrel} = Programme::get_time_string( $prog->{expires}, time() );
 	$prog->{versions}	= $versions;
 	$prog->{guidance}	= $guidance || $prog->{guidance};
 	$prog->{categories}	= $categories || $prog->{categories};
@@ -8060,7 +8122,7 @@ use base 'Programme::bbciplayer';
 
 # Class vars
 sub index_min { return 1 }
-sub index_max { return 9999 }
+sub index_max { return 19999 }
 sub channels {
 	return {
 		'national' => {
@@ -8260,6 +8322,10 @@ sub get_links_aod {
 	my $self = shift;
 	my $prog = shift;
 	my $prog_type = shift;
+	my $now = shift || time();
+	my $force_channel_id = shift;
+	my $two_days = 2 * 86400;
+	my $thirty_days = 30 * 86400;
 	my %channel_map = (
 		'1xtra'			=> 'bbc_1xtra',
 		'radio1'		=> 'bbc_radio_one',
@@ -8286,6 +8352,9 @@ sub get_links_aod {
 	my $ua = main::create_ua( 'desktop', 1 );
 	# Download index feed
 	my @channel_list = keys %channels;
+	if ( $force_channel_id ) {
+		@channel_list = ($force_channel_id)
+	}
  	for my $channel_id ( @channel_list ) {
 		my $url = "http://www.bbc.co.uk/radio/aod/availability/${channel_id}.xml";
 		main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
@@ -8301,21 +8370,33 @@ sub get_links_aod {
 		# Discard first element == header
 		shift @entries;
 		main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channels{$channel_id}\n" if $opt->{verbose};
-		my $now = time();
 		foreach my $entry (@entries) {
-			my ( $title, $name, $brand_pid, $series_pid, $brand, $series, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $channel, $duration, $thumbnail, $version, $guidance );
-			my ($start, $available) = ($1, $2) if $entry =~ m{<availability\s+start="(.*?)"\s+end="(.*?)"};
-			next if ! ( $start || $available );
-			if ( $start ) {
-				my $xstart = Programme::get_time_string( $start );
-				next if $xstart > $now;
+			my ( $title, $name, $brand_pid, $series_pid, $brand, $series, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $channel, $duration, $thumbnail, $version, $guidance );
+			my ($available_str, $until_str);
+			($available_str, $until_str) = ($1, $2) if $entry =~ m{<availability\s+start="(.*?)"\s+end="(.*?)"};
+			next if ! $available_str;
+			$available = Programme::get_time_string( $available_str );
+			next if $available > $now;
+			$max_expires = $expires = $available + $thirty_days;
+			if ( $until_str ) {
+				my $until = Programme::get_time_string( $until_str );
+				$expires = $until if ($until - $available) < $two_days;
 			}
-			if ( $available ) {
-				my $xavailable = Programme::get_time_string( $available );
-				next if $xavailable < $now;
-			}
-			my $vpid = $1 if $entry =~ m{pid="(.+?)">};
+			$expires = $max_expires if $expires > $max_expires;
+			next if $expires < $now;
 			$pid = $1 if $entry =~ m{<pid>(.+?)</pid>};
+			if ( defined $prog->{$pid} ) {
+	 			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
+				# use listing with earliest availability
+				if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
+					$prog->{$pid}->{available} = $available_str;
+				}
+				# use listing with latest expiry
+				if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
+					$prog->{$pid}->{expires} = $expires;
+				}
+				next;
+			}
 			$duration = $1 if $entry =~ m{duration="(.*?)"};
 			$desc = $1 if $entry =~ m{<synopsis>(.*?)</synopsis>};
 			$episode = $1 if $entry =~ m{<title>(.*?)</title>};
@@ -8354,10 +8435,6 @@ sub get_links_aod {
 			# Extract channel
 			$channel = $channels{$channel_id};
 			main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
-			# Merge and Skip if this pid is a duplicate
-			if ( defined $prog->{$pid} ) {
-				next;
-			}
 			# only default for radio
 			$version = 'default';
 			# no categories in AOD
@@ -8386,13 +8463,14 @@ sub get_links_aod {
 				'episodenum'	=> $episodenum,
 				'desc'		=> $desc,
 				'guidance'	=> $guidance,
-				'available'	=> 'Unknown',
 				'duration'	=> $duration || 'Unknown',
 				'thumbnail'	=> $thumbnail,
 				'channel'	=> $channel,
 				'categories'	=> join(',', sort @category),
 				'type'		=> $prog_type,
 				'web'		=> "${bbc_prog_page_prefix}/${pid}",
+				'available' => $available_str,
+				'expires'	=> $expires,
 			);
 		}
 	}
@@ -8405,7 +8483,7 @@ sub get_links {
 	my $self = shift; # ignore obj ref
 	my $prog = shift;
 	my $prog_type = shift;
-	my $now = time();
+	my $now = shift || time();
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	my $rc = 0;
 	my $feeds = $opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"};
@@ -8435,34 +8513,50 @@ sub get_links_schedule {
 	my $prog = shift;
 	my $prog_type = shift;
 	my $future = shift;
+	my $now = shift || time();
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
 	my @channel_list = sort keys %channels;
-	my @schedule_dates;
 	my $limit = 0;
-	my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
-	$limit_days = 30 if $limit_days > 30;
-	if ( $limit_days ) {
-		my $now = time();
-		$limit = $now - $limit_days * 86400;
-		my ($limit_weeks, $rem) = (int $limit_days / 7, $limit_days % 7);
-		$limit_weeks++ if $rem && $limit_weeks;
-		for (my $i = $limit_weeks; $i >= 0; $i -= 1) {
-			my $then = $now - ($i * 7) * 86400;
-			my $year = (gmtime($then))[5];
-			my $week = strftime( "%W", gmtime($then) );
-			push @schedule_dates, sprintf("%04d/w%02d", $year+1900, ++$week);
-		}
+	my @schedule_dates;
+	if ( $future ) {
+		push @schedule_dates, "this_week", "next_week";
 	} else {
-		if ( $future ) {
-			@schedule_dates = ( "this_week", "next_week" );
+		my $one_week = 7 * 86400;
+		my $this_year = (gmtime($now))[5];
+		my $this_week = strftime( "%W", gmtime($now) );
+		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
+		$limit_days = 0 if $limit_days < 0;
+		$limit_days = 30 if $limit_days > 30;
+		$limit = $now - ($limit_days * 86400) if $limit_days;
+		if ( $limit ) {
+			my $limit_time = $limit;
+			my $limit_year = (gmtime($limit_time))[5];
+			my $limit_week = strftime( "%W", gmtime($limit_time) );
+			while ( $limit_week != $this_week ) {
+				push @schedule_dates, sprintf("%04d/w%02d", $limit_year+1900, $limit_week+1);
+				$limit_time += $one_week;
+				$limit_year = (gmtime($limit_time))[5];
+				$limit_week = strftime( "%W", gmtime($limit_time) );
+			}
 		} else {
-			@schedule_dates = ( "last_week", "this_week" );
+			my $cache_file = "${profile_dir}/${prog_type}.cache";
+			if ( ! $opt->{refresh} && ! $opt->{cachereset} && -f $cache_file ) {
+				my $cache_time = stat($cache_file)->mtime;
+				my $cache_year = (gmtime($cache_time))[5];
+				my $cache_week = strftime( "%W", gmtime($cache_time) );
+				if ( ! ( $this_year == $cache_year && $this_week == $cache_week ) ) {
+					push @schedule_dates, "last_week";
+				}
+			} else {
+				push @schedule_dates, "last_week";
+			}
 		}
+		push @schedule_dates, "this_week";
 	}
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
-			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channels{$channel_id}, $future, $url, $limit);
+			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
 				return 1 if $opt->{refreshabortonerror};
 				next;
@@ -8480,6 +8574,22 @@ sub get_links_schedule_page {
 	my $future = shift;
 	my $url = shift;
 	my $limit = shift;
+	my $now = shift || time();
+	# TODO: world service schedule not available in XML
+	if ( $url =~ /worldservice/ ) {
+		if ( $future ) {
+			main::logger "WARNING: --refresh-future is not supported for BBC World Service\n";
+			return;
+		} else {
+			main::logger "INFO: Only previous 7 days of programmes are cached for BBC World Service\n" if $opt->{verbose};
+			return $self->get_links_aod($prog, $prog_type, $now, 'worldservice');
+		}
+	}
+	my $cache_channel = $channel;
+	if ( $prog_type eq "tv" ) {
+		# collapse BBC One/Two variants
+		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
+	}
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $ua = main::create_ua( 'desktop', 1 );
 	main::logger "DEBUG: Getting feed $url\n" if $opt->{debug};
@@ -8553,32 +8663,49 @@ sub get_links_schedule_page {
 	# 	</programme>
 	# </broadcast>	
 
+	my $thirty_days = 30 * 86400;
+	my $min_available = $now - ( $limit || $thirty_days );
 	# get list of entries within <broadcast> </broadcast> tags
 	my @entries = split /<broadcast[^s]/, $xml;
 	# Discard first element == header
 	shift @entries;
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
-	my $now = time();
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $until, $duration, $thumbnail, $version, $guidance, $descshort );
-		# Don't create this prog instance if the availability is in the past 
-		# this prevents programmes which never appear in iPlayer from being indexed
-		if ( $future ) {
-			$available = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
-		} else {
-			$available = $1 if $entry =~ m{<actual_start>\s*(.+?)\s*</actual_start>};
+		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort );
+		my ($available_str, $until_str);
+		$available_str = $1 if $entry =~ m{<end>\s*(.+?)\s*</end>};
+		if ( ! $available_str ) {
+			$available_str = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
 		}
-		next if ! $available;
-		if ( $future ) {
-			next if Programme::get_time_string( $available ) < $now;
-		} else {
-			next if Programme::get_time_string( $available ) > $now;
-			next if $limit && Programme::get_time_string( $available ) < $limit;
-			$until = $1 if $entry =~ m{<available_until>\s*(.+?)\s*</available_until>};
-			next if ! $until;
-			next if Programme::get_time_string( $until ) < $now;
+		next if ! $available_str;
+		$available = Programme::get_time_string( $available_str );
+		next if $available < $min_available;
+		next if ! $future && $available > $now;
+		next if $future && $available <= $now;
+		$until_str = $1 if $entry =~ m{<available_until>(.*?)</available_until>};
+		next if ! $future && ! $until_str;
+		if ( ! $future ) {
+			$max_expires = $expires = $available + $thirty_days;
+			if ( $until_str ) {
+				my $until = Programme::get_time_string( $until_str );
+				$expires = $until if $until < $expires;
+			}
+			$expires = $max_expires if $expires > $max_expires;
+			next if $expires < $now;
 		}
 		$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
+		if ( defined $prog->{$pid} ) {
+ 			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
+			# use listing with earliest availability
+			if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
+				$prog->{$pid}->{available} = $available_str;
+			}
+			# use listing with latest expiry
+			if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
+				$prog->{$pid}->{expires} = $expires;
+			}
+			next;
+		}
 		$desc = $1 if $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>};
 		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
 		$episode = $1 if $entry =~ m{<programme\s+type="episode">.*?<title>\s*(.*?)\s*</title>};
@@ -8616,19 +8743,6 @@ sub get_links_schedule_page {
 		#$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
 		main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
 		# Merge and Skip if this pid is a duplicate
-		if ( defined $prog->{$pid} ) {
-			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-			# Update this info from schedule (not available in the usual iplayer channels feeds)
-			$prog->{$pid}->{duration} = $duration;
-			$prog->{$pid}->{episodenum} = $episodenum if ! $prog->{$pid}->{episodenum};
-			$prog->{$pid}->{seriesnum} = $seriesnum if ! $prog->{$pid}->{seriesnum};
-			# use listing with earliest availability
-			if ( $available && $prog->{$pid}->{available} && $prog->{$pid}->{available} ne "Unknown" && $available lt $prog->{$pid}->{available} ) {
-				$prog->{$pid}->{available} = $available;
-				$prog->{$pid}->{channel} = $channel;
-			}
-			next;
-		}
 		# only default version in schedules
 		$version = 'default';
 		# thumbnail options
@@ -8649,12 +8763,13 @@ sub get_links_schedule_page {
 			'seriesnum'	=> $seriesnum,
 			'episodenum'	=> $episodenum,
 			'desc'		=> $desc,
-			'available'	=> $available,
 			'duration'	=> $duration,
 			'thumbnail'	=> $thumbnail,
-			'channel'	=> $channel,
+			'channel'	=> $cache_channel,
 			'type'		=> $prog_type,
 			'web'		=> "${bbc_prog_page_prefix}/${pid}",
+			'available' => $available_str,
+			'expires' => $expires,
 		);
 	}
 }

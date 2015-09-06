@@ -148,6 +148,7 @@ my @headings = qw(
 	thumbnail
 	pid
 	available
+	expires
 	type
 	name
 	episode
@@ -173,6 +174,7 @@ my %fieldname = (
 	index			=> 'Index',
 	pid			=> 'Pid',
 	available		=> 'Availability',
+	expires		=> 'Expires',
 	type			=> 'Type',
 	name			=> 'Name',
 	episode			=> 'Episode',
@@ -2186,6 +2188,7 @@ sub get_sorted {
 		timeadded	=> 'numeric',
 		seriesnum	=> 'numeric',
 		episodenum	=> 'numeric',
+		expires	=> 'numeric',
 	);
 
 	# Insert search '<key>~~~<sort_field>' for each prog in hash
@@ -3083,6 +3086,14 @@ sub search_progs {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, "${years}$t[7]d $t[2]h ago" ) );
+			} elsif ( /^expires$/ ) {
+				my $expires;
+				if ( $prog{$pid}->{$_} && $prog{$pid}->{$_} > $time ) {
+					my @t = gmtime( $prog{$pid}->{$_} - $time );
+					my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
+					$expires = "in ${years}$t[7]d $t[2]h";
+				}
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $expires ) );
 			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
