@@ -9822,7 +9822,7 @@ sub get_links {
 
 	for ( split /<program/, $xmlindex ) {
 		# Extract channel name, rss feed data
-		my ($channel, $url, $web);
+		my ($channel, $url, $web, $header, $name, $thumbnail);
 		# <network id="radio1" name="BBC Radio 1" />
 		$channel = $1 if m{<network\s+id=".*?"\s+name="(.*?)"\s*\/>};
 		# <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
@@ -9831,7 +9831,6 @@ sub get_links {
 		$web = $1 if m{<link\s+target="homepage"\s+url="(.*?)"\s*\/>};
 		# Skip if there is no feed data for channel
 		next if ! ($channel || $url);
-		my ( $name, $episode, $desc, $pid, $available, $duration, $thumbnail );
 		# Get RSS feeds for each podcast programme
 		main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
 		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
@@ -9881,7 +9880,7 @@ sub get_links {
 		# get list of entries within <entry> </entry> tags
 		my @entries = split /<item>/, $xml;
 		# first element == <channel> header
-		my $header = shift @entries;
+		$header = shift @entries;
 		# Get podcast name
 		$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
 		# Parse the categories into hash
@@ -9921,12 +9920,14 @@ sub get_links {
 	
 		foreach my $entry (@entries) {
 			$entry =~ s/[\r\n]+/ /g;
+			my ($episode, $desc, $pid, $available, $duration);
 			# Use the link as a guid
 			# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
 			$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
+			next if ! $pid;
 			# Skip if this pid is a duplicate
 			if ( defined $prog->{$pid} ) {
-				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $_)\n" if $opt->{verbose};
+				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
 				next;
 			}
 			# parse episode
