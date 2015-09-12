@@ -7666,6 +7666,29 @@ sub get_stream_data {
 					}
 				}
 			}
+			# generate 320k HLS stream from RTMP stream if possible
+			if ( $prog->{type} eq "radio" ) {
+				my @hls_medias = grep { $_->{connections}->[0]->{transferFormat} eq "hls" } @medias;
+				if ( @hls_medias ) {
+					my @pc_medias = grep { $_->{kind} eq "audio" && $_->{bitrate} > 300 && $_->{connections}->[0]->{protocol} eq "rtmp" } @medias;
+					for my $pc_media ( @pc_medias ) {
+						(my $hd_id = $pc_media->{connections}->[0]->{identifier}) =~ s/^mp4:(secure\/)?//g;
+						if ( $hd_id ) {
+							my (undef, $hd_pfx) = split("/", $hd_id);
+							$hd_pfx =~ s/_\d+$//;
+							if ( $hd_pfx ) {
+								my $hls_media = dclone($hls_medias[0]);
+								$hls_media->{bitrate} = $pc_media->{bitrate};
+								$hls_media->{service} = "gip_hls_iplayer_$pc_media->{bitrate}";
+								for my $hls_conn ( @{$hls_media->{connections}} ) {
+									$hls_conn->{href} =~ s|(https?:.*?)/$hd_pfx.*?\.mp4|$1$hd_id|;
+								}
+								push @medias, $hls_media;
+							}
+						}
+					}
+				}
+			}
 			# generate additional live streams
 			if ( $prog->{type} =~ /live/ ) {
 				my ( $media, $href_prefix, $href_prefix_nonuk, $href_ext, $min_bitrate, $uk );
