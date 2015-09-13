@@ -130,9 +130,10 @@ my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  TV modes typically have two streams available."],
 	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them."],
-	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <suppliers>', "Comma-delimited list of media stream suppliers to skip.  Possible values: akamai,limelight,level3,bidi"],
+	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <suppliers>', "Comma-delimited list of media stream suppliers to skip.  Possible values: level3,akamai,limelight,bidi,mf_akamai,mf_limelight,mf_bidi"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
+	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <suppliers>', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi,mf_akamai,mf_limelight,mf_bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	mediaselector	=> [ 1, "mediaselector|media-selector=s", 'Recording', '--mediaselector <identifier>', "Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
@@ -7488,22 +7489,27 @@ sub get_stream_data {
 		}
 	}
 	
-  my @exclude_supplier = split(/,/, $opt->{excludesupplier});
-  if ( grep /^akamai/, @exclude_supplier ) {
-		push @exclude_supplier, 'ak';
-  }
-  if ( grep /^limelight/, @exclude_supplier ) {
-		push @exclude_supplier, 'll';
-  }
-  if ( ! grep /^bidi/, @exclude_supplier ) {
+	# filter CDN suppliers
+	my @exclude_supplier = split(/,/, $opt->{excludesupplier});
+	# exclude bidi until supported
+	if ( ! grep /^bidi/, @exclude_supplier ) {
 		push @exclude_supplier, 'bidi';
-  }
-  if ( ! grep /^mf_bidi/, @exclude_supplier ) {
+	}
+	if ( ! grep /^mf_bidi/, @exclude_supplier ) {
 		push @exclude_supplier, 'mf_bidi';
-  }
+	}
+	if ( $opt->{includesupplier} ) {
+			@exclude_supplier = grep { $opt->{includesupplier} !~ /\b$_\b/ } @exclude_supplier;
+	}
+	if ( grep /^akamai/, @exclude_supplier ) {
+		push @exclude_supplier, 'ak';
+	}
+	if ( grep /^limelight/, @exclude_supplier ) {
+		push @exclude_supplier, 'll';
+	}
 	my $exclude_regex = '^ROGUEVALUE$';
 	if ( @exclude_supplier ) {
-	  $exclude_regex = '^('.(join('|', @exclude_supplier)).')';
+		$exclude_regex = '^('.(join('|', @exclude_supplier)).')';
 	}
 
 	# Setup user agent with redirection enabled
