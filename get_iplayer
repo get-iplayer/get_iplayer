@@ -4411,6 +4411,34 @@ sub generate_version_list {
 }
 
 
+sub cmp_modes {
+	my %ranks = (
+		'vhd$' => 10,
+		'[^v]hd$' => 20,
+		'sd$' => 30,
+		'vhigh$' => 40,
+		'[^v]high$' => 50,
+		'std$' => 60,
+		'[^v]low$' => 70,
+		'vlow$' => 80,
+	);
+	my %ranks2 = (
+		'^ddl' => 1,
+		'^flash' => 2,
+		'^hls' => 3,
+		'^hvf' => 4,
+	);
+	my ($rank_a, $rank_b);
+	for my $k ( keys %ranks ) {
+		$rank_a = $ranks{$k} if $a =~ /$k/;
+		$rank_b = $ranks{$k} if $b =~ /$k/;
+	}
+	for my $k ( keys %ranks2 ) {
+		$rank_a += $ranks2{$k} if $a =~ /$k/;
+		$rank_b += $ranks2{$k} if $b =~ /$k/;
+	}
+  $rank_a <=> $rank_b;
+}
 
 # Retry the recording of a programme
 # Usage: download_retry_loop ( $prog )
@@ -4462,7 +4490,7 @@ sub download_retry_loop {
 	return 1 if $#version_search_list < 0;
 
 	# Get all possible (or user overridden) modes for this prog recording
-	my $modelist = $prog->modelist;
+	my $modelist = $prog->modelist(1);
 	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
 
 	######## version loop #######
@@ -4497,11 +4525,20 @@ sub download_retry_loop {
 				# Strip the number from the end of the mode name and make a unique array
 				for ( @available_modes ) {
 					my $modename = $_;
+					next if $modename =~ /subtitle/;
 					$modename =~ s/\d+$//g;
 					$available_modes_short{$modename}++;
 				}
-				main::logger "INFO: No specified modes ($modelist) available for this programme with version '$version'\n";
-				main::logger "INFO: Try using --modes=".(join ',', sort keys %available_modes_short)."\n";
+				my $msg = "No supported modes";
+				if ( $opt->{$prog->{type}."mode"} || $opt->{modes} ) {
+					$msg = "No specified modes";
+				}
+				main::logger "INFO: $msg ".($modelist ? "($modelist) " : "")."available for this programme with version '$version'\n";
+				if ( keys %available_modes_short ) {
+					main::logger "INFO: Try using --modes=".(join ',', sort cmp_modes keys %available_modes_short)."\n";
+				} else {
+					main::logger "INFO: No other modes are available\n";
+				}
 				main::logger "INFO: You may receive this message if you are using get_iplayer outside the UK\n" if $#available_modes < 0;
 				next;
 			}
@@ -8137,16 +8174,19 @@ sub optional_list_entry_format {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $showwarn = shift;
 	my $mlist = $opt->{tvmode} || $opt->{modes};
 	
 	# Defaults
 	if ( ! $mlist ) {
+		$mlist = 'default';
 		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
-		} elsif ( ! main::exists_in_path('ffmpeg') ) {
-			main::logger "WARNING: Not using HLS modes since ffmpeg is not found\n" if $opt->{verbose};
-		} else {
-			$mlist = 'default';
+			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if ( $showwarn || $opt->{verbose} );
+			$mlist = 'hlsdefault';
+		}
+		if ( ! main::exists_in_path('ffmpeg') ) {
+			main::logger "WARNING: Not using hls/hvf modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+			return undef if $mlist eq "hlsdefault";
 		}
 	}
 	# Deal with BBC TV fallback modes and expansions
@@ -9191,16 +9231,19 @@ sub min_download_size {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $showwarn = shift;
 	my $mlist = $opt->{radiomode} || $opt->{modes};
 	
 	# Defaults
 	if ( ! $mlist ) {
+		$mlist = 'default';
 		if ( ! main::exists_in_path('rtmpdump') ) {
-			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if $opt->{verbose};
-		} elsif ( ! main::exists_in_path('ffmpeg') ) {
-			main::logger "WARNING: Not using HLS modes since ffmpeg is not found\n" if $opt->{verbose};
-		} else {
-			$mlist = 'default';
+			main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if ( $showwarn || $opt->{verbose} );
+			$mlist = 'hlsdefault';
+		}
+		if ( ! main::exists_in_path('ffmpeg') ) {
+			main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+			$mlist = "ddl" if $mlist eq "hlsdefault";
 		}
 	}
 	# Deal with BBC Radio fallback modes and expansions
@@ -9495,14 +9538,15 @@ sub init {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $showwarn = shift;
 	my $mlist = $opt->{livetvmode} || $opt->{modes};
 	
 	# Defaults
 	if ( ! $mlist ) {
+		$mlist = 'default';
 		if ( ! main::exists_in_path('ffmpeg') ) {
-			main::logger "WARNING: Not using HLS modes since ffmpeg is not found\n" if $opt->{verbose};
-		} else {
-			$mlist = 'default';
+			main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+			return undef;
 		}
 	}
 	# deal with obsolete values
@@ -9665,14 +9709,15 @@ sub init {
 # Returns the modes to try for this prog type
 sub modelist {
 	my $prog = shift;
+	my $showwarn = shift;
 	my $mlist = $opt->{liveradiomode} || $opt->{modes};
 	
 	# Defaults
 	if ( ! $mlist ) {
+		$mlist = 'default';
 		if ( ! main::exists_in_path('ffmpeg') ) {
-			main::logger "WARNING: Not using HLS and Shoutcast modes since ffmpeg is not found\n" if $opt->{verbose};
-		} else {
-			$mlist = 'default';
+			main::logger "WARNING: Not using hls/shoutcast modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+			return undef;
 		}
 	}
 	# deal with obsolete values
