@@ -12,7 +12,6 @@ tag:
 	@./get_iplayer --manpage get_iplayer.1
 	git diff --exit-code get_iplayer.1 > /dev/null || \
 	sed -i.bak -e 's/\(\.TH GET_IPLAYER "1" "\)[^"]*"/\1$(shell date +"%B %Y")\"/' get_iplayer get_iplayer.1
-	sed -i.bak -e 's/\(The latest version is v\)[0-9]\{1,\}\.[0-9]\{1,\}/\1$(VERSION)/' html/get_iplayer.html
 	rm -f get_iplayer.bak get_iplayer.1.bak html/get_iplayer.html.bak
 	@git log --format='%aN' |sort -u > CONTRIBUTORS; git add CONTRIBUTORS
 	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.1 html/get_iplayer.html CONTRIBUTORS get_iplayer.cgi

@@ -1339,10 +1339,8 @@ sub build_url_playlist {
 # If the get_iplayer.cgi script is unwritable then quit
 # update script
 sub update_script {
-	my $update_url	= 'http://www.infradead.org/get_iplayer/latest/get_iplayer.cgi';
-	# Get version URL
+	my $update_url = "https://raw.githubusercontent.com/get-iplayer/get_iplayer/latest/get_iplayer.cgi";
 	my $script_file = $0;
-	my $ua = create_ua('update');
 
 	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
 	if ( ! -w $script_file ) {
@@ -1350,28 +1348,44 @@ sub update_script {
 		exit 1;
 	}
 
-	print $se "INFO: Updating $script_file (from $VERSION)\n";
-	print $fh p("Updating $script_file (from $VERSION)");
-	if ( update_file( $ua, $update_url, $script_file ) ) {
-		print $fh p("Updating Web PVR Manager Failed");
-	} else {
-		print $fh p("Updating Web PVR Manager Succeeded - please restart the get_iplayer Web PVR Manager service");
+	my $ua = create_ua('update');
+	if ( $update_url =~ /^https:/ && ! $ua->is_protocol_supported('https') ) {
+		print $se "ERROR: HTTPS protocol support is required for update\n";
+		print $se "ERROR: Install LWP::Protocol::https Perl module or equivalent package for your operating system\n";
+		exit 1;
+	}
+	if ( $ua->can("ssl_opts") ) {
+		# TODO: Mozilla::CA::SSL_ca_file gives wrong path on Windows
+		$ua->ssl_opts(verify_hostname => 0);
 	}
 
-	print $se "INFO: Updating get_iplayer\n";
-	my @cmd = (
-		$opt_cmdline->{getiplayer},
-		'--encoding-locale=UTF-8',
-		'--encoding-console-out=UTF-8',
-		'--nocopyright',
-		'--expiry=999999999',
-		'--nopurge',
-		'--update',
-	);
-	print $fh '<pre>';
-	run_cmd( $fh, $se, 1, @cmd );
-	print $fh '</pre>';
-	print $fh p("Updated get_iplayer");
+	print $se "INFO: Updating $script_file to latest version from:\n";
+	print $se "INFO: $update_url\n";
+	print $fh p("Updating $script_file to latest version from:<br/>$update_url");
+	my $update_gip;
+	if ( update_file( $ua, $update_url, $script_file ) ) {
+		print $fh p("Updating Web PVR Manager Failed - see Web PVR Manager service console window for error message");
+	} else {
+		print $fh p("Updating Web PVR Manager Succeeded - please restart the get_iplayer Web PVR Manager service");
+		$update_gip = 1;
+	}
+
+	if ( $update_gip ) {
+		print $se "INFO: Updating get_iplayer\n";
+		my @cmd = (
+			$opt_cmdline->{getiplayer},
+			'--encoding-locale=UTF-8',
+			'--encoding-console-out=UTF-8',
+			'--nocopyright',
+			'--expiry=999999999',
+			'--nopurge',
+			'--update',
+		);
+		print $fh '<pre>';
+		run_cmd( $fh, $se, 1, @cmd );
+		print $fh '</pre>';
+		print $fh p("Updated get_iplayer");
+	}
 
 	# Render options actions
 	print $fh div( { -class=>'action' },
@@ -1417,7 +1431,7 @@ sub request_url_retry {
 	my $res;
 
 	# Malformed URL check
-	if ( $url !~ m{^\s*http\:\/\/}i ) {
+	if ( $url !~ m{^\s*https?\:\/\/}i ) {
 		print $se "ERROR: Malformed URL: '$url'\n";
 		return '';
 	}
@@ -1451,13 +1465,17 @@ sub update_file {
 	# Download the file
 	if ( not $res = request_url_retry($ua, $url, 3) ) {
 		print $se "ERROR: Could not download update for ${dest_file} - Update aborted\n";
+		print $se "ERROR: $@\n";
 		return 1;
 	}
 	# If the download was successful then copy over this file and make executable after making a backup of this script
 	if ( -f $dest_file ) {
-		if ( ! copy($dest_file, $dest_file.'.old') ) {
-			print $se "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
-			return 1;
+		my $backup_file = "${dest_file}-${VERSION_TEXT}";
+		if ( ! copy($dest_file, $backup_file) ) {
+			print $se  "ERROR: Could not write backup file $backup_file - Update aborted\n";
+			exit 1;
+		} else {
+			print $se "INFO: $dest_file backed up to $backup_file\n";
 		}
 	}
 	# Check if file is writable

@@ -2189,16 +2189,6 @@ sub open_file_append {
 # If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
 #		update script
 sub update_script {
-	my $version_url	= 'http://www.infradead.org/get_iplayer/VERSION-get_iplayer';
-	my $update_url	= 'http://www.infradead.org/get_iplayer/';
-	my $changelog_url = 'http://www.infradead.org/get_iplayer/CHANGELOG-get_iplayer';
-	my $latest_ver;
-	# Get version URL
-	my $script_file = $0;
-	my $script_url;
-	my %plugin_url;
-	my $ua = create_ua( 'update', 1 );
-
 	# Are we flagged as installed using a pkg manager?
 	if ( $opt->{packagemanager} ) {
 		if ( $opt->{packagemanager} =~ /installer/i ) {
@@ -2209,64 +2199,27 @@ sub update_script {
 			logger "ERROR: get_iplayer was installed using the '$opt->{packagemanager}' package manager.  Please refer to the package manager documentation.\n";
 		}
 		exit 1;
-	} 
-
-	logger "INFO: Current version is ".(sprintf '%.2f', $version)."\n";
-	logger "INFO: Checking for latest version from www.infradead.org\n";
-	if ( $latest_ver = request_url_retry($ua, $version_url, 3 ) ) {
-		chomp($latest_ver);
-		# Compare version numbers
-		if ( $latest_ver > $version || $opt->{force} ) {
-			# reformat version number
-			$latest_ver = sprintf('%.2f', $latest_ver);
-			logger "INFO: Newer version $latest_ver available\n" if $latest_ver > $version;
-			
-			# Get the manifest of files to be updated
-			my $base_url = "${update_url}/${latest_ver}";
-			my $res;
-			if ( not $res = request_url_retry($ua, "${update_url}/MANIFEST.v${latest_ver}", 3 ) ) {
-				logger "ERROR: Failed to obtain update file manifest - Update aborted\n";
-				exit 3;
-			}
-
-			# get a list of plugins etc from the manifest
-			for ( split /\n/, $res ) {
-				chomp();
-				my ( $type, $url) = split /\s/;
-				if ( $type eq 'bin' ) {
-					$script_url =  $url;
-				}
-			}
-
-			# update script if required
-			if ( $latest_ver > $version || $opt->{force} ) {
-				# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-				if ( ! -w $script_file ) {
-					logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
-					exit 1;
-				}
-				logger "INFO: Updating $script_file (from $version to $latest_ver)\n";
-				update_file( $ua, $script_url, $script_file ) if ! $opt->{test};
-			}
-
-			# Show changelog since last version if this is an upgrade
-			if ( $version < $latest_ver ) {
-				logger "INFO: Change Log: ${changelog_url}\n";
-				my $changelog = request_url_retry($ua, $changelog_url, 3 );
-				my $current_ver = sprintf('%.2f', $version);
-				$changelog =~ s|^(.*)Version\s+$current_ver.+$|$1|s;
-				logger "INFO: Changes since version $current_ver:\n\n$changelog\n";
-			}
-
-		} else {
-			logger "INFO: No update is necessary (latest version = $latest_ver)\n";
-		}
-				
-	} else {
-		logger "ERROR: Failed to connect to update site - Update aborted\n";
-		exit 2;
 	}
-
+	my $update_url = "https://raw.githubusercontent.com/get-iplayer/get_iplayer/latest/get_iplayer";
+	my $script_file = $0;
+	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
+	if ( ! -w $script_file ) {
+		logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
+		exit 1;
+	}
+	my $ua = create_ua( 'update', 1 );
+	if ( $update_url =~ /^https:/ && ! $ua->is_protocol_supported('https') ) {
+		logger "ERROR: HTTPS protocol support is required for update\n";
+		logger "ERROR: Install LWP::Protocol::https Perl module or equivalent package for your operating system\n";
+		exit 1;
+	}
+	if ( $ua->can("ssl_opts") ) {
+		# TODO: Mozilla::CA::SSL_ca_file gives wrong path on Windows
+		$ua->ssl_opts(verify_hostname => 0);
+	}
+	logger "INFO: Updating $script_file to latest version from:\n";
+	logger "INFO: $update_url\n";
+	update_file( $ua, $update_url, $script_file ) if ! $opt->{test};
 	exit 0;
 }
 
@@ -2282,13 +2235,17 @@ sub update_file {
 	# Download the file
 	if ( not $res = request_url_retry($ua, $url, 3) ) {
 		logger "ERROR: Could not download update for ${dest_file} - Update aborted\n";
+		logger "ERROR: $@\n";
 		exit 1;
 	}
 	# If the download was successful then copy over this file and make executable after making a backup of this script
 	if ( -f $dest_file ) {
-		if ( ! copy($dest_file, $dest_file.'.old') ) {
-			logger "ERROR: Could not create backup file ${dest_file}.old - Update aborted\n";
+		my $backup_file = "${dest_file}-${version_text}";
+		if ( ! copy($dest_file, $backup_file) ) {
+			logger "ERROR: Could not write backup file $backup_file - Update aborted\n";
 			exit 1;
+		} else {
+			logger "INFO: $dest_file backed up to $backup_file\n";
 		}
 	}
 	# Check if file is writable
@@ -2303,6 +2260,14 @@ sub update_file {
 	close FILE;
 	chmod 0755, $dest_file;
 	logger "INFO: Downloaded $dest_file\n";
+	my $vercmd = qq{"$dest_file" -V 2>&1};
+	if ( $^O eq "MSWin32" ) {
+		$vercmd = "perl ".$vercmd;
+	}
+	(my $newver = qx{$vercmd}) =~ s/^get_iplayer v(\d+\.\d+).*/$1/s;
+	if ( $newver =~ /^\d+\.\d+$/ ) {
+		logger "INFO: Updated $dest_file to version $newver\n";
+	}
 }
 
 
@@ -2669,7 +2634,7 @@ sub request_url_retry {
 	}
 
 	# Malformed URL check
-	if ( $url !~ m{^\s*http\:\/\/}i ) {
+	if ( $url !~ m{^\s*https?\:\/\/}i ) {
 		logger "ERROR: Malformed URL: '$url'\n";
 		return '';
 	}
