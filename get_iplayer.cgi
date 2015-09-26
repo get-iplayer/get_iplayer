@@ -1555,8 +1555,8 @@ sub run_cmd {
 	my @cmd = ( @_ );
 	my $direct = grep(/$opt_cmdline->{ffmpeg}/, @cmd);
 	my $stream = grep(/stream%3D1/, @cmd);
-	my $livetv = grep(/type%3Dlivetv/, @cmd);
-	my $filter_ffmpeg_progress = (! $stream && $livetv);
+	my $is_tv = grep(/type%3D(live)?tv/, @cmd);
+	my $filter_ffmpeg_progress = (! $stream && $is_tv);
 	my $stdout_raw = ($direct || $stream);
 	my $rtn;
 
@@ -1645,7 +1645,7 @@ sub run_cmd {
 			my $bytes;
 			# Assume that we don't want to buffer STDERR output of the command
 			$size = 1;
-			if ( $filter_ffmpeg_progress) {
+			if ( $filter_ffmpeg_progress ) {
 				my ($count, $buf);
 				while ( $bytes = read( $err, $char, $size ) ) {
 					if ( $bytes <= 0 ) {
