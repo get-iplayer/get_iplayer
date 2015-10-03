@@ -4978,6 +4978,14 @@ sub generate_filenames {
 		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
 	}
 
+	# default output directory on desktop for Windows
+	if ( ! $ENV{IPLAYER_OUTDIR} && $^O eq "MSWin32" ) {
+		my $desktop;
+		eval 'use Win32 qw(CSIDL_DESKTOPDIRECTORY); $desktop = Win32::GetFolderPath(CSIDL_DESKTOPDIRECTORY);';
+		if ( ! $@ && $desktop ) {
+			$ENV{IPLAYER_OUTDIR} = File::Spec->catfile($desktop, "iPlayer Recordings");
+		}
+	}
 	# Determine directory and find its absolute path
 	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
 	$prog->{dir} = main::encode_fs($prog->{dir});
