@@ -5283,7 +5283,7 @@ sub download_thumbnail {
 		$file = $prog->{thumbfile};
 
 		# Download thumb
-		$image = main::request_url_retry( main::create_ua( 'desktop', 1 ), $prog->{thumbnail}, 1);
+		$image = main::request_url_retry( main::create_ua( 'desktop', 1 ), $prog->{thumbnail}, 3);
 		if (! $image ) {
 			main::logger "ERROR: Thumbnail Download failed\n";
 			return 1;
@@ -5300,6 +5300,7 @@ sub download_thumbnail {
 	# Write to file
 	unlink($file);
 	open( my $fh, ">:raw", $file );
+	binmode $fh;
 	print $fh $image;
 	close $fh;
 
