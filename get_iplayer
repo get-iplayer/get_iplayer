@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes + other Programmes via 3rd-party plugins
+# get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes and BBC podcasts
 #
 #    Copyright (C) 2008-2010 Phil Lewis
 #
@@ -38,13 +38,8 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 # 	https://github.com/get-iplayer/get_iplayer/wiki/documentation
 #
 # Todo:
-# * Fix non-uk detection - iphone auth?
-# * Index/Record live radio streams w/schedule feeds to assist timing
-# * Remove all rtsp/mplayer/lame/tee dross when realaudio streams become obselete (not quite yet)
 # ** all global vars into a class???
 # ** Cut down 'use' clauses in each class
-# * stdout streaming with mms
-# * Add podcast links to web pvr manager
 # * Add PVR search src to recording history
 # * Fix unicode / wide chars in rdf
 #
@@ -502,7 +497,7 @@ logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr );
 Options->get_class_options( progclass($_) ) for progclass();
-Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast rtsp iphone mms 3gp http ddl );
+Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast http ddl );
 
 
 # Parse the cmdline using the opt_format hash
@@ -902,17 +897,6 @@ sub init_search {
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
 	# External Binaries
-	$bin->{mplayer}		= $opt->{mplayer} || 'mplayer';
-	delete $binopts->{mplayer};
-	push @{ $binopts->{mplayer} }, '-nolirc';
-	if ( $opt->{debug} ) {
-		push @{ $binopts->{mplayer} }, '-v';
-	} elsif ( $opt->{verbose} ) {
-		push @{ $binopts->{mplayer} }, '-v';
-	} elsif ( $opt->{quiet} || $opt->{silent}  ) {
-		push @{ $binopts->{mplayer} }, '-really-quiet';
-	}
-
 	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'avconv';
 	if (! main::exists_in_path('ffmpeg') ) {
 		$bin->{ffmpeg} = 'ffmpeg';
@@ -930,19 +914,8 @@ sub init_search {
 	}
 
 
-	$bin->{lame}		= $opt->{lame} || 'lame';
-	delete $binopts->{lame};
-	$binopts->{lame}	= '-f';
-	$binopts->{lame}	.= ' --quiet ' if $opt->{quiet} || $opt->{silent} ;
-
-	$bin->{vlc}		= $opt->{vlc} || 'cvlc';
-	delete $binopts->{vlc};
-	push @{ $binopts->{vlc} }, '-vv' if $opt->{debug};
-
 	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
 	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
-
-	$bin->{tee}		= 'tee';
 
 	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
 	if (! main::exists_in_path('rtmpdump') ) {
@@ -959,11 +932,6 @@ sub init_search {
 		push @{ $binopts->{rtmpdump}	}, '--quiet';
 	}
 
-	# quote binaries which allows for spaces in the path (only required if used via a shell)
-	for ( $bin->{lame}, $bin->{tee} ) {
-		s!^(.+)$!"$1"!g;
-	}
-	
 	# Redirect STDOUT to player command if one is specified
 	if ( $opt->{player} && $opt->{nowrite} && $opt->{stdout} ) {
 		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
@@ -1613,28 +1581,6 @@ sub user_agent {
 				'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 7.1; Trident/5.0)',
 				'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0; .NET CLR 3.5.30729; .NET CLR 3.0.30729; .NET CLR 2.0.50727; Media Center PC 6.0)',
 				],
-		safari		=> [
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 2_0 like Mac OS X; en-us) AppleWebKit/525.18.1 (KHTML, like Gecko) Version/3.1.1 Mobile/5A345 Safari/525.20',
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 2_0_1 like Mac OS X; en-us) AppleWebKit/525.18.1 (KHTML, like Gecko) Version/3.1.1 Mobile/5B108 Safari/525.20',
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A341 Safari/528.16',
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0_1 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A400 Safari/528.16',
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_2 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7D11 Safari/528.16',
-				'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16',
-				],
-		coremedia	=> [
-				'Apple iPhone v1.1.4 CoreMedia v1.0.0.4A102',
-				'Apple iPhone v1.1.5 CoreMedia v1.0.0.4B1',
-				'Apple iPhone OS v2.0 CoreMedia v1.0.0.5A347',
-				'Apple iPhone OS v2.0.1 CoreMedia v1.0.0.5B108',
-				'Apple iPhone OS v2.1 CoreMedia v1.0.0.5F136',
-				'Apple iPhone OS v2.1 CoreMedia v1.0.0.5F137',
-				'Apple iPhone OS v2.1.1 CoreMedia v1.0.0.5F138',
-				'Apple iPhone OS v2.2 CoreMedia v1.0.0.5G77',
-				'Apple iPhone OS v2.2 CoreMedia v1.0.0.5G77a',
-				'Apple iPhone OS v2.2.1 CoreMedia v1.0.0.5H11',
-				'Apple iPhone OS v3.0 CoreMedia v1.0.0.7A341',
-				'Apple iPhone OS v3.1.2 CoreMedia v1.0.0.7D11',
-				],
 	};
 
 	# Remember the ua string for the entire session
@@ -2157,40 +2103,6 @@ sub get_hex {
         }
 	logger "DEBUG: HEX string value = $ret\n" if $opt->{verbose};
         return $ret;
-}
-
-
-
-# Generic
-# version of unix tee
-# Usage tee ($infile, $outfile)
-# If $outfile is undef then just cat file to STDOUT
-sub tee {
-	my ( $infile, $outfile ) = @_;
-	# Open $outfile for writing, $infile for reading
-	if ( $outfile) {
-		if ( ! open( OUT, "> $outfile" ) ) {
-			logger "ERROR: Could not open $outfile for writing\n";
-			return 1;
-		} else {
-			logger "INFO: Opened $outfile for writing\n" if $opt->{verbose};
-		}
-	}
-	if ( ! open( IN, "< $infile" ) ) {
-		logger "ERROR: Could not open $infile for reading\n";
-		return 2;
-	} else {
-		logger "INFO: Opened $infile for reading\n" if $opt->{verbose};
-	}
-	# Read and redirect IN
-	while ( <IN> ) {
-		print $_;
-		print OUT $_ if $outfile;
-	}
-	# Close output file
-	close OUT if $outfile;
-	close IN;
-	return 0;
 }
 
 
@@ -3068,87 +2980,6 @@ sub expand_list {
 		$_ = $replace if $_ eq $search;
 	}
 	return join ',', @elements;	
-}
-
-
-
-sub get_playlist_url {
-	my $ua = shift;
-	my $url = shift;
-	my $filter = shift;
-	# Don't recurse more than 5 times
-	my $depth = 5;
-
-	# Resolve the MMS url if it is an http ref
-	while ( $url =~ /^http/i && $depth ) {
-		my $content = main::request_url_retry($ua, $url, 2, '', '');
-		# Reference list
-		if ( $content =~ m{\[reference\]}i ) {
-			my @urls;
-			# [Reference]
-			# Ref1=http://wm.bbc.co.uk/wms/england/radioberkshire/aod/andrewpeach_thu.wma?MSWMExt=.asf
-			# Ref2=http://wm.bbc.co.uk/wms/england/radioberkshire/aod/andrewpeach_thu.wma?MSWMExt=.asf
-			for ( split /ref\d*=/i, $content ) {
-				#main::logger "DEBUG: LINE: $_\n" if $opt->{debug};
-				s/[\s]//g;
-				# Rename http:// to mms:// - don't really know why but this seems to be necessary with such playlists
-				s|http://|mms://|g;
-				push @urls, $_ if m{^(http|mms|rtsp)://};
-				main::logger "DEBUG: Got Reference URL: $_\n" if $opt->{debug};
-			}
-			# use first URL for now??
-			$url = $urls[0];
-
-		# ASX XML based playlist
-		} elsif ( $content =~ m{<asx}i ) {
-			my @urls;
-			# <ASX version="3.0">
-			#  <ABSTRACT>http://www.bbc.co.uk/</ABSTRACT>
-			#  <TITLE>BBC support</TITLE>
-			#  <AUTHOR>BBC</AUTHOR>
-			#  <COPYRIGHT>(c) British Broadcasting Corporation</COPYRIGHT>
-			#  <MoreInfo href="http://www.bbc.co.uk/" />
-			#  <Entry>
-			#    <ref href="rtsp://wm.bbc.co.uk/wms/england/radioberkshire/aod/andrewpeach_thu.wma" />
-			#    <ref href="http://wm.bbc.co.uk/wms/england/radioberkshire/aod/andrewpeach_thu.wma" />
-			#    <ref href="rtsp://wm.bbc.co.uk/wms2/england/radioberkshire/aod/andrewpeach_thu.wma" />
-			#    <ref href="http://wm.bbc.co.uk/wms2/england/radioberkshire/aod/andrewpeach_thu.wma" />
-			#    <MoreInfo href="http://www.bbc.co.uk/" />
-			#    <Abstract>BBC</Abstract>
-			#  </Entry>
-			# </ASX>
-			for ( split /</i, $content ) {
-				#main::logger "DEBUG: LINE: $_\n" if $opt->{debug};
-				# Ignore anything except mms or http from this playlist
-				push @urls, $1 if m{ref\s+href=\"((http|$filter)://.+?)\"}i;
-			}
-			for ( @urls ) {
-				main::logger "DEBUG: Got ASX URL: $_\n" if $opt->{debug};
-			}
-			# use first URL for now??
-			$url = $urls[0];
-
-		# RAM format urls
-		} elsif ( $content =~ m{rtsp://}i ) {
-			my @urls;
-			for ( split /[\n\r\s]/i, $content ) {
-				main::logger "DEBUG: LINE: $_\n" if $opt->{debug};
-				# Ignore anything except $filter or http from this playlist
-				push @urls, $1 if m{((http|$filter)://.+?)[\n\r\s]?$}i;
-			}
-			for ( @urls ) {
-				main::logger "DEBUG: Got RAM URL: $_\n" if $opt->{debug};
-			}
-			# use first URL for now??
-			$url = $urls[0];			
-
-		} else {	
-			chomp( $url = $content );
-		}
-		$depth--;
-	}
-
-	return $url;
 }
 
 
@@ -7351,17 +7182,6 @@ sub get_stream_data_cdn {
 		} elsif ( $cattribs->{kind} eq 'http' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
-		# drm license - ignore
-		} elsif ( $cattribs->{kind} eq 'licence' ) {
-
-		# iphone new
-		} elsif ( $cattribs->{kind} eq 'securesis' ) {
-			$conn->{streamurl} = $cattribs->{href};
-
-		# asx playlist
-		} elsif ( $cattribs->{kind} eq 'asx' ) {
-			$conn->{streamurl} = $cattribs->{href};
-
 		# hls stream
 		} elsif ( $cattribs->{transferFormat} =~ /hls/ ) {
 			$conn->{streamurl} = $cattribs->{href};
@@ -7865,17 +7685,7 @@ sub get_stream_data {
 		$mattribs->{verpid} = $verpid;
 		$mattribs->{modelist} = $prog->modelist;
 
-		# New iphone stream
-		if ( $mattribs->{service} eq 'iplayer_streaming_http_mp4' ) {
-			# Fix/remove some audio stream attribs
-			if ( $prog->{type} eq 'radio' ) {
-				$mattribs->{bitrate} = 128;
-				delete $mattribs->{width};
-				delete $mattribs->{height};
-			}
-			get_stream_data_cdn( $data, $mattribs, 'iphone', 'iphone', 'mov' );
-		
-		} elsif ( $mattribs->{service} =~ /(hls|hlx)/ ) {
+		if ( $mattribs->{service} =~ /(hls|hlx)/ ) {
 
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $pfx = $mattribs->{service} =~ /hlx/ ? "hlx" : "hls";
@@ -7989,38 +7799,6 @@ sub get_stream_data {
 			$mattribs->{encoding} = 'vp6';
 			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
-		# n95 modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mpeg' &&
-				$mattribs->{encoding} eq 'h264'
-		) {
-			# n95_wifi modes
-			if ( $mattribs->{bitrate} > 140 ) {
-				$mattribs->{width} = $mattribs->{width} || 320;
-				$mattribs->{height} = $mattribs->{height} || 176;
-				get_stream_data_cdn( $data, $mattribs, 'n95_wifi', '3gp', '3gp' );
-
-			# n95_3g modes
-			} else {
-				$mattribs->{width} = $mattribs->{width} || 176;
-				$mattribs->{height} = $mattribs->{height} || 96;
-				get_stream_data_cdn( $data, $mattribs, 'n95_3g', '3gp', '3gp' );
-			}
-
-		# WMV drm modes - still used?
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/wmv'
-		) {
-			$mattribs->{width} = $mattribs->{width} || 320;
-			$mattribs->{height} = $mattribs->{height} || 176;
-			get_stream_data_cdn( $data, $mattribs, 'mobile_wmvdrm', 'http', 'wmv' );
-			# Also DRM (same data - just remove _mobile from href and identfier)
-			$mattribs->{width} = 672;
-			$mattribs->{height} = 544;
-			get_stream_data_cdn( $data, $mattribs, 'wmvdrm', 'http', 'wmv' );
-			$data->{wmvdrm}->{identifier} =~ s/_mobile//g;
-			$data->{wmvdrm}->{streamurl} =~ s/_mobile//g;
-
 		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
 				$mattribs->{type} eq 'audio/mp4'
@@ -8040,34 +7818,6 @@ sub get_stream_data {
 				get_stream_data_cdn( $data, $mattribs, 'flashaaclow', 'rtmp', 'aac' );
 			}
 
-		# flashaudio modes
-		} elsif (	$mattribs->{kind} eq 'audio' &&
-				( $mattribs->{type} eq 'audio/mpeg' || $mattribs->{type} eq 'audio/mp3' )
-				#&& $mattribs->{encoding} eq 'mp3'
-		) {
-			get_stream_data_cdn( $data, $mattribs, 'flashaudio', 'rtmp', 'mp3' );
-
-		# RealAudio modes
-		} elsif (	$mattribs->{type} eq 'audio/real' &&
-				$mattribs->{encoding} eq 'real'
-		) {
-			get_stream_data_cdn( $data, $mattribs, 'realaudio', 'rtsp', 'mp3' );
-
-		# wma modes
-		} elsif (	( $mattribs->{type} eq 'audio/wma' || $mattribs->{type} eq "audio/x-ms-asf" ) &&
-				$mattribs->{encoding} =~ /wma/
-		) {
-			get_stream_data_cdn( $data, $mattribs, 'wma', 'mms', 'wma' );
-
-		# aac3gp modes
-		} elsif (	$mattribs->{kind} eq '' &&
-				$mattribs->{type} eq 'audio/mp4' &&
-				$mattribs->{encoding} eq 'aac'
-		) {
-			# Not sure how to stream these yet
-			#$mattribs->{kind} = 'sis';
-			#get_stream_data_cdn( $data, $mattribs, 'aac3gp', 'http', 'aac' );
-
 		# Subtitles modes
 		} elsif (	$mattribs->{kind} eq 'captions' &&
 				$mattribs->{type} eq 'application/ttaf+xml'
@@ -8082,27 +7832,6 @@ sub get_stream_data {
 
 	$opt->{mediaselector} = $mediaselector;
 	
-	# Do iphone redirect check regardless of an xml entry for iphone (except for EMP/Live) - sometimes the iphone streams exist regardless
-	# Skip check if the modelist selected excludes iphone
-	if ( $prog->{pid} !~ /^http/i && $verpid !~ /^\?/ && $verpid !~ /^http:/ && grep /^iphone/, split ',', $prog->modelist() ) {
-		if ( my $streamurl = Streamer::iphone->get_url($ua, $prog->{pid}) ) {
-			my $mode = 'iphone1';
-			if ( $prog->{type} eq 'radio' ) {
-				$data->{$mode}->{bitrate} = 128;
-				$data->{$mode}->{type} = "(iplayer_streaming_http_mp3) http mp3 128kbps stream";
-			} else {
-				$data->{$mode}->{bitrate} = 480;
-				$data->{$mode}->{type} = "(iplayer_streaming_http_mp4) http h264 480x272 480kbps stream";
-			}
-			$data->{$mode}->{streamurl} = $streamurl;
-			$data->{$mode}->{streamer} = 'iphone';
-			$data->{$mode}->{ext} = 'mov';
-			get_stream_set_type( $data->{$mode} ) if ! $data->{$mode}->{type};
-		} else {
-			main::logger "DEBUG: No iphone redirect stream\n" if $opt->{verbose};
-		}
-	}
-
 	# Report modes found
 	if ( $opt->{verbose} ) {
 		main::logger "INFO: Found mode $_: $data->{$_}->{type}\n" for sort keys %{ $data };
@@ -8815,25 +8544,6 @@ sub get_links_schedule_page {
 sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
-	# Check if we need 'tee'
-	if ( $mode =~ /^real/ && (! main::exists_in_path('tee')) && $opt->{stdout} && (! $opt->{nowrite}) ) {
-		main::logger "\nERROR: tee does not exist in path, skipping\n";
-		return 'next';
-	}
-	if ( $mode =~ /^(real|wma)/ && (! main::exists_in_path('mplayer')) ) {
-		main::logger "\nWARNING: Required mplayer does not exist\n";
-		return 'next';
-	}
-	# Check if we have mplayer and lame
-	if ( $mode =~ /^real/ && (! $opt->{wav}) && (! $opt->{raw}) && (! main::exists_in_path('lame')) ) {
-		main::logger "\nWARNING: Required lame does not exist, will save file in wav format\n";
-		$opt->{wav} = 1;
-	}
-	# Check if we have vlc
-	if ( $mode =~ /^n95/ && (! main::exists_in_path('vlc')) ) {
-		main::logger "\nWARNING: Required vlc does not exist\n";
-		return 'next';
-	}
 	# if rtmpdump does not exist
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
 		main::logger "WARNING: Required rtmpdump does not exist - cannot download Flash audio/video\n";
@@ -8859,11 +8569,6 @@ sub download {
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 
 	# Nasty hacky filename ext overrides based on non-default fallback modes
-	# Override iphone ext from metadata which is wrong for radio
-	$prog->{ext} = 'mp3' if $mode =~ /^iphone/ && $prog->{type} eq 'radio';
-	# Override realaudio ext based on raw / wav
-	$prog->{ext} = 'ra'  if $opt->{raw} &&  $mode =~ /^real/;
-	$prog->{ext} = 'wav' if $opt->{wav} &&  $mode =~ /^real/;
 	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 	# Override flashaac ext
@@ -10474,219 +10179,6 @@ sub opt {
 }
 
 
-
-################### Streamer::iphone class #################
-package Streamer::iphone;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-
-
-# Generic
-# Get streaming iphone URL
-# More iphone stream data http://www.bbc.co.uk/json/stream/b0067vmx/iplayer_streaming_http_mp4?r=585330738351 HTTP/1.1
-# Capabilities based on IP address: http://www.bbc.co.uk/mobile/iplayer-mgw/damp/proxytodemi?ip=111.222.333.444
-# Category codes list: http://www.bbc.co.uk/mobile/iwiplayer/category_codes.php
-sub get_url {
-	shift;
-	my $ua = shift;
-	my $pid = shift;
-
-	# Look for href="http://download.iplayer.bbc.co.uk/iplayer_streaming_http_mp4/5439950172312621205.mp4?token=iVX.lots.of.text.x9Z%2F2GNBdQKl0%3D%0A&amp;pid=b00qhs36"
-	my $url;
-	my $iphone_download_prefix = 'http://www.bbc.co.uk/mobile/iplayer/episode';
-	my $url_0 = ${iphone_download_prefix}.'/'.${pid};
-	main::logger "INFO: iphone stream URL = $url_0\n" if $opt->{verbose};
-	my $safari_ua = main::create_ua( 'safari' );
-	my $html = main::request_url_retry( $safari_ua, $url_0, 3, undef, undef, 1 );
-	$html =~ s/\n/ /g;
-	# Check for guidance warning
-	my $guidance_post;
-	$guidance_post = $1 if $html =~ m{(isOver\d+)};
-	if ( $guidance_post ) {
-		my $h = new HTTP::Headers(
-			'User-Agent'		=> main::user_agent( 'coremedia' ),
-			'Accept'		=> '*/*',
-			'Accept-Language'	=> 'en',
-			'Connection'		=> 'keep-alive',
- 			'Pragma'		=> 'no-cache',
-		);
-		main::logger "INFO: Guidance '$guidance_post' Warning Detected\n" if $opt->{verbose};
-		# Now post this var and get html again
-		my $req = HTTP::Request->new('POST', $url_0, $h);
-		$req->content_type('application/x-www-form-urlencoded');
-		$req->content('form=guidanceprompt&'.$guidance_post.'=1');
-		my $res = $ua->request($req);
-		$html = $res->as_string;
-	}
-	$url = decode_entities($1) if $html =~ m{href="(http.//download\.iplayer\.bbc\.co\.uk/iplayer_streaming_http_mp4.+?)"};
-	main::logger "DEBUG: Got iphone mediaselector URL: $url\n" if $opt->{verbose};
-	
-	if ( ! $url ) {
-		main::logger "ERROR: Failed to get iphone URL from iplayer site\n\n";
-	}
-	return $url;
-}
-
-
-
-# %prog (only for %prog for mode and tagging)
-# Get the h.264/mp3 stream
-# ( $stream, $ua, $url_2, $prog )
-sub get {
-	my ( $stream, $ua, $url_2, $prog ) = @_;
-	my $childpid;
-	my $iphone_block_size	= 0x2000000; # 32MB
-
-	# Stage 3a: Download 1st byte to get exact file length
-	main::logger "INFO: Stage 3 URL = $url_2\n" if $opt->{verbose};
-
-	# Use url prepend if required
-	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
-		$url_2 = $opt->{proxy}.main::url_encode( $url_2 );
-		$url_2 =~ s/^prepend://g;
-	}
-
-	# Setup request header
-	my $h = new HTTP::Headers(
-		'User-Agent'	=> main::user_agent( 'coremedia' ),
-		'Accept'	=> '*/*',
-		'Range'		=> 'bytes=0-1',
-	);
-	# detect bad url => not available
-	if ( $url_2 !~ /^http:\/\// ) {
-		main::logger "WARNING: iphone version not available\n";
-		return 'next';
-	}
-	my $req = HTTP::Request->new ('GET', $url_2, $h);
-	my $res = $ua->request($req);
-	# e.g. Content-Range: bytes 0-1/181338136 (return if no content length returned)
-	my $download_len = $res->header("Content-Range");
-	if ( ! $download_len ) {
-		main::logger "WARNING: iphone version not available\n";
-		return 'retry';
-	}
-	$download_len =~ s|^bytes 0-1/(\d+).*$|$1|;
-	main::logger "INFO: Download File Length $download_len\n" if $opt->{verbose};
-
-	# Only do this if we're rearranging QT streams
-	my $mdat_start = 0;
-	# default (tells the download chunk loop where to stop - i.e. EOF instead of end of mdat atom)
-	my $moov_start = $download_len + 1;
-	my $header;
-
-	# If we have partial content and wish to stream, resume the recording & spawn off STDOUT from existing file start 
-	# Sanity check - we cannot support resuming of partial content if we're streaming also. 
-	if ( $opt->{stdout} && (! $opt->{nowrite}) && -f $prog->{filepart} ) {
-		main::logger "WARNING: Partially recorded file exists, streaming will start from the beginning of the programme\n";
-		# Don't do usual streaming code - also force all messages to go to stderr
-		delete $opt->{stdout};
-		$opt->{stderr} = 1;
-		$childpid = fork();
-		if (! $childpid) {
-			# Child starts here
-			main::logger "INFO: Streaming directly for partially recorded file $prog->{filepart}\n";
-			if ( ! open( STREAMIN, "< $prog->{filepart}" ) ) {
-				main::logger "INFO: Cannot Read partially recorded file to stream\n";
-				exit 4;
-			}
-			my $outbuf;
-			# Write out until we run out of bytes
-			my $bytes_read = 65536;
-			while ( $bytes_read == 65536 ) {
-				$bytes_read = read(STREAMIN, $outbuf, 65536 );
-				#main::logger "INFO: Read $bytes_read bytes\n";
-				print STDOUT $outbuf;
-			}
-			close STREAMIN;
-			main::logger "INFO: Stream thread has completed\n";
-			exit 0;
-		}
-	}
-
-	# Open file if required
-	my $fh = main::open_file_append($prog->{filepart});
-
-	# If the partial file already exists, then resume from the correct mdat/download offset
-	my $restart_offset = 0;
-	my $moovdata;
-	my $moov_length = 0;
-
-	# If we have a too-small-sized file (greater than moov_length+mdat_start) and not stdout and not no-write then this is a partial recording
-	if (-f $prog->{filepart} && (! $opt->{stdout}) && (! $opt->{nowrite}) && stat($prog->{filepart})->size > ($moov_length+$mdat_start) ) {
-		# Calculate new start offset (considering that we've put moov first in file)
-		$restart_offset = stat($prog->{filepart})->size - $moov_length;
-		main::logger "INFO: Resuming recording from $restart_offset                        \n";
-	}
-
-	# Not sure if this is already done in download method???
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-
-	# Start marker
-	my $start_time = time();
-
-	# Download mdat in blocks
-	my $chunk_size = $iphone_block_size;
-	for ( my $s = $restart_offset; $s < ${moov_start}-1; $s+= $chunk_size ) {
-		# get mdat chunk into file
-		my $retcode;
-		my $e;
-		# Get block end offset
-		if ( ($s + $chunk_size - 1) > (${moov_start}-1) ) {
-			$e = $moov_start - 1;
-		} else {
-			$e = $s + $chunk_size - 1;
-		}
-		# Get block from URL and append to $prog->{filepart}
-		if ( main::download_block($prog->{filepart}, $url_2, $ua, $s, $e, $download_len, $fh ) ) {
-			main::logger "\rERROR: Could not download block $s - $e from $prog->{filepart}\n\n";
-			return 'retry';
-		}
-	}
-
-	# Close fh
-	close $fh;
-
-	# end marker
-	my $end_time = time() + 0.0001;
-
-	# Calculate average speed, duration and total bytes recorded
-	main::logger sprintf("\rINFO: Recorded %.2fMB in %s at %5.0fkbps to %s\n", 
-		($moov_start - 1 - $restart_offset) / (1024.0 * 1024.0),
-		sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
-		( $moov_start - 1 - $restart_offset ) / ($end_time - $start_time) / 1024.0 * 8.0, 
-		$prog->{filename} );
-
-	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
-
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
-	return 0;
-}
-
-
-
 ################### Streamer::rtmp class #################
 package Streamer::rtmp;
 
@@ -10876,21 +10368,6 @@ sub get {
 		}
 		return 0;
 
-	# Convert flv to mp3/aac
-	} elsif ( $mode =~ /^flashaudio/ ) {
-		# We could do id3 tagging here with ffmpeg but id3v2 does this later anyway
-		# This fails
-		# $cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -vn -acodec copy -y \"$prog->{filepart}\" 1>&2";
-		# This works but it's really bad bacause it re-transcodes mp3 and takes forever :-(
-		# $cmd = "$bin->{ffmpeg} -i \"$file_tmp\" -acodec libmp3lame -ac 2 -ab 128k -vn -y \"$prog->{filepart}\" 1>&2";
-		# At last this removes the flv container and dumps the mp3 stream! - mplayer dumps core but apparently succeeds
-		@cmd = (
-			$bin->{mplayer},
-			@{ $binopts->{mplayer} },
-			'-dumpaudio',
-			$file_tmp,
-			'-dumpfile', $prog->{filepart},
-		);
 	# Convert flv to aac/mp4a/mp3
 	} elsif ( $mode =~ /flashaac/ ) {
 		# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
@@ -11337,592 +10814,6 @@ sub get {
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
 	main::logger "INFO: Recorded $prog->{filename}  $prog->{filepart}\n";
-	return 0;
-}
-
-
-package Streamer::rtsp;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-
-# %prog (only for lame id3 tagging and {mode})
-# Actually do the rtsp streaming
-sub get {
-	my ( $stream, $ua, $url, $prog ) = @_;
-	my $childpid;
-
-	# get bandwidth options value
-	# Download bandwidth bps used for rtsp streams
-	my $bandwidth = $opt->{bandwidth} || 512000;
-
-	# Parse/recurse playlist if required to get mms url
-	$url = main::get_playlist_url( $ua, $url, 'rtsp' );
-
-	# Add stop and start if defined
-	# append: ?start=5400&end=7400 or &start=5400&end=7400
-	if ( $opt->{start} || $opt->{stop} ) {
-		# Make sure we add the correct separator for adding to the rtsp url
-		my $prefix_char = '?';
-		$prefix_char = '&' if $url =~ m/\?.+/;
-		if ( $opt->{start} && $opt->{stop} ) {
-			$url .= "${prefix_char}start=$opt->{start}&end=$opt->{stop}";
-		} elsif ( $opt->{start} && not $opt->{stop} ) {
-			$url .= "${prefix_char}start=$opt->{start}";
-		} elsif ( $opt->{stop} && not $opt->{start} ) {
-			$url .= "${prefix_char}end=$opt->{stop}";
-		}
-	}
-	
-	# Create named pipe
-	if ( $^O !~ /^MSWin32$/ ) {
-		mkfifo($namedpipe, 0700);
-	} else {
-		main::logger "WARNING: fifos/named pipes are not supported - only limited output modes will be supported\n";
-	}
-	
-	main::logger "INFO: RTSP URL = $url\n" if $opt->{verbose};
-
-	# Create ID3 tagging options for lame (escape " for shell)
-	my ( $id3_name, $id3_episode, $id3_desc, $id3_channel ) = ( $prog->{name}, $prog->{episode}, $prog->{desc}, $prog->{channel} );
-	s|"|\\"|g for ($id3_name, $id3_episode, $id3_desc, $id3_channel);
-	$binopts->{lame} .= " --ignore-tag-errors --ty ".( (localtime())[5] + 1900 )." --tl \"$id3_name\" --tt \"$id3_episode\" --ta \"$id3_channel\" --tc \"$id3_desc\" ";
-
-	# Use post-streaming transcoding using lame if namedpipes are not supported (i.e. ActivePerl/Windows)
-	# (Fallback if no namedpipe support and raw/wav not specified)
-	if ( ( ! -p $namedpipe ) && ! ( $opt->{raw} || $opt->{wav} ) ) {
-			my @cmd;
-			# Remove filename extension
-			$prog->{filepart} =~ s/\.mp3$//gi;
-			# Remove named pipe
-			unlink $namedpipe;
-			main::logger "INFO: Recording wav format (followed by transcoding)\n";
-			my $wavfile = "$prog->{filepart}.wav";
-			# Strip off any leading drivename in win32 - mplayer doesn't like this for pcm output files
-			$wavfile =~ s|^[a-zA-Z]:||g;
-			@cmd = (
-				$bin->{mplayer},
-				@{ $binopts->{mplayer} },
-				'-cache', 128,
-				'-bandwidth', $bandwidth,
-				'-vc', 'null',
-				'-vo', 'null',
-				'-ao', "pcm:waveheader:fast:file=\"$wavfile\"",
-				$url,
-			);
-			# Create symlink if required
-			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.wav" ) if $opt->{symlink};
-			if ( main::run_cmd( 'STDERR', @cmd ) ) {
-				unlink $prog->{symlink};
-				return 'next';
-			}
-			# Transcode
-			main::logger "INFO: Transcoding $prog->{filepart}.wav\n";
-			my $cmd = "$bin->{lame} $binopts->{lame} \"$prog->{filepart}.wav\" \"$prog->{filepart}.mp3\" 1>&2";
-			main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-			# Create symlink if required
-			$prog->create_symlink( $prog->{symlink}, "$prog->{filepart}.mp3" ) if $opt->{symlink};		
-			if ( system($cmd) || (-f "$prog->{filepart}.wav" && stat("$prog->{filepart}.wav")->size < $prog->min_download_size()) ) {
-				unlink $prog->{symlink};
-				return 'next';
-			}
-			unlink "$prog->{filepart}.wav";
-			move "$prog->{filepart}.mp3", $prog->{filename};
-			$prog->{ext} = 'mp3';
-		
-	} elsif ( $opt->{wav} && ! $opt->{stdout} ) {
-		main::logger "INFO: Writing wav format\n";
-		my $wavfile = $prog->{filepart};
-		# Strip off any leading drivename in win32 - mplayer doesn't like this for pcm output files
-		$wavfile =~ s|^[a-zA-Z]:||g;
-		# Start the mplayer process and write to wav file
-		my @cmd = (
-			$bin->{mplayer},
-			@{ $binopts->{mplayer} },
-			'-cache', 128,
-			'-bandwidth', $bandwidth,
-			'-vc', 'null',
-			'-vo', 'null',
-			'-ao', "pcm:waveheader:fast:file=\"$wavfile\"",
-			$url,
-		);
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
-			unlink $prog->{symlink};
-			return 'next';
-		}
-		# Move file to done state
-		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
-
-	# No transcoding if --raw was specified
-	} elsif ( $opt->{raw} && ! $opt->{stdout} ) {
-		# Write out to .ra ext instead (used on fallback if no fifo support)
-		main::logger "INFO: Writing raw realaudio stream\n";
-		# Start the mplayer process and write to raw file
-		my @cmd = (
-			$bin->{mplayer},
-			@{ $binopts->{mplayer} },
-			'-cache', 128,
-			'-bandwidth', $bandwidth,
-			'-dumpstream',
-			'-dumpfile', $prog->{filepart},
-			$url,
-		);
-		# Create symlink if required
-		$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};		
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
-			unlink $prog->{symlink};
-			return 'next';
-		}
-		# Move file to done state
-		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
-
-	# Fork a child to do transcoding on the fly using a named pipe written to by mplayer
-	# Use transcoding via named pipes
-	} elsif ( -p $namedpipe )  {
-		$childpid = fork();
-		if (! $childpid) {
-			# Child starts here
-			$| = 1;
-			main::logger "INFO: Transcoding $prog->{filepart}\n";
-
-			# Stream mp3 to file and stdout simultaneously
-			if ( $opt->{stdout} && ! $opt->{nowrite} ) {
-				# Create symlink if required
-				$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-				if ( $opt->{wav} || $opt->{raw} ) {
-					# Race condition - closes named pipe immediately unless we wait
-					sleep 5;
-					# Create symlink if required
-					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-					main::tee($namedpipe, $prog->{filepart});
-					#system( "cat $namedpipe 2>/dev/null| $bin->{tee} $prog->{filepart}");
-				} else {
-					my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null| $bin->{tee} \"$prog->{filepart}\"";
-					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-					# Create symlink if required
-					$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-					system($cmd);
-				}
-
-			# Stream mp3 stdout only
-			} elsif ( $opt->{stdout} && $opt->{nowrite} ) {
-				if ( $opt->{wav} || $opt->{raw} ) {
-					sleep 5;
-					main::tee($namedpipe);
-					#system( "cat $namedpipe 2>/dev/null");
-				} else {
-					my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null";
-					main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-					system( "$bin->{lame} $binopts->{lame} \"$namedpipe\" - 2>/dev/null");
-				}
-
-			# Stream mp3 to file directly
-			} elsif ( ! $opt->{stdout} ) {
-				my $cmd = "$bin->{lame} $binopts->{lame} \"$namedpipe\" \"$prog->{filepart}\" >/dev/null 2>/dev/null";
-				main::logger "DEGUG: Running $cmd\n" if $opt->{debug};
-				# Create symlink if required
-				$prog->create_symlink( $prog->{symlink}, $prog->{filepart} ) if $opt->{symlink};
-				system($cmd);
-			}
-			# Remove named pipe
-			unlink $namedpipe;
-
-			# Move file to done state
-			move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename} && ! $opt->{nowrite};
-			main::logger "INFO: Transcoding thread has completed\n";
-			# Re-symlink if required
-			$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-			exit 0;
-		}
-		# Start the mplayer process and write to named pipe
-		# Raw mode
-		if ( $opt->{raw} ) {
-			my @cmd = (
-				$bin->{mplayer},
-				@{ $binopts->{mplayer} },
-				'-cache', 32,
-				'-bandwidth', $bandwidth,
-				'-dumpstream',
-				'-dumpfile', $namedpipe,
-				$url,
-			);
-			if ( main::run_cmd( 'STDERR', @cmd ) ) {
-				# If we fail then kill off child processes
-				kill 9, $childpid;
-				unlink $prog->{symlink};
-				return 'next';
-			}
-		# WAV / mp3 mode - seems to fail....
-		} else {
-			my @cmd = (
-				$bin->{mplayer},
-				@{ $binopts->{mplayer} },
-				'-cache', 128,
-				'-bandwidth', $bandwidth,
-				'-vc', 'null',
-				'-vo', 'null',
-				'-ao', "pcm:waveheader:fast:file=$namedpipe",
-				$url,
-			);
-			if ( main::run_cmd( 'STDERR', @cmd ) ) {
-				# If we fail then kill off child processes
-				kill 9, $childpid;
-				unlink $prog->{symlink};
-				return 'next';
-			}
-		}
-		# Wait for child processes to prevent zombies
-		wait;
-
-		unlink $namedpipe;
-	} else {
-		main::logger "ERROR: Unsupported method of download on this platform\n";
-		return 'next';
-	}
-
-	main::logger "INFO: Recorded $prog->{filename}\n";
-	# Re-symlink if required
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
-	return 0;
-}
-
-
-
-
-package Streamer::mms;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-
-
-# %prog (only used for {mode} and generating multi-part file prefixes)
-# Actually do the MMS video streaming
-sub get {
-	my ( $stream, $ua, $urls, $prog ) = @_;
-	my $file_tmp;
-	my $cmd;
-	my @url_list = split /\|/, $urls;
-	my @file_tmp_list;
-	my %threadpid;
-	my $retries = $opt->{attempts} || 3;
-
-	main::logger "INFO: MMS_URLs: ".(join ', ', @url_list).", file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
-
-	if ( $opt->{stdout} ) {
-		main::logger "ERROR: stdout streaming isn't supported for mms streams\n";
-		return 'next';
-	}
-
-	# Start marker
-	my $start_time = time();
-	# Download each mms url (multi-threaded to stream in parallel)
-	my $file_part_prefix = "$prog->{dir}/$prog->{fileprefix}_part";
-	for ( my $count = 0; $count <= $#url_list; $count++ ) {
-		
-		# Parse/recurse playlist if required to get mms url
-		$url_list[$count] = main::get_playlist_url( $ua, $url_list[$count], 'mms' );
-
-		# Create temp recording filename
-		$file_tmp = sprintf( "%s%02d.".$prog->{ext}, $file_part_prefix, $count+1);
-		$file_tmp_list[$count] = $file_tmp;
-		#my $null;
-		#$null = '-really-quiet' if ! $opt->{quiet};
-		# Can also use 'mencoder mms://url/ -oac copy -ovc copy -o out.asf' - still gives zero exit code on failed stream...
-		# Can also use $bin->{vlc} --sout file/asf:\"$file_tmp\" \"$url_list[$count]\" vlc://quit
-		# The vlc cmd does not quit of there is an error - it just hangs
-		# $cmd = "$bin->{mplayer} $binopts->{mplayer} -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" $null 1>&2";
-		# Use backticks to invoke mplayer and grab all output then grep for 'read error'
-		# problem is that the following output is given by mplayer at the end of liong streams:
-		#read error:: Operation now in progress
-		#pre-header read failed
-		#Core dumped ;)
-		#vo: x11 uninit called but X11 not initialized..
-		#
-		#Exiting... (End of file)
-		$cmd = "\"$bin->{mplayer}\" ".(join ' ', @{ $binopts->{mplayer} } )." -dumpstream \"$url_list[$count]\" -dumpfile \"$file_tmp\" 2>&1";
-		$cmd = main::encode_fs($cmd);
-		main::logger "INFO: Command: $cmd\n" if $opt->{verbose};
-
-		# fork streaming threads
-		if ( not $opt->{mmsnothread} ) {
-			my $childpid = fork();
-			if (! $childpid) {
-				# Child starts here
-				main::logger "INFO: Streaming to file $file_tmp\n";
-				# Remove old file
-				unlink $file_tmp;
-				# Retry loop
-				my $retry = $retries;
-				while ($retry) {
-					my $cmdoutput = `$cmd`;
-					my $exitcode = $?;
-					main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
-					# Assume file is fully downloaded if > 10MB and we get an error reported !!!
-					if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $prog->min_download_size()*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
-						# Failed, retry
-						main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
-						$retry--;
-					} else {
-						# Successfully streamed
-						main::logger "INFO: Streaming thread has completed for file $file_tmp\n";
-						exit 0;
-					}
-				}
-				main::logger "ERROR: Record thread failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
-				move $file_tmp, "${file_tmp}.failed";
-				exit 1;
-			}
-			# Create a hash of process_id => 'count'
-			$threadpid{$childpid} = $count;
-
-		# else stream each part in turn
-		} else {
-			# Child starts here
-			main::logger "INFO: Recording file $file_tmp\n";
-			# Remove old file
-			unlink $file_tmp;
-			# Retry loop
-			my $retry = $retries;
-			my $done = 0;
-			while ( $retry && not $done ) {
-				my $cmdoutput = `$cmd`;
-				my $exitcode = $?;
-				main::logger "DEBUG: Command '$cmd', Output:\n$cmdoutput\n\n" if $opt->{debug};
-				# Assume file is fully downloaded if > 10MB and we get an error reported !!!
-				if ( ( -f $prog->{filename} && stat($prog->{filename})->size < $prog->min_download_size()*10.0 && grep /(read error|connect error|Failed, exiting)/i, $cmdoutput ) || $exitcode ) {
-				#if ( grep /(read error|connect error|Failed, exiting)/i, $cmdoutput || $exitcode ) {
-					# Failed, retry
-					main::logger "DEBUG: Trace of failed command:\n####################\n${cmdoutput}\n####################\n" if $opt->{debug};
-					main::logger "WARNING: Failed, retrying to stream $file_tmp, exit code: $exitcode\n";
-					$retry--;
-				} else {
-					# Successfully downloaded
-					main::logger "INFO: Streaming has completed to file $file_tmp\n";
-					$done = 1;
-				}
-			} 
-			# if the programme part failed after a few retries...
-			if (not $done) {
-				main::logger "ERROR: Recording failed after $retries retries for $file_tmp (renamed to ${file_tmp}.failed)\n";
-				move $file_tmp, "${file_tmp}.failed";
-				return 'next';
-			}
-		} 
-	}
-
-	# If doing a threaded streaming, monitor the progress and thread completion
-	if ( not $opt->{mmsnothread} ) {
-		# Wait for all threads to complete
-		$| = 1;
-		# Autoreap zombies
-		$SIG{CHLD}='IGNORE';
-		my $done = 0;
-		my $done_symlink;
-		while (keys %threadpid) {
-			my @sizes;
-			my $total_size = 0;
-			my $total_size_new = 0;
-			my $format = "Threads: ";
-			sleep 1;
-			#main::logger "DEBUG: ProcessIDs: ".(join ',', keys %threadpid)."\n";
-			for my $procid (sort keys %threadpid) {
-				my $size = 0;
-				# Is this child still alive?
-				if ( kill 0 => $procid ) {
-					main::logger "DEBUG Thread $threadpid{$procid} still alive ($file_tmp_list[$threadpid{$procid}])\n" if $opt->{debug};
-					# Build the status string
-					$format .= "%d) %.3fMB   ";
-					$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
-					push @sizes, $threadpid{$procid}+1, $size/(1024.0*1024.0);
-					$total_size_new += $size;
-					# Now create a symlink if this is the first part and size > $prog->min_download_size()
-					if ( $threadpid{$procid} == 0 && $done_symlink != 1 && $opt->{symlink} && $size > $prog->min_download_size() ) {
-						# Symlink to file if only one part or to dir if multi-part
-						if ( $#url_list ) {
-							$prog->create_symlink( $prog->{symlink}, $prog->{dir} );
-						} else {
-							$prog->create_symlink( $prog->{symlink}, $file_tmp_list[$threadpid{$procid}] );
-						}
-						$done_symlink = 1;
-					}
-				# Thread has completed/failed
-				} else {
-					$size = stat($file_tmp_list[$threadpid{$procid}])->size if -f $file_tmp_list[$threadpid{$procid}];
-					# end marker
-					my $end_time = time() + 0.0001;
-					# Calculate average speed, duration and total bytes downloaded
-					main::logger sprintf("INFO: Thread #%d Recorded %.2fMB in %s at %5.0fkbps to %s\n", 
-						($threadpid{$procid}+1),
-						$size / (1024.0 * 1024.0),
-						sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ), 
-						$size / ($end_time - $start_time) / 1024.0 * 8.0,
-						$file_tmp_list[$threadpid{$procid}] );
-					# Remove from thread test list
-					delete $threadpid{$procid};
-				}
-			}
-			$format .= " recorded (%.0fkbps)        \r";
-			main::logger sprintf $format, @sizes, ($total_size_new - $total_size) / (time() - $start_time) / 1024.0 * 8.0 unless $opt->{quiet};
-		}
-		main::logger "INFO: All streaming threads completed\n";	
-		# Unset autoreap
-		delete $SIG{CHLD};
-	}
-	# If not all files > min_size then assume streaming failed
-	for (@file_tmp_list) {
-		# If file doesnt exist or too small then skip
-		if ( (! -f $_) || ( -f $_ && stat($_)->size < $prog->min_download_size() ) ) {
-			main::logger "ERROR: Recording of programme failed, skipping\n" if $opt->{verbose};
-			return 'next';
-		}
-	}
-	if ( $#file_tmp_list == 0 ) {
-		$prog->check_duration($file_tmp_list[0]) if $opt->{checkduration} && $prog->{type} !~ /live/;
-	}
-
-#	# Retain raw format if required
-#	if ( $opt->{raw} ) {
-#		# Create symlink to first part file
-#		$prog->create_symlink( $prog->{symlink}, $file_tmp_list[0] ) if $opt->{symlink};
-#		return 0;
-#	}
-#
-#	# Convert video asf to mp4 if required - need to find a suitable converter...
-#	} else {
-#		# Create part of cmd that specifies each partial file
-#		my $filestring;
-#		$filestring .= " -i \"$_\" " for (@file_tmp_list);
-#		$cmd = "$bin->{ffmpeg} $binopts->{ffmpeg} $filestring -vcodec copy -acodec copy -f $prog->{ext} -y \"$prog->{filepart}\" 1>&2";
-#	}
-#
-#	main::logger "INFO: Command: $cmd\n\n" if $opt->{verbose};
-#	# Run asf conversion and delete source file on success
-#	if ( ! system($cmd) ) {
-#		unlink( @file_tmp_list );
-#	} else {
-#		main::logger "ERROR: asf conversion failed - retaining files ".(join ', ', @file_tmp_list)."\n";
-#		return 2;
-#	}
-#	# Moving file into place as complete (if not stdout)
-#	move($prog->{filepart}, $prog->{filename}) if ! $opt->{stdout};
-#	# Create symlink if required
-#	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-	return 0;
-}
-
-
-
-package Streamer::3gp;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-
-# Generic
-# Actually do the 3gp / N95 h.264 streaming
-sub get {
-	my ( $stream, $ua, $url, $prog ) = @_;
-
-	# Resolve URL if required
-	if ( $url =~ /^http/ ) {
-		my $url1 = main::request_url_retry($ua, $url, 2, '', '');
-		chomp($url1);
-		$url = $url1;
-	}
-
-	my @opts;
-	@opts = @{ $binopts->{vlc} } if $binopts->{vlc};
-
-	main::logger "INFO: URL = $url\n" if $opt->{verbose};
-	if ( ! $opt->{stdout} ) {
-		main::logger "INFO: Recording Low Quality H.264 stream\n";
-		my @cmd = (
-			$bin->{vlc},
-			@opts,
-			'--sout', 'file/ts:'.$prog->{filepart},
-			$url,
-			'vlc://quit',
-		);
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
-			return 'next';
-		}
-
-	# to STDOUT
-	} else {
-		main::logger "INFO: Streaming Low Quality H.264 stream to stdout\n";
-		my @cmd = (
-			$bin->{vlc},
-			@opts,
-			'--sout', 'file/ts:-',
-			$url,
-			'vlc://quit',
-		);
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
-			return 'next';
-		}
-	}
-	main::logger "INFO: Recorded $prog->{filename}\n";
-	# Moving file into place as complete (if not stdout)
-	move($prog->{filepart}, $prog->{filename}) if $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout};
-
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
 	return 0;
 }
 
