@@ -7642,7 +7642,6 @@ sub get_stream_data {
 							}
 							my $prefix;
 							$prefix = "hlx" if $iptv_conn->{supplier} =~ /hls_open/;
-							$prefix = "hls" if $version eq "audiodescribed";
 							my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
 							for my $hls_media ( @hls_medias ) {
 								for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7695,7 +7694,6 @@ sub get_stream_data {
 						}
 						my $prefix;
 						$prefix = "hlx" if $mobile_conn->{supplier} =~ /hls_open/;
-						$prefix = "hls" if $version eq "audiodescribed";
 						my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
 						for my $hls_media ( @hls_medias ) {
 							for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7711,6 +7709,28 @@ sub get_stream_data {
 								last;
 							}
 						}
+					}
+				}
+			}
+			# ensure both hls and hlx streams for AD programmes
+			if ( $version eq "audiodescribed" ) {
+				my @hls_ad = grep { $_->{service} =~ /hls/ } @medias;
+				my @hlx_ad = grep { $_->{service} =~ /hlx/ } @medias;
+				my ($hls1, $pfx1, $pfx2);
+				if ( @hls_ad && ! @hlx_ad ) {
+					$hls1 = \@hls_ad;
+					$pfx1 = "hls";
+					$pfx2 = "hlx";
+				} elsif ( ! @hls_ad && @hlx_ad ) {
+					$hls1 = \@hlx_ad;
+					$pfx1 = "hlx";
+					$pfx2 = "hls";
+				}
+				if ( $hls1 ) {
+					for my $hls ( @{$hls1} ) {
+						my $copy = dclone($hls);
+						$copy->{service} =~ s/$pfx1/$pfx2/;
+						push @medias, $copy;
 					}
 				}
 			}
