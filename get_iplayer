@@ -6031,42 +6031,6 @@ sub get_metadata {
 		}
 	}
 
-	my @default_versions = $prog->default_version_list();
-	# incorporate unknown versions
-	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		if ( ! grep /^${version}$/, @default_versions ) {
-			push @default_versions, $version;
-		}
-	}
-	
-	# use first/longest available variants, ensure default version if possible
-	for my $version ( @default_versions ) {
-		next if $version =~ /(audiodescribed|signed)/;
-		next if ! $modes->{$version};
-		my $base_version = "default";
-		if ( ! $modes->{$base_version} ) {
-			main::logger "INFO: Using '$version' version ($prog->{verpids}->{$version}) as '$base_version'\n" if $version ne "default" && $opt->{verbose};
-			$modes->{$base_version} = $modes->{$version};
-			$mode_sizes->{$base_version} = $mode_sizes->{$version};
-			for my $key ( @fields1 ) {
-				$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
-			}
-			if ( $prog->{firstbcast}->{$version} ) {
-				for my $key ( @fields2 ) {
-					$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
-				}
-			}
-			# delete $modes->{$version};
-			# delete $mode_sizes->{$version};
-			# for my $key ( @fields1, @fields2 ) {
-			# 	delete $prog->{$key}->{$version};
-			# }
-		}
-	}
-	if ( ! $modes->{default} ) {
-		main::logger "WARNING: The 'default' programme version could not be determined for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
-	}
-
 	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		main::logger "WARNING: No programme versions found\n";
