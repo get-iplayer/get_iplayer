@@ -8421,7 +8421,9 @@ sub get_links_schedule_page {
 		next if ! $future && $available > $now;
 		next if $future && $available <= $now;
 		$until_str = $1 if $entry =~ m{<available_until>(.*?)</available_until>};
-		next if ! $future && ! $until_str;
+		if ( ! $until_str ) {
+			$until_str = $1 if $entry =~ m{<expires>(.*?)</expires>};
+		}
 		if ( ! $future ) {
 			$max_expires = $expires = $available + $thirty_days;
 			if ( $until_str ) {
