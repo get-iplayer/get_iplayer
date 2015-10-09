@@ -1555,8 +1555,8 @@ sub run_cmd {
 	my @cmd = ( @_ );
 	my $direct = grep(/$opt_cmdline->{ffmpeg}/, @cmd);
 	my $stream = grep(/stream%3D1/, @cmd);
-	my $is_tv = grep(/type%3D(live)?tv/, @cmd);
-	my $filter_ffmpeg_progress = (! $stream && $is_tv);
+	my $is_hls = grep(/modes%3Dhl(s|x)/, @cmd);
+	my $is_live = grep(/type%3Dlive/, @cmd);
 	my $stdout_raw = ($direct || $stream);
 	my $rtn;
 
@@ -1645,18 +1645,23 @@ sub run_cmd {
 			my $bytes;
 			# Assume that we don't want to buffer STDERR output of the command
 			$size = 1;
-			if ( $filter_ffmpeg_progress ) {
+			if ( ( $is_hls || $is_live ) && ! $stream ) {
 				my ($count, $buf);
 				while ( $bytes = read( $err, $char, $size ) ) {
 					if ( $bytes <= 0 ) {
 						print $se "DEBUG: STDERR fd closed - exiting thread\n";
 						exit 0;
 					} else {
-						if ( $char =~ /[\r\n]/ ) {
+						if ( $char eq "#" ) {
+							print $fh_cmd_err $char;
+						} elsif ( $char =~ /[\r\n]/ ) {
 							if ( $buf =~ /size=/ ) {
-								print $fh_cmd_err "$buf\n" if ! ($count++ % 10);
+								$count++;
+								print $fh_cmd_err "#";
+								print $fh_cmd_err "\n" if ! ($count % 100);
 							} else {
-								print $fh_cmd_err "$buf\n";
+								print $fh_cmd_err $buf;
+								print $fh_cmd_err "\n";
 							}
 							$buf = '';
 						} else {
