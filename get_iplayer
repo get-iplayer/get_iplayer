@@ -4424,7 +4424,7 @@ sub download_retry_loop {
 				# If multimode is used, skip only modes which are in the history
 				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
 
-				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
+				main::logger "INFO: Trying $mode mode to ".($opt->{nowrite} ? "stream" : "record")." $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
@@ -4899,7 +4899,9 @@ sub generate_filenames {
 		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
-	main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
+	if ( ! $opt->{nowrite} ) {
+		main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
+	}
 
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
@@ -10522,7 +10524,9 @@ sub get {
 		push @cmd, ( '-f', 'mpegts', 'pipe:1' );
 	}
 	
-	main::logger "INFO: Begin recording $prog->{filename}\n";
+	if ( ! $opt->{nowrite} ) {
+		main::logger "INFO: Begin recording $prog->{filename}\n";
+	}
 
 	$return = main::run_cmd( 'normal', @cmd );
 
@@ -10714,7 +10718,9 @@ sub get {
 		push @cmd, ( '-f', 'adts', 'pipe:1' );
 	}
 	
-	main::logger "INFO: Begin recording $prog->{filename}\n";
+	if ( ! $opt->{nowrite} ) {
+		main::logger "INFO: Begin recording $prog->{filename}\n";
+	}
 
 	$return = main::run_cmd( 'normal', @cmd );
 
