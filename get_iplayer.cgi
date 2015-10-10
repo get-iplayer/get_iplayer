@@ -3329,7 +3329,7 @@ sub search_progs {
 		{
 			-class => 'action'.$add_search_class_suffix,
 			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-			-onClick => "var version = '$opt->{VERSIONLIST}->{current}'; if ('$opt->{SEARCH}->{current}' == '.*' && $num_adv_srch == 0 && version.toLowerCase().indexOf('default') != -1) { alert('Search = .* will download all available programmes.  Please enter a more specific search term or additional advanced search criteria (excluding $opt->{FUTURE}->{title}).'); return false; } if ('$opt->{SEARCH}->{current}' == '' ) { alert('Please enter a search term. Use Search = .* to record all programmes matching advanced search criteria.'); return false; } if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; }  BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if ('$opt->{SEARCH}->{current}' == '.*' && $num_adv_srch == 0) { alert('Search = .* will download all available programmes.  Please enter a more specific search term or additional advanced search criteria (excluding $opt->{VERSIONLIST}->{title} and $opt->{FUTURE}->{title}).'); return false; } if ('$opt->{SEARCH}->{current}' == '' ) { alert('Please enter a search term. Use Search = .* to record all programmes matching advanced search criteria.'); return false; } if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; }  BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
 		},
 		'Add Search to PVR'
 	);
@@ -3737,7 +3737,7 @@ sub process_params {
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
-		default	=> 'default', # default
+		default	=> '', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
@@ -3770,7 +3770,7 @@ sub process_params {
 		webvar	=> 'VERSIONLIST', # webvar
 		optkey	=> 'versionlist', # option
 		type	=> 'text', # type
-		default	=> 'default', # default
+		default	=> '', # default
 		value	=> 30, # width values
 		save	=> 1,
 	};
