@@ -10310,6 +10310,10 @@ sub get {
 		);
 	}
 
+	if ( ! $opt->{nowrite} ) {
+		main::logger "INFO: Begin recording file: $prog->{filename}\n";
+	}
+
 	$return = main::run_cmd( 'normal', @cmd );
 
 	# exit behaviour when streaming
@@ -10410,7 +10414,9 @@ sub get {
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
-	main::logger "\nINFO: Recorded $prog->{filename}\n";
+	if ( ! $opt->{nowrite} ) {
+		main::logger "\nINFO: Recorded file: $prog->{filename}\n";
+	}
 	return 0;
 }
 
@@ -10719,7 +10725,7 @@ sub get {
 	}
 	
 	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording $prog->{filename}\n";
+		main::logger "INFO: Begin recording file: $prog->{filename}\n";
 	}
 
 	$return = main::run_cmd( 'normal', @cmd );
@@ -10798,7 +10804,9 @@ sub get {
 	# Re-symlink file
 	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 
-	main::logger "\nINFO: Recorded $prog->{filename}  $prog->{filepart}\n";
+	if ( ! $opt->{nowrite} ) {
+		main::logger "\nINFO: Recorded file: $prog->{filename}\n";
+	}
 	return 0;
 }
 
