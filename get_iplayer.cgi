@@ -1668,7 +1668,10 @@ sub run_cmd {
 							$buf .= $char;
 						}
 					}
-					last if $bytes < $size;
+					if ( $bytes < $size ) {
+						print $fh_cmd_err "$buf\n" if $buf;
+						last;
+					}
 				}
 			} else {
 				while ( $bytes = read( $err, $char, $size ) ) {
