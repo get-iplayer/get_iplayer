@@ -124,7 +124,7 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  TV modes typically have two streams available."],
-	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them."],
+	checkduration		=> [ 1, "checkduration|check-duration!", 'Recording', '--check-duration', "Print message showing recorded duration, expected duration and difference between them. Ignored when recording live streams."],
 	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <suppliers>', "Comma-delimited list of media stream suppliers to skip.  Possible values: level3,akamai,limelight,bidi,mf_akamai,mf_limelight,mf_bidi"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
@@ -4332,7 +4332,7 @@ sub download_retry_loop {
 				# If multimode is used, skip only modes which are in the history
 				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
 
-				main::logger "INFO: Trying $mode mode to ".($opt->{nowrite} ? "stream" : "record")." $prog->{type}: $prog->{name} - $prog->{episode}\n";
+				main::logger "INFO: Trying $mode mode to ".($opt->{nowrite} && $opt->{stdout} ? "stream" : "record")." $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
@@ -4364,17 +4364,22 @@ sub mode_ver_download_retry_loop {
 	# Use different number of retries for flash modes
 	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
+	# can only resume on retries unless live or streaming-only
+	delete $opt->{hlsresume} unless $prog->{type} =~ /live/ || ( $opt->{nowrite} && $opt->{stdout} );
+
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
 
 		# for live streams update <dldate> and <dltime> for each download attempt
-		# creates new output file if <dldate> or <dltime> in <fileprefix>
+		# force new output file with <dldate> or <dltime> in <fileprefix>
 		if ( $prog->{type} =~ /live/ ) {
 			my @t = localtime();
 			$prog->{dldate} = sprintf "%02s-%02s-%02s", $t[5] + 1900, $t[4] + 1, $t[3];
 			$prog->{dltime} = sprintf "%02s:%02s:%02s", $t[2], $t[1], $t[0];
+			undef $prog->{filename};
 		}
+
 		$retcode = $prog->download( $ua, $mode, $version, $version_pid );
 		main::logger "DEBUG: Record using $mode mode return code: '$retcode'\n" if $opt->{verbose};
 
@@ -4397,7 +4402,7 @@ sub mode_ver_download_retry_loop {
 		# Success
 		} elsif ( $retcode eq '0' ) {
 			# No need to do all these post-tasks if its streaming-only
-			if ( $opt->{stdout} ) {
+			if ( $opt->{nowrite} && $opt->{stdout} ) {
 				# Run user command if streaming-only or a stream was writtem
 				$prog->run_user_command( $opt->{command} ) if $opt->{command};
 				# Skip
@@ -4425,7 +4430,7 @@ sub mode_ver_download_retry_loop {
 
 		# Retry this mode
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
-			main::logger "WARNING: Retry recording for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+			main::logger "WARNING: Retry ".( ! $opt->{nowrite} ? "recording" : "streaming")." for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
 			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version );
 		}
@@ -4766,6 +4771,9 @@ sub generate_filenames {
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	# Don't allow <mode> in fileprefix as it can break when resumes fallback on differently numbered modes of the same type change for <modeshort>
 	$prog->{fileprefix} =~ s/<mode>/<modeshort>/g;
+	if ( $prog->{type} =~ /live/ && $prog->{fileprefix} !~ /<dldate> <dltime>/ ) {
+		$prog->{fileprefix} .= " <dldate> <dltime>";
+	}
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
 	$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
 
@@ -4810,7 +4818,7 @@ sub generate_filenames {
 	}
 
 	if ( ! $opt->{nowrite} ) {
-		main::logger("\rINFO: File name prefix = $prog->{fileprefix}                 \n");
+		main::logger("INFO: File name prefix = $prog->{fileprefix}                 \n");
 	}
 
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
@@ -5096,28 +5104,40 @@ sub download_thumbnail {
 	return 0;
 }
 
-
-sub check_duration {
-	my $prog = shift;
-	my $filename = shift || $prog->{filename};
-	return unless $prog->{duration} && $filename;
+sub get_duration {
+	my ($prog, $filename) = @_;
+	return -1 unless ( -f $filename );
+	my $duration = -1;
 	my $cmd = "\"$bin->{ffmpeg}\" -i \"$filename\" 2>&1";
 	$cmd = main::encode_fs($cmd);
 	my $ffout = `$cmd`;
 	if ( $ffout =~ /duration:\s+((\d+):(\d\d):(\d\d))/i ) {
+		$duration = ($2 * 3600) + ($3 * 60) + $4;
+	}
+	return $duration;
+}
+
+sub check_duration {
+	my $prog = shift;
+	my $filename = shift || $prog->{filename};
+	my $recorded_s = $prog->get_duration($filename);
+	if ( $recorded_s >= 0 ) {
 		my $expected_s = $prog->{duration};
 		if ( $opt->{start} && ! $opt->{stop} ) {
 			$expected_s -= $opt->{start};
 		} elsif ( $opt->{stop} ) {
 			$expected_s = $opt->{stop} - $opt->{start};
 		}
-		my $expected = sprintf("%02d:%02d:%02d", $expected_s / 3600, ($expected_s % 3600) / 60, $expected_s % 60);
-		my $recorded_s = ($2 * 3600) + ($3 * 60) + $4;
-		my $recorded = $1;
-		my $diff_s = abs($recorded_s - $expected_s);
-		my $diff_sign = $recorded_s < $expected_s ? "-" : "";
-		my $diff = sprintf("$diff_sign%02d:%02d:%02d", $diff_s / 3600, ($diff_s % 3600) / 60, $diff_s % 60);
-		main::logger "\nINFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $filename\n\n";
+		if ( $expected_s >= 0 ) {
+			my $expected = sprintf("%02d:%02d:%02d", ( gmtime($expected_s))[2,1,0] );
+			my $recorded = sprintf("%02d:%02d:%02d", ( gmtime($recorded_s))[2,1,0] );
+			my $diff_s = abs($recorded_s - $expected_s);
+			my $diff_sign = $recorded_s < $expected_s ? "-" : "";
+			my $diff = sprintf("$diff_sign%02d:%02d:%02d", ( gmtime($diff_s))[2,1,0] );
+			main::logger "INFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $filename\n";
+		} else {
+			main::logger "WARNING: Could not determine expected duration of file: $filename\n";
+		}
 	} else {
 		main::logger "WARNING: Could not determine recorded duration of file: $filename\n";
 	}
@@ -6888,7 +6908,12 @@ sub parse_hls_connection {
 			delete $hls_media->{media_file_size};
 			delete $hls_media->{service};
 			delete $hls_media->{connections};
-			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1000);
+			my ($ab, $vb) = ($1, $2) if $stream->{'URL'} =~ /audio.*?=(\d+)-video.*?=(\d+)/;
+			if ( $ab && $vb ) {
+				$hls_media->{audio_bitrate} = int($ab/1000);
+				$hls_media->{video_bitrate} = int($vb/1000);
+			}
+			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1024.0);
 			next if $min_bitrate && $hls_media->{bitrate} < $min_bitrate;
 			next if $max_bitrate && $hls_media->{bitrate} > $max_bitrate;
 			if ( $stream->{RESOLUTION} ) {
@@ -7103,10 +7128,8 @@ sub get_stream_data_cdn {
 				$conn->{audio_bitrate} = $mattribs->{audio_bitrate};
 				if ( $mattribs->{bitrate} > 2000 ) {
 					$conn->{audio_bitrate} ||= 128;
-				} elsif ( $mattribs->{bitrate} > 700 ) {
-					$conn->{audio_bitrate} ||= 96;
 				} else {
-					$conn->{audio_bitrate} ||= 64;
+					$conn->{audio_bitrate} ||= 96;
 				}
 				$conn->{video_bitrate} = $mattribs->{video_bitrate};
 				$conn->{video_bitrate} ||= $mattribs->{bitrate} - $conn->{audio_bitrate};
@@ -8477,17 +8500,21 @@ sub download {
 	}
 	# Force raw mode if ffmpeg is not installed
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('ffmpeg')) {
-		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting flv file\n";
+		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .flv file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
 	if ( $mode =~ /^(hls|hlx)/ && (! main::exists_in_path('ffmpeg')) ) {
-		main::logger "\nWARNING: Required ffmpeg does not exist - cannot download HLS audio/video\n";
-		return 'next';
+		if ( $opt->{hlsffmpeg} ) {
+			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
+			return 'next';
+		} else {
+			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .ts file\n";
+			$opt->{raw} = 1;
+		}
 	}
-
 	if ( $mode =~ /^shoutcast/ && (! main::exists_in_path('ffmpeg')) ) {
-		main::logger "\nWARNING: Required ffmpeg does not exist - cannot download Shoutcast audio\n";
+		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download Shoutcast audio\n";
 		return 'next';
 	}
 
@@ -8499,7 +8526,7 @@ sub download {
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 	# Override flash ext
 	if ( ! $opt->{raw} && $prog->{type} =~ /radio/ ) {
-		if ( $opt->{aactomp3} ) {
+		if ( $opt->{aactomp3} || $mode =~ /^shoutcastmp3/ ) {
 			$prog->{ext} = 'mp3';
 		} else {
 			$prog->{ext} = 'm4a';
@@ -9253,8 +9280,6 @@ sub opt_format {
 # This gets run before the download retry loop if this class type is selected
 sub init {
 	# Force certain options for Live
-	# Force only one try if live and recording to file
-	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
 	# Force to skip checking history if live
 	$opt->{force} = 1;
 }
@@ -9384,12 +9409,6 @@ sub opt_format {
 # This gets run before the download retry loop if this class type is selected
 sub init {
 	# Force certain options for Live
-	# Force --raw otherwise realaudio stdout streaming fails
-	# (this would normally be a bad thing but since its a live stream we
-	# won't be downloading other types of progs afterwards)
-	$opt->{raw} = 1 if $opt->{stdout} && $opt->{nowrite};
-	# Force only one try if live and recording to file
-	$opt->{attempts} = 1 if ( ! $opt->{attempts} ) && ( ! $opt->{nowrite} );
 	# Force to skip checking history if live
 	$opt->{force} = 1;
 }
@@ -9937,6 +9956,9 @@ sub download {
 
 ################### Streamer class #################
 package Streamer;
+use File::stat;
+use File::Copy;
+use strict;
 
 # Class vars
 # Global options
@@ -9973,6 +9995,137 @@ sub opt {
 	return $opt->{$optname};
 }
 
+sub opt_format {
+	return {
+		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+	};
+}
+
+sub postproc {
+	my ( $self, $file_tmp, $prog, %streamdata ) = @_;
+	my $live = $streamdata{live};
+	my $kind = $streamdata{kind};
+	my @cmd;
+	my $return;
+
+	# Retain raw format if required or if shoutcast mp3
+	if ( $opt->{raw} || $prog->{mode} =~ /mp3/ ) {
+		if ( $file_tmp ne $prog->{filename} && ! $opt->{nowrite} ) {
+			move($file_tmp, $prog->{filename});
+			$prog->check_duration() if $opt->{checkduration} && ! $live;
+			main::logger "INFO: Recorded file: $prog->{filename}\n";
+		}
+		return 0;
+	}
+
+	my @globals = ( '-y' );
+	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
+		if ( $kind eq 'video') {
+			push @globals, ( '-loglevel', 'error', '-stats' );
+		} else {
+			push @globals, ( '-loglevel', 'info', '-stats' );
+		}
+	}
+
+	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
+	my @ffmpeg_opts = ();
+	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
+		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
+	}
+
+	# use backwards-compatible option for ffmpeg
+	my @filter_opts;
+	if ( $bin->{ffmpeg} =~ /avconv/ ) {
+		push @filter_opts, '-bsf:a';
+	} else {
+		push @filter_opts, '-absf';
+	}
+	push @filter_opts, 'aac_adtstoasc';
+
+	if ( $prog->{type} =~ /radio/ ) {
+		# transcode to MP3 if directed. If mp3vbr is not set then do CBR.
+		if ( $opt->{aactomp3} ) {
+			my @br_opts;
+			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
+				@br_opts = ('-aq', $opt->{mp3vbr});
+			} else {
+				my $ab;
+				if ( $prog->{mode} =~ /high/ ) {
+					$ab = "320k";
+				} elsif ( $prog->{mode} =~ /std/ ) {
+					$ab = "128k";
+				} elsif ( $prog->{mode} =~ /med/ ) {
+					$ab = "96k";
+				} else {
+					$ab = "48k";
+				}
+				@br_opts = ('-ab', $ab );
+			}
+			@cmd = (
+				$bin->{ffmpeg},
+				@{ $binopts->{ffmpeg} },
+				@globals,
+				'-i', $file_tmp,
+				'-vn',
+				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
+				@ffmpeg_opts,
+				$prog->{filepart},
+			);
+		} else {
+			@cmd = (
+				$bin->{ffmpeg},
+				@{ $binopts->{ffmpeg} },
+				@globals,
+				'-i', $file_tmp,
+				'-vn',
+				'-acodec', 'copy',
+				@filter_opts,
+				@ffmpeg_opts,
+				$prog->{filepart},
+			);
+		}
+	} else {
+		@cmd = (
+			$bin->{ffmpeg},
+			@{ $binopts->{ffmpeg} },
+			@globals,
+			'-i', $file_tmp,
+			'-vcodec', 'copy',
+			'-acodec', 'copy',
+			@filter_opts,
+			@ffmpeg_opts,
+			$prog->{filepart},
+		);
+	}
+
+	main::logger "INFO: Begin converting file: $file_tmp\n";
+
+	# Run conversion and delete source file on success
+	$return = main::run_cmd( 'STDERR', @cmd );
+
+	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
+			unlink( $file_tmp );
+			main::logger "INFO: Converted file: $prog->{filepart}\n";
+	# If the ffmpeg conversion failed, remove the failed converted file attempt - move the file as done anyway
+	} else {
+		main::logger "WARNING: Conversion failed - retaining $file_tmp\n";
+		unlink $prog->{filepart};
+		$prog->{filepart} = $file_tmp;
+		$prog->{filename} = $file_tmp;
+	}
+	# Moving file into place as complete
+	if ( $prog->{filepart} ne $prog->{filename} ) {
+		move($prog->{filepart}, $prog->{filename});
+		$prog->check_duration() if $opt->{checkduration} && ! $live;
+		main::logger "INFO: Recorded file: $prog->{filename}\n";
+	}
+
+	# Re-symlink file
+	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
+
+	return 0;
+}
 
 ################### Streamer::rtmp class #################
 package Streamer::rtmp;
@@ -10013,9 +10166,10 @@ sub opt_format {
 # %prog (only for {ext} and {mode})
 # Actually do the RTMP streaming
 sub get {
-	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
+	my ( $self, undef, undef, $prog, %streamdata ) = @_;
 	my @cmdopts;
 
+	my $live 	= $streamdata{live};
 	my $url_2 	= $streamdata{streamurl};
 	my $server	= $streamdata{server};
 	my $application = $streamdata{application};
@@ -10137,101 +10291,23 @@ sub get {
 			return 0;
 		} else {
 			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'abort';
+			return 'retry';
 		}
 	}
 
-	# if we fail during the rtmp streaming, try to resume (this gets new streamdata again so that it isn't stale)
+	# rtmpdump returns 2 with --stop
 	unless ( $return == 2 && $opt->{stop} ) {
 		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
 	}
 
 	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp via RTMP\n";
+		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
 	}
 
-	# Add custom options to ffmpeg for this type if specified with -ffmpeg-<type>-opts
-	my @ffmpeg_opts = ();
-	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
-	}
-
-	# Retain raw flv format if required
-	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} && ! $opt->{stdout} ) {
-			move($file_tmp, $prog->{filename});
-			$prog->check_duration() if $opt->{checkduration} && !$streamdata{live};
-		}
-		return 0;
-
-	# Convert flv to aac/mp4a/mp3
-	} elsif ( $prog->{type} =~ /radio/ ) {
-		# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
-		if ( $opt->{aactomp3} ) {
-			my @br_opts = ('-ab', '128k');
-			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
-				@br_opts = ('-aq', $opt->{mp3vbr});
-			}
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				@ffmpeg_opts,
-				'-y', $prog->{filepart},
-			);
-		} else {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				@ffmpeg_opts,
-				'-y', $prog->{filepart},
-			);
-		}
-	# Convert video flv to mp4/mkv/avi if required
-	} else {
-		@cmd = (
-			$bin->{ffmpeg},
-			@{ $binopts->{ffmpeg} },
-			'-i', $file_tmp,
-			'-vcodec', 'copy',
-			'-acodec', 'copy',
-			@ffmpeg_opts,
-			'-y', $prog->{filepart},
-		);
-	}
-
-	# Run flv conversion and delete source file on success
-	my $return = main::run_cmd( 'STDERR', @cmd );
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
-			unlink( $file_tmp );
-	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
-	} else {
-		main::logger "WARNING: flv conversion failed - retaining flv file\n";
-		unlink $prog->{filepart};
-		$prog->{filepart} = $file_tmp;
-		$prog->{filename} = $file_tmp;
-	}
-	# Moving file into place as complete (if not stdout)
-	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
-		move($prog->{filepart}, $prog->{filename});
-		$prog->check_duration() if $opt->{checkduration} && !$streamdata{live};
-	}
-
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
-	if ( ! $opt->{nowrite} ) {
-		main::logger "\nINFO: Recorded file: $prog->{filename}\n";
-	}
-	return 0;
+	return $self->postproc($file_tmp, $prog, %streamdata);
 }
 
 
@@ -10240,24 +10316,373 @@ package Streamer::hls;
 
 # Inherit from Streamer class
 use base 'Streamer';
+
 use File::Copy;
 use File::Path;
 use File::stat;
+use List::Util qw(max);
 use strict;
 
 sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		hlsencode		=> [ 1, "hls-encode|hlsencode!", 'Recording', '--hls-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Does not apply to built-in HLS downloader."],
+		hlsbuffer		=> [ 1, "hls-buffer|hlsbuffer=n", 'Recording', '--hls-buffer', "Number of HLS segments to buffer at start of streaming (built-in downloader only). Default (and minimum): 4"],
+		hlsencode		=> [ 1, "hls-encode|hlsencode!", 'Recording', '--hls-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
+		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader."],
 	};
 }
 
+sub parse_playlist {
+	my (undef, $ua, $url) = @_;
+	main::logger "DEBUG: HLS playlist = $url\n" if $opt->{verbose};
+	my $data = main::request_url_retry($ua, $url, 3, undef, "\nWARNING: Failed to download HLS segment list $url\n", 1);
+	return undef if ! $data;
+	my @lines = split(/\r?\n/, $data);
+	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
+		main::logger "WARNING: Invalid HLS playlist (no header) $url\n";
+		return undef;
+	}
+	my $sequence = 0;
+	my $segment_duration = 0;
+	my $segments;
+	foreach my $line (@lines) {
+		next if $line =~ /^\s*$/;
+		next if $line =~ /^##/;
+		if ($line =~ /^#EXT-X-MEDIA-SEQUENCE:(\d+)$/) {
+			$sequence = $1;
+		} elsif ($line =~ /^#EXTINF:([\d\.]+)/) {
+			$segment_duration = $1;
+		} elsif ($line !~ /^#/) {
+			my $segment_url = $line;
+			if ( $segment_url !~ /^http/ ) {
+				($segment_url = $url) =~ s/[^\/]+\.m3u8/$line/;
+			}
+			$segments->{$sequence} = { 'url' => $segment_url, 'duration' => $segment_duration };
+			$segment_duration = 0;
+			$sequence++;
+		} else {
+			$segment_duration = 0;
+		}
+	}
+	return $segments;
+}
 
-# %prog (only for {ext} and {mode})
-# Actually do the HLS streaming
 sub get {
-	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
+	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
+	if ( $opt->{hlsffmpeg} ) {
+		return $self->get_ffmpeg( $prog, %streamdata );
+	}
+	return $self->get_builtin( $ua, $url, $prog, %streamdata );
+}
+
+sub get_builtin {
+	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
+	my $live = $streamdata{live};
+	my $file_size = $streamdata{size};
+	my $return;
+	my $file_tmp;
+	my $fh;
+	my $last_sequence = 0;
+	my $begin_time = time();
+	my $begin_size = 0;
+	my $size = 0;
+	my $last_percent = 0;
+	my $hash_count = 0;
+	my $elapsed = 0;
+	my $retries = 3;
+	my $count = 0;
+	my $lagging = 0;
+	my $stop = 0;
+	my %seen;
+	my $buffer = max(4, $opt->{hlsbuffer});
+
+	# Deal with stdout streaming
+	#if ( $opt->{stdout} && ! $opt->{nowrite} ) {
+	#	main::logger "ERROR: Cannot stream HLS to STDOUT and file simultaneously\n";
+	#	exit 4;
+	#}
+
+	if ( $opt->{raw} ) {
+		$file_tmp = $prog->{filepart};
+	} else {
+		$file_tmp = $prog->{filepart}.".ts"
+	}
+	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+		unlink( $file_tmp );
+	}
+	if ( $opt->{hlsresume} ) {
+		($last_sequence, $size, $elapsed, $begin_time) = split /,/, $opt->{hlsresume};
+	}
+	if ( ! $opt->{nowrite} ) {
+		if ( ! $live && $opt->{hlsresume} ) {
+			if ( ! open($fh, ">>:raw", $file_tmp) ) {
+				main::logger "ERROR: Cannot append to $file_tmp\n";
+				exit 1;
+			}
+			binmode $fh;
+			my $tmp_size = stat($file_tmp)->size;
+			if ( $size < $tmp_size ) {				
+				main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
+				truncate($fh, $size);
+			}
+		} else {
+			if ( ! open($fh, ">:raw", $file_tmp) ) {
+				main::logger "ERROR: Cannot write to $file_tmp\n";
+				exit 1;
+			}
+			binmode $fh;
+		}
+	}
+	if ( $opt->{stdout} ) {
+		binmode STDOUT;
+		STDOUT->autoflush(1);
+		STDERR->autoflush(1);
+	}
+
+	my $callback_ondemand = sub {
+		my ($data, $res, undef) = @_;
+		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
+		print $fh $data if ! $opt->{nowrite};
+		print STDOUT $data if $opt->{stdout};
+		if ( ! $opt->{nowrite} ) {
+			$size = tell $fh;
+		} else {
+			$size += length($data);
+		}
+		#return if $opt->{stdout} && $opt->{nowrite};
+		return if $opt->{quiet} || $opt->{silent};
+		my $percent = 0;
+		$percent = 100.0 * $size / $file_size if $file_size;
+		if ( $opt->{hash} ) {
+			return if ($percent - $last_percent) < 1;
+		} else {
+			return if ($percent - $last_percent) < 0.1;
+		}
+		$last_percent = $percent;
+		if ( $opt->{hash} ) {
+			main::logger '#';
+			$hash_count++;
+			if ( ! ($hash_count % 100) ) {
+				main::logger "\n";
+			}
+		} else {
+			my $rate_bps;
+			my $rate;
+			my $time;
+			my $time_called = time();
+			if ($time_called - $begin_time < 1) {
+				$rate = '-----kbps';
+				$time = '--:--:--';
+			} else {
+				$rate_bps = ($size - $begin_size) / ($time_called - $begin_time);
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+				$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
+			}
+			main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB / %.2fMB %s %5.1f%%, %s remaining\r",
+				$size / 1024.0 / 1024.0,
+				$file_size / 1024.0 / 1024.0,
+				$rate,
+				$percent,
+				$time,
+			);
+		}
+	};
+
+	my $callback_live = sub {
+		my ($data, $res, undef) = @_;
+		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
+		print $fh $data if ! $opt->{nowrite};
+		print STDOUT $data if $opt->{stdout};
+		if ( ! $opt->{nowrite} ) {
+			$size = tell $fh;
+		} else {
+			$size += length($data);
+		}
+		#return if $opt->{stdout} && $opt->{nowrite};
+		return if $opt->{hash} || $opt->{quiet} || $opt->{silent};
+		my $time_called = time();
+		my $rate_bps;
+		my $rate;
+		if ( $elapsed < 10 ) {
+			$rate = '-----kbps';
+		} else {
+			$rate_bps = ($size - $begin_size) / (($time_called - $begin_time) + 1);
+			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+		}
+		main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB @ %s [%s]\r",
+			$size / 1024.0 / 1024.0,
+			$rate,
+			sprintf("%02d:%02d:%02d", ( gmtime( $elapsed ))[2,1,0] ),
+		);
+	};
+
+	my $callback = $live ? $callback_live : $callback_ondemand;
+
+	if ( ! $opt->{nowrite} ) {
+		main::logger "INFO: ".( ! $live && $opt->{hlsresume} ? "Resume" : "Begin" )." recording file: $file_tmp\n";
+	}
+
+	while ( 1 ) {
+		my $curr_time = time();
+		my $curr_count = 0;
+		my $segment_duration;
+		my $segments = $self->parse_playlist($ua, $url);
+		my @sequences = sort { $a <=> $b } keys %{$segments};
+		unless ( @sequences ) {
+			main::logger "ERROR: no segments in HLS playlist $url\n";
+			$return = 6;
+			last;
+		}
+		# estimate expected file size for on-demand if necessary
+		if ( ! $live && ! $file_size) {
+			my $total_duration = 0;
+			for my $sequence ( @sequences ) {
+				$total_duration += $segments->{$sequence}->{duration};
+			}
+			$file_size = int($total_duration * $streamdata{bitrate} * 1024.0 / 8.0);
+		}
+		# truncate iptv playlist with 2h rewind
+		if ( $live && scalar @sequences > $buffer ) {
+			@sequences = splice @sequences, -1 * $buffer;
+		}
+		# check for gap compared to last live playlist
+		if ( $live && $last_sequence ) {
+			my $diff = $last_sequence - $sequences[-1] - 1;
+			$diff = max(0, $diff);
+			if ( $diff ) {
+				my $missing = $diff * $segments->{$sequences[-1]}->{duration};
+				main::logger "WARNING: Missing approximately $missing secs at $elapsed secs in file $file_tmp\n";
+			}
+		}
+		# process segments in current playlist
+		for my $sequence ( @sequences ) {
+			# skip overlapping segments
+			next if $seen{$sequence};
+			# skip segments already downloaded
+			next if $sequence <= $last_sequence;
+			$segment_duration = $segments->{$sequence}->{duration};
+			$elapsed += $segment_duration;
+			# check --start
+			next if defined $opt->{start} && $elapsed <= $opt->{start};
+			my $segment_url = $segments->{$sequence}->{url};
+			if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
+				$segment_url = $opt->{proxy}.main::url_encode( $segment_url );
+				$segment_url =~ s/^prepend://g;
+			}
+			main::logger "\nDEBUG: Getting HLS segment ($sequence) $segment_url\n" if $opt->{debug};
+			my $i;
+			for ($i = 0; $i < $retries; $i++) {
+				my $res = $ua->get($segment_url, ':content_cb' => $callback);
+				if ( ! $res->is_success || ! $res->header("Content-Length") ) {
+					main::logger "\nERROR: Failed to download HLS segment ($sequence) $segment_url\n";
+				} else {
+					last;
+				}
+			}
+			if ( $i == $retries ) {
+				$return = 5;
+				$stop = 1;
+				last;
+			}
+			$seen{$sequence}++;
+			# capture for resuming
+			$last_sequence = $sequence;
+			$opt->{hlsresume} = "$last_sequence,$size,$elapsed,$begin_time"; 
+			$count++;
+			$curr_count++;
+			if ( $live && $opt->{hash} && ! ( $opt->{quiet} || $opt->{silent} ) ) {
+				if ( ! ($hash_count % 3) ) {
+					main::logger '#';
+				}
+				$hash_count++;
+				if ( ! ($hash_count % 300) ) {
+					main::logger "\n";
+				}
+			}
+			# check --stop
+			if ( defined $opt->{stop} && $elapsed >= $opt->{stop} ) {
+				$stop = 1;
+				last;
+			}
+			# don't wait while buffering
+			next if $count < $buffer;
+			# wait if streaming on-demand
+			if ( ! $live && $opt->{stdout} ) {
+				# download next segment sooner if lagging
+				$lagging = ( $count >= $buffer && time() - $curr_time > $curr_count * int($segment_duration) ) ? 2 : 1;
+				while ( time() - $curr_time < int($segment_duration / $lagging) ) {
+					sleep 1;
+				}
+			}
+		}
+		# all done if on-demand or stopped
+		last if ( ! $live || $stop );
+		# wait before re-pulling live playlist
+		if ( $live ) {
+			# re-pull live playlist sooner if lagging
+			$lagging = ( $count >= $buffer && time() - $curr_time > $curr_count * int($segment_duration) ) ? 2 : 1;
+			while ( time() - $curr_time < int($segment_duration / $lagging) ) {
+				sleep 1;
+			}
+		}
+	}
+	close $fh if ! $opt->{nowrite};
+	# summary stats if downloading
+	if ( ! $opt->{nowrite} && ! ( $opt->{quiet} || $opt->{silent} ) ) {
+		my $end_time = time() + 0.0001;
+		my $end_size = stat($file_tmp)->size;
+		main::logger sprintf("\rINFO: Recorded: %.2fMB in %s at %5.0fkbps to %s\n",
+			($end_size - $begin_size) / (1024.0 * 1024.0),
+			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $begin_time))[2,1,0] ),
+			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 * 8.0,
+			$file_tmp );
+	}
+
+	# fix up start/stop for live streams
+	if ( $live ) {
+		my $stop_time;
+		if ( defined $opt->{stop} ) {
+			$stop_time = max(0, $opt->{stop} - $elapsed);
+		}
+		if ( $stop_time ) {
+			if ( ! $opt->{nowrite} && -f $file_tmp ) {
+				$prog->{filename} =~ s/\.$prog->{ext}$/\.ts/ if ! $opt->{raw};
+				$opt->{raw} = 1;
+				$self->postproc($file_tmp, $prog, %streamdata);
+			}
+			return 'retry';
+		}
+	}
+
+	# exit behaviour when streaming
+	if ( $opt->{nowrite} && $opt->{stdout} ) {
+		if ( $return == 0 ) {
+			main::logger "\nINFO: Streaming completed successfully\n";
+			return 0;
+		} else {
+			main::logger "\nINFO: Streaming failed with exit code $return\n";
+			return 'retry';
+		}
+	}
+
+	# if we fail during the streaming, try again
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+
+	delete $opt->{hlsresume} unless $live;
+
+	# If file is too small or non-existent then delete and try next mode
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+		main::logger "WARNING: Failed to stream file $file_tmp\n";
+		unlink $file_tmp;
+		return 'next';
+	}
+
+	return $self->postproc($file_tmp, $prog, %streamdata);
+}
+
+sub get_ffmpeg {
+	my ( $self, $prog, %streamdata ) = @_;
 	my $file_tmp;
 	my @cmd;
 	my @cmdopts;
@@ -10269,6 +10694,12 @@ sub get {
 	my $live = $streamdata{live};
 	my $mode = $prog->{mode};
 	my $pfx = substr($mode, 0, 3);
+
+	# Deal with stdout streaming
+	#if ( $opt->{stdout} && ! $opt->{nowrite} ) {
+	#	main::logger "ERROR: Cannot stream HLS to STDOUT and file simultaneously\n";
+	#	exit 4;
+	#}
 
 	if ( $opt->{raw} ) {
 		$file_tmp = $prog->{filepart};
@@ -10284,17 +10715,11 @@ sub get {
 	# Create symlink if required
 	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
-	# Deal with stdout streaming
-	#if ( $opt->{stdout} && not $opt->{nowrite} ) {
-	#	main::logger "ERROR: Cannot stream HLS to STDOUT and file simultaneously\n";
-	#	exit 4;
-	#}
-
-	# Add start stop options if defined
-	push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if $opt->{stop};
+	# Add start/stop options if defined
+	push @cmdopts, ( '-ss', $opt->{start} ) if defined $opt->{start};
+	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if defined $opt->{stop};
 	# requires ffmpeg 1.2
-	# push @cmdopts, ( '-to', $opt->{stop} ) if $opt->{stop};
+	# push @cmdopts, ( '-to', $opt->{stop} ) if defined $opt->{stop};
 	if ( $opt->{hlsencode} ) {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
@@ -10332,19 +10757,44 @@ sub get {
 		@globals,
 		'-i', $url,
 	);
-	push @cmd, @cmdopts;
 	if ( ! $opt->{nowrite} ) {
-		push @cmd, ( $file_tmp );
+		push @cmd, @cmdopts;
+		push @cmd, $file_tmp;
 	}
 	if ( $opt->{stdout} ) {
+		push @cmd, @cmdopts;
 		push @cmd, ( '-f', 'mpegts', 'pipe:1' );
 	}
 
 	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording $prog->{filename}\n";
+		main::logger "INFO: Begin recording file: $prog->{filename}\n";
 	}
 
+	my $begin_time = time();
 	$return = main::run_cmd( 'normal', @cmd );
+	my $elapsed = time() - $begin_time;
+
+	# fix up start/stop for live streams
+	if ( $live ) {
+		if ( ! $opt->{nowrite} ) {
+			my $file_duration = $prog->get_duration($file_tmp);
+			$elapsed = $file_duration if $file_duration >= 0;
+		}
+		if ( $opt->{start} ) {
+			$opt->{start} = max(0, $opt->{start} - $elapsed);
+		}
+		if ( $opt->{stop} ) {
+			$opt->{stop} = max(0, $opt->{stop} - $elapsed);
+		}
+		if ( $opt->{stop} >= 10 ) {
+			if ( ! $opt->{nowrite} && -f $file_tmp ) {
+				$prog->{filename} =~ s/\.$prog->{ext}$/\.ts/ if ! $opt->{raw};
+				$opt->{raw} = 1;
+				$self->postproc($file_tmp, $prog, %streamdata);
+			}
+			return 'retry';
+		}
+	}
 
 	# exit behaviour when streaming
 	if ( $opt->{nowrite} && $opt->{stdout} ) {
@@ -10353,111 +10803,163 @@ sub get {
 			return 0;
 		} else {
 			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'abort';
+			return 'retry';
 		}
 	}
 
-	# if we fail during the hls streaming, try to resume (this gets new streamdata again so that it isn't stale)
+	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
 
 	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp via HLS\n";
+		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
 	}
 
-	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
-	my @ffmpeg_opts = ();
-	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
-	}
+	return $self->postproc($file_tmp, $prog, %streamdata);
+}
 
-	# use backwards-compatible option for ffmpeg
-	my @filter_opts;
-	if ( $bin->{ffmpeg} =~ /avconv/ ) {
-		push @filter_opts, '-bsf:a';
-	} else {
-		push @filter_opts, '-absf';
-	}
-	push @filter_opts, 'aac_adtstoasc';
 
-	# Retain raw ts format if required
+################### Streamer::shoutcast class #################
+package Streamer::shoutcast;
+
+# Inherit from Streamer class
+use base 'Streamer';
+use File::Copy;
+use File::Path;
+use File::stat;
+use List::Util qw(max);
+use strict;
+
+sub opt_format {
+	return {
+		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+	};
+}
+
+
+# %prog (only for {ext} and {mode})
+# Actually do the shoutcast streaming
+sub get {
+	my ( $self, undef, undef, $prog, %streamdata ) = @_;
+	my $url = $streamdata{streamurl};
+	my $live = $streamdata{live};
+	my $mode_mp3 = $prog->{mode} =~ /shoutcastmp3/;
+	my $mode_aac = $prog->{mode} =~ /shoutcastaac/;
+	my $file_tmp;
+	my @cmd;
+	my @cmdopts;
+	my $return;
+
+	# Deal with stdout streaming
+	#if ( $opt->{stdout} && not $opt->{nowrite} ) {
+	#	main::logger "ERROR: Cannot stream Shoutcast to STDOUT and file simultaneously\n";
+	#	exit 4;
+	#}
+
 	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} && ! $opt->{stdout} ) {
-			move($file_tmp, $prog->{filename});
-			$prog->check_duration() if $opt->{checkduration} && ! $live;
+		$file_tmp = $prog->{filepart};
+	} else {
+		if ( $mode_mp3 ) {
+			$file_tmp = $prog->{filepart}.".mp3";
+		} elsif ( $mode_aac ) {
+			$file_tmp = $prog->{filepart}.".aac";
 		}
-		return 0;
+	}
 
-	# Convert ts to aac/mp4a/mp3
-	} elsif ( $prog->{type} =~ /radio/ ) {
-		# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
-		if ( $opt->{aactomp3} ) {
-			my @br_opts = ('-ab', '128k');
-			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
-				@br_opts = ('-aq', $opt->{mp3vbr});
+	# Remove failed file recording (below a certain size)
+	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+		unlink( $file_tmp );
+	}
+
+	# Create symlink if required
+	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
+
+	# Add start/stop options if defined
+	push @cmdopts, ( '-ss', $opt->{start} ) if defined $opt->{start};
+	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if defined $opt->{stop};
+	push @cmdopts, ( '-acodec', 'copy', '-vn' );
+
+	# Add custom options to ffmpeg for this type if specified with --shoutcast-<type>-opts
+	if ( defined $opt->{'shoutcast'.$prog->{type}.'opts'} ) {
+		push @cmdopts, ( split /\s+/, $opt->{'shoutcast'.$prog->{type}.'opts'} );
+	}
+
+	my @globals = ( '-y' );
+	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
+		push @globals, ( '-loglevel', 'error', '-stats' );
+	}
+	@cmd = (
+		$bin->{ffmpeg},
+		@{$binopts->{ffmpeg}},
+		@globals,
+		'-i', $url,
+	);
+	if ( ! $opt->{nowrite} ) {
+		push @cmd, @cmdopts;
+		push @cmd, ( $file_tmp );
+	}
+	if ( $opt->{stdout} ) {
+		push @cmd, @cmdopts;
+		if ( $mode_mp3 ) {
+			push @cmd, ( '-f', 'mp3', 'pipe:1' );
+		} elsif ( $mode_aac ) {
+			push @cmd, @cmdopts;
+			push @cmd, ( '-f', 'adts', 'pipe:1' );
+		}
+	}
+
+	my $begin_time = time();
+	$return = main::run_cmd( 'normal', @cmd );
+	my $elapsed = time() - $begin_time;
+
+	# fix up start/stop for live streams
+	if ( $live ) {
+		if ( ! $opt->{nowrite} ) {
+			my $file_duration = $prog->get_duration($file_tmp);
+			$elapsed = $file_duration if $file_duration >= 0;
+		}
+		if ( $opt->{start} ) {
+			$opt->{start} = max(0, $opt->{start} - $elapsed);
+		}
+		if ( $opt->{stop} ) {
+			$opt->{stop} = max(0, $opt->{stop} - $elapsed);
+		}
+		if ( $opt->{stop} >= 10 ) {
+			if ( ! $opt->{nowrite} && -f $file_tmp ) {
+				my $ext = $mode_mp3 ? ".mp3" : ".aac";
+				$prog->{filename} =~ s/\.$prog->{ext}$/$ext/ if ! $opt->{raw};
+				$opt->{raw} = 1;
+				$self->postproc($file_tmp, $prog, %streamdata);
 			}
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-		} else {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				@filter_opts,
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
+			return 'retry';
 		}
-	} else {
-		@cmd = (
-			$bin->{ffmpeg},
-			@{ $binopts->{ffmpeg} },
-			@globals,
-			'-i', $file_tmp,
-			'-vcodec', 'copy',
-			'-acodec', 'copy',
-			@filter_opts,
-			@ffmpeg_opts,
-			$prog->{filepart},
-		);
 	}
 
-	# Run ts conversion and delete source file on success
-	$return = main::run_cmd( 'STDERR', @cmd );
-
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
-			unlink( $file_tmp );
-	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
-	} else {
-		main::logger "WARNING: ts conversion failed - retaining ts file\n";
-		unlink $prog->{filepart};
-		$prog->{filepart} = $file_tmp;
-		$prog->{filename} = $file_tmp;
-	}
-	# Moving file into place as complete
-	if ( $prog->{filepart} ne $prog->{filename} ) {
-		move($prog->{filepart}, $prog->{filename});
-		$prog->check_duration() if $opt->{checkduration} && ! $live;
+	# exit behaviour when streaming
+	if ( $opt->{nowrite} && $opt->{stdout} ) {
+		if ( $return == 0 ) {
+			main::logger "\nINFO: Streaming completed successfully\n";
+			return 0;
+		} else {
+			main::logger "\nINFO: Streaming failed with exit code $return\n";
+			return 'retry';
+		}
 	}
 
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
+	# if we fail during the streaming, try again
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
 
-	main::logger "\nINFO: Recorded $prog->{filename}\n";
-	return 0;
+	# If file is too small or non-existent then delete and try next mode
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+		main::logger "WARNING: Failed to stream file $file_tmp\n";
+		unlink $file_tmp;
+		return 'next';
+	}
+
+	return $self->postproc($file_tmp, $prog, %streamdata);
 }
 
 
@@ -10524,206 +11026,6 @@ sub get {
 		$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
 	}
 
-	return 0;
-}
-
-
-################### Streamer::shoutcast class #################
-package Streamer::shoutcast;
-
-# Inherit from Streamer class
-use base 'Streamer';
-use File::Copy;
-use File::Path;
-use File::stat;
-use strict;
-
-sub opt_format {
-	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-	};
-}
-
-
-# %prog (only for {ext} and {mode})
-# Actually do the shoutcast streaming
-sub get {
-	my ( $stream, undef, undef, $prog, %streamdata ) = @_;
-	my $file_tmp;
-	my @cmd;
-	my @cmdopts;
-	my $return;
-	my $url = $streamdata{streamurl};
-	my $kind = $streamdata{kind};
-	my $live = $streamdata{live};
-	my $mode = $prog->{mode};
-	my $mode_mp3 = $mode =~ /shoutcastmp3/;
-	my $mode_aac = $mode =~ /shoutcastaac/;
-
-	if ( $opt->{raw} ) {
-		$file_tmp = $prog->{filepart};
-	} else {
-		if ( $mode_mp3 ) {
-			$file_tmp = $prog->{filepart}.".mp3";
-		} elsif ( $mode_aac ) {
-			$file_tmp = $prog->{filepart}.".aac";
-		}
-	}
-
-	# Remove failed file recording (below a certain size)
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
-		unlink( $file_tmp );
-	}
-
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
-
-	# Deal with stdout streaming
-	#if ( $opt->{stdout} && not $opt->{nowrite} ) {
-	#	main::logger "ERROR: Cannot stream Shoutcast to STDOUT and file simultaneously\n";
-	#	exit 4;
-	#}
-
-	# Add start stop options if defined
-	if ( $opt->{start} || $opt->{stop} ) {
-		push @cmdopts, ( '-ss', $opt->{start} ) if $opt->{start};
-		push @cmdopts, ( '-t', $opt->{stop} ) if $opt->{stop};
-	}
-	push @cmdopts, ( '-acodec', 'copy', '-vn' );
-
-	# Add custom options to ffmpeg for this type if specified with --shoutcast-<type>-opts
-	if ( defined $opt->{'shoutcast'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'shoutcast'.$prog->{type}.'opts'} );
-	}
-
-	my @globals = ( '-y' );
-	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
-	}
-	@cmd = (
-		$bin->{ffmpeg},
-		@{$binopts->{ffmpeg}},
-		@globals,
-		'-i', $url,
-	);
-	if ( ! $opt->{nowrite} ) {
-		push @cmd, @cmdopts;
-		push @cmd, ( $file_tmp );
-	}
-	if ( $opt->{stdout} ) {
-		push @cmd, @cmdopts;
-		if ( $mode_mp3 ) {
-			push @cmd, ( '-f', 'mp3', 'pipe:1' );
-		} elsif ( $mode_aac ) {
-			push @cmd, ( '-f', 'adts', 'pipe:1' );
-		}
-	}
-
-	$return = main::run_cmd( 'normal', @cmd );
-
-	# exit behaviour when streaming
-	if ( $opt->{nowrite} && $opt->{stdout} ) {
-		if ( $return == 0 ) {
-			main::logger "\nINFO: Streaming completed successfully\n";
-			return 0;
-		} else {
-			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'abort';
-		}
-	}
-
-	# if we fail during the hls streaming, try to resume (this gets new streamdata again so that it isn't stale)
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
-
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp via Shoutcast\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-
-	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
-	my @ffmpeg_opts = ();
-	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
-	}
-
-	# Retain raw aac format if required
-	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} && ! $opt->{stdout} ) {
-			move($file_tmp, $prog->{filename});
-			$prog->check_duration() if $opt->{checkduration} && ! $live;
-		}
-		return 0;
-
-	} elsif ( $mode_mp3 ) {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-
-	# Convert aac to m4a/mp3
-	} elsif ( $mode_aac ) {
-		# transcode to MP3 if directed. If mp3vbr is not set then perform CBR.
-		if ( $opt->{aactomp3} ) {
-			my @br_opts = ('-ab', '128k');
-			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
-				@br_opts = ('-aq', $opt->{mp3vbr});
-			}
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-		} else {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				'-absf', 'aac_adtstoasc',
-				@ffmpeg_opts,
-				$prog->{filepart},
-			);
-		}
-	}
-
-	# Run aac conversion and delete source file on success
-	$return = main::run_cmd( 'STDERR', @cmd );
-
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
-			unlink( $file_tmp );
-	# If the ffmpeg conversion failed, remove the failed-converted file attempt - move the file as done anyway
-	} else {
-		main::logger "WARNING: aac conversion failed - retaining aac file\n";
-		unlink $prog->{filepart};
-		$prog->{filepart} = $file_tmp;
-		$prog->{filename} = $file_tmp;
-	}
-	# Moving file into place as complete (if not stdout)
-	if ( $prog->{filepart} ne $prog->{filename} && ! $opt->{stdout} ) {
-		move($prog->{filepart}, $prog->{filename});
-		$prog->check_duration() if $opt->{checkduration} && ! $live;
-	}
-
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
-	main::logger "\nINFO: Recorded $prog->{filename}\n";
 	return 0;
 }
 
