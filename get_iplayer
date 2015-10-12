@@ -7488,7 +7488,7 @@ sub get_stream_data {
 							$mobile_conn->{href} =~ s/(\*\~hmac|\,\.mp4\.csmil)/,${pc_hd_id}$1/g;
 						}
 						my $prefix;
-						$prefix = "hlx" if $mobile_conn->{supplier} =~ /hls_open/;
+						$prefix = "hlx" if $mobile_conn->{supplier} =~ /hls_open/ && $prog->{type} ne "radio";
 						my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
 						for my $hls_media ( @hls_medias ) {
 							for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7665,24 +7665,22 @@ sub get_stream_data {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $pfx = $mattribs->{service} =~ /hlx/ ? "hlx" : "hls";
 				my $ext = "mp4";
-				if ( $mattribs->{bitrate} > 4000 ) {
-					get_stream_data_cdn( $data, $mattribs, "${pfx}vhd", 'hls', $ext );
- 				} elsif ( $mattribs->{bitrate} > 2000 ) {
- 					get_stream_data_cdn( $data, $mattribs, "${pfx}hd", 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 1200 ) {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}vhigh", 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 700 ) {
+				if ( $mattribs->{height} > 700 ) {
+					get_stream_data_cdn( $data, $mattribs, "${pfx}hd", 'hls', $ext );
+ 				} elsif ( $mattribs->{height} > 400 ) {
+ 					if ( $mattribs->{bitrate} > 2000 ) {
+	 					get_stream_data_cdn( $data, $mattribs, "${pfx}sd", 'hls', $ext );
+ 					} else {
+	 					get_stream_data_cdn( $data, $mattribs, "${pfx}vhigh", 'hls', $ext );
+ 					}
+ 				} elsif ( $mattribs->{height} > 200 ) {
+ 					if ( $mattribs->{bitrate} > 700 ) {
 						get_stream_data_cdn( $data, $mattribs, "${pfx}high", 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 400  ) {
-					get_stream_data_cdn( $data, $mattribs, "${pfx}std", 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} > 300 ) {
-					get_stream_data_cdn( $data, $mattribs, "${pfx}low", 'hls', $ext );
-				#} elsif ( $mattribs->{bitrate} > 200 ) {
-				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vlow", 'hls', $ext );
-				#} elsif ( $mattribs->{bitrate} > 100 ) {
-				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vvlow", 'hls', $ext );
-				#} else {
-				#	get_stream_data_cdn( $data, $mattribs, "${pfx}vvvlow", 'hls', $ext );
+ 					} elsif ( $mattribs->{bitrate} > 500 ) {
+						get_stream_data_cdn( $data, $mattribs, "${pfx}std", 'hls', $ext );
+ 					} elsif ( $mattribs->{bitrate} > 300 ) {
+						get_stream_data_cdn( $data, $mattribs, "${pfx}low", 'hls', $ext );
+					}
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
@@ -7988,8 +7986,8 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbetter');
 	$mlist = main::expand_list($mlist, 'hlsvbest', 'hlsvhd,hlsbest');
-	$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
-	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlsbetter');
+	$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsvbetter');
+	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlssd,hlsbetter');
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvhigh,hlsgood');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlslow');
 	$mlist = main::expand_list($mlist, 'hlx', 'hlxdefault');
