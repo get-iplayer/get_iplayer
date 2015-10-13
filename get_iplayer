@@ -5907,6 +5907,40 @@ sub get_metadata {
 		$prog->get_metadata_fallback( $ua );
 	}
 
+	$prog->{title} 		= $title || $prog->{title};
+	$prog->{name} 		= $name || $prog->{name};
+	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
+	$prog->{brand} 	= $brand || $prog->{name};
+	$prog->{series} 	= $series;
+	$prog->{type}		= $prog_type || $prog->{type};
+	$prog->{channel}	= $channel || $prog->{channel};
+	$prog->{expires}		= $expires || $prog->{expires};
+	$prog->{expiresrel} = Programme::get_time_string( $prog->{expires}, time() );
+	$prog->{guidance}	= $guidance || $prog->{guidance};
+	$prog->{categories}	= $categories || $prog->{categories};
+	$prog->{category}	= $category || $prog->{category};
+	$prog->{desc}		= $summary || $prog->{desc} || $prog->{descshort};
+	$prog->{desclong}	= $longdesc || $meddesc || $summary || $prog->{desclong};
+	$prog->{descmedium}	= $meddesc || $summary || $prog->{descmedium};
+	$prog->{descshort}	= $summary || $prog->{descshort};
+	$prog->{player}		= $player || $prog->{player};
+	$prog->{web}		= $web || $prog->{web};
+	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
+	$prog->{episodenum}	= $episodenum || $prog->{episodenum};
+	$prog->{episodepart}	= $episodepart || $prog->{episodepart};
+	$prog->{seriesnum}	= $seriesnum || $prog->{seriesnum};
+	# Conditionally set the senum
+	$prog->{senum} = sprintf "s%02se%02s%s", $prog->{seriesnum}, $prog->{episodenum}, $prog->{episodepart} if $prog->{seriesnum} != 0 || $prog->{episodenum} != 0;
+	# Create a stripped episode and series with numbers removed + senum s##e## element.
+	$prog->{episodeshort} = $prog->{episode};
+	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
+	my $no_number = $prog->{episodeshort};
+	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
+	$prog->{nameshort} = $prog->{brand};
+	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i;
+
 	my $modes;
 	my $mode_sizes;
 	my $first_broadcast;
@@ -5991,6 +6025,8 @@ sub get_metadata {
 			($prog->{lastbcastdate}->{$version} = $last_string) =~ s/T.*$//;
 		}
 	}
+	$prog->{modes}		= $modes;
+	$prog->{modesizes}	= $mode_sizes;
 
 	my @fields1 = qw(verpids streams durations);
 	my @fields2 = qw(firstbcast lastbcast firstbcastrel lastbcastrel firstbcastdate lastbcastdate);
@@ -6041,43 +6077,8 @@ sub get_metadata {
 	}
 
 	$versions = join ',', sort keys %{ $prog->{verpids} };
-
-	$prog->{title} 		= $title || $prog->{title};
-	$prog->{name} 		= $name || $prog->{name};
-	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
-	$prog->{brand} 	= $brand || $prog->{name};
-	$prog->{series} 	= $series;
-	$prog->{type}		= $prog_type || $prog->{type};
-	$prog->{channel}	= $channel || $prog->{channel};
-	$prog->{expires}		= $expires || $prog->{expires};
-	$prog->{expiresrel} = Programme::get_time_string( $prog->{expires}, time() );
 	$prog->{versions}	= $versions;
-	$prog->{guidance}	= $guidance || $prog->{guidance};
-	$prog->{categories}	= $categories || $prog->{categories};
-	$prog->{category}	= $category || $prog->{category};
-	$prog->{desc}		= $summary || $prog->{desc} || $prog->{descshort};
-	$prog->{desclong}	= $longdesc || $meddesc || $summary || $prog->{desclong};
-	$prog->{descmedium}	= $meddesc || $summary || $prog->{descmedium};
-	$prog->{descshort}	= $summary || $prog->{descshort};
-	$prog->{player}		= $player || $prog->{player};
-	$prog->{web}		= $web || $prog->{web};
-	$prog->{thumbnail}	= $thumbnail || $prog->{thumbnail};
-	$prog->{modes}		= $modes;
-	$prog->{modesizes}	= $mode_sizes;
-	$prog->{episodenum}	= $episodenum || $prog->{episodenum};
-	$prog->{episodepart}	= $episodepart || $prog->{episodepart};
-	$prog->{seriesnum}	= $seriesnum || $prog->{seriesnum};
-	# Conditionally set the senum
-	$prog->{senum} = sprintf "s%02se%02s%s", $prog->{seriesnum}, $prog->{episodenum}, $prog->{episodepart} if $prog->{seriesnum} != 0 || $prog->{episodenum} != 0;
-	# Create a stripped episode and series with numbers removed + senum s##e## element.
-	$prog->{episodeshort} = $prog->{episode};
-	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
-	my $no_number = $prog->{episodeshort};
-	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
-	$prog->{nameshort} = $prog->{brand};
-	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i;
+
 	return 0;
 }
 
@@ -6145,6 +6146,14 @@ sub get_metadata_fallback {
 		$prog->{desclong} = $1 if $entry =~ m{<po:long_synopsis>\s*(.+?)\s*</po:long_synopsis>}s;
 		# Flatten
 		$entry =~ s|[\n\r]| |g;
+		my $masterbrand = $1 if $entry =~ m{<po:masterbrand\s+rdf:resource="/(.+?)#service"/>};
+		if ( $masterbrand ) {
+			if ( $masterbrand =~ /(bbcone|bbctwo|bbcthree|bbcfour|cbbc|cbeebies|bbcnews|bbcparliament|bbcalba|s4c)/ ) {
+				$prog->{type} = 'tv';
+			} else {
+				$prog->{type} = 'radio';
+			}
+		}
 		$prog->{descmedium} = $1 if $entry =~ m{<po:medium_synopsis>\s*(.+?)\s*</po:medium_synopsis>};
 		$prog->{descshort} = $1 if $entry =~ m{<po:short_synopsis>\s*(.+?)\s*</po:short_synopsis>};
 		# extract categories from RDF
@@ -6244,7 +6253,6 @@ sub get_metadata_fallback {
 			}
 		}
 	}
-
 }
 
 sub genres {
