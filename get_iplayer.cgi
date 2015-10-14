@@ -75,8 +75,8 @@ sub usage {
 	my $text = "get_iplayer Web PVR Manager $VERSION_TEXT, ";
 	$text .= <<'EOF';
 Copyright (C) 2009-2010 Phil Lewis
-  This program comes with ABSOLUTELY NO WARRANTY; This is free software, 
-  and you are welcome to redistribute it under certain conditions; 
+  This program comes with ABSOLUTELY NO WARRANTY; This is free software,
+  and you are welcome to redistribute it under certain conditions;
   See the GPLv3 for details.
 
 Options:
@@ -84,13 +84,13 @@ Options:
  --port,-p          Use the built-in web server and listen on this TCP port
  --getiplayer,-g    Path to the get_iplayer script
  --ffmpeg           Path to the ffmpeg binary
- --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252) 
+ --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
  --debug            Debug mode
  --help,-h          This help text
 EOF
 	print $text;
 	exit 1;
-}	
+}
 
 
 # Some defaults
@@ -107,7 +107,7 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 	exit 2;
 }
 if ( ! $opt_cmdline->{encodinglocalefs} ) {
-	chomp(my @encodinglocalefs = map { s/^\s*encodinglocalefs\s*=\s*// ? $_ : () } 
+	chomp(my @encodinglocalefs = map { s/^\s*encodinglocalefs\s*=\s*// ? $_ : () }
 		get_cmd_output(
 			$opt_cmdline->{getiplayer},
 			'--encoding-locale=UTF-8',
@@ -121,7 +121,7 @@ if ( ! $opt_cmdline->{encodinglocalefs} ) {
 }
 $opt_cmdline->{encodinglocalefs} = (IS_WIN32 ? 'cp1252' : 'utf8') if ! $opt_cmdline->{encodinglocalefs};
 if ( ! $opt_cmdline->{ffmpeg} ) {
-	chomp(my @ffmpeg = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () } 
+	chomp(my @ffmpeg = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () }
 		get_cmd_output(
 			$opt_cmdline->{getiplayer},
 			'--encoding-locale=UTF-8',
@@ -143,7 +143,7 @@ my @pids;
 my @displaycols;
 
 # Field names to be grabbed from get_iplayer
-my @headings = qw( 
+my @headings = qw(
 	index
 	thumbnail
 	pid
@@ -224,7 +224,7 @@ for my $type (keys %prog_types) {
 		delete $prog_types{$type};
 		# Delete from %prog_types_order hash
 		for ( keys %prog_types_order ) {
-			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type; 
+			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type;
 		}
 	}
 }
@@ -375,11 +375,11 @@ if ( $opt_cmdline->{port} > 0 ) {
 					$query_string = $request{CONTENT};
 				}
 				$data{"_method"} = "GET";
-	
+
 			} elsif ($request{METHOD} eq 'POST') {
 				$query_string = parse_post_form_string( $request{CONTENT} );
 				$data{"_method"} = "POST";
-	
+
 			} else {
 				$data{"_method"} = "ERROR";
 			}
@@ -556,7 +556,7 @@ sub run_cgi {
 			# flv audio
 			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio|podcast)$};
 
-			# Output headers to stream 
+			# Output headers to stream
 			# This will enable seekable: -Accept_Ranges=>'bytes',
 			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
@@ -649,7 +649,7 @@ sub run_cgi {
 		if ( $mimetypes{$ext} ) {
 
 			# Output headers
-			# to stream 
+			# to stream
 			# This will enable seekable -Accept_Ranges=>'bytes',
 			my $headers = $cgi->header( -type => $mimetypes{$ext}, -Connection => 'close' );
 
@@ -699,7 +699,7 @@ sub run_cgi {
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
 		print $fh $headers;
-		
+
 		# determine output type
 		my $outtype = $cgi->param('OUTTYPE') || 'flv';
 		$outtype = $cgi->param('STREAMTYPE') || $cgi->param('OUTTYPE') if $action eq 'genplaylistdirect';
@@ -719,7 +719,7 @@ sub run_cgi {
 			print $fh $cgi->Dump();
 			#for my $key (sort keys %ENV) {
 			#    print $fh $key, " = ", $ENV{$key}, "\n";
-			#}    
+			#}
 		}
 		if ($nextpages{$nextpage}) {
 			# call the correct subroutine
@@ -864,7 +864,7 @@ sub stream_prog {
 	my ( $mimetype, $pid , $type, $modes, $ext, $notranscode, $abitrate, $vsize, $vfr, $versionlist ) = ( @_ );
 	# Default modes to try
 	$modes = $default_modes if ! $modes;
-	
+
 	print $se "INFO: Start Streaming $pid to browser using modes '$modes', output ext '$ext', audio bitrate '$abitrate', video size '$vsize', video frame rate '$vfr'\n";
 
 	my @cmd = (
@@ -915,7 +915,7 @@ sub stream_prog {
 }
 
 
-			
+
 # Stream a file to browser/client
 sub stream_file {
 	my ( $filename, $mimetype, $src_ext, $ext, $notranscode, $abitrate, $vsize, $vfr ) = ( @_ );
@@ -996,7 +996,7 @@ sub build_ffmpeg_args {
 
 			# Apply video framerate - caveat - bitrate defaults to 200k if only vfr is set
 			push @cmd_vopts, ( '-r', $vfr ) if $vfr =~ m{^\d$};
-			
+
 			# -sameq is bad
 			## Apply sameq if framerate only and no bitrate
 			#push @cmd_vopts, '-sameq' if $vfr =~ m{^\d$} && $vsize !~ m{^\d+x\d+$};
@@ -1013,7 +1013,7 @@ sub build_ffmpeg_args {
 				#'-f', $src_ext, # not required?
 				'-i', $filename,
 				@cmd_aopts,
-				@cmd_vopts,					
+				@cmd_vopts,
 				'-f', $ext,
 				'-',
 			);
@@ -1052,7 +1052,7 @@ sub create_playlist_m3u_single {
 	} else {
 		$searchterm =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
 	}
-		
+
 	print $se "INFO: Getting playlist for type '$type' using modes '$modes' and bitrate '$bitrate'\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -1108,7 +1108,7 @@ sub create_playlist_m3u_single {
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		push @playlist, "#EXTINF:-1,$type - $channel - $name - $episode - $desc";
 		push @playlist, "$url\n";
-		
+
 	}
 	print $se join ("\n", @playlist);
 	return join ("\n", @playlist);
@@ -1166,7 +1166,7 @@ sub create_playlist_m3u_multi {
 
 		# Skip empty urls
 		next if ! $url;
-		
+
 		# Format required, e.g.
 		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
@@ -1244,10 +1244,10 @@ sub get_opml {
 			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
 			push @playlist, "\t\t<outline URL=\"".encode_entities( $item_url )."\" text=\"".encode_entities( "$item" )."\" />";
 		}
-		
+
 	# Channels/Names etc
 	} elsif ($list) {
-	
+
 		# Header
 		push @playlist, "\t<head>\n\t\t\n\t</head>";
 		push @playlist, "\t<body>";
@@ -1416,7 +1416,7 @@ sub create_ua {
 	$ua->agent( "get_iplayer Web PVR Manager updater version $VERSION" );
 	$ua->conn_cache(LWP::ConnCache->new());
 	return $ua;
-};	
+};
 
 
 
@@ -1428,7 +1428,7 @@ sub request_url_retry {
 	my %OPTS = @LWP::Protocol::http::EXTRA_SOCK_OPTS;
 	$OPTS{SendTE} = 0;
 	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
-	
+
 	my ($ua, $url, $retries, $succeedmsg, $failmsg) = @_;
 	my $res;
 
@@ -1513,7 +1513,7 @@ sub run_cmd_unix {
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
 	eval "use IPC::Open3";
-	
+
 	# probably only likely in win32
 	if ($@) {
 		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
@@ -1529,7 +1529,7 @@ sub run_cmd_unix {
 		$rtn = $?;
 	}
 
-	# Interpret return code	      
+	# Interpret return code
 	return interpret_return_code( $rtn );
 }
 
@@ -1562,12 +1562,12 @@ sub run_cmd {
 
 	$fh_cmd_out->autoflush(1);
 	$fh_cmd_err->autoflush(1);
-	
+
 	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
 	eval "use IPC::Open3";
-	
+
 	# probably only likely in win32
 	if ($@) {
 		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
@@ -1631,7 +1631,7 @@ sub run_cmd {
 			print $se "ERROR: Failed to fork STDOUT reader process: $!\n";
 			exit 1;
 		}
-		
+
 		my $childpiderr = fork();
 
 		# Fork a child process to read from the indirect (STDERR) fh of the spawned command and write it to the selected fh (browser client)
@@ -1707,7 +1707,7 @@ sub run_cmd {
 		$SIG{PIPE} = 'DEFAULT';
 	}
 
-	# Interpret return code	      
+	# Interpret return code
 	return interpret_return_code( $rtn );
 }
 
@@ -1737,7 +1737,7 @@ sub run_cmd_win32 {
 
 	$rtn = system( @cmd );
 
-	# Interpret return code	      
+	# Interpret return code
 	return interpret_return_code( $rtn );
 }
 
@@ -1803,7 +1803,7 @@ sub get_cmd_output {
 	#$to->autoflush(1);
 	$from->autoflush(1);
 	$error->autoflush(1);
-	
+
 	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
@@ -1869,9 +1869,9 @@ sub get_cmd_output {
 		$SIG{PIPE} = 'DEFAULT';
 	}
 
-	# Interpret return code	      
+	# Interpret return code
 	interpret_return_code( $rtn );
-	
+
 	return @out_from;
 }
 
@@ -1892,7 +1892,7 @@ sub get_cmd_output_win32 {
 	my @out = <CMD>;
 	close CMD;
 
-	# Interpret return code	      
+	# Interpret return code
 	interpret_return_code( $? );
 
 	return @out;
@@ -1902,7 +1902,7 @@ sub get_cmd_output_win32 {
 
 sub interpret_return_code {
 	my $rtn = shift;
-	# Interpret return code	and force return code 2 upon error      
+	# Interpret return code and force return code 2 upon error
 	my $return = $rtn >> 8;
 	if ( $rtn == -1 && $IGNOREEXIT ) {
 		$return = 0;
@@ -1997,7 +1997,7 @@ sub show_pvr_list {
 			]),
 		),
 	);
-	
+
 	my @html;
 	my @displaycols = ( 'pvrsearch', ( grep !/pvrsearch/, ( sort keys %fields ) ) );
 	# Build header row
@@ -2006,14 +2006,14 @@ sub show_pvr_list {
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
-	        # Sort by column click and change display class (colour) according to sort status
-	        my ($title, $class, $onclick);
-	        if ( $sort_field eq $heading && not $reverse ) {
-                  ($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; form.submit(); RestoreFormVars(form);");
-                } else {
-                  ($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.submit(); RestoreFormVars(form); ");
-                }
-                $class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
+		# Sort by column click and change display class (colour) according to sort status
+		my ($title, $class, $onclick);
+		if ( $sort_field eq $heading && not $reverse ) {
+			($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; form.submit(); RestoreFormVars(form);");
+		} else {
+			($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.submit(); RestoreFormVars(form); ");
+		}
+		$class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
 		push @html, th( { -class => 'search' },
 			label( {
@@ -2023,8 +2023,8 @@ sub show_pvr_list {
 				},
 				$fieldname{$heading} || $heading,
 			)
-                );
-        }
+		);
+	}
 	push @html, "</tr>";
 
 	# Build each row
@@ -2041,7 +2041,7 @@ sub show_pvr_list {
 			)
 		);
 		for ( @displaycols ) {
-			push @row, td( {-class=>'search'}, 
+			push @row, td( {-class=>'search'},
 				label( {
 					-title		=> "Click to Edit",
 					-class		=> 'search',
@@ -2054,7 +2054,7 @@ sub show_pvr_list {
 		push @html, Tr( {-class=>'search'}, @row );
 	}
 
-	
+
 	# Search form
 	print $fh start_form(
 		-name   => "form",
@@ -2335,7 +2335,7 @@ sub get_direct_filename {
 	my $history = 1;
 
 	print $se "DEBUG: Looking up filename for MODE=$mode TYPE=$type PID=$pid\n";
-	
+
 	# set this flag if required and unset history if pid is a file
 	if ( -f $pid ) {
 		print $se "DEBUG: PID is a valid filename\n";
@@ -2378,8 +2378,8 @@ sub get_direct_filename {
 	} else {
 		$filename = $1 if $match =~ m{^filename: .+?\|\s*(.+?)\|$mode\s*$};
 	}
- 	if ( $filename && $opt_cmdline->{encodinglocalefs} !~ /UTF-?8/i ) {
-	 	$filename = encode($opt_cmdline->{encodinglocalefs}, $filename, sub { '' });
+	if ( $filename && $opt_cmdline->{encodinglocalefs} !~ /UTF-?8/i ) {
+		$filename = encode($opt_cmdline->{encodinglocalefs}, $filename, sub { '' });
 	}
 	return search_absolute_path( $filename );
 }
@@ -2428,9 +2428,9 @@ sub search_absolute_path {
 	} else {
 		$abs_path = $filename;
 	}
-	
+
 	#print $se "  ->  ABSPATH='$abs_path'\n";
-	
+
 	return $abs_path;
 }
 
@@ -2571,7 +2571,7 @@ sub recordings_delete {
 				}
 			}
 			if ( ! $deleted ) {
-				print $fh p("No files deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");				
+				print $fh p("No files deleted: $type: '$name - $episode', MODE: $mode, PID: $pid");
 			}
 			closedir(DIR);
 		} else {
@@ -2735,7 +2735,7 @@ sub pvr_save {
 # Build templated HTML for an option specified by passed hashref
 sub build_option_html {
 	my $arg = shift;
-	
+
 	my $title = $arg->{title};
 	my $tooltip = $arg->{tooltip};
 	my $webvar = $arg->{webvar};
@@ -2782,7 +2782,7 @@ sub build_option_html {
 				-name		=> $webvar,
 				-values		=> { 0=>'Off' , 1=>'On' },
 				-default	=> $current,
-				-override	=> 1,				
+				-override	=> 1,
 			)
 		);
 
@@ -2821,13 +2821,13 @@ sub build_option_html {
 		my $inner_table = table ( { -class => 'options_embedded' }, Tr( { -class => 'options_embedded' },
 			$element
 		) );
-			
+
 		push @html, th( { -class => 'options', -title => $tooltip }, $title ).td( { -class => 'options' }, $inner_table );
 	# Popup type
 	} elsif ( $type eq 'popup' ) {
 		my @value = $arg->{value};
 		push @html, th( { -class => 'options', -title => $tooltip, -id => "label_option_$webvar" }, $title ).
-		td( { -class => 'options', -title => $tooltip }, 
+		td( { -class => 'options', -title => $tooltip },
 			popup_menu(
 				-class		=> 'options',
 				-name		=> $webvar,
@@ -2938,7 +2938,7 @@ sub search_progs {
 
 	#for my $key (sort keys %ENV) {
 	#	print $fh $key, " = ", $ENV{$key}, "\n<br>";
-	#}    
+	#}
 
 	# Get prog data
 	my @params = get_search_params();
@@ -2971,10 +2971,10 @@ sub search_progs {
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
-		push @html, 
+		push @html,
 			th( { -class => 'search' },
 				table( { -class => 'searchhead', -role=>'presentation' },
-					Tr( { -class => 'search' }, [ 
+					Tr( { -class => 'search' }, [
 						th( { -class => 'search' },
 							label( {
 								-title		=> $title,
@@ -2998,7 +2998,7 @@ sub search_progs {
 	my $time = time();
 	for ( my $i = 0; $i <= $#pids; $i++ ) {
 		my $search_class = 'search';
-		my $pid = $pids[$i]; 
+		my $pid = $pids[$i];
 		my @row;
 
 		# Grey-out history lines which files have been deleted or where the history doesn't have a filename mentioned
@@ -3067,9 +3067,9 @@ sub search_progs {
 			# escape regex metacharacters in programme name
 			(my $escaped_name = $prog{$pid}->{name}) =~ s/([\\\^\$\.\|\?\*\+\(\)\[\]])/\\\\$1/g;
 			$links .= label( {
-				-id=>'nowrap', 
+				-id=>'nowrap',
 				-class=>'search pointer_noul',
-				-title=>"Add Series '$prog{$pid}->{name}' to PVR", 
+				-title=>"Add Series '$prog{$pid}->{name}' to PVR",
 				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$escaped_name\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; form.submit(); RestoreFormVars(form);" }, 'Add Series' );
 		}
 
@@ -3139,7 +3139,7 @@ sub search_progs {
 				my @cats = split /,/, $prog{$pid}->{$_};
 				for ( @cats ) {
 					my $category = $_;
-					$_ = label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$category'", 
+					$_ = label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$category'",
 						-onClick=>"
 							BackupFormVars(form);
 							form.NEXTPAGE.value='search_progs';
@@ -3246,7 +3246,7 @@ sub search_progs {
 		} else {
 			push @opt_td, td( { -class=>'options_outer', -id=>"tab_${tabname}", -style=>"$tab->{style}" },
 				table( { -class=>'options' }, Tr( { -class=>'options' }, [ @optrows ] ) )
-			);		
+			);
 		}
 	}
 
@@ -3256,7 +3256,7 @@ sub search_progs {
 		Tr( { -class=>'options_outer' }, (join '', @opt_td) ).
 		Tr( { -class=>'options_outer' }, td( { -class=>'options_outer' }, $options_buttons ) )
 	);
-	
+
 	# Grey-out 'Add Current Search to PVR' button if too many programme matches
 	my $add_search_class_suffix;
 	$add_search_class_suffix = ' darker' if $matchcount > 30;
@@ -3377,7 +3377,7 @@ sub search_progs {
 			),
 		);
 	}
-	
+
 	print $fh @actionbar;
 	print $fh @pagetrail;
 	print $fh table( {-class=>'search', -role=>'main' }, @html );
@@ -3426,7 +3426,7 @@ sub pagetrail {
 
 	push @pagetrail, td( { -class=>'pagetrail' }, '...' ) if $page > $trailsize+2;
 
- 	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
+	for (my $pn=$page-$trailsize; $pn <= $page+$trailsize; $pn++) {
 		push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail pointer',
@@ -3576,7 +3576,7 @@ sub get_display_cols {
 
 #############################################
 #
-# Form Header 
+# Form Header
 #
 #############################################
 sub form_header {
@@ -3587,7 +3587,7 @@ sub form_header {
 			-name   => "formheader",
 			-method => "POST",
 	);
-	
+
 	# Only highlight the 'Update Software' option if the script is writable or is not win32
 	my $update_element = a( { -class=>'nav darker' }, 'Update Software' );
 	$update_element = a(
@@ -3626,12 +3626,12 @@ sub form_header {
 	);
 	print $fh hidden( -name => 'AUTOPVRRUN', -value => $opt->{AUTOPVRRUN}->{current}, -override => 1 );
 	print $fh hidden( -name => 'NEXTPAGE', -value => 'search_progs', -override => 1 );
-	print $fh $cgi->end_form();	
+	print $fh $cgi->end_form();
 }
 
 
 
-# Form Footer 
+# Form Footer
 sub form_footer {
 	#print $fh "<iframe src=\"about:blank\" height=\"100\" width=\"95%\" name=\"dataframe\"></iframe>";
 	#print $fh "<iframe src=\"about:blank\" height=\"0\" width=\"0\" name=\"dataframe\"></iframe>";
@@ -3665,7 +3665,7 @@ sub process_params {
 		value	=> 20, # width values
 		save	=> 0,
 	};
-	
+
 	$opt->{URL} = {
 		title	=> 'Quick URL', # Title
 		tooltip	=> "Enter your URL for Recording (then click 'Record' or 'Play')", # Tooltip
@@ -3675,7 +3675,7 @@ sub process_params {
 		value	=> 36, # width values
 		save	=> 0,
 	};
-	
+
 	$opt->{SEARCHFIELDS} = {
 		title	=> 'Search in', # Title
 		tooltip	=> 'Select which column you wish to search', # Tooltip
@@ -3744,7 +3744,7 @@ sub process_params {
 		value	=> 30, # width values
 		save	=> 1,
 	};
-	
+
 	$opt->{OUTPUT} = {
 		title	=> 'Override Recordings Folder', # Title
 		tooltip	=> 'Folder on the server where recordings should be saved', # Tooltip
@@ -3755,7 +3755,7 @@ sub process_params {
 		value	=> 30, # width values
 		save	=> 1,
 	};
-	
+
 	$opt->{PROXY} = {
 		title	=> 'Web Proxy URL', # Title
 		tooltip	=> 'e.g. http://192.168.1.2:8080', # Tooltip
@@ -3766,7 +3766,7 @@ sub process_params {
 		value	=> 30, # width values
 		save	=> 1,
 	};
-	
+
 	$opt->{VERSIONLIST} = {
 		title	=> 'Programme Version', # Title
 		tooltip	=> 'Comma separated list of versions to try to record in order (e.g., "signed,default" or "audiodescribed,default")', # Tooltip
@@ -4107,7 +4107,7 @@ sub process_params {
 				$opt->{$_}->{current} =  join ",", $opt->{$_}->{default};
 			}
 			print $se "DEBUG: Using $_ = $opt->{$_}->{current}\n--\n" if $opt_cmdline->{debug};
-			
+
 		} else {
 			$opt->{$_}->{current} = join(",", $cgi->param($_) ) || $opt->{$_}->{default} if not defined $opt->{$_}->{current};
 		}
@@ -4119,7 +4119,7 @@ sub process_params {
 ######################################################################
 #
 #   begin_html
-# 
+#
 #   Send HTTP headers to browser
 #   Sets "title", Sends <HTML> and <BODY> flags
 #
@@ -4127,7 +4127,7 @@ sub process_params {
 sub begin_html {
 	my $request_host = shift;
 	my $mimetype = 'text/html';
-	
+
 	# Save settings if selected
 	my @cookies;
 	if ( $cgi->param('SAVE') ) {
@@ -4191,7 +4191,7 @@ sub insert_javascript {
 	print $fh <<EOF;
 
 	<script type="text/javascript">
-	
+
 	function RefreshTab(url, time, force ) {
 		if ( force ) {
 			window.location.href = url;
@@ -4202,7 +4202,7 @@ sub insert_javascript {
 
 	// global hash table for saving copy of form
 	var form_backup = {};
-	
+
 	//
 	// Copy all non-grouped form values into a global hash
 	//
@@ -4219,12 +4219,12 @@ sub insert_javascript {
 			if ( elem[i].type != "checkbox" && elem[i].type != "radio" ) {
 				form_backup[ elem[i].name ] = elem[i].value;
 			}
-		} 
+		}
 	}
 
 	//
 	// Copy all form values in the global hash into the specified form
-	//	
+	//
 	function RestoreFormVars( form ) {
 		// copy form elements
 		for(var key in form_backup) {
@@ -4275,7 +4275,7 @@ sub insert_javascript {
 		}
 		return true;
 	}
-	
+
 	//
 	// Check/Uncheck all checkboxes named <name>
 	//
@@ -4374,7 +4374,7 @@ sub insert_stylesheet {
 	print $fh <<EOF;
 
 	<STYLE type="text/css">
-	
+
 	.pointer		{ cursor: pointer; cursor: hand; }
 	.pointer:hover		{ text-decoration: underline; }
 
@@ -4408,13 +4408,13 @@ sub insert_stylesheet {
 	A.nav:hover		{ color: #ADADAD; }
 
 	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
-	INPUT.header		{ font-size: 80%; } 
-	SELECT.header		{ font-size: 80%; } 
+	INPUT.header		{ font-size: 80%; }
+	SELECT.header		{ font-size: 80%; }
 
 	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; }
 	TR.types		{ white-space: nowrap; }
 	TD.types		{ width: 20px }
-	
+
 	TABLE.options_embedded	{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
 	TR.options_embedded	{ white-space: nowrap; }
 	TH.options_embedded	{ width: 20px }
@@ -4434,18 +4434,18 @@ sub insert_stylesheet {
 	TR.options		{ white-space: nowrap; }
 	TH.options		{ padding-right: 4px; text-align: left; }
 	TD.options		{ }
-	LABEL.options		{ font-size: 100%; } 
+	LABEL.options		{ font-size: 100%; }
 	INPUT.options[type="radio"],INPUT.options[type="checkbox"] { font-size: 100%; background:none; }
-	INPUT.options		{ font-size: 100%; } 
-	SELECT.options		{ font-size: 100%; } 
+	INPUT.options		{ font-size: 100%; }
+	SELECT.options		{ font-size: 100%; }
 
 	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
 	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
 	TH.options_outer	{ }
 	TD.options_outer	{ padding-right: 50px; }
-	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
-	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
-	
+	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; }
+	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; }
+
 	/* Action bar */
 	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
 	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
@@ -4464,7 +4464,7 @@ sub insert_stylesheet {
 	TH.colselect		{ font-weight: bold; }
 	INPUT.colselect		{ font-size: 70%; }
 	LABEL.colselect		{ font-size: 70%; }
-	
+
 	TABLE.search		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
 	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
 	TR.search		{ background: #444; }
