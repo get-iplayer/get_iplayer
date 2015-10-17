@@ -3179,10 +3179,8 @@ sub search_progs {
 		my $label = $layout->{$tabname}->{title};
 
 		# Set the colour to grey and change tab appearance if it is selected
-		my $style = 'color: #ADADAD;';
 		my $class = 'options_tab';
 		if ( defined $opt->{$tabname}->{current} && $opt->{$tabname}->{current} eq 'yes' ) {
-			$style = 'color: #F54997;';
 			$class = 'options_tab_sel';
 		}
 		push @optrows_nav, li( { -class=>$class, -id=>"li_${tabname}" },
@@ -3190,7 +3188,6 @@ sub search_progs {
 				-class		=> 'options_outer pointer_noul',
 				-id		=> 'button_'.$tabname,
 				-title		=> "Show $label tab",
-				-style		=> $style,
 				-onClick	=> "show_options_tab( '$tabname', [ '".(join "', '", @tablist )."' ] );",
 			},
 			$label ),
@@ -4260,7 +4257,7 @@ sub insert_javascript {
 				tab.style.visibility = 'visible';
 				option.value = 'yes';
 				//button.innerHTML = '- ' + button.innerHTML.substring(2);
-				button.style.color = '#F54997';
+				//button.style.color = '#F54997';
 				//li.style.borderBottom = '0px solid #666';
 				li.className = 'options_tab_sel';
 			} else {
@@ -4268,7 +4265,7 @@ sub insert_javascript {
 				tab.style.visibility = 'collapse';
 				option.value = 'no';
 				//button.innerHTML = '+ ' + button.innerHTML.substring(2);
-				button.style.color = '#ADADAD';
+				//button.style.color = '#ADADAD';
 				//li.style.borderBottom = '1px solid #666';
 				li.className = 'options_tab';
 			}
@@ -4375,120 +4372,102 @@ sub insert_stylesheet {
 
 	<STYLE type="text/css">
 	
-	.pointer		{ cursor: pointer; cursor: hand; }
-	.pointer:hover		{ text-decoration: underline; }
-
-	.pointer_noul		{ cursor: pointer; cursor: hand; }
-
-	.extra_border		{ border-left: 2px solid #666; }
-	.all_borders		{ border-left: 2px solid #666; border-right: 2px solid #666; border-top: 2px solid #666; border-bottom: 2px solid #666; }
-
-	.darker			{ color: #7D7D7D; }
-	#logo			{ width: 190px; border-width: 0 0 1px 0; }
-	#underline		{ text-decoration: underline; }
-	#nowrap			{ white-space: nowrap; }
-	#smaller80pc		{ font-size: 80%; }
-
-	BODY			{ color: #FFF; background: black; font-size: 90%; font-family: verdana, sans-serif; }
-	IMG			{ border: 0; }
-	INPUT			{ border: 0 none; background: #ddd; }
-	A			{ color: #FFF; text-decoration: none; }
-	A:hover			{ text-decoration: none; }
-
-	TABLE.title 		{ font-size: 150%; border-spacing: 0px; padding: 0px; }
-	A.title			{ color: #F54997; font-weight: bold; font-family: Arial,Helvetica,sans-serif; }
-
-	/* Nav bar */
-	DIV.nav			{ font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
-	UL.nav			{ cursor: pointer; cursor: hand; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 44px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.nav_tab		{ padding-left: 0px; border-top: 1px solid #444; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
-	LI.nav_tab_sel		{ padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; display: inline; float: left; height: 42px; margin: 0; width: 13%; }
-	A.nav			{ display: block; height: 42px; line-height: 42px; text-align: center; }
-	IMG.nav			{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.nav:hover		{ color: #ADADAD; }
-
-	TABLE.header		{ font-size: 80%; border-spacing: 1px; padding: 0; }
-	INPUT.header		{ font-size: 80%; } 
-	SELECT.header		{ font-size: 80%; } 
-
-	TABLE.types		{ font-size: 70%; text-align: left; border-spacing: 0px; padding: 0; }
-	TR.types		{ white-space: nowrap; }
-	TD.types		{ width: 20px }
+	html {
+		font: 16px/20px Arial, sans-serif;
+		background: #000;
+		color: #FFF;
+	}
 	
-	TABLE.options_embedded	{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
-	TR.options_embedded	{ white-space: nowrap; }
-	TH.options_embedded	{ width: 20px }
-	TD.options_embedded	{ width: 20px }
-
-	/*DIV.options		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }*/
-	/* options_tab */
-	UL.options_tab		{ text-align: left; cursor: pointer; cursor: hand; list-style-type: none; display: inline; padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	/* selected tab button */
-	LI.options_tab_sel	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 0px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
-	/* unselected tab button */
-	LI.options_tab		{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #444; display: inline; float: left; border-left: 1px solid #444; border-right: 1px solid #444; border-bottom: 1px solid #888; margin: 0; margin-left: 0px; margin-bottom: 5px; }
-	/* unselected tab button */
-	LI.options_button	{ padding-left: 10px; padding-right: 10px; padding-bottom: 2px; padding-top: 2px; border-top: 1px solid #888; display: inline; float: left; border-left: 1px solid #888; border-right: 1px solid #888; border-bottom: 1px solid #888; margin: 0; margin-right: 5px; margin-bottom: 5px; }
-
-	TABLE.options		{ font-size: 100%; text-align: left; border-spacing: 0px; padding: 0; white-space: nowrap; }
-	TR.options		{ white-space: nowrap; }
-	TH.options		{ padding-right: 4px; text-align: left; }
-	TD.options		{ }
-	LABEL.options		{ font-size: 100%; } 
-	INPUT.options[type="radio"],INPUT.options[type="checkbox"] { font-size: 100%; background:none; }
-	INPUT.options		{ font-size: 100%; } 
-	SELECT.options		{ font-size: 100%; } 
-
-	TABLE.options_outer	{ font-size: 70%; text-align: left; border-spacing: 0px 0px; padding: 0; white-space: nowrap; overflow: visible; table-layout: fixed; }
-	TR.options_outer	{ vertical-align: top; white-space: nowrap; }
-	TH.options_outer	{ }
-	TD.options_outer	{ padding-right: 50px; }
-	LABEL.options_outer	{ font-weight: bold; font-size: 120%; color: #F54997; font-family: Arial,Helvetica,sans-serif; } 
-	LABEL.options_heading	{ font-weight: bold; font-size: 110%; color: #CCC; } 
+	a[href], a[onclick], label[onclick], :link, :visited {
+		cursor: pointer;
+	}
 	
-	/* Action bar */
-	DIV.action		{ padding-top: 10px; padding-bottom: 10px; font-family: Arial,Helvetica,sans-serif; background-color: #000; color: #FFF; }
-	UL.action		{ padding-left: 0px; background-color: #000; font-size: 100%; font-weight: bold; height: 24px; margin: 0; margin-left: 0px; list-style-image: none; overflow: hidden; }
-	LI.action		{ cursor: pointer; cursor: hand; padding-left: 0px; border-top: 1px solid #888; border-left: 1px solid #666; border-right: 1px solid #666; border-bottom: 1px solid #666; display: inline; float: left; height: 22px; margin: 0; margin-left: 2px; width: 13.0%; }
-	A.action		{ color: #FFF; display: block; height: 42px; line-height: 22px; text-align: center; }
-	IMG.action		{ padding: 7px; display: block; text-align: center; text-decoration: none; }
-	A.action:hover		{ color: #ADADAD; }
-
-	TABLE.pagetrail		{ font-size: 70%; text-align: center; font-weight: bold; border-spacing: 10px 0; padding: 0px; }
-	#centered		{ height:20px; margin:0px auto 0; position: relative; }
-	LABEL.pagetrail		{ color: #FFF; }
-	LABEL.pagetrail-current	{ color: #F54997; }
-
-	TABLE.colselect		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
-	TR.colselect		{ text-align: left; }
-	TH.colselect		{ font-weight: bold; }
-	INPUT.colselect		{ font-size: 70%; }
-	LABEL.colselect		{ font-size: 70%; }
+	:link {
+		color: #88F;
+	}
 	
-	TABLE.search		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; width: 100%; }
-	TABLE.searchhead	{ font-size: 110%; border-spacing: 0px; padding: 0; width: 100%; }
-	TR.search		{ background: #444; }
-	TR.search:hover		{ background: #555; }
-	TH.search		{ color: #FFF; text-align: center; background: #000; text-align: center; }
-	TD.search		{ text-align: left; }
-	A.search		{ }
-	LABEL.search		{ text-decoration: none; }
-	INPUT.search		{ font-size: 70%; background: none; }
-	LABEL.sorted            { color: #CFC; }
-	LABEL.unsorted          { color: #FFF; }
-	LABEL.sorted_reverse    { color: #FCC; }
-	INPUT.edit		{ font-size: 100%; background: #DDD; }
-
-	TABLE.info		{ font-size: 70%; color: #fff; background: #333; border-spacing: 2px; padding: 0; }
-	TR.info			{ background: #444; }
-	TR.info:hover		{ background: #555; }
-	TH.info			{ color: #FFF; text-align: center; background: #000; text-align: center; }
-	TD.info			{ text-align: left; }
-	A.info			{ text-decoration: underline; }
-	A.info:hover		{ }
-
-	B.footer		{ font-size: 70%; color: #777; font-weight: normal; }
-	.logotext		{ font-size: 24px; font-family: "Courier New",monospace; color: #F54997; }
+	:visited {
+		color: #F88;
+	}
+	
+	ul.nav,
+	ul.options_tab {
+		margin-top: 0;
+		border-bottom: 4px solid #888;
+	}
+	
+	ul.nav,
+	ul.options_tab,
+	ul.action {
+		list-style: none;
+		padding: 0;
+	}
+	
+	ul.nav > li,
+	ul.options_tab > li,
+	ul.action > li {
+		display: inline-block;
+		vertical-align: bottom;
+		margin: 0 4px;
+		padding: 4px 8px;
+		background: #444;
+	}
+	
+	ul.nav > li:hover,
+	ul.options_tab > li:hover,
+	ul.action > li:hover {
+		background: #666;
+	}
+	
+	ul.nav > li.nav_tab_sel,
+	ul.options_tab > li.options_tab_sel {
+		background: #888;
+	}
+	
+	#logo {
+		background: none;
+		margin: 0;
+	}
+	
+	#logo .logotext {
+		font-size: 150%;
+		font-family: "Courier New", monospace;
+		color: #F54997;
+	}
+	
+	table.options_outer td, table.options_outer th,
+	table.info td, table.info th {
+		vertical-align: top;
+		text-align: left;
+	}
+	
+	table.search {
+		border: 2px solid white;
+		border-collapse: collapse;
+	}
+	
+	table.search > tbody > tr > td, table.search > tbody > tr > th {
+		border: 1px solid white;
+		padding: 4px 8px;
+	}
+	
+	table.pagetrail {
+		margin-left: auto;
+		margin-right: auto;
+	}
+	
+	label.sorted {
+		color: #CFC;
+	}
+	
+	label.sorted_reverse {
+		color: #FCC;
+	}
+	
+	.footer {
+		font-size: 75%;
+	}
+	
 	</STYLE>
 EOF
 
