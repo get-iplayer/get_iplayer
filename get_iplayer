@@ -8253,6 +8253,10 @@ sub get_links_schedule {
 	my $future = shift;
 	my $now = shift || time();
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
+	my %aod_channels;
+	if ( $prog_type eq "radio" ) {
+		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
+	}
 	my @channel_list = sort keys %channels;
 	my $limit = 0;
 	my @schedule_dates;
@@ -8291,13 +8295,36 @@ sub get_links_schedule {
 		}
 		push @schedule_dates, "this_week";
 	}
+	my %aod_seen;
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
 			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
-				return 1 if $opt->{refreshabortonerror};
-				next;
+				if ( $prog_type eq "radio" && ! $aod_seen{$channel_id} ) {
+					my $aod_channel_id;
+					keys %aod_channels;
+					while ( my ($k, $v) = each %aod_channels ) {
+						if ( $v eq $channels{$channel_id} ) {
+							$aod_channel_id = $k;
+							last;
+						}
+					}
+					if ( $aod_channel_id ) {
+						$aod_seen{$channel_id}++;
+						main::logger "\nWARNING: Falling back to AOD feeds for $aod_channels{$aod_channel_id} ($aod_channel_id)\n";
+						if ( ! $future ) {
+							main::logger "WARNING: Only previous 7 days of programmes will be indexed for $aod_channels{$aod_channel_id}\n";
+							$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
+						} else {
+							main::logger "WARNING: --refresh-future is not supported sith AOD feeds for $aod_channels{$aod_channel_id}\n";
+						}
+					}
+				}
+				if ( $rc ) {
+					return 1 if $opt->{refreshabortonerror};
+					next;
+				}
 			}
 		}
 	}
@@ -8313,16 +8340,6 @@ sub get_links_schedule_page {
 	my $url = shift;
 	my $limit = shift;
 	my $now = shift || time();
-	# TODO: world service schedule not available in XML
-	if ( $url =~ /worldservice/ ) {
-		if ( $future ) {
-			main::logger "WARNING: --refresh-future is not supported for BBC World Service\n";
-			return;
-		} else {
-			main::logger "INFO: Only previous 7 days of programmes are cached for BBC World Service\n" if $opt->{verbose};
-			return $self->get_links_aod($prog, $prog_type, $now, 'worldservice');
-		}
-	}
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
