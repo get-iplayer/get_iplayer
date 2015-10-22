@@ -258,7 +258,6 @@ my %nextpages = (
 	'record_now'		=> \&record_now,
 	'show_info'		=> \&show_info,
 	'refresh'		=> \&refresh,
-	'update_script'		=> \&update_script,
 );
 
 
@@ -1334,92 +1333,6 @@ sub build_url_playlist {
 
 
 
-# Update script
-# Generic
-# Updates and overwrites this script - makes backup as <this file>.old
-# Update logic:
-# If the get_iplayer.cgi script is unwritable then quit
-# update script
-sub update_script {
-	my $update_url = "https://raw.githubusercontent.com/get-iplayer/get_iplayer/latest/get_iplayer.cgi";
-	my $script_file = $0;
-
-	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-	if ( ! -w $script_file ) {
-		print $se "ERROR: $script_file is not writable - aborting update\n";
-		exit 1;
-	}
-
-	my $ua = create_ua('update');
-	if ( $update_url =~ /^https:/ && ! $ua->is_protocol_supported('https') ) {
-		print $se "ERROR: HTTPS protocol support is required for update\n";
-		print $se "ERROR: Install LWP::Protocol::https Perl module or equivalent package for your operating system\n";
-		exit 1;
-	}
-	if ( $ua->can("ssl_opts") ) {
-		# TODO: Mozilla::CA::SSL_ca_file gives wrong path on Windows
-		$ua->ssl_opts(verify_hostname => 0);
-	}
-
-	print $se "INFO: Updating $script_file to latest version from:\n";
-	print $se "INFO: $update_url\n";
-	print $fh p("Updating $script_file to latest version from:<br/>$update_url");
-	my $update_gip;
-	if ( update_file( $ua, $update_url, $script_file ) ) {
-		print $fh p("Updating Web PVR Manager Failed - see Web PVR Manager service console window for error message");
-	} else {
-		print $fh p("Updating Web PVR Manager Succeeded - please restart the get_iplayer Web PVR Manager service");
-		$update_gip = 1;
-	}
-
-	if ( $update_gip ) {
-		print $se "INFO: Updating get_iplayer\n";
-		my @cmd = (
-			$opt_cmdline->{getiplayer},
-			'--encoding-locale=UTF-8',
-			'--encoding-console-out=UTF-8',
-			'--nocopyright',
-			'--expiry=999999999',
-			'--nopurge',
-			'--update',
-		);
-		print $fh '<pre>';
-		run_cmd( $fh, $se, 1, @cmd );
-		print $fh '</pre>';
-		print $fh p("Updated get_iplayer");
-	}
-
-	# Render options actions
-	print $fh div( { -class=>'action' },
-		ul( { -class=>'action' },
-			li( { -class=>'action' }, [
-				a(
-					{
-						-class=>'action',
-						-title => 'Go Back',
-						-onClick  => "history.back()",
-					},
-					'Back'
-				),
-			]),
-		),
-	);
-
-	return 0;
-}
-
-
-
-sub create_ua {
-	my $ua = LWP::UserAgent->new;
-	$ua->timeout( 10 );
-	$ua->agent( "get_iplayer Web PVR Manager updater version $VERSION" );
-	$ua->conn_cache(LWP::ConnCache->new());
-	return $ua;
-};
-
-
-
 # Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>]);
@@ -1453,46 +1366,6 @@ sub request_url_retry {
 	return '' if $i == $retries;
 
 	return $res->content;
-}
-
-
-
-# Updates a file:
-# Usage: update_file( <ua>, <url>, <dest filename> )
-sub update_file {
-	my $ua = shift;
-	my $url = shift;
-	my $dest_file = shift;
-	my $res;
-	# Download the file
-	if ( not $res = request_url_retry($ua, $url, 3) ) {
-		print $se "ERROR: Could not download update for ${dest_file} - Update aborted\n";
-		print $se "ERROR: $@\n";
-		return 1;
-	}
-	# If the download was successful then copy over this file and make executable after making a backup of this script
-	if ( -f $dest_file ) {
-		my $backup_file = "${dest_file}-${VERSION_TEXT}";
-		if ( ! copy($dest_file, $backup_file) ) {
-			print $se  "ERROR: Could not write backup file $backup_file - Update aborted\n";
-			exit 1;
-		} else {
-			print $se "INFO: $dest_file backed up to $backup_file\n";
-		}
-	}
-	# Check if file is writable
-	if ( not open( FILE, "> $dest_file" ) ) {
-		print $se "ERROR: $dest_file is not writable by the current user - Update aborted\n";
-		return 1;
-	}
-	# Windows needs this
-	binmode FILE;
-	# Write contents to file
-	print FILE $res;
-	close FILE;
-	chmod 0755, $dest_file;
-	print $se "INFO: Downloaded $dest_file\n";
-	return 0;
 }
 
 
@@ -3588,28 +3461,16 @@ sub form_header {
 			-method => "POST",
 	);
 
-	# Only highlight the 'Update Software' option if the script is writable or is not win32
-	my $update_element = a( { -class=>'nav darker' }, 'Update Software' );
-	$update_element = a(
-		{
-			-class=>'nav',
-			-title=>'Update the Web PVR Manager and get_iplayer software - please restart Web PVR Manager after updating',
-			-onClick => "if (! confirm('Please restart the Web PVR Manager service once the update has completed') ) { return false; } BackupFormVars(formheader); formheader.NEXTPAGE.value='update_script'; formheader.submit(); RestoreFormVars(formheader);",
-		},
-		'Update Software' ) if -w $0 && ! IS_WIN32;
-
 	# set $class for tab selection in nav bar
 	my $class = {};
 	$class->{search}	= 'nav_tab';
 	$class->{recordings}	= 'nav_tab';
 	$class->{pvrlist}	= 'nav_tab';
 	$class->{pvrrun}	= 'nav_tab';
-	$class->{update}	= 'nav_tab';
 	$class->{search}	= 'nav_tab_sel' if ( $nextpage eq 'search_progs' || ! $nextpage ) && ! $opt->{HISTORY}->{current};
 	$class->{recordings}	= 'nav_tab_sel' if $nextpage eq 'search_history' || $opt->{HISTORY}->{current};
 	$class->{pvrrun}	= 'nav_tab_sel' if $nextpage eq 'pvr_run';
 	$class->{pvrlist}	= 'nav_tab_sel' if $nextpage =~ m{^(pvr_list|pvr_queue|pvr_del)$};
-	$class->{update}	= 'nav_tab_sel' if $nextpage eq 'update_script';
 
 	print $fh div( { -class=>'nav', -role=>'navigation' },
 		ul( { -class=>'nav' },
@@ -3620,7 +3481,6 @@ sub form_header {
 			li( { -class=>$class->{recordings} }, a( { -class=>'nav', -title=>'History search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);" }, 'Recordings' ) ).
 			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
 			li( { -class=>$class->{pvrrun} }, a( { -class=>'nav', -title=>'Run the PVR now - wait for the PVR to complete', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';" }, 'Run PVR' ) ).
-			li( { -class=>$class->{update} }, $update_element ).
 			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "https://github.com/get-iplayer/get_iplayer/wiki/webpvr", -target => "_new" }, 'Help' ) )
 		),
 	);

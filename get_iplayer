@@ -220,7 +220,6 @@ my $opt_format = {
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't ask to delete programmes recorded over 30 days ago"],
 	packagemanager	=> [ 1, "packagemanager=s", 'Config', '--packagemanager <string>', "Tell the updater that we were installed using a package manager and don't update (use either: apt,rpm,deb,yum,disable)"],
-	pluginsupdate	=> [ 1, "pluginsupdate|plugins-update!", 'Config', '--plugins-update', "Update get_iplayer plugins to the latest versions. get_iplayer main script also will be updated if a newer version is available.)"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add!", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del!", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
 	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear!", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
@@ -245,7 +244,6 @@ my $opt_format = {
 	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <integer>', "Number of days of radio programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	refreshlimittv	=> [ 1, "refreshlimittv|refresh-limit-tv=n", 'Config', '--refresh-limit-tv <integer>', "Number of days of TV programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
 	skipdeleted	=> [ 1, "skipdeleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with --history & --metadataonly/subsonly/thumbonly."],
-	update		=> [ 2, "update|u!", 'Config', '--update, -u', "Update get_iplayer if a newer version is available. If so, plugins also will be updated if newer versions available."],
 	webrequest	=> [ 1, "webrequest=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
 	# Display
@@ -581,8 +579,6 @@ if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	logger request_url_retry( create_ua( 'get_iplayer', 1 ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
-
-update_script() if $opt->{update};
 
 
 
@@ -1568,7 +1564,6 @@ sub user_agent {
 
 	# Create user agents lists
 	my $user_agent = {
-		update		=> [ "get_iplayer updater (v${version} - $^O - $^V)" ],
 		get_iplayer	=> [ "get_iplayer/$version $^O/$^V" ],
 		desktop		=> [
 				'Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.17 (KHTML, like Gecko) Chrome/24.0.1312.56 Safari/537.17',
@@ -2125,96 +2120,6 @@ sub open_file_append {
 	binmode FH;
 	return *FH;
 }
-
-
-
-# Generic
-# Updates and overwrites this script - makes backup as <this file>.old
-# Update logic:
-# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-#		update script
-sub update_script {
-	# Are we flagged as installed using a pkg manager?
-	if ( $opt->{packagemanager} ) {
-		if ( $opt->{packagemanager} =~ /installer/i ) {
-			logger "ERROR: get_iplayer should only be updated using the Windows installer: http://www.infradead.org/get_iplayer_win/get_iplayer_setup_latest.exe\n";
-		} elsif ( $opt->{packagemanager} =~ /disable/i ) {
-			logger "ERROR: get_iplayer should only be updated using your local package management system.  Please refer to your system documentation.\n";
-		} else {
-			logger "ERROR: get_iplayer was installed using the '$opt->{packagemanager}' package manager.  Please refer to the package manager documentation.\n";
-		}
-		exit 1;
-	}
-	my $update_url = "https://raw.githubusercontent.com/get-iplayer/get_iplayer/latest/get_iplayer";
-	my $script_file = $0;
-	# If the get_iplayer script is unwritable then quit - makes it harder for deb/rpm installed scripts to be overwritten
-	if ( ! -w $script_file ) {
-		logger "ERROR: $script_file is not writable - aborting update (maybe a package manager was used to install get_iplayer?)\n";
-		exit 1;
-	}
-	my $ua = create_ua( 'update', 1 );
-	if ( $update_url =~ /^https:/ && ! $ua->is_protocol_supported('https') ) {
-		logger "ERROR: HTTPS protocol support is required for update\n";
-		logger "ERROR: Install LWP::Protocol::https Perl module or equivalent package for your operating system\n";
-		exit 1;
-	}
-	if ( $ua->can("ssl_opts") ) {
-		# TODO: Mozilla::CA::SSL_ca_file gives wrong path on Windows
-		$ua->ssl_opts(verify_hostname => 0);
-	}
-	logger "INFO: Updating $script_file to latest version from:\n";
-	logger "INFO: $update_url\n";
-	update_file( $ua, $update_url, $script_file ) if ! $opt->{test};
-	exit 0;
-}
-
-
-
-# Updates a file:
-# Usage: update_file( <ua>, <url>, <dest filename> )
-sub update_file {
-	my $ua = shift;
-	my $url = shift;
-	my $dest_file = shift;
-	my $res;
-	# Download the file
-	if ( not $res = request_url_retry($ua, $url, 3) ) {
-		logger "ERROR: Could not download update for ${dest_file} - Update aborted\n";
-		logger "ERROR: $@\n";
-		exit 1;
-	}
-	# If the download was successful then copy over this file and make executable after making a backup of this script
-	if ( -f $dest_file ) {
-		my $backup_file = "${dest_file}-${version_text}";
-		if ( ! copy($dest_file, $backup_file) ) {
-			logger "ERROR: Could not write backup file $backup_file - Update aborted\n";
-			exit 1;
-		} else {
-			logger "INFO: $dest_file backed up to $backup_file\n";
-		}
-	}
-	# Check if file is writable
-	if ( not open( FILE, "> $dest_file" ) ) {
-		logger "ERROR: $dest_file is not writable by the current user - Update aborted\n";
-		exit 1;
-	}
-	# Windows needs this
-	binmode FILE;
-	# Write contents to file
-	print FILE $res;
-	close FILE;
-	chmod 0755, $dest_file;
-	logger "INFO: Downloaded $dest_file\n";
-	my $vercmd = qq{"$dest_file" -V 2>&1};
-	if ( $^O eq "MSWin32" ) {
-		$vercmd = "perl ".$vercmd;
-	}
-	(my $newver = qx{$vercmd}) =~ s/^get_iplayer v(\d+\.\d+).*/$1/s;
-	if ( $newver =~ /^\d+\.\d+$/ ) {
-		logger "INFO: Updated $dest_file to version $newver\n";
-	}
-}
-
 
 
 # Usage: create_xml( @prog_objects )
@@ -3318,7 +3223,7 @@ sub copy_set_options_from {
 
 # specify regex of options that cannot be saved
 sub excludeopts {
-	return '^(profiledir|update|encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions)';
+	return '^(profiledir|encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions)';
 }
 
 
@@ -11115,7 +11020,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^profiledir|update|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
