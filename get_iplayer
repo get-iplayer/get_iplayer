@@ -288,6 +288,7 @@ my $opt_format = {
 	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file.  All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
+	tag_force => [ 1, "tagforce|tag-force!", 'Tagging', '--tag-force', "Force metadata tagging if not enabled by default, e.g, for podcasts."],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Prepend album/show title to track title"],
 	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley accepts --hdvideo argument for HD video flag"],
 	tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Tagging', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
@@ -4578,11 +4579,13 @@ sub tag_file {
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
 	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
-	# create metadata
-	my $meta = $prog->tag_metadata;
-	# tag file
-	my $tagger = Tagger->new();
-	$tagger->tag_file($meta);
+	if ( $prog->{type} ne "podcast" || $opt->{tag_force} ) {
+		# create metadata
+		my $meta = $prog->tag_metadata;
+		# tag file
+		my $tagger = Tagger->new();
+		$tagger->tag_file($meta);
+	}
 	# clean up thumbnail if necessary
 	unlink $prog->{thumbfile} if ! $opt->{thumb};
 }
