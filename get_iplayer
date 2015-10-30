@@ -10227,6 +10227,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+		hlsencode		=> [ 1, "hls-encode|hlsencode!", 'Recording', '--hls-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Does not apply to built-in HLS downloader."],
 	};
 }
 
@@ -10272,16 +10273,15 @@ sub get {
 	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if $opt->{stop};
 	# requires ffmpeg 1.2
 	# push @cmdopts, ( '-to', $opt->{stop} ) if $opt->{stop};
-	if ( $live ) {
+	if ( $opt->{hlsencode} ) {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
-			#push @cmdopts, ( '-vcodec', 'h264' );
-			push @cmdopts, ( '-ab', "${ab}k" ) if $ab;
-			push @cmdopts, ( '-acodec', 'aac', '-strict', 'experimental' );
+			push @cmdopts, ( '-vcodec', 'h264' );
 		} else {
 			push @cmdopts, ( '-vn' );
-			push @cmdopts, ( '-acodec', 'copy' );
 		}
+		push @cmdopts, ( '-ab', "${ab}k" ) if $ab;
+		push @cmdopts, ( '-acodec', 'aac', '-strict', 'experimental' );
 	} else {
 		if ( $kind eq 'video' ) {
 			push @cmdopts, ( '-vcodec', 'copy' );
@@ -10310,15 +10310,11 @@ sub get {
 		@globals,
 		'-i', $url,
 	);
+	push @cmd, @cmdopts;
 	if ( ! $opt->{nowrite} ) {
-		if ( $live ) {
-			push @cmd, ( '-vcodec', 'h264' ) if $kind eq 'video';
-		}
-		push @cmd, @cmdopts;
 		push @cmd, ( $file_tmp );
 	}
 	if ( $opt->{stdout} ) {
-		push @cmd, @cmdopts;
 		push @cmd, ( '-f', 'mpegts', 'pipe:1' );
 	}
 
