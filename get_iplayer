@@ -5169,6 +5169,13 @@ sub get_verpids {
 		$prog->{versions} = join ',', keys %{ $prog->{verpids} };
 		$prog->{title} = decode_entities($title);
 		return 0;
+	
+	# news site video page	
+	} elsif ( $prog->{pid} =~ m{^(http://)www(\.bbc\.co\.uk/news/.*?(\d+))$} ) {
+		# hard-code playlist path
+		$url = $1."playlists".$2."A/playlist.sxml";
+		# use asset id as pid
+		$prog->{pid} = $3;
 
 	# Determine if the is a standard pid, Live TV or EMP TV URL
 	# EMP URL
@@ -5217,6 +5224,10 @@ sub get_verpids {
 		# playlist embedded in JSON
 		} elsif ( $xml =~ m{"href":"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"} ) {
 			($url = $1) =~ s/\\//g;
+		# playlist in data-media-id attribute
+		} elsif ( $xml =~ m{data-media-id="(http://playlists.bbc.co.uk/.+?/(\d+)\w?/playlist.sxml)"} ) {
+			$url = $1;
+			$prog->{pid} = $2;
 		# embedded player
 		} elsif ( $xml =~ m{emp\.load\("(http://www.bbc.co.uk/iplayer/playlist/([bp]0[a-z0-9]{6}))"\)} ) {
 			$url = $1;
@@ -5345,6 +5356,14 @@ sub get_verpids {
 			my $hls_pid = $hls_pid_map->{$prog->{pid}};
 			$verpid = $hls_pid || $verpid;
 			main::logger "INFO: Using Live TV: $verpid\n" if $opt->{verbose} && $verpid;
+
+		# news site video page	
+		} elsif ( $prog->{pid} =~ /^\d+$/i && $url =~ /^http.+xml$/ ) {
+			$version = 'default';
+			$verpid = $1 if m{<mediator\s+identifier="(.+?)"};
+			$verpid ||= $url;
+			main::logger "INFO: Using Non-live news video VPID: $verpid\n" if $opt->{verbose} && $verpid;
+
 		# Live/Non-live EMP tv/radio XML URL
 		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http.+xml$/ ) {
 			$version = 'default';
@@ -7173,8 +7192,8 @@ sub get_stream_data {
 		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 	} else {
 		# assume URL in $verpid is XML playlist from news site
-		if ( $verpid =~ /http:/ ) {
-			@pc_mediasets = ( 'journalism-pc' );
+		if ( $verpid =~ /http:/ || $prog->{pid} =~ /^\d+$/ ) {
+			@pc_mediasets = ( 'journalism-pc' ); 
 			@mobile_mediasets = ('journalism-http-tablet');
 		} else {
 			@pc_mediasets = ( 'pc' );
