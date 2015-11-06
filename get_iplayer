@@ -11417,6 +11417,10 @@ sub tag_file {
 # add full ID3 tag with MP3::Tag
 sub tag_file_id3 {
 	my ($self, $meta, $tags) = @_;
+	# suppress Perl 5.22 warnings from MP3::Tag::parse_prepare
+	local $SIG{__WARN__} = sub {
+			warn @_ unless $_[0] =~ m(^Unescaped left brace in regex is deprecated);
+	};
 	# look for required module
 	eval 'use MP3::Tag';
 	if ( $@ ) {
