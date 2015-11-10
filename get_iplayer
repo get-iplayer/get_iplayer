@@ -9959,6 +9959,7 @@ package Streamer;
 use File::stat;
 use File::Copy;
 use strict;
+use Text::ParseWords;
 
 # Class vars
 # Global options
@@ -10031,7 +10032,7 @@ sub postproc {
 	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
 	my @ffmpeg_opts = ();
 	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, ( split /\s+/, $opt->{'ffmpeg'.$prog->{type}.'opts'} );
+		push @ffmpeg_opts, shellwords( $opt->{'ffmpeg'.$prog->{type}.'opts'} );
 	}
 
 	# use backwards-compatible option for ffmpeg
@@ -10148,6 +10149,7 @@ use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
 use strict;
+use Text::ParseWords;
 use Time::Local;
 use URI;
 
@@ -10181,7 +10183,7 @@ sub get {
 	my $protocol	= $streamdata{protocol} || 0;
 	my $pageurl	= $prog->{player};
 	my $mode	= $prog->{mode};
-	push @cmdopts, ( split /\s+/, $streamdata{extraopts} ) if $streamdata{extraopts};
+	push @cmdopts, shellwords( $streamdata{extraopts} ) if $streamdata{extraopts};
 
 	my $file_tmp;
 	my @cmd;
@@ -10248,7 +10250,7 @@ sub get {
 
 	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
 	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'rtmp'.$prog->{type}.'opts'} );
+		push @cmdopts, shellwords( $opt->{'rtmp'.$prog->{type}.'opts'} );
 	}
 
 	my $return;
@@ -10321,6 +10323,7 @@ use File::Copy;
 use File::Path;
 use File::stat;
 use List::Util qw(max);
+use Text::ParseWords;
 use strict;
 
 sub opt_format {
@@ -10740,7 +10743,7 @@ sub get_ffmpeg {
 
 	# Add custom options to ffmpeg for this type if specified with --hls-<type>-opts
 	if ( defined $opt->{$pfx.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{$pfx.$prog->{type}.'opts'} );
+		push @cmdopts, shellwords( $opt->{$pfx.$prog->{type}.'opts'} );
 	}
 
 	my @globals = ( '-y' );
@@ -10831,6 +10834,7 @@ use File::Path;
 use File::stat;
 use List::Util qw(max);
 use strict;
+use Text::ParseWords;
 
 sub opt_format {
 	return {
@@ -10884,7 +10888,7 @@ sub get {
 
 	# Add custom options to ffmpeg for this type if specified with --shoutcast-<type>-opts
 	if ( defined $opt->{'shoutcast'.$prog->{type}.'opts'} ) {
-		push @cmdopts, ( split /\s+/, $opt->{'shoutcast'.$prog->{type}.'opts'} );
+		push @cmdopts, shellwords( $opt->{'shoutcast'.$prog->{type}.'opts'} );
 	}
 
 	my @globals = ( '-y' );
