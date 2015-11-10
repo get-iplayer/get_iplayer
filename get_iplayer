@@ -7601,11 +7601,12 @@ sub get_stream_data {
 
 	# Parse and dump structure
 	my $mode;
+	my $modelist = $prog->modelist();
 	for my $mattribs ( @medias ) {
 
 		# Put verpid into mattribs
 		$mattribs->{verpid} = $verpid;
-		$mattribs->{modelist} = $prog->modelist;
+		$mattribs->{modelist} = $modelist;
 
 		if ( $mattribs->{service} =~ /(hls|hlx)/ ) {
 
@@ -7764,14 +7765,21 @@ sub modelist {
 	my $prog = shift;
 	my $showwarn = shift;
 	my $mlist = $opt->{$prog->{type}."mode"} || $opt->{modes};
-
 	# Defaults
 	if ( ! $mlist ) {
 		$mlist = 'default';
 		if ( $prog->{type} =~ /live/ ) {
-			if ( ! main::exists_in_path('ffmpeg') ) {
-				main::logger "WARNING: Not using hls/shoutcast modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-				return undef;
+ 			if ( ! main::exists_in_path('ffmpeg') ) {
+				$mlist = 'hlsdefault';
+				if ( $opt->{hlsffmpeg} ) {
+					main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+					return undef unless $prog->{type} =~ /radio/;
+					$mlist = "shoutcast";
+				}
+				if ( $mlist eq "shoutcast" ) {
+					main::logger "WARNING: Not using shoutcast modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+					return undef;
+				}
 			}
 		} else {
 			if ( ! main::exists_in_path('rtmpdump') ) {
