@@ -60,7 +60,7 @@ use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(mkfifo);
+use POSIX qw(mkfifo strftime);
 use POSIX qw(:termios_h);
 use strict;
 #use warnings;
@@ -158,12 +158,14 @@ my $opt_format = {
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
 
 	# Search
+	availablesince		=> [ 0, "availablesince|available-since=n", 'Search', '--available-since', "Limit search to programmes that have become available in the last N hours"],
 	before		=> [ 1, "before=n", 'Search', '--before', "Limit search to programmes added to the cache before N hours ago"],
 	category 	=> [ 0, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes)."],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	exclude		=> [ 0, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
 	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes)."],
 	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
+	expiresbefore		=> [ 1, "expiresbefore|expires-before=n", 'Search', '--expires-before', "Limit search to programmes that will expire in the next N hours"],
 	fields		=> [ 0, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
 	future		=> [ 1, "future!", 'Search', '--future', "Additionally search future programme schedule if it has been indexed (refresh cache with: --refresh --refresh-future)."],
 	long		=> [ 0, "long|l!", 'Search', '--long, -l', "Additionally search in programme descriptions and episode names (same as --fields=name,episode,desc )"],
@@ -1448,7 +1450,9 @@ sub get_regex_matches {
 	my $since = $opt->{since} || 999999;
 	my $before = $opt->{before} || -999999;
 	my $now = time();
-
+	my $available_since = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablesince} * 3600))) if $opt->{availablesince};
+	my $expires_before = $now + ($opt->{expiresbefore} * 3600) if $opt->{expiresbefore};
+	
 	if ( $opt->{verbose} ) {
 		main::logger "DEBUG: Search download_regex = $download_regex\n";
 		main::logger "DEBUG: Search channel_regex = $channel_regex\n";
@@ -1459,6 +1463,8 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search category_exclude_regex = $category_exclude_regex\n";
 		main::logger "DEBUG: Search since = $since\n";
 		main::logger "DEBUG: Search before = $before\n";
+		main::logger "DEBUG: Search available_since = $available_since\n";
+		main::logger "DEBUG: Search expires_before = $expires_before\n";
 	}
 
 	# Determine fields to search
@@ -1484,6 +1490,8 @@ sub get_regex_matches {
 			&& $this->{categories} !~ /$category_exclude_regex/i
 			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
 			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
+			&& ( ( not $available_since ) || ( not $this->{available} ) || $this->{available} ge $available_since )
+			&& ( ( not $expires_before ) || ( not $this->{expires} ) || $this->{expires} <= $expires_before )
 		) {
 			# Add included matches
 			my @compund_fields;
