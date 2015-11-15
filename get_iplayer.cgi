@@ -45,6 +45,8 @@ use Encode qw(:DEFAULT :fallback_all);
 use PerlIO::encoding;
 $PerlIO::encoding::fallback = XMLCREF;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
+# suppress Perl 5.22/CGI 4 warning
+$CGI::LIST_CONTEXT_WARN = 0;
 $| = 1;
 my $fh;
 # Send log messages to this fh
