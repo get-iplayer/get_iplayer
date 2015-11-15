@@ -4232,45 +4232,71 @@ sub insert_stylesheet {
 
 	<STYLE type="text/css">
 
-	html {
-		font: 16px/20px Arial, sans-serif;
+	body {
 		background: #000;
-		color: #FFF;
+		color: #fff;
+		font-family: Arial,Helvetica,sans-serif;
+		font-size: 100%;
+	}
+
+	img	{
+		border: 0;
+	}
+	
+	input, select {
+		background: #ddd; 
+		border: 0; 
+	}
+	
+	input {
+		font-size: 1em;
+	}
+
+	a { 
+		color: #fff; 
+		text-decoration: none; 
 	}
 
 	a[href], a[onclick], label[onclick], :link, :visited {
 		cursor: pointer;
 	}
-
-	:link {
-		color: #88F;
-	}
-
-	:visited {
-		color: #F88;
-	}
-
-	ul.nav,
-	ul.options_tab {
-		margin-top: 0;
-		border-bottom: 4px solid #888;
-	}
-
+	
 	ul.nav,
 	ul.options_tab,
 	ul.action {
 		list-style: none;
+		margin: 8px 0;
 		padding: 0;
 	}
+	
+	ul.nav, ul.action {
+		font-size: 1em;
+	}
 
+	ul.nav {
+		border-bottom: 4px solid #888;
+	}
+
+	ul.options_tab {
+		border-bottom: 2px solid #888;
+	}
+	
 	ul.nav > li,
 	ul.options_tab > li,
 	ul.action > li {
+		background: #444;
 		display: inline-block;
 		vertical-align: bottom;
 		margin: 0 4px;
-		padding: 4px 8px;
-		background: #444;
+	}
+	
+	ul.nav > li, 
+	ul.action > li {
+		padding: 4px 16px;
+	}
+	
+	ul.options_tab > li {
+		padding: 2px 8px;
 	}
 
 	ul.nav > li:hover,
@@ -4278,54 +4304,106 @@ sub insert_stylesheet {
 	ul.action > li:hover {
 		background: #666;
 	}
-
+	
 	ul.nav > li.nav_tab_sel,
 	ul.options_tab > li.options_tab_sel {
 		background: #888;
+	}
+	
+	table.options_outer > tbody > tr {
+		font-size: 0.875em;
+	}
+
+	table.options_outer td, 
+	table.options_outer th,
+	table.info td, 
+	table.info th {
+		vertical-align: top;
+		text-align: left;
+	}
+
+	table.options,
+	table_options_embedded {
+		border-spacing: 1;
+	}
+
+	table.pagetrail {
+		margin-left: auto;
+		margin-right: auto;
+		margin-top: 8px;
+		margin-bottom: 8px;
+		font-size: 1em;
+		font-weight: bold; 
+		border-spacing: 10px 0; 
+		padding: 0px;
+	}
+	
+	label.pagetrail-current	{
+		color: #F54997;
+	}
+	
+	table.search,
+	table.info {
+		border: 2px solid #333;
+		border-collapse: collapse;
+		width: 100%;
+	}
+
+	table.search > tbody > tr,
+	table.info > tbody > tr {
+		background: #444;
+		font-size: 0.875em;
+	}
+
+	table.search > tbody > tr:hover,
+	table.info > tbody > tr:hover {
+		background: #666;
+	}
+
+	table.search > tbody > tr > th,
+	table.info > tbody > tr > th {
+		background: #000; 
+		text-align: center; 
+	}
+	
+	table.search > tbody > tr > td, 
+	table.search > tbody > tr > th,
+	table.info > tbody > tr > td, 
+	table.info > tbody > tr > th {
+		border: 1px solid #333;
+		padding: 4px 8px;
+	}
+	
+	table.searchhead {
+		width: 100%; 
+	}
+
+	label.sorted {
+		color: #CFC;
+	}
+	
+	label.sorted_reverse {
+		color: #FCC;
+	}
+	
+	b.footer {
+		color: #777;
+		font-size: 0.75em;
+		font-weight: normal;
+	}
+
+	#nowrap {
+		white-space: nowrap;
 	}
 
 	#logo {
 		background: none;
 		margin: 0;
 	}
-
+	
 	#logo .logotext {
-		font-size: 150%;
-		font-family: "Courier New", monospace;
 		color: #F54997;
-	}
-
-	table.options_outer td, table.options_outer th,
-	table.info td, table.info th {
-		vertical-align: top;
-		text-align: left;
-	}
-
-	table.search {
-		border: 2px solid white;
-		border-collapse: collapse;
-	}
-
-	table.search > tbody > tr > td, table.search > tbody > tr > th {
-		border: 1px solid white;
-		padding: 4px 8px;
-	}
-
-	table.pagetrail {
-		margin-left: auto;
-		margin-right: auto;
-	}
-
-	label.sorted {
-		color: #CFC;
-	}
-
-	label.sorted_reverse {
-		color: #FCC;
-	}
-
-	.footer {
-		font-size: 75%;
+		font-family: "Courier New", monospace;
 	}
 
 	</STYLE>
