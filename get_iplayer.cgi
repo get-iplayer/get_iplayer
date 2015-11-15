@@ -3592,8 +3592,8 @@ sub process_params {
 	};
 
 	$opt->{MODES} = {
-		title	=> 'Recording Modes<br/>(set to <i>best</i> for HD TV)', # Title
-		tooltip	=> 'Comma separated list of recording modes which should be tried in order. Set to "best" (without quotes) for HD TV (if available, with fallback to SD TV). Set to "default" (without quotes) for best available SD TV.  Set to "good" (without quotes) for lower-quality SD TV.', # Tooltip
+		title	=> 'Recording Modes', # Title
+		tooltip	=> 'Comma separated list of recording modes which should be tried in order. Default is "best" for HD TV (if available, with fallback to SD TV). Set to "better" (without quotes) for best available SD TV.  Set to "good" (without quotes) for lower-quality SD TV.', # Tooltip
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
