@@ -3412,8 +3412,7 @@ sub get {
 	my $opt_encoding = ( $^O eq "MSWin32" && $optfile eq $optfile_system ) ? $opt->{encodinglocalefs} : "utf8";
 	open (OPT, "<:encoding($opt_encoding)",  $optfile) || die ("ERROR: Cannot read options file $optfile\n");
 	while(<OPT>) {
-		/^\s*([\w\-_]+)\s+(.*)\s*$/;
-		next if not defined $1;
+		next unless (/^\s*([\w\-_]+)\s+(.*)\s*$/);
 		# Error if the option is not valid
 		if ( not defined $optname->{$1} ) {
 			# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
