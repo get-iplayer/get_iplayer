@@ -3424,19 +3424,17 @@ sub get {
 		}
 		# Warn if it is listed as a deprecated or ignored internal option name
 		if ( defined @{ $opt_format_ref->{$1} }[2] ) {
-			my $warned;
+			$opt->{stderr} = 1;
 			if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
 				main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
-				$warned = 1;
+				main::logger "INFO: Use --dump-opts to display all valid options\n";
 			} elsif ( @{ $opt_format_ref->{$1} }[2] eq 'Ignored' ) {
 				main::logger "WARNING: Ignored option in $optfile: '$1 = $2'\n";
 				main::logger "WARNING: Option '$1' is no longer used and is scheduled for removal\n";
 				main::logger "WARNING: Please delete option '$1' from $optfile\n";
-				$warned = 1;
-			}
-			if ( $warned ) {
 				main::logger "INFO: Use --dump-opts to display all valid options\n";
 			}
+			delete $opt->{stderr};
 		}
 		chomp( $entry->{ $optname->{$1} } = $2 );
 		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
