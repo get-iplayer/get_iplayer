@@ -3331,7 +3331,7 @@ sub show {
 	return 0 if ! -f $optfile;
 
 	# Load opts file
-	my $entry = get( $opt, $optfile );
+	my $entry = get( $opt, $optfile, 1 );
 
 	# Merge all cmdline opts into $entry except for these
 	main::logger "Options in '$optfile'\n";
@@ -3400,6 +3400,7 @@ sub get_opt_map {
 sub get {
 	my $opt = shift;
 	my $optfile = shift;
+	my $suppress_warnings = shift;
 	my $opt_format_ref = $Options::opt_format_ref;
 	my $entry;
 	return $entry if ( ! defined $optfile ) || ( ! -f $optfile );
@@ -3413,7 +3414,7 @@ sub get {
 	while(<OPT>) {
 		next unless (/^\s*([\w\-_]+)\s+(.*)\s*$/);
 		# Error if the option is not valid
-		if ( not defined $optname->{$1} ) {
+		if ( ( not defined $optname->{$1} ) && ( ! $suppress_warnings ) ) {
 			# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
 			$opt->{stderr} = 1;
 			main::logger "WARNING: Ignoring invalid option in $optfile: '$1 = $2'\n";
@@ -3422,7 +3423,7 @@ sub get {
 			next;
 		}
 		# Warn if it is listed as a deprecated or ignored internal option name
-		if ( defined @{ $opt_format_ref->{$1} }[2] ) {
+		if ( ( defined @{ $opt_format_ref->{$1} }[2] ) && ( ! $suppress_warnings ) ) {
 			$opt->{stderr} = 1;
 			if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
 				main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
