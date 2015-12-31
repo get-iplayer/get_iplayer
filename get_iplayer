@@ -8272,11 +8272,12 @@ sub get_links_schedule {
 		}
 		push @schedule_dates, "this_week";
 	}
+	my $known_bad = "bbclondon|radiosolent|worldserviceradio";
 	my %aod_seen;
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
-			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channels{$channel_id}, $future, $url, $limit, $now);
+			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
 			if ( $rc ) {
 				if ( $prog_type eq "radio" && ! $aod_seen{$channel_id} ) {
 					my $aod_channel_id;
@@ -8289,12 +8290,11 @@ sub get_links_schedule {
 					}
 					if ( $aod_channel_id ) {
 						$aod_seen{$channel_id}++;
-						main::logger "\nWARNING: Falling back to AOD feeds for $aod_channels{$aod_channel_id} ($aod_channel_id)\n";
 						if ( ! $future ) {
-							main::logger "WARNING: Only previous 7 days of programmes will be indexed for $aod_channels{$aod_channel_id}\n";
+							main::logger "\nWARNING: Only previous 7 days of programmes will be indexed for $aod_channels{$aod_channel_id}\n" unless $channel_id =~ /$known_bad/;
 							$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
 						} else {
-							main::logger "WARNING: --refresh-future is not supported sith AOD feeds for $aod_channels{$aod_channel_id}\n";
+							main::logger "WARNING: --refresh-future is not supported for $aod_channels{$aod_channel_id}\n";
 						}
 					}
 				}
@@ -8312,11 +8312,13 @@ sub get_links_schedule_page {
 	my $self = shift;
 	my $prog = shift;
 	my $prog_type = shift;
+	my $channel_id = shift;
 	my $channel = shift;
 	my $future = shift;
 	my $url = shift;
 	my $limit = shift;
 	my $now = shift || time();
+	my $known_bad = shift;
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
@@ -8325,7 +8327,7 @@ sub get_links_schedule_page {
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $ua = main::create_ua( 'desktop', 1 );
 	main::logger "DEBUG: Getting feed $url\n" if $opt->{debug};
-	my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
+	my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n") unless $channel_id =~ /$known_bad/;
 	return 1 if ! $xml;
 	decode_entities($xml);
 
