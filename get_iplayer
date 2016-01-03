@@ -309,6 +309,7 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions (only applies with --playlist-metadata)."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
+	experimentaldashtv	=> [ 1, "experimentaldashtv|experimental-dashtv|experimental-dash-tv!", 'Misc', '--experimental-dash-tv', "Switch on incomplete DASH support for tv programmes (will only produce separate audio and video files)"],
 
 };
 
@@ -4382,7 +4383,8 @@ sub mode_ver_download_retry_loop {
 
 	# can only resume on retries unless live or streaming-only
 	delete $opt->{hlsresume} unless $prog->{type} =~ /live/ || ( $opt->{nowrite} && $opt->{stdout} );
-
+	delete $opt->{dashresume};
+	
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
@@ -7002,6 +7004,158 @@ sub parse_m3u_attribs {
 	return %attr;
 }
 
+sub parse_dash_connection {
+	eval "use XML::Simple";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for MPEG-DASH streams.\n";
+		return;
+	} 
+	my $media = shift;
+	my $conn = shift;
+	my $prefix = shift || "dash";
+# 	my $media = {};
+# 	my $conn = {};
+# 	my $prefix = "dash";
+ 	my @dash_medias;
+# 	$conn->{href} = "http://aod-dash-uk-live.edgesuite.net/usp/auth/vod/piff_abr_full_audio/823988-b06sf3b3/vf_b06sf3b3_ee538b52-e1cd-4623-aa00-3da2a8185948.ism/pc_hd_abr_v1_uk_dash_master.mpd?__gda__=1451688826_e1154a56213db9c7ef37e4b7ea1bda88";
+# 	$conn->{href} = "http://aod-dash-uk-live.bbcfmt.vo.llnwd.net/usp/auth/vod/piff_abr_full_audio/823988-b06sf3b3/vf_b06sf3b3_ee538b52-e1cd-4623-aa00-3da2a8185948.ism/pc_hd_abr_v1_uk_dash_master.mpd?s=1451645626&amp;e=1451688826&amp;h=e74bc22ddf472a2d387a5ece8c5c643e"
+	decode_entities($conn->{href});
+	my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
+	if ( ! $xml ) {
+		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
+		return;
+	}
+# 	my $file = 'bells.mpd';
+# # 	$file = 'weather.mpd';
+# 	open my $fh, '<', $file or die;
+# 	$/ = undef;
+# 	my $xml = <$fh>;
+# 	close $fh;
+	my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
+	if ( $@ ) {
+		main::logger "WARNING: Could not parse DASH manifest ($conn->{href})\n" if $opt->{verbose};
+		return;
+	}
+	$doc->{mediaPresentationDuration} =~ /(([0-9]+)H)?(([0-9]+)M)?(([.0-9]+)S)/;
+	my $programme_duration = $2 * 3600 + $4 * 60 + $6;
+	my $period = $doc->{Period}->[0];
+	my $baseurl = $period->{BaseURL}->[0];
+	$baseurl =~ s/\/$//;
+	my @audio_medias;
+	my @video_medias;
+	my $template0 = $period->{AdaptationSet}->[0]->{SegmentTemplate}->[0];
+	if ( ! $template0 ) {
+		$template0 = $period->{AdaptationSet}->[0]->{Representation}->[0]->{SegmentTemplate}->[0];
+	}
+	my $xinit = $template0->{initialization};
+	my $xmedia = $template0->{media};
+	my $dash_conn = dclone($conn);
+	my $uri1 = URI->new($dash_conn->{href});
+	my $uri2 = URI->new($xinit);
+	if ( ! $uri2->scheme ) {
+		my @segs1 = $uri1->path_segments;
+		my @segs2 = $uri2->path_segments;
+		pop @segs1;
+		push @segs1, $baseurl, @segs2;
+		$uri2 = dclone($uri1);
+		$uri2->path_segments(@segs1);
+	}
+	my $qs1 = $uri1->query;
+	my $qs2 = $uri2->query;
+	$qs1 .= "&" if $qs1 && $qs2;
+	$uri2->query($qs1.$qs2);
+	my $init_template = $uri2->as_string;
+	my $uri3 = URI->new($xmedia);
+	if ( ! $uri3->scheme ) {
+		my @segs1 = $uri1->path_segments;
+		my @segs3 = $uri3->path_segments;
+		pop @segs1;
+		push @segs1, $baseurl, @segs3;
+		$uri3 = dclone($uri1);
+		$uri3->path_segments(@segs1);
+	}
+	$qs1 = $uri1->query;
+	my $qs3 = $uri3->query;
+	$qs1 .= "&" if $qs1 && $qs3;
+	$uri3->query($qs1.$qs3);
+	my $media_template = $uri3->as_string;
+	for my $set ( @{$period->{AdaptationSet}} ) {
+		my $content_type = $set->{contentType};
+		my $template = $set->{SegmentTemplate}->[0];
+		for my $repr ( @{$set->{Representation}} ) {
+			if ( ! $template ) {
+				$template = $repr->{SegmentTemplate}->[0];
+			}
+			my $segment_duration = $template->{duration} / $template->{timescale};
+			my $num_segments = int($programme_duration / $segment_duration);
+			$num_segments++ if $segment_duration * $num_segments < $programme_duration;
+			my $repr_media = {};
+			$repr_media->{content_type} = $content_type;
+			$repr_media->{id} = $repr->{id};
+			$repr_media->{bitrate} = int($repr->{bandwidth}/1000.0);
+			$repr_media->{file_size} = int($programme_duration * $repr_media->{bitrate} * 1000.0 / 8.0);
+			$repr_media->{service} = "gip_${prefix}_iplayer_$repr_media->{bitrate}";
+			$repr_media->{num_segments} = $num_segments;
+			$repr_media->{segment_duration} = $segment_duration;
+			$repr_media->{programme_duration} = $programme_duration;
+			$repr_media->{start_number} = $template->{startNumber};
+			$repr_media->{stop_number} = $template->{startNumber} + $num_segments - 1;
+			$repr_media->{init_template} = $init_template;
+			$repr_media->{media_template} = $media_template;
+			if ( $content_type eq "video" ) {
+				$repr_media->{width} = $repr->{width};
+				$repr_media->{height} = $repr->{height};
+				$repr_media->{frameRate} = $repr->{frameRate};
+				push @video_medias, $repr_media;
+			} else {
+				push @audio_medias, $repr_media;
+			}
+		}
+	}
+	my @sorted_audio = sort {$a->{bitrate} <=> $b->{bitrate}} @audio_medias;
+	my $video_audio = pop @sorted_audio;
+
+	if ( @video_medias ) {
+		for my $video_media ( @video_medias ) {
+			my $dash_media = dclone($media);
+			delete $dash_media->{width};
+			delete $dash_media->{height};
+			delete $dash_media->{bitrate};
+			delete $dash_media->{service};
+			delete $dash_media->{media_file_size};
+			delete $dash_media->{connections};
+			my $dash_conn = dclone($conn);
+			delete $dash_conn->{href};
+			$dash_media->{width} = $video_media->{width};
+			$dash_media->{height} = $video_media->{height};
+			$dash_media->{bitrate} = $video_media->{bitrate};
+			$dash_media->{service} = $video_media->{service};
+			$dash_media->{media_file_size} = $video_media->{file_size};
+			$dash_media->{video_media} = $video_media;
+			$dash_media->{audio_media} = $video_audio;
+			($dash_conn->{href} = $video_media->{init_template}) =~ s/\$RepresentationID\$/$video_media->{id}/;
+			$dash_media->{connections} = [ $dash_conn ];
+			push @dash_medias, $dash_media;
+		}
+	} else {
+		for my $audio_media ( @audio_medias ) {
+			my $dash_media = dclone($media);
+			delete $dash_media->{bitrate};
+			delete $dash_media->{service};
+			delete $dash_media->{media_file_size};
+			my $dash_conn = dclone($conn);
+			delete $dash_conn->{href};
+			$dash_media->{bitrate} = $audio_media->{bitrate};
+			$dash_media->{service} = $audio_media->{service};
+			$dash_media->{media_file_size} = $audio_media->{file_size};
+			$dash_media->{audio_media} = $audio_media;
+			($dash_conn->{href} = $audio_media->{init_template}) =~ s/\$RepresentationID\$/$audio_media->{id}/;
+			$dash_media->{connections} = [ $dash_conn ];
+			push @dash_medias, $dash_media;
+		}
+	}
+ 	return @dash_medias;
+}
 
 sub get_stream_data_cdn {
 	my ( $data, $mattribs, $mode, $streamer, $ext ) = ( @_ );
@@ -7150,6 +7304,13 @@ sub get_stream_data_cdn {
 				$conn->{video_bitrate} = $mattribs->{video_bitrate};
 				$conn->{video_bitrate} ||= $mattribs->{bitrate} - $conn->{audio_bitrate};
 			}
+
+		# dash stream
+		} elsif ( $cattribs->{transferFormat} =~ /dash/ ) {
+			$conn->{streamurl} = $cattribs->{href};
+			$conn->{kind} = $mattribs->{kind};
+			$conn->{audio_media} = $mattribs->{audio_media};
+			$conn->{video_media} = $mattribs->{video_media};
 
 		# shoutcast stream
 		} elsif ( $cattribs->{kind} =~ /icy/ ) {
@@ -7349,9 +7510,9 @@ sub get_stream_data {
 		if ( $verpid =~ /http:/ ) {
 			@medias = parse_metadata( $xml );
 		} else {
-			# get Flash streams for on-demand
 			my $pc_hd_id;
 			if ( $prog->{type} !~ /live/ ) {
+				# get Flash streams for on-demand
 				for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 					$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
 					main::logger "\n$xml\n" if $opt->{debug};
@@ -7379,6 +7540,43 @@ sub get_stream_data {
 							for my $pc_conn ( @{$pc_media->{connections}} ) {
 								($pc_hd_id = $pc_conn->{identifier}) =~ s/(^mp4:(secure\/)?|\.mp4$)//g;
 								last;
+							}
+						}
+					}
+				}
+				if ( $prog->{type} eq "radio" || $opt->{experimentaldashtv} ) {
+					# get MPEG-DASH streams for on-demand
+					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
+						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+						main::logger "\n$xml\n" if $opt->{debug};
+						my @pc_medias = parse_metadata( $xml );
+						for my $pc_media ( @pc_medias ) {
+							for my $pc_conn ( @{$pc_media->{connections}} ) {
+								next if $pc_conn->{supplier} =~ /$exclude_regex/;
+								$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+								next if $seen{$stream_key};
+								$seen{$stream_key}++;
+								($stream_key = $pc_conn->{href}) =~ s/\?.*//;
+								next if $seen{$stream_key};
+								$seen{$stream_key}++;
+								if ( $pc_media->{kind} eq "captions" ) {
+									push @medias, $pc_media;
+									last;
+								}
+								next if ( $pc_media->{kind} eq "captions" );
+								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
+								for my $dash_media ( @dash_medias ) {
+									for my $dash_conn ( @{$dash_media->{connections}} ) {
+										$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
+										next if $seen{$stream_key};
+										$seen{$stream_key}++;
+										($stream_key = $dash_conn->{href}) =~ s/\?.*//;
+										next if $seen{$stream_key};
+										$seen{$stream_key}++;
+										push @medias, $dash_media;
+										last;
+									}
+								}
 							}
 						}
 					}
@@ -7649,6 +7847,7 @@ sub get_stream_data {
 					}
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
+				my $pfx = $mattribs->{service} =~ /hls/ ? "hls" : "dash";
 				my $ext = "m4a";
 				if (  $mattribs->{bitrate} >= 192 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlshigh', 'hls', $ext );
@@ -7658,6 +7857,40 @@ sub get_stream_data {
 					get_stream_data_cdn( $data, $mattribs, 'hlsmed', 'hls', $ext );
 				} else {
 					get_stream_data_cdn( $data, $mattribs, 'hlslow', 'hls', $ext );
+				}
+			}
+
+		} elsif ( $mattribs->{service} =~ /dash/ ) {
+
+			if ( $mattribs->{kind} =~ 'video' ) {
+				my $ext = "mp4";
+				if ( $mattribs->{height} > 700 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashhd", 'dash', $ext );
+				} elsif ( $mattribs->{height} > 400 ) {
+					if ( $mattribs->{bitrate} > 2000 ) {
+						get_stream_data_cdn( $data, $mattribs, "dashsd", 'dash', $ext );
+					} else {
+						get_stream_data_cdn( $data, $mattribs, "dashvhigh", 'dash', $ext );
+					}
+				} elsif ( $mattribs->{height} > 200 ) {
+					if ( $mattribs->{bitrate} > 700 ) {
+						get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
+					} elsif ( $mattribs->{bitrate} > 500 ) {
+						get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
+					} elsif ( $mattribs->{bitrate} > 300 ) {
+						get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
+					}
+				}
+			} elsif ( $mattribs->{kind} =~ 'audio' ) {
+				my $ext = "m4a";
+				if (  $mattribs->{bitrate} >= 192 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashmed", 'dash', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
 				}
 			}
 
@@ -7835,6 +8068,14 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'flashbetter', 'flashvgood');
 	$mlist = main::expand_list($mlist, 'flashvgood', 'flashvhigh,flashgood');
 	$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashstd,flashnormal,flashlow');
+	# DASH on-demand tv/radio
+	$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
+	$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
+	$mlist = main::expand_list($mlist, 'dashbest', 'dashhd,dashvbetter');
+	$mlist = main::expand_list($mlist, 'dashvbetter', 'dashbetter');
+	$mlist = main::expand_list($mlist, 'dashbetter', 'dashvgood');
+	$mlist = main::expand_list($mlist, 'dashvgood', 'dashvhigh,dashgood');
+	$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashlow');
 	# HLS on-demand and live tv/radio
 	$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
@@ -10328,6 +10569,214 @@ sub get {
 	}
 
 	return $self->postproc($file_tmp, $prog, %streamdata);
+}
+
+################### Streamer::dash class #################
+package Streamer::dash;
+
+# Inherit from Streamer class
+use base 'Streamer';
+
+use File::Copy;
+use File::Path;
+use File::stat;
+use List::Util qw(max);
+use Text::ParseWords;
+use strict;
+
+sub postproc_dash {
+	my ( $self, $audio_file, $video_file, $prog, %streamdata ) = @_;
+	
+	if ( $prog->{type} eq "radio" ) {
+	 	return $self->postproc($audio_file, $prog, %streamdata);
+	}
+	# TODO: combine audio and video files
+	my $audio_part = $audio_file;
+	$audio_part =~ s/\.m4a$// unless $opt->{raw};
+	my $video_part = $video_file;
+	$video_part =~ s/\.m4v$// unless $opt->{raw};
+	move($audio_file, $audio_part) unless $audio_file eq $audio_part;
+	move($video_file, $video_part) unless $video_file eq $video_part;
+	main::logger "WARNING: DASH support for tv programmes is incomplete - audio and video files not combined\n";
+	main::logger "INFO: Retaining DASH audio file: $audio_part\n";
+	main::logger "INFO: Retaining DASH video file: $video_part\n";
+	return 0;
+}
+
+sub get {
+	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
+	if ( $opt->{stdout} || $opt->{nowrite} ) {
+		main::logger "ERROR: Cannot stream DASH to STDOUT\n";
+		exit 4;
+	}
+	my $rc;
+	my $audio_media = $streamdata{audio_media};
+	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
+	$audio_file .= ".m4a" unless $opt->{raw};
+	$rc = $self->get_media($audio_media, $audio_file, $ua, $url, $prog, %streamdata );
+	return $rc if $rc =~ /(retry|next)/;
+	my $video_media;
+	my $video_file;
+	if ( $prog->{type} eq "tv" ) {
+		$video_media = $streamdata{video_media};
+		($video_file = $prog->{filepart}) =~ s/\.\w+$/.m4v/;
+		$video_file .= ".m4v" unless $opt->{raw};
+		$rc = $self->get_media($video_media, $video_file, $ua, $url, $prog, %streamdata );
+		return $rc if $rc =~ /(retry|next)/;
+	}
+	return $self->postproc_dash($audio_file, $video_file, $prog, %streamdata);
+}
+
+sub get_media {
+	my ( $self, $media, $file_tmp, $ua, $url, $prog, %streamdata ) = @_;
+	my $file_size = $media->{file_size};
+	my $return;
+	my $fh;
+	my $last_sequence = 0;
+	my $begin_time = time();
+	my $begin_size = 0;
+	my $size = 0;
+	my $last_percent = 0;
+	my $hash_count = 0;
+	my $elapsed = 0;
+	my $retries = 3;
+	my %seen;
+
+	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+		unlink( $file_tmp );
+	}
+	if ( $opt->{dashresume} ) {
+		($last_sequence, $size, $elapsed, $begin_time) = split /,/, $opt->{dashresume};
+		if ( ! open($fh, ">>:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot append to $file_tmp\n";
+			exit 1;
+		}
+		binmode $fh;
+		my $tmp_size = stat($file_tmp)->size;
+		if ( $size < $tmp_size ) {				
+			main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
+			truncate($fh, $size);
+		}
+	} else {
+		if ( ! open($fh, ">:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot write to $file_tmp\n";
+			exit 1;
+		}
+		binmode $fh;
+	}
+
+	my $callback = sub {
+		my ($data, $res, undef) = @_;
+		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
+		print $fh $data;
+		$size = tell $fh;
+		return if $opt->{quiet} || $opt->{silent};
+		my $percent = 0;
+		$percent = 100.0 * $size / $file_size if $file_size;
+		if ( $opt->{hash} ) {
+			return if ($percent - $last_percent) < 1;
+		} else {
+			return if ($percent - $last_percent) < 0.1;
+		}
+		$last_percent = $percent;
+		if ( $opt->{hash} ) {
+			main::logger '#';
+			$hash_count++;
+			if ( ! ($hash_count % 100) ) {
+				main::logger "\n";
+			}
+		} else {
+			my $rate_bps;
+			my $rate;
+			my $time;
+			my $time_called = time();
+			if ($time_called - $begin_time < 1) {
+				$rate = '-----kbps';
+				$time = '--:--:--';
+			} else {
+				$rate_bps = ($size - $begin_size) / ($time_called - $begin_time);
+				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+				$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
+			}
+			main::logger sprintf ("Recording: %8.2fMB / %.2fMB %s %5.1f%%, %s remaining\r",
+				$size / 1024.0 / 1024.0,
+				$file_size / 1024.0 / 1024.0,
+				$rate,
+				$percent,
+				$time,
+			);
+		}
+	};
+
+	main::logger "INFO: ".( $opt->{dashresume} ? "Resume" : "Begin" )." recording DASH $media->{content_type} file: $file_tmp\n";
+
+	my $init_number = $media->{start_number} - 1;
+	my $start_number = $init_number;
+	$start_number = $last_sequence + 1 if $last_sequence;
+	for my $sequence ( $start_number .. $media->{stop_number} ) {
+		next if $seen{$sequence};
+		# skip segments already downloaded
+		next if $sequence > $init_number && $sequence <= $last_sequence;
+		my $segment_url;
+		if ( $sequence == $init_number ) {
+			($segment_url = $media->{init_template}) =~ s/\$RepresentationID\$/$media->{id}/;
+		} else {
+			($segment_url = $media->{media_template}) =~ s/\$RepresentationID\$/$media->{id}/;
+			$segment_url =~ s/\$Number\$/$sequence/;
+			$elapsed += $media->{segment_duration};
+			# check --start
+			next if defined $opt->{start} && $elapsed <= $opt->{start};
+		}
+		if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
+			$segment_url = $opt->{proxy}.main::url_encode( $segment_url );
+			$segment_url =~ s/^prepend://g;
+		}
+		main::logger "\nDEBUG: Getting DASH segment ($sequence) $segment_url\n" if $opt->{debug};
+		my $i;
+		for ($i = 0; $i < $retries; $i++) {
+			my $res = $ua->get($segment_url, ':content_cb' => $callback);
+			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
+				main::logger "\nERROR: Failed to download DASH segment ($sequence) $segment_url\n";
+			} else {
+				last;
+			}
+		}
+		if ( $i == $retries ) {
+			$return = 5;
+			last;
+		}
+		$seen{$sequence}++;
+		# capture for resuming
+		$last_sequence = $sequence;
+		$opt->{dashresume} = "$last_sequence,$size,$elapsed,$begin_time"; 
+		# check --stop
+		last if ( defined $opt->{stop} && $elapsed >= $opt->{stop} );
+	}
+	close $fh;
+	# summary stats
+	if ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
+		my $end_time = time() + 0.0001;
+		my $end_size = stat($file_tmp)->size;
+		main::logger sprintf("\rINFO: Recorded: %.2fMB in %s at %5.0fkbps to %s\n",
+			($end_size - $begin_size) / (1024.0 * 1024.0),
+			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $begin_time))[2,1,0] ),
+			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 * 8.0,
+			$file_tmp );
+	}
+
+	my $prog_type = $media->{content_type} eq "audio" ? "radio" : "tv";
+	my $min_download_size = main::progclass($prog_type)->min_download_size();
+	# if we fail during the streaming, try again
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
+	# clear resume data
+	delete $opt->{dashresume};
+	# If file is too small or non-existent then delete and try next mode
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+		main::logger "WARNING: Failed to stream file $file_tmp\n";
+		unlink $file_tmp;
+		return 'next';
+	}
+
 }
 
 
