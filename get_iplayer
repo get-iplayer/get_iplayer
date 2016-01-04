@@ -10131,7 +10131,8 @@ sub postproc {
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
 
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $prog->min_download_size() ) {
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
 			unlink( $file_tmp );
 			main::logger "INFO: Converted file: $prog->{filepart}\n";
 	# If the ffmpeg conversion failed, remove the failed converted file attempt - move the file as done anyway
@@ -10323,13 +10324,14 @@ sub get {
 		}
 	}
 
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# rtmpdump returns 2 with --stop
 	unless ( $return == 2 && $opt->{stop} ) {
-		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 	}
 
 	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
@@ -10695,13 +10697,13 @@ sub get_builtin {
 		}
 	}
 
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
-
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 	delete $opt->{hlsresume} unless $live;
 
 	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
@@ -10836,11 +10838,12 @@ sub get_ffmpeg {
 		}
 	}
 
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
 	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
@@ -10979,11 +10982,12 @@ sub get {
 		}
 	}
 
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $prog->min_download_size();
+	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
 	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size()) ) {
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
 		main::logger "WARNING: Failed to stream file $file_tmp\n";
 		unlink $file_tmp;
 		return 'next';
