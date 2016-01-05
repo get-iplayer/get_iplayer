@@ -4507,7 +4507,7 @@ sub tag_file {
 	# return if file does not exist
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
-	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
+	$prog->download_thumbnail if ( $opt->{tagonly} || ! -f $prog->{thumbfile} );
 	if ( $prog->{type} ne "podcast" ) {
 		# create metadata
 		my $meta = $prog->tag_metadata;
@@ -11944,7 +11944,11 @@ sub tag_file_mp4 {
 			);
 		}
 		# add artwork if available
-		push @cmd, ( '--artwork', $meta->{thumbfile} ) if ( -f $meta->{thumbfile} && ! $opt->{noartwork} );
+		if ( $opt->{noartwork} ) {
+			push @cmd, ( '--artwork', "REMOVE_ALL" ) if ( $opt->{noartwork} );
+		} else {
+			push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
+		}
 		# run atomicparsley command
 		if ( main::run_cmd( 'STDERR', @cmd ) ) {
 			main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
