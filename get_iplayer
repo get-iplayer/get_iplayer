@@ -4202,18 +4202,18 @@ sub cmp_modes($$) {
 	my %ranks = (
 		'vhd(\d?)' => 10,
 		'[^v]hd(\d?)' => 20,
-		'sd(\d?)' => 30,
-		'vhigh(\d?)' => 40,
-		'[^v]high(\d?)' => 50,
-		'std(\d?)' => 60,
-		'med(\d?)' => 70,
-		'[^v]low(\d?)' => 80,
-		'vlow(\d?)' => 90,
+		'xd(\d?)' => 30,
+		'sd(\d?)' => 40,
+		'vhigh(\d?)' => 50,
+		'[^v]high(\d?)' => 60,
+		'std(\d?)' => 70,
+		'med(\d?)' => 80,
+		'[^v]low(\d?)' => 90,
 	);
 	my %ranks2 = (
 		'^flash' => 100,
 		'^hls' => 200,
-		'^hlx' => 300,
+		'^dash' => 300,
 		'^subtitle' => 400,
 	);
 	my ($rank_x, $rank_y);
@@ -7475,11 +7475,7 @@ sub get_stream_data {
 				my @hls_ad = grep { $_->{service} =~ /hls/ } @medias;
 				my @hlx_ad = grep { $_->{service} =~ /hlx/ } @medias;
 				my ($hls1, $pfx1, $pfx2);
-				if ( @hls_ad && ! @hlx_ad ) {
-					$hls1 = \@hls_ad;
-					$pfx1 = "hls";
-					$pfx2 = "hlx";
-				} elsif ( ! @hls_ad && @hlx_ad ) {
+				if ( ! @hls_ad && @hlx_ad ) {
 					$hls1 = \@hlx_ad;
 					$pfx1 = "hlx";
 					$pfx2 = "hls";
@@ -7624,26 +7620,32 @@ sub get_stream_data {
 		$mattribs->{verpid} = $verpid;
 		$mattribs->{modelist} = $modelist;
 
-		if ( $mattribs->{service} =~ /(hls|hlx)/ ) {
-
+		if ( $mattribs->{service} =~ /hlx/ ) {
+			my $ext = "mp4";
 			if ( $mattribs->{kind} =~ 'video' ) {
-				my $pfx = $mattribs->{service} =~ /hlx/ ? "hlx" : "hls";
+				if ( $mattribs->{height} > 700 ) {
+					get_stream_data_cdn( $data, $mattribs, "hlsxd", 'hls', $ext );
+				}
+			}
+				
+		} elsif ( $mattribs->{service} =~ /hls/ ) {
+			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, "${pfx}hd", 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
 				} elsif ( $mattribs->{height} > 400 ) {
 					if ( $mattribs->{bitrate} > 2000 ) {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}sd", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hlssd", 'hls', $ext );
 					} else {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}vhigh", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
 					}
 				} elsif ( $mattribs->{height} > 200 ) {
 					if ( $mattribs->{bitrate} > 700 ) {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}high", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hlshigh", 'hls', $ext );
 					} elsif ( $mattribs->{bitrate} > 500 ) {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}std", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hlsstd", 'hls', $ext );
 					} elsif ( $mattribs->{bitrate} > 300 ) {
-						get_stream_data_cdn( $data, $mattribs, "${pfx}low", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
 					}
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
@@ -7803,7 +7805,7 @@ sub modelist {
 				$mlist = 'hlsdefault';
 			}
 			if ( ! main::exists_in_path('ffmpeg') ) {
-				main::logger "WARNING: Not using hls/hlx modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+				main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
 				return undef if $mlist eq "hlsdefault";
 			}
 		}
@@ -7841,14 +7843,6 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
 	$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlsmed,hlslow');
-	# Old HLS on-demand tv/radio
-	$mlist = main::expand_list($mlist, 'hlx', 'hlxdefault');
-	$mlist = main::expand_list($mlist, 'hlxdefault', 'hlxbest');
-	$mlist = main::expand_list($mlist, 'hlxbest', 'hlxhd,hlxvbetter');
-	$mlist = main::expand_list($mlist, 'hlxvbetter', 'hlxbetter');
-	$mlist = main::expand_list($mlist, 'hlxbetter', 'hlxvgood');
-	$mlist = main::expand_list($mlist, 'hlxvgood', 'hlxvhigh,hlxgood');
-	$mlist = main::expand_list($mlist, 'hlxgood', 'hlxhigh,hlxstd,hlxlow');
 	# Shoutcast live radio
 	$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
 	$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
@@ -7962,7 +7956,6 @@ sub opt_format {
 		vlc		=> [ 1, "vlc=s", 'Ignored', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 		hlstvopts	=> [ 1, "hls-tv-opts|hlstvopts=s", 'Recording', '--hls-tv-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for tv"],
-		hlxtvopts	=> [ 1, "hlx-tv-opts|hlxtvopts=s", 'Recording', '--hlx-tv-opts <options>', "Add custom options to ffmpeg HLX download re-muxing for tv"],
 		ffmpegtvopts	=> [ 1, "ffmpeg-tv-opts|ffmpegtvopts=s", 'Recording', '--ffmpeg-tv-opts <options>', "Add custom options to ffmpeg re-muxing for tv"],
 	};
 }
@@ -8530,7 +8523,7 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hlx)/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^hls/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
@@ -8562,7 +8555,7 @@ sub download {
 	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hlx)/;
+	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^hls/;
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
 
