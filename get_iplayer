@@ -238,9 +238,9 @@ my $opt_format = {
 	refreshexcludegroups	=> [ 1, "refreshexcludegroups|refresh-exclude-groups=s", 'Config', '--refresh-exclude-groups', "Exclude channel groups when refreshing radio or tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupsradio	=> [ 1, "refreshexcludegroupsradio|refresh-exclude-groups-radio=s", 'Config', '--refresh-exclude-groups-radio', "Exclude channel groups when refreshing radio cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshexcludegroupstv	=> [ 1, "refreshexcludegroupstv|refresh-exclude-groups-tv=s", 'Config', '--refresh-exclude-groups-tv', "Exclude channel groups when refreshing tv cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
-	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Config', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'schedule', 'aod' (radio only)"],
-	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Config', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'schedule', 'aod'"],
-	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Config', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'schedule'"],
+	refreshfeeds	=> [ 1, "refreshfeeds|refresh-feeds=s", 'Ignored', '--refresh-feeds <string>', "Alternate source for programme data.  Valid values: 'schedule', 'aod' (radio only)"],
+	refreshfeedsradio	=> [ 1, "refreshfeedsradio|refresh-feeds-radio=s", 'Ignored', '--refresh-feeds-radio <string>', "Alternate source for radio programme data.  Valid values: 'schedule', 'aod'"],
+	refreshfeedstv	=> [ 1, "refreshfeedstv|refresh-feeds-tv=s", 'Ignored', '--refresh-feeds-tv <string>', "Alternate source for TV programme data.  Valid values: 'schedule'"],
 	refreshfuture	=> [ 1, "refreshfuture|refresh-future!", 'Config', '--refresh-future', "Obtain future programme schedule when refreshing cache"],
 	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <integer>', "Minimum number of days of programmes to cache (max: 30)"],
 	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <integer>', "Number of days of radio programmes to cache. Only applied with --refresh-feeds=schedule. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30"],
@@ -8438,17 +8438,7 @@ sub get_links {
 	my $now = shift || time();
 	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	my $rc = 0;
-	my $feeds = $opt->{"refreshfeeds".${prog_type}} || $opt->{"refreshfeeds"};
-	if ( $prog_type eq 'radio' ) {
-		if ( $feeds eq "aod" ) {
-			$rc = $self->get_links_aod($prog, $prog_type, $now);
-		} else {
-			$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
-		}
-	}
-	elsif ( $prog_type eq 'tv' ) {
-		$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
-	}
+	$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
 	return 1 if $rc && $opt->{refreshabortonerror};
 	if ( $opt->{refreshfuture} ) {
 		$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
