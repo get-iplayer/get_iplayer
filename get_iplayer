@@ -4858,6 +4858,7 @@ sub generate_filenames {
 	$prog->{filepart} = main::encode_fs($prog->{filepart});
 
 	# overwrite/error if the file already exists and is going to be written to
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	if (
 		( ! $opt->{nowrite} )
 		&& ( ! $opt->{metadataonly} )
@@ -4865,7 +4866,7 @@ sub generate_filenames {
 		&& ( ! $opt->{subsonly} )
 		&& ( ! $opt->{tagonly} )
 		&& -f $prog->{filename}
-		&& stat($prog->{filename})->size > $prog->min_download_size()
+		&& stat($prog->{filename})->size > $min_download_size
 	) {
 		if ( $opt->{overwrite} ) {
 			main::logger("INFO: Overwriting file $prog->{filename}\n\n");
@@ -10435,7 +10436,8 @@ sub get {
 	}
 
 	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 
@@ -10536,7 +10538,6 @@ sub get {
 		}
 	}
 
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# rtmpdump returns 2 with --stop
 	unless ( $return == 2 && $opt->{stop} ) {
 		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
@@ -10623,7 +10624,9 @@ sub get_media {
 	my $retries = 3;
 	my %seen;
 
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+	my $prog_type = $media->{content_type} eq "audio" ? "radio" : "tv";
+	my $min_download_size = main::progclass($prog_type)->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 	if ( $opt->{dashresume} ) {
@@ -10745,8 +10748,6 @@ sub get_media {
 			$file_tmp );
 	}
 
-	my $prog_type = $media->{content_type} eq "audio" ? "radio" : "tv";
-	my $min_download_size = main::progclass($prog_type)->min_download_size();
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 	# clear resume data
@@ -10859,7 +10860,8 @@ sub get_builtin {
 	} else {
 		$file_tmp = $prog->{filepart}.".ts"
 	}
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 	if ( $opt->{hlsresume} ) {
@@ -11117,7 +11119,6 @@ sub get_builtin {
 		}
 	}
 
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 	delete $opt->{hlsresume} unless $live;
@@ -11159,7 +11160,8 @@ sub get_ffmpeg {
 	}
 
 	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 
@@ -11254,7 +11256,6 @@ sub get_ffmpeg {
 		}
 	}
 
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
@@ -11319,7 +11320,8 @@ sub get {
 	}
 
 	# Remove failed file recording (below a certain size)
-	if ( -f $file_tmp && stat($file_tmp)->size < $prog->min_download_size() ) {
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
 
@@ -11398,7 +11400,6 @@ sub get {
 		}
 	}
 
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
