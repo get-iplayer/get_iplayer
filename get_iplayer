@@ -7015,24 +7015,13 @@ sub parse_dash_connection {
 	my $media = shift;
 	my $conn = shift;
 	my $prefix = shift || "dash";
-# 	my $media = {};
-# 	my $conn = {};
-# 	my $prefix = "dash";
  	my @dash_medias;
-# 	$conn->{href} = "http://aod-dash-uk-live.edgesuite.net/usp/auth/vod/piff_abr_full_audio/823988-b06sf3b3/vf_b06sf3b3_ee538b52-e1cd-4623-aa00-3da2a8185948.ism/pc_hd_abr_v1_uk_dash_master.mpd?__gda__=1451688826_e1154a56213db9c7ef37e4b7ea1bda88";
-# 	$conn->{href} = "http://aod-dash-uk-live.bbcfmt.vo.llnwd.net/usp/auth/vod/piff_abr_full_audio/823988-b06sf3b3/vf_b06sf3b3_ee538b52-e1cd-4623-aa00-3da2a8185948.ism/pc_hd_abr_v1_uk_dash_master.mpd?s=1451645626&amp;e=1451688826&amp;h=e74bc22ddf472a2d387a5ece8c5c643e"
 	decode_entities($conn->{href});
 	my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
 	if ( ! $xml ) {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
 	}
-# 	my $file = 'bells.mpd';
-# # 	$file = 'weather.mpd';
-# 	open my $fh, '<', $file or die;
-# 	$/ = undef;
-# 	my $xml = <$fh>;
-# 	close $fh;
 	my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
 	if ( $@ ) {
 		main::logger "WARNING: Could not parse DASH manifest ($conn->{href})\n" if $opt->{verbose};
