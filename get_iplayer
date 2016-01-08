@@ -4203,19 +4203,19 @@ sub cmp_modes($$) {
 	my %ranks = (
 		'vhd(\d?)' => 10,
 		'[^v]hd(\d?)' => 20,
-		'xd(\d?)' => 30,
-		'sd(\d?)' => 40,
-		'vhigh(\d?)' => 50,
-		'[^v]high(\d?)' => 60,
-		'std(\d?)' => 70,
-		'med(\d?)' => 80,
-		'[^v]low(\d?)' => 90,
+		'sd(\d?)' => 30,
+		'vhigh(\d?)' => 40,
+		'[^v]high(\d?)' => 50,
+		'std(\d?)' => 60,
+		'med(\d?)' => 10,
+		'[^v]low(\d?)' => 80,
 	);
 	my %ranks2 = (
 		'^flash' => 100,
-		'^hls' => 200,
-		'^dash' => 300,
-		'^subtitle' => 400,
+		'^hls50' => 200,
+		'^hls[^5]' => 300,
+		'^dash' => 400,
+		'^subtitle' => 500,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -7814,7 +7814,7 @@ sub get_stream_data {
 			my $ext = "mp4";
 			if ( $mattribs->{kind} =~ 'video' ) {
 				if ( $mattribs->{height} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, "hlsxd", 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
 				}
 			}
 				
@@ -7822,10 +7822,10 @@ sub get_stream_data {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
+					get_stream_data_cdn( $data, $mattribs, "hls50hd", 'hls', $ext );
 				} elsif ( $mattribs->{height} > 400 ) {
 					if ( $mattribs->{bitrate} > 2000 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlssd", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hls50sd", 'hls', $ext );
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
 					}
@@ -7839,7 +7839,6 @@ sub get_stream_data {
 					}
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
-				my $pfx = $mattribs->{service} =~ /hls/ ? "hls" : "dash";
 				my $ext = "m4a";
 				if (  $mattribs->{bitrate} >= 192 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlshigh', 'hls', $ext );
@@ -8029,9 +8028,11 @@ sub modelist {
 				main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if ( $showwarn || $opt->{verbose} );
 				$mlist = 'hlsdefault';
 			}
-			if ( ! main::exists_in_path('ffmpeg') ) {
-				main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-				return undef if $mlist eq "hlsdefault";
+			if ( $opt->{hlsffmpeg} ) {
+				if ( ! main::exists_in_path('ffmpeg') ) {
+					main::logger "WARNING: Not using hls modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+					return undef if $mlist eq "hlsdefault";
+				}
 			}
 		}
 	}
@@ -8040,7 +8041,7 @@ sub modelist {
 		# deal with obsolete values
 		$mlist =~ s/(flash|rtmp)/hls/g;
 		$mlist =~ s/normal/std/g;
-		$fmt = "hls";
+		$fmt = "hls50";
 	}
 	$mlist =~ s/(flash|hls)aac/$1/g;
 	# Deal with fallback modes and expansions
@@ -8069,11 +8070,16 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'dashvgood', 'dashvhigh,dashgood');
 	$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashlow');
 	# HLS on-demand and live tv/radio
+	$mlist = main::expand_list($mlist, 'hls50', 'hls50default');
+	$mlist = main::expand_list($mlist, 'hls50fps', 'hls50best');
+	$mlist = main::expand_list($mlist, 'hls50default', 'hls50best');
+	$mlist = main::expand_list($mlist, 'hls50best', 'hls50hd,hls50vbetter');
+	$mlist = main::expand_list($mlist, 'hls50vbetter', 'hls50sd,hlsbetter');
 	$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
 	$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
+	$mlist = main::expand_list($mlist, 'hls25fps', 'hlsbest');
 	$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsvbetter');
 	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlssd,hlsbetter');
-	$mlist = main::expand_list($mlist, 'hls25fps', 'hlsxd,hlsbetter');
 	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
 	$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
 	$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlsmed,hlslow');
@@ -9509,7 +9515,7 @@ sub hls_pid_map {
 # Class cmdline Options
 sub opt_format {
 	return {
-		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hlshd,hlssd,hlsvhigh,hlshigh,hlsstd,hlslow. Shortcuts: default(=best),good,vgood,better,vbetter,best,hls. ('default'=hlshd,hlssd,hlsvhigh,hlshigh,hlsstd,hlslow)"],
+		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hls50hd,hls50sd,hlsvhigh,hlshigh,hlsstd,hlslow. Shortcuts: default(=best),good,vgood,better,vbetter,best,hls,hls50. ('default'=hls50hd,hls50sd,hlsvhigh,hlshigh,hlsstd,hlslow)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings (overrides --output)"],
 		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Ignored', '--rtmp-livetv-opts <options>', "Add custom options to rtmpdump for livetv"],
 		hlslivetvopts	=> [ 1, "hls-livetv-opts|hlslivetvopts=s", 'Recording', '--hls-livetv-opts <options>', "Add custom options to ffmpeg HLS download encoding for livetv"],
