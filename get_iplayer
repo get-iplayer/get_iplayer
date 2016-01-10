@@ -10626,7 +10626,7 @@ sub opt_format {
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
 		hlsencode		=> [ 1, "hls-encode|hlsencode!", 'Recording', '--hls-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
 		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader."],
-		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of stream segments to buffer at start of on-demand streams (built-in downloader only). Default (and minimum): 4"],
+		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of segments to buffer at start of on-demand streams (built-in downloader only). Default (and minimum): 4"],
 	};
 }
 
@@ -10873,7 +10873,19 @@ sub get_builtin {
 			for ($i = 0; $i < $retries; $i++) {
 				my $res = $ua->get($segment_url, ':content_cb' => $callback);
 				if ( ! $res->is_success || ! $res->header("Content-Length") ) {
-					main::logger "\nERROR: Failed to download segment ($sequence) $segment_url (attempt #".($i+1).")\n";
+					if ( $res->code == 404 ) {
+						# don't retry if 404 received - may be due to inaccurate manifest
+						main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+						if ( ! $live && $sequence == $sequences[$#sequences] ) {
+							main::logger "WARNING: The message above may appear due to an inaccurate programme manifest\n";
+							main::logger "WARNING: Check the end of the recording to ensure it is intact\n";
+						} else {
+							main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." seconds in the recording\n";
+						}
+						last;
+					} else {
+						main::logger "\nERROR: Failed to download segment ($sequence) $segment_url (attempt #".($i+1).") [error=$res->code]\n";
+					}
 				} else {
 					last;
 				}
@@ -11125,7 +11137,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of stream segments to buffer at start of streaming (built-in downloader only). Default (and minimum): 4"],
+		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of segments to buffer at start of on-demand streams (built-in downloader only). Default (and minimum): 4"],
 	};
 }
 
