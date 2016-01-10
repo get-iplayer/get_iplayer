@@ -8332,14 +8332,14 @@ sub get_links_aod {
 	# Hack to get correct 'channels' method because this methods is being shared with Programme::radio
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	# Setup User agent
-	my $ua = main::create_ua( 'desktop', 1 );
 	# Download index feed
 	my @channel_list = keys %channels;
 	if ( $force_channel_id ) {
 		@channel_list = ($force_channel_id)
 	}
 	for my $channel_id ( @channel_list ) {
+		# Setup User agent
+		my $ua = main::create_ua( 'desktop', 1 );
 		my $url = "http://www.bbc.co.uk/radio/aod/availability/${channel_id}.xml";
 		main::logger "\nDEBUG: Getting feed $url\n" if $opt->{verbose};
 		my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to get programme index feed for $channels{$channel_id}\n");
@@ -8534,9 +8534,10 @@ sub get_links_schedule {
 	my $known_bad = "bbclondon|radiosolent|worldserviceradio";
 	my %aod_seen;
 	for my $channel_id ( @channel_list ) {
+		my $ua = main::create_ua( 'desktop', 1 );
 		for my $schedule_date ( @schedule_dates ) {
 			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
-			my $rc = $self->get_links_schedule_page($prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+			my $rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
 			if ( $rc ) {
 				if ( $prog_type eq "radio" && ! $aod_seen{$channel_id} ) {
 					my $aod_channel_id;
@@ -8569,6 +8570,7 @@ sub get_links_schedule {
 # get cache info from schedule page
 sub get_links_schedule_page {
 	my $self = shift;
+	my $ua = shift;
 	my $prog = shift;
 	my $prog_type = shift;
 	my $channel_id = shift;
@@ -8584,7 +8586,6 @@ sub get_links_schedule_page {
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	my $ua = main::create_ua( 'desktop', 1 );
 	main::logger "DEBUG: Getting feed $url\n" if $opt->{debug};
 	my $xml = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n") unless $channel_id =~ /$known_bad/;
 	return 1 if ! $xml;
