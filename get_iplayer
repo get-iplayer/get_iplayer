@@ -2517,7 +2517,7 @@ sub request_url_retry {
 	for ($i = 0; $i < $retries; $i++) {
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
-			logger $failmsg;
+			logger $failmsg if $i == $retries - 1;
 		} else {
 			logger $succeedmsg;
 			last;
@@ -8927,7 +8927,7 @@ sub download_subtitles {
 	open( my $fh, "> $file" );
 
 	# Download subs
-	$subs = main::request_url_retry($ua, $suburl, 2);
+	$subs = main::request_url_retry($ua, $suburl, 3);
 	if (! $subs ) {
 		main::logger "ERROR: Subtitle Download failed\n";
 		close $fh;
@@ -10877,14 +10877,16 @@ sub get_builtin {
 						# don't retry if 404 received - may be due to inaccurate manifest
 						main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
 						if ( ! $live && $sequence == $sequences[$#sequences] ) {
-							main::logger "WARNING: The message above may appear due to an inaccurate programme manifest\n";
-							main::logger "WARNING: Check the end of the recording to ensure it is intact\n";
+							main::logger "WARNING: The message above may appear due to inaccurate programme data\n";
+							main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 						} else {
 							main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." seconds in the recording\n";
 						}
 						last;
 					} else {
-						main::logger "\nERROR: Failed to download segment ($sequence) $segment_url (attempt #".($i+1).") [error=$res->code]\n";
+						if ( $i == $retries - 1 ) {
+							main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
+						}
 					}
 				} else {
 					last;
