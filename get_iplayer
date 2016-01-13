@@ -307,7 +307,7 @@ my $opt_format = {
 	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions (only applies with --playlist-metadata)."],
+	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 	experimentaldashtv	=> [ 1, "experimentaldashtv|experimental-dashtv|experimental-dash-tv!", 'Misc', '--experimental-dash-tv', "Switch on incomplete DASH support for tv programmes (will only produce separate audio and video files)"],
 
@@ -5318,10 +5318,10 @@ sub get_verpids {
 
 	# send request
 	my $xml = main::request_url_retry( $ua, $url, 3 );
-	if ( ! $xml ) {
-		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-		return 1;
-	}
+# 	if ( ! $xml ) {
+# 		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
+# 		return 1;
+# 	}
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
 	#<?xml version="1.0" encoding="UTF-8"?>
 	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
@@ -5376,7 +5376,7 @@ sub get_verpids {
 	$prog->{type} ||= 'radio' if grep /kind="radioProgramme"/, $xml;
 
 	# Detect noItems or no programmes
-	if ( $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+	if ( ! $xml || $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
 		my $rc_json = $prog->get_verpids_json( $ua );
 		my $rc_html = 1;
 		if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
@@ -5549,10 +5549,10 @@ sub get_verpids_json {
 		$title =~ s/\\\//\//g;
 		$prog->{title} = decode_entities($title) if $title;
 	}
-	unless ( $prog->{type} ) {
-		$prog->{type} = 'tv' if $default =~ /"kind":"video"/;
-		$prog->{type} = 'radio' if $default =~ /"kind":"audio"/;
-	}
+# 	unless ( $prog->{type} ) {
+		$prog->{type} = 'tv' if $default =~ /"kind":"programme"/;
+		$prog->{type} = 'radio' if $default =~ /"kind":"radioProgramme"/;
+# 	}
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
 	for ( @versions ) {
@@ -5628,7 +5628,7 @@ sub get_verpids_html {
 			main::logger "\rERROR: Failed to get version pid metadata from iplayer site (HTML)\n\n";
 			return 1;
 		}
-		my $config = $1 if $html =~ /require\(\{\s*config:(.*?)\<\/script\>/s;
+		my $config = $1 if $html =~ /bind\(\{\s*"player":(.*?)\<\/script\>/s;
 		main::logger "DEBUG: Block (HTML): $config\n" if $opt->{debug};
 		my $verpid = $1 if $config =~ /"vpid":"(.*?)"/;
 		if ( ! $verpid ) {
@@ -5717,161 +5717,161 @@ sub get_metadata {
 	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
 
 	my $got_metadata;
-	eval "use XML::Simple";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for more accurate programme metadata.\n";
-	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
-		my $url = $prog_data_url.$prog->{pid}.".xml";
-		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
-		my $xml = main::request_url_retry($ua, $url, 3, '', '');
-		if ( $xml ) {
-			my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
-			if ( ! $@ ) {
-				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
-					my $parent = $doc->{parent}->[0]->{programme}->[0];
-					my $grandparent = $parent->{parent}->[0]->{programme}->[0];
-					my $greatgrandparent = $grandparent->{parent}->[0]->{programme}->[0];
-					my $pid = $doc->{pid}->[0];
-					my $parentpid = $parent->{pid}->[0];
-					$prog_type = $doc->{media_type}->[0];
-					$prog_type = 'tv' if $prog_type =~ m{video}s;
-					$prog_type = 'radio' if $prog_type eq 'audio';
-					$longdesc = $doc->{long_synopsis}->[0];
-					$meddesc = $doc->{medium_synopsis}->[0];
-					$summary = $doc->{short_synopsis}->[0];
-					$channel = $doc->{ownership}->[0]->{service}->[0]->{title}->[0];
-					my $image_pid = $doc->{image}->[0]->{pid}->[0];
-					my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
-					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
-					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
-					$web = "http://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
-					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
-						$player = "http://www.bbc.co.uk/iplayer/episode/$pid";
-					} else {
-						$player = "http://www.bbc.co.uk/programmes/$pid";
-					}
-					# title strings
-					my ($series_position, $subseries_position);
-					$episode = $doc->{title}->[0];
-					for my $ancestor ($parent, $grandparent, $greatgrandparent) {
-						if ( $ancestor->{type} && $ancestor->{title}->[0] ) {
-							if ( $ancestor->{type} eq "brand" ) {
-								$brand = $ancestor->{title}->[0];
-							} elsif ( $ancestor->{type} eq "series" ) {
-								# handle rare subseries
-								if ( $series ) {
-									$episode = "$series $episode";
-									$subseries_position = $series_position;
-								}
-								$series = $ancestor->{title}->[0];
-								$series_position = $ancestor->{position}->[0];
-							}
-						}
-					}
-					if ( $brand ) {
-						if ( $series && $series ne $brand ) {
-							$name = "$brand: $series";
-						} else {
-							$name = $brand;
-						}
-					} else {
-							$name = $series;
-					}
-					unless ( $name ) {
-						$name = $brand = $episode;
-						$episode = "-";
-						$title = $name;
-					} else {
-						$title = "$name: $episode";
-					}
-					# categories
-					my (@cats1, @cats2, @cats3);
-					for my $cat1 ( @{$doc->{categories}->[0]->{category}} ) {
-						unshift @cats1, $cat1->{title}->[0];
-						for my $cat2 ( @{$cat1->{broader}->[0]->{category}} ) {
-							unshift @cats2, $cat2->{title}->[0];
-							for my $cat3 ( @{$cat2->{broader}->[0]->{category}} ) {
-								unshift @cats3, $cat3->{title}->[0];
-							}
-						}
-					}
-					my %seen;
-					my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
-					$categories = join(',', @categories);
-					foreach my $cat ( @categories ) {
-						if ( ! grep(/$cat/i, @ignore_categories) ) {
-							$category = $cat;
-							last;
-						}
-					}
-					$categories ||= "get_iplayer";
-					$category ||= $categories[0] || "get_iplayer";
-					# series/episode numbers
-					if ( $subseries_position ) {
-						my @parts = ("a".."z");
-						$episodepart = $parts[$doc->{position}->[0] - 1];
-					}
-					$episodenum = $subseries_position || $doc->{position}->[0];
-					$seriesnum = $series_position || $parent->{position}->[0];
-					# the Doctor Who fudge
-					my ($seriesnum2, $episodenum2);
-					# Extract the seriesnum
-					my $regex = 'Series\s+'.main::regex_numbers();
-					if ( "$name $episode" =~ m{$regex}i ) {
-						$seriesnum2 = main::convert_words_to_number( $1 );
-					}
-					# Extract the episode num
-					my $regex_1 = 'Episode\s+'.main::regex_numbers();
-					my $regex_2 = '^'.main::regex_numbers().'\.\s+';
-					if ( "$name $episode" =~ m{$regex_1}i ) {
-						$episodenum2 = main::convert_words_to_number( $1 );
-					} elsif ( $episode =~ m{$regex_2}i ) {
-						$episodenum2 = main::convert_words_to_number( $1 );
-					}
-					# override series/episode numbers if mismatch
-					$seriesnum = $seriesnum2 if $seriesnum2;
-					$episodenum = $episodenum2 if $episodenum2;
-					# insert episode number in $episode
-					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
-					# minimum episode number = 1 if not a film and series number == 0
-					$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
-					# minimum series number = 1 if episode number != 0
-					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
-					# programme versions
-					my %found;
-					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						my $type;
-						# check for audiodescribed and signed first
-						if ( grep /describe/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "audiodescribed";
-						} elsif ( grep /sign/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "signed";
-						} elsif ( grep /open subtitles/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "opensubtitles";
-						} else {
-							($type = lc($ver->{types}->[0]->{type}->[0])) =~ s/\s+.*$//;
-						}
-						# skip store only
-						next if $type =~ /store/;
-						if ( $type ) {
-							my $version = $type;
-							$version .= $found{$type} if ++$found{$type} > 1;
-							$prog->{verpids}->{$version} = $ver->{pid}->[0];
-							$prog->{durations}->{$version} = $ver->{duration}->[0];
-						}
-					}
-					$got_metadata = 1;
-				} else {
-					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode. Download may fail and metadata may be inaccurate.\n";
-				}
-			} else {
-				main::logger "WARNING: Could not parse programme metadata from $url ($@)\n";
-			}
-		} else {
-			main::logger "WARNING: Could not download programme metadata from $url\n";
-		}
-	}
+# 	eval "use XML::Simple";
+# 	if ( $@ ) {
+# 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for more accurate programme metadata.\n";
+# 	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
+# 		my $url = $prog_data_url.$prog->{pid}.".xml";
+# 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
+# 		my $xml = main::request_url_retry($ua, $url, 3, '', '');
+# 		if ( $xml ) {
+# 			my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
+# 			if ( ! $@ ) {
+# 				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
+# 					my $parent = $doc->{parent}->[0]->{programme}->[0];
+# 					my $grandparent = $parent->{parent}->[0]->{programme}->[0];
+# 					my $greatgrandparent = $grandparent->{parent}->[0]->{programme}->[0];
+# 					my $pid = $doc->{pid}->[0];
+# 					my $parentpid = $parent->{pid}->[0];
+# 					$prog_type = $doc->{media_type}->[0];
+# 					$prog_type = 'tv' if $prog_type =~ m{video}s;
+# 					$prog_type = 'radio' if $prog_type eq 'audio';
+# 					$longdesc = $doc->{long_synopsis}->[0];
+# 					$meddesc = $doc->{medium_synopsis}->[0];
+# 					$summary = $doc->{short_synopsis}->[0];
+# 					$channel = $doc->{ownership}->[0]->{service}->[0]->{title}->[0];
+# 					my $image_pid = $doc->{image}->[0]->{pid}->[0];
+# 					my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+# 					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+# 					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
+# 					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
+# 					$web = "http://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
+# 					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
+# 						$player = "http://www.bbc.co.uk/iplayer/episode/$pid";
+# 					} else {
+# 						$player = "http://www.bbc.co.uk/programmes/$pid";
+# 					}
+# 					# title strings
+# 					my ($series_position, $subseries_position);
+# 					$episode = $doc->{title}->[0];
+# 					for my $ancestor ($parent, $grandparent, $greatgrandparent) {
+# 						if ( $ancestor->{type} && $ancestor->{title}->[0] ) {
+# 							if ( $ancestor->{type} eq "brand" ) {
+# 								$brand = $ancestor->{title}->[0];
+# 							} elsif ( $ancestor->{type} eq "series" ) {
+# 								# handle rare subseries
+# 								if ( $series ) {
+# 									$episode = "$series $episode";
+# 									$subseries_position = $series_position;
+# 								}
+# 								$series = $ancestor->{title}->[0];
+# 								$series_position = $ancestor->{position}->[0];
+# 							}
+# 						}
+# 					}
+# 					if ( $brand ) {
+# 						if ( $series && $series ne $brand ) {
+# 							$name = "$brand: $series";
+# 						} else {
+# 							$name = $brand;
+# 						}
+# 					} else {
+# 							$name = $series;
+# 					}
+# 					unless ( $name ) {
+# 						$name = $brand = $episode;
+# 						$episode = "-";
+# 						$title = $name;
+# 					} else {
+# 						$title = "$name: $episode";
+# 					}
+# 					# categories
+# 					my (@cats1, @cats2, @cats3);
+# 					for my $cat1 ( @{$doc->{categories}->[0]->{category}} ) {
+# 						unshift @cats1, $cat1->{title}->[0];
+# 						for my $cat2 ( @{$cat1->{broader}->[0]->{category}} ) {
+# 							unshift @cats2, $cat2->{title}->[0];
+# 							for my $cat3 ( @{$cat2->{broader}->[0]->{category}} ) {
+# 								unshift @cats3, $cat3->{title}->[0];
+# 							}
+# 						}
+# 					}
+# 					my %seen;
+# 					my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
+# 					$categories = join(',', @categories);
+# 					foreach my $cat ( @categories ) {
+# 						if ( ! grep(/$cat/i, @ignore_categories) ) {
+# 							$category = $cat;
+# 							last;
+# 						}
+# 					}
+# 					$categories ||= "get_iplayer";
+# 					$category ||= $categories[0] || "get_iplayer";
+# 					# series/episode numbers
+# 					if ( $subseries_position ) {
+# 						my @parts = ("a".."z");
+# 						$episodepart = $parts[$doc->{position}->[0] - 1];
+# 					}
+# 					$episodenum = $subseries_position || $doc->{position}->[0];
+# 					$seriesnum = $series_position || $parent->{position}->[0];
+# 					# the Doctor Who fudge
+# 					my ($seriesnum2, $episodenum2);
+# 					# Extract the seriesnum
+# 					my $regex = 'Series\s+'.main::regex_numbers();
+# 					if ( "$name $episode" =~ m{$regex}i ) {
+# 						$seriesnum2 = main::convert_words_to_number( $1 );
+# 					}
+# 					# Extract the episode num
+# 					my $regex_1 = 'Episode\s+'.main::regex_numbers();
+# 					my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+# 					if ( "$name $episode" =~ m{$regex_1}i ) {
+# 						$episodenum2 = main::convert_words_to_number( $1 );
+# 					} elsif ( $episode =~ m{$regex_2}i ) {
+# 						$episodenum2 = main::convert_words_to_number( $1 );
+# 					}
+# 					# override series/episode numbers if mismatch
+# 					$seriesnum = $seriesnum2 if $seriesnum2;
+# 					$episodenum = $episodenum2 if $episodenum2;
+# 					# insert episode number in $episode
+# 					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
+# 					# minimum episode number = 1 if not a film and series number == 0
+# 					$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
+# 					# minimum series number = 1 if episode number != 0
+# 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
+# 					# programme versions
+# 					my %found;
+# 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
+# 						my $type;
+# 						# check for audiodescribed and signed first
+# 						if ( grep /describe/i, @{$ver->{types}->[0]->{type}} ) {
+# 							$type = "audiodescribed";
+# 						} elsif ( grep /sign/i, @{$ver->{types}->[0]->{type}} ) {
+# 							$type = "signed";
+# 						} elsif ( grep /open subtitles/i, @{$ver->{types}->[0]->{type}} ) {
+# 							$type = "opensubtitles";
+# 						} else {
+# 							($type = lc($ver->{types}->[0]->{type}->[0])) =~ s/\s+.*$//;
+# 						}
+# 						# skip store only
+# 						next if $type =~ /store/;
+# 						if ( $type ) {
+# 							my $version = $type;
+# 							$version .= $found{$type} if ++$found{$type} > 1;
+# 							$prog->{verpids}->{$version} = $ver->{pid}->[0];
+# 							$prog->{durations}->{$version} = $ver->{duration}->[0];
+# 						}
+# 					}
+# 					$got_metadata = 1;
+# 				} else {
+# 					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode. Download may fail and metadata may be inaccurate.\n";
+# 				}
+# 			} else {
+# 				main::logger "WARNING: Could not parse programme metadata from $url ($@)\n";
+# 			}
+# 		} else {
+# 			main::logger "WARNING: Could not download programme metadata from $url\n";
+# 		}
+# 	}
 
 	# Get list of available modes for each version available
 	# populate version pid metadata if we don't have it already
@@ -5884,9 +5884,11 @@ sub get_metadata {
 	}
 
 	# use fallback metadata if necessary
-	unless ( $got_metadata ) {
-		$prog->get_metadata_fallback( $ua );
-	}
+# 	unless ( $got_metadata ) {
+# 		$prog->get_metadata_fallback( $ua );
+# 	}
+
+
 
 	$prog->{title} 		= $title || $prog->{title};
 	$prog->{name} 		= $name || $prog->{name};
