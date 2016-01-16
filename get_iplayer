@@ -307,7 +307,7 @@ my $opt_format = {
 	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions (only applies with --playlist-metadata)."],
+	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 	experimentaldashtv	=> [ 1, "experimentaldashtv|experimental-dashtv|experimental-dash-tv!", 'Misc', '--experimental-dash-tv', "Switch on incomplete DASH support for tv programmes (will only produce separate audio and video files)"],
 
@@ -5318,10 +5318,10 @@ sub get_verpids {
 
 	# send request
 	my $xml = main::request_url_retry( $ua, $url, 3 );
-	if ( ! $xml ) {
-		main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-		return 1;
-	}
+	#if ( ! $xml ) {
+	#	main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
+	#	return 1;
+	#}
 	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
 	#<?xml version="1.0" encoding="UTF-8"?>
 	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
@@ -5376,7 +5376,7 @@ sub get_verpids {
 	$prog->{type} ||= 'radio' if grep /kind="radioProgramme"/, $xml;
 
 	# Detect noItems or no programmes
-	if ( $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
+	if ( ! $xml || $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
 		my $rc_json = $prog->get_verpids_json( $ua );
 		my $rc_html = 1;
 		if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
@@ -5549,10 +5549,10 @@ sub get_verpids_json {
 		$title =~ s/\\\//\//g;
 		$prog->{title} = decode_entities($title) if $title;
 	}
-	unless ( $prog->{type} ) {
-		$prog->{type} = 'tv' if $default =~ /"kind":"video"/;
-		$prog->{type} = 'radio' if $default =~ /"kind":"audio"/;
-	}
+ 	unless ( $prog->{type} ) {
+		$prog->{type} = 'tv' if $default =~ /"kind":"programme"/;
+		$prog->{type} = 'radio' if $default =~ /"kind":"radioProgramme"/;
+ 	}
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
 	for ( @versions ) {
@@ -5620,15 +5620,15 @@ sub get_verpids_html {
 	my $version_list = $opt->{versionlist} || 'default';
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
 	for my $version ( "default", "audiodescribed", "signed" ) {
-		next if $version_list !~ /$version/ || $prog->{verpids}->{$version};
+		next if $prog->{verpids}->{$version};
 		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		my $html = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $html ) {
-			main::logger "\rERROR: Failed to get version pid metadata from iplayer site (HTML)\n\n";
-			return 1;
+			main::logger "\nINFO: No metadata for $version version retrieved from iplayer site (HTML)\n" if $opt->{verbose};
+			next;
 		}
-		my $config = $1 if $html =~ /require\(\{\s*config:(.*?)\<\/script\>/s;
+		my $config = $1 if $html =~ /bind\(\{\s*"player":(.*?)\<\/script\>/s;
 		main::logger "DEBUG: Block (HTML): $config\n" if $opt->{debug};
 		my $verpid = $1 if $config =~ /"vpid":"(.*?)"/;
 		if ( ! $verpid ) {
