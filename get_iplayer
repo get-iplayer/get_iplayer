@@ -285,7 +285,7 @@ my $opt_format = {
 	mplayer		=> [ 1, "mplayer=s", 'Ignored', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Tagging
-	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file.  All other metadata values will be written."],
+	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Prepend album/show title to track title"],
@@ -4519,7 +4519,10 @@ sub tag_file {
 	# return if file does not exist
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
-	$prog->download_thumbnail if ( $opt->{tagonly} || ! -f $prog->{thumbfile} );
+	if ( -f $prog->{thumbfile} ) {
+		main::logger("WARNING: File $prog->{thumbfile} already exists\n\n");
+	}
+	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
 	if ( $prog->{type} ne "podcast" ) {
 		# create metadata
 		my $meta = $prog->tag_metadata;
@@ -12185,12 +12188,16 @@ sub tag_file_id3 {
 			$mp3->select_id3v2_frame_by_descr('TGID', $tags->{podcastGUID});
 		}
 		# add artwork if available
-		if ( -f $meta->{thumbfile}  && ! $opt->{noartwork} ) {
-			my $data;
-			open(THUMB, "<:raw", $meta->{thumbfile});
-			read(THUMB, $data, stat($meta->{thumbfile})->size());
-			close(THUMB);
-			$mp3->select_id3v2_frame_by_descr('APIC', $data);
+		if ( $opt->{noartwork} ) {
+				$mp3->select_id3v2_frame_by_descr('APIC', undef);
+		} else {
+			if ( -f $meta->{thumbfile} ) {
+				my $data;
+				open(THUMB, "<:raw", $meta->{thumbfile});
+				read(THUMB, $data, stat($meta->{thumbfile})->size());
+				close(THUMB);
+				$mp3->select_id3v2_frame_by_descr('APIC', $data);
+			}
 		}
 		# write metadata to file
 		$mp3->update_tags();
@@ -12323,7 +12330,7 @@ sub tag_file_mp4 {
 		}
 		# add artwork if available
 		if ( $opt->{noartwork} ) {
-			push @cmd, ( '--artwork', "REMOVE_ALL" ) if ( $opt->{noartwork} );
+			push @cmd, ( '--artwork', "REMOVE_ALL" );
 		} else {
 			push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 		}
