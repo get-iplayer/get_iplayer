@@ -156,6 +156,7 @@ my $opt_format = {
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Recording', '--thumb', "Download Thumbnail image if available"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Recording', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
+	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded. Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
 
 	# Search
 	availablesince		=> [ 0, "availablesince|available-since=n", 'Search', '--available-since', "Limit search to programmes that have become available in the last N hours"],
@@ -173,7 +174,6 @@ my $opt_format = {
 	history		=> [ 1, "history!", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 0, "since=n", 'Search', '--since', "Limit search to programmes added to the cache in the last N hours"],
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', sort keys %prog_types).",all (tv is default)"],
-	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Search', '--versions <versions>', "Version of programme to search or record.  List is processed from left to right and first version found is downloaded. Example: '--versions=signed,audiodescribed,default' will prefer signed and audiodescribed programmes if available."],
 
 	# Output
 	aactomp3	=> [ 1, "aactomp3|mp3", 'Output', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg/avconv (CBR 128k unless --mp3vbr is specified).  Applied only to radio programmes. (Synonyms: --mp3)"],
@@ -1427,11 +1427,6 @@ sub get_regex_matches {
 	} else {
 		$category_regex = '.*';
 	}
-	if ( $opt->{versionlist} ) {
-		$versions_regex = '('.(join '|', ( split /,/, $opt->{versionlist} ) ).')';
-	} else {
-		$versions_regex = '.*';
-	}
 	if ( $opt->{excludechannel} ) {
 		$channel_exclude_regex = '('.(join '|', ( split /,/, $opt->{excludechannel} ) ).')';
 	} else {
@@ -1457,7 +1452,6 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search download_regex = $download_regex\n";
 		main::logger "DEBUG: Search channel_regex = $channel_regex\n";
 		main::logger "DEBUG: Search category_regex = $category_regex\n";
-		main::logger "DEBUG: Search versions_regex = $versions_regex\n";
 		main::logger "DEBUG: Search exclude_regex = $exclude_regex\n";
 		main::logger "DEBUG: Search channel_exclude_regex = $channel_exclude_regex\n";
 		main::logger "DEBUG: Search category_exclude_regex = $category_exclude_regex\n";
@@ -1485,7 +1479,6 @@ sub get_regex_matches {
 		# Only include programmes matching channels and category regexes
 		if ( $this->{channel} =~ /$channel_regex/i
 			&& $this->{categories} =~ /$category_regex/i
-			&& ( ( not defined $this->{versions} ) || $this->{versions} =~ /$versions_regex/i )
 			&& $this->{channel} !~ /$channel_exclude_regex/i
 			&& $this->{categories} !~ /$category_exclude_regex/i
 			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )

@@ -275,7 +275,7 @@ $layout->{BASICTAB}->{order} = [ qw/ SEARCH SEARCHFIELDS PROGTYPES HISTORY URL /
 
 $layout->{SEARCHTAB}->{title} = 'Advanced Search';
 $layout->{SEARCHTAB}->{heading} = 'Advanced Search Options:';
-$layout->{SEARCHTAB}->{order} = [ qw/ VERSIONLIST EXCLUDE CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
+$layout->{SEARCHTAB}->{order} = [ qw/ EXCLUDE CATEGORY EXCLUDECATEGORY CHANNEL EXCLUDECHANNEL SINCE BEFORE FUTURE / ],
 
 $layout->{DISPLAYTAB}->{title} = 'Display';
 $layout->{DISPLAYTAB}->{heading} = 'Display Options:';
@@ -287,7 +287,7 @@ $layout->{COLUMNSTAB}->{order} = [ qw/ COLS / ];
 
 $layout->{RECORDINGTAB}->{title} = 'Recording';
 $layout->{RECORDINGTAB}->{heading} = 'Recording Options:';
-$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE / ];
+$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT VERSIONLIST MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE / ];
 
 $layout->{STREAMINGTAB}->{title} = 'Streaming';
 $layout->{STREAMINGTAB}->{heading} = 'Streaming Options:';
