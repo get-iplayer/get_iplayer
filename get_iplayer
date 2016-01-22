@@ -309,7 +309,6 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
-	experimentaldashtv	=> [ 1, "experimentaldashtv|experimental-dashtv|experimental-dash-tv!", 'Misc', '--experimental-dash-tv', "Switch on incomplete DASH support for tv programmes (will only produce separate audio and video files)"],
 
 };
 
@@ -7555,7 +7554,7 @@ sub get_stream_data {
 						}
 					}
 				}
-				if ( $prog->{type} eq "radio" || $opt->{experimentaldashtv} ) {
+				if ( $prog->{type} eq "radio" ) {
 					# get MPEG-DASH streams for on-demand
 					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
@@ -11111,25 +11110,6 @@ sub opt_format {
 	};
 }
 
-sub postproc {
-	my ( $self, $audio_file, $video_file, $prog, %streamdata ) = @_;
-	
-	if ( $prog->{type} =~ /radio/ ) {
-	 	return $self->SUPER::postproc($audio_file, $prog, %streamdata);
-	}
-	# TODO: combine audio and video files
-	my $audio_part = $audio_file;
-	$audio_part =~ s/\.m4a$// unless $opt->{raw};
-	my $video_part = $video_file;
-	$video_part =~ s/\.m4v$// unless $opt->{raw};
-	move($audio_file, $audio_part) unless $audio_file eq $audio_part;
-	move($video_file, $video_part) unless $video_file eq $video_part;
-	main::logger "WARNING: DASH support for tv programmes is incomplete - audio and video files not combined\n";
-	main::logger "INFO: Retaining DASH audio file: $audio_part\n";
-	main::logger "INFO: Retaining DASH video file: $video_part\n";
-	return 0;
-}
-
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	if ( $prog->{type} =~ /tv/ && ( $opt->{stdout} || $opt->{nowrite} ) ) {
@@ -11143,19 +11123,8 @@ sub get {
 	$streamdata{media} = $audio_media;
 	$streamdata{prog_type} = $streamdata{live} ? "liveradio" : "radio";
 	$rc = $self->get_builtin( $ua, $url, $audio_file, $prog, %streamdata );
-	return $rc if $rc =~ /(retry|next)/;
-	my $video_media;
-	my $video_file;
-	if ( $prog->{type} =~ /tv/ ) {
-		$video_media = $streamdata{video_media};
-		($video_file = $prog->{filepart}) =~ s/\.\w+$/.m4v/;
-		$video_file .= ".m4v" unless $opt->{raw};
-		$streamdata{media} = $video_media;
-		$streamdata{prog_type} = $streamdata{live} ? "livetv" : "tv";
-		$rc = $self->get_builtin( $ua, $url, $video_file, $prog, %streamdata );
-		return $rc if $rc =~ /(retry|next)/;
-	}
-	return $self->postproc($audio_file, $video_file, $prog, %streamdata);
+	return $rc if $rc;
+	return $self->postproc($audio_file, $prog, %streamdata);
 }
 
 sub parse_playlist {
