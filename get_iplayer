@@ -10768,16 +10768,19 @@ sub get_builtin {
 		my $time_called = time();
 		my $rate_bps;
 		my $rate;
-		if ( $elapsed < 10 ) {
+		my $time;
+		if ($time_called - $begin_time < 1) {
 			$rate = '-----kbps';
+			$time = '--:--:--';
 		} else {
 			$rate_bps = ($size - $begin_size) / (($time_called - $begin_time) + 1);
 			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
+			$time = sprintf("%02d:%02d:%02d", ( gmtime( $size / $rate_bps ))[2,1,0] );
 		}
 		main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB @ %s [%s]\r",
 			$size / 1024.0 / 1024.0,
 			$rate,
-			sprintf("%02d:%02d:%02d", ( gmtime( $elapsed ))[2,1,0] ),
+			$time
 		);
 	};
 
