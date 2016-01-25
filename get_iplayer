@@ -7679,24 +7679,6 @@ sub get_stream_data {
 					}
 				}
 			}
-			# ensure both hls and hlx streams for AD programmes
-			if ( $version eq "audiodescribed" ) {
-				my @hls_ad = grep { $_->{service} =~ /hls/ } @medias;
-				my @hlx_ad = grep { $_->{service} =~ /hlx/ } @medias;
-				my ($hls1, $pfx1, $pfx2);
-				if ( ! @hls_ad && @hlx_ad ) {
-					$hls1 = \@hlx_ad;
-					$pfx1 = "hlx";
-					$pfx2 = "hls";
-				}
-				if ( $hls1 ) {
-					for my $hls ( @{$hls1} ) {
-						my $copy = dclone($hls);
-						$copy->{service} =~ s/$pfx1/$pfx2/;
-						push @medias, $copy;
-					}
-				}
-			}
 			# generate 320k HLS stream from RTMP stream if possible
 			if ( $prog->{type} eq "radio" ) {
 				my @hls_medias = grep { $_->{connections}->[0]->{transferFormat} eq "hls" } @medias;
@@ -7857,6 +7839,19 @@ sub get_stream_data {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				if ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
+				}
+				if ( $version eq "audiodescribed" ) {
+					if ( $mattribs->{height} > 400 ) {
+						get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
+					} elsif ( $mattribs->{height} > 200 ) {
+						if ( $mattribs->{bitrate} > 700 ) {
+							get_stream_data_cdn( $data, $mattribs, "hlshigh", 'hls', $ext );
+						} elsif ( $mattribs->{bitrate} > 500 ) {
+							get_stream_data_cdn( $data, $mattribs, "hlsstd", 'hls', $ext );
+						} elsif ( $mattribs->{bitrate} > 300 ) {
+							get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
+						}
+					}
 				}
 			}
 				
