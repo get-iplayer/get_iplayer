@@ -303,6 +303,7 @@ my @nosearch_params = qw/ /;
 ### Perl CGI Web Server ###
 use Socket;
 use IO::Socket;
+use Net::INET6Glue::INET_is_INET6;
 my $IGNOREEXIT = 0;
 # If the port number is specified then run embedded web server
 if ( $opt_cmdline->{port} > 0 ) {
