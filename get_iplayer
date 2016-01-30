@@ -7589,7 +7589,7 @@ sub get_stream_data {
 					}
 				}
 			}
-			if ( $opt->{info} || $modelist =~ /(hls|hvf)/ || ( $prog->{type} eq "liveradio" && $modelist =~ /dash/ ) ) {
+			if ( $opt->{info} || $modelist =~ /(hls|hvf)/ ) {
 				if ( $prog->{type} =~ /tv/ ) {
 					# get HLS streams from IPTV data
 					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
@@ -7702,23 +7702,19 @@ sub get_stream_data {
 					$priority++;
 					my $loc;
 					my @sbr;
-					my $dash;
 					if ( $uk ) {
 						$loc = 'uk';
 						if ( $verpid eq 'bbc_world_service' ) {
 							@sbr = ( 'high' );
-							$dash = 'dash_low';
 						} else {
 							@sbr = ( 'sbr_high', 'sbr_med', 'sbr_low', 'sbr_vlow' );
-							$dash = 'dash_full';
 						}
 					} else {
 						$loc = 'nonuk';
 						@sbr = ( 'sbr_low', 'sbr_vlow' );
-						$dash = 'dash_low';
 					}
 					my $media = { encoding => "aac", kind => "audio", type => "audio/mp4" };
-					if ( $opt->{info} || $modelist =~ /(hls|hvf)/ ) {
+					if ( $opt->{info} || $modelist =~ /hls/ ) {
 						my $min_bitrate = 0;
 						my $href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls";
 						my $href_ext = ".m3u8";
@@ -7728,14 +7724,6 @@ sub get_stream_data {
 							$conn->{href} = "${href_prefix}/${loc}/${sbr}/${cdn}/${verpid}${href_ext}";
 							push @lr_medias, parse_hls_connection( $media, $conn, $min_bitrate);
 						}
-					}
-					if ( $opt->{info} || $modelist =~ /dash/ ) {
-						my $dash_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/dash";
-						my $dash_ext = ".mpd";
-						my $conn = { supplier => "${cdn}_gip_dash_live", priority => $conn_priority, transferFormat => 'dash', protocol => 'http' };
-						$conn->{kind} = $conn->{supplier};
-						$conn->{href} = "${dash_prefix}/${loc}/${dash}/${cdn}/${verpid}${dash_ext}";
-						push @lr_medias, parse_dash_connection( $media, $conn );
 					}
 				}
 				for my $lr_media ( @lr_medias ) {
