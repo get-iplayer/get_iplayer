@@ -10576,7 +10576,7 @@ sub opt_format {
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
 		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader."],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
-		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of segments to buffer at start of on-demand streams (built-in downloader only). Default (and minimum): 4. Segments typically 6-8 secs in duration."],
+		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Initial number of segments to download at start of streaming (built-in downloader only). Typically unnecessary, but can be increased to init player cache on slow connections. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
 }
 
@@ -11078,30 +11078,11 @@ sub get_ffmpeg {
 ################### Streamer::dash class #################
 package Streamer::dash;
 
-# Inherit from Streamer class
 use base 'Streamer::hls';
-
-use File::Copy;
-use File::Path;
-use File::stat;
-use List::Util qw(max);
-use Text::ParseWords;
 use strict;
-
-sub opt_format {
-	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Number of segments to buffer at start of on-demand streams (built-in downloader only). Default (and minimum): 4"],
-	};
-}
 
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
-	if ( $prog->{type} =~ /tv/ && ( $opt->{stdout} || $opt->{nowrite} ) ) {
-		main::logger "ERROR: Cannot stream DASH tv to STDOUT\n";
-		exit 4;
-	}
 	my $rc;
 	my $audio_media = $streamdata{audio_media};
 	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
