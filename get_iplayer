@@ -10576,7 +10576,7 @@ sub opt_format {
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
 		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader."],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
-		streambuffer		=> [ 1, "stream-buffer|streambuffer=n", 'Recording', '--stream-buffer', "Initial number of segments to download at start of streaming (built-in downloader only). Typically unnecessary, but can be increased to init player cache on slow connections. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
+		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to init player cache on slow connections. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
 }
 
@@ -10652,7 +10652,7 @@ sub get_builtin {
 	my $lagging = 0;
 	my $stop = 0;
 	my %seen;
-	my $buffer = max(4, $opt->{streambuffer});
+	my $init = max(4, $opt->{streaminit});
 
 	my $min_download_size = main::progclass($prog_type)->min_download_size();
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
@@ -10669,7 +10669,7 @@ sub get_builtin {
 			}
 			binmode $fh;
 			my $tmp_size = stat($file_tmp)->size;
-			if ( $size < $tmp_size ) {				
+			if ( $size < $tmp_size ) {
 				main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
 				truncate($fh, $size);
 			}
@@ -10793,8 +10793,8 @@ sub get_builtin {
 			$file_size = int($total_duration * $streamdata{bitrate} * 1024.0 / 8.0);
 		}
 		# truncate iptv playlist with 2h rewind
-		if ( $live && scalar @sequences > $buffer ) {
-			@sequences = splice @sequences, -1 * $buffer;
+		if ( $live && scalar @sequences > $init ) {
+			@sequences = splice @sequences, -1 * $init;
 		}
 		# check for gap compared to last live playlist
 		if ( $live && $last_sequence ) {
@@ -10870,12 +10870,12 @@ sub get_builtin {
 				$stop = 1;
 				last;
 			}
-			# don't wait while buffering
-			next if $count < $buffer;
+			# don't wait while initialising
+			next if $count < $init;
 			# wait if streaming on-demand
 			if ( ! $live && $opt->{stdout} ) {
 				# download next segment sooner if lagging
-				$lagging = ( $count >= $buffer && time() - $seq_time > int($segment_duration) ) ? 2 : 1;
+				$lagging = ( $count >= $init && time() - $seq_time > int($segment_duration) ) ? 2 : 1;
 				while ( time() - $seq_time < int($segment_duration / $lagging) ) {
 					sleep 1;
 				}
@@ -10886,7 +10886,7 @@ sub get_builtin {
 		# wait before re-pulling live playlist
 		if ( $live ) {
 			# re-pull live playlist sooner if lagging
-			$lagging = ( $count >= $buffer && time() - $curr_time > $curr_count * int($segment_duration) ) ? 2 : 1;
+			$lagging = ( $count >= $init && time() - $curr_time > $curr_count * int($segment_duration) ) ? 2 : 1;
 			while ( time() - $curr_time < int($segment_duration / $lagging) ) {
 				sleep 1;
 			}
