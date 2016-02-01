@@ -10652,6 +10652,7 @@ sub get_builtin {
 	my $lagging = 0;
 	my $stop = 0;
 	my %seen;
+	my $proxy_prefix;
 	my $init = max(4, $opt->{streaminit});
 
 	my $min_download_size = main::progclass($prog_type)->min_download_size();
@@ -10726,7 +10727,7 @@ sub get_builtin {
 				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
 				$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
 			}
-			main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB / %.2fMB %s %5.1f%%, %s remaining\r",
+			main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB / %.2fMB %s %5.1f%% %s remaining\r",
 				$size / 1024.0 / 1024.0,
 				$file_size / 1024.0 / 1024.0,
 				$rate,
@@ -10773,6 +10774,10 @@ sub get_builtin {
 		main::logger "INFO: ".( ! $live && $opt->{streamresume} ? "Resume" : "Begin" )." recording file: $file_tmp\n";
 	}
 
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
+		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
+	}
+	
 	while ( 1 ) {
 		my $curr_time = time();
 		my $curr_count = 0;
@@ -10801,8 +10806,8 @@ sub get_builtin {
 			my $diff = $last_sequence - $sequences[-1] - 1;
 			$diff = max(0, $diff);
 			if ( $diff ) {
-				my $missing = $diff * $segments->{$sequences[-1]}->{duration};
-				main::logger "WARNING: Missing approximately $missing secs at $elapsed secs in file $file_tmp\n";
+				my $missing = int($diff * $segments->{$sequences[-1]}->{duration});
+				main::logger "WARNING: Missing approximately $missing secs near $elapsed secs in programme\n";
 			}
 		}
 		# process segments in current playlist
@@ -10816,10 +10821,11 @@ sub get_builtin {
 			$elapsed += $segment_duration;
 			# check --start
 			next if ! $segments->{$sequence}->{initialization} && defined $opt->{start} && $elapsed <= $opt->{start};
-			my $segment_url = $segments->{$sequence}->{url};
-			if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
-				$segment_url = $opt->{proxy}.main::url_encode( $segment_url );
-				$segment_url =~ s/^prepend://g;
+			my $segment_url;
+			if ( $proxy_prefix ) {
+				$segment_url = $proxy_prefix.main::url_encode( $segments->{$sequence}->{url} );
+			} else {
+				$segment_url = $segments->{$sequence}->{url};
 			}
 			main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
 			my $i;
@@ -10827,18 +10833,25 @@ sub get_builtin {
 				my $res = $ua->get($segment_url, ':content_cb' => $callback);
 				if ( ! $res->is_success || ! $res->header("Content-Length") ) {
 					if ( $res->code == 404 ) {
-						# don't retry if 404 received - may be due to inaccurate manifest
-						main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
-						if ( ! $live && $sequence == $sequences[$#sequences] ) {
-							main::logger "WARNING: The message above may appear due to inaccurate programme data\n";
-							main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
+						if ( $live ) {
+							# wait for segment production to catch up 
+							while ( time() - $seq_time < int($segment_duration) ) {
+								sleep 1;
+							}
+							next;
 						} else {
-							main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." seconds in the recording\n";
-						}
-						last;
-					} else {
-						if ( $i == $retries - 1 ) {
-							main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
+							# don't retry if 404 received - may be due to inaccurate manifest
+							if ( $sequence == $sequences[$#sequences] ) {
+								if ( $opt->{verbose} ) {
+									main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+									main::logger "WARNING: The message above may appear due to inaccurate programme data\n";
+									main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
+								}
+							} else {
+								main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+								main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." secs in programme\n";
+							}
+							last;
 						}
 					}
 				} else {
@@ -10846,6 +10859,7 @@ sub get_builtin {
 				}
 			}
 			if ( $i == $retries ) {
+				main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
 				$return = 5;
 				$stop = 1;
 				last;
@@ -10853,7 +10867,7 @@ sub get_builtin {
 			$seen{$sequence}++;
 			# capture for resuming
 			$last_sequence = $sequence;
-			$opt->{streamresume} = "$last_sequence,$size,$elapsed,$begin_time"; 
+			$opt->{streamresume} = "$last_sequence,$size,$elapsed,$begin_time";
 			$count++;
 			$curr_count++;
 			if ( $live && $opt->{hash} && ! ( $opt->{quiet} || $opt->{silent} ) ) {
@@ -10874,20 +10888,18 @@ sub get_builtin {
 			next if $count < $init;
 			# wait if streaming on-demand
 			if ( ! $live && $opt->{stdout} ) {
-				# download next segment sooner if lagging
-				$lagging = ( $count >= $init && time() - $seq_time > int($segment_duration) ) ? 2 : 1;
-				while ( time() - $seq_time < int($segment_duration / $lagging) ) {
+				while ( time() - $seq_time < int($segment_duration) ) {
 					sleep 1;
 				}
 			}
 		}
 		# all done if on-demand or stopped
 		last if ( ! $live || $stop );
+		# don't wait while initialising
+		next if $count < $init;
 		# wait before re-pulling live playlist
 		if ( $live ) {
-			# re-pull live playlist sooner if lagging
-			$lagging = ( $count >= $init && time() - $curr_time > $curr_count * int($segment_duration) ) ? 2 : 1;
-			while ( time() - $curr_time < int($segment_duration / $lagging) ) {
+			while ( time() - $curr_time <  int(max(1, $curr_count - 1) * $segment_duration) ) {
 				sleep 1;
 			}
 		}
