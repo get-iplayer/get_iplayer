@@ -133,7 +133,7 @@ my $opt_format = {
 	mediaselector	=> [ 1, "mediaselector|media-selector=s", 'Deprecated', '--mediaselector <identifier>', "Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	mmsnothread	=> [ 1, "mmsnothread!", 'Ignored', '--mmsnothread', "Disable parallel threaded recording for mms"],
-	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode for available modes and defaults. Shortcuts: default(=best),good,vgood,better,vbetter,best."],
+	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode for available modes and defaults. Shortcuts: default(=best),good,better,best."],
 	multimode	=> [ 1, "multimode!", 'Recording', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
@@ -4213,10 +4213,10 @@ sub cmp_modes($$) {
 		'[^v]low(\d?)' => 80,
 	);
 	my %ranks2 = (
-		'^flash' => 100,
-		'^hls' => 200,
-		'^hvf' => 300,
-		'^dash' => 400,
+		'^dash' => 100,
+		'^flash' => 200,
+		'^hls' => 300,
+		'^hvf' => 400,
 		'^shoutcast' => 500,
 		'^subtitle' => 600,
 	);
@@ -6046,7 +6046,7 @@ sub get_metadata {
 
 	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
-		main::logger "WARNING: No programme versions found with available media streams for requested modes\n";
+		main::logger "WARNING: No programme versions found with media streams for requested modes\n";
 		main::logger "WARNING: You may receive this message if you are using get_iplayer outside the UK\n";
 		# Return at this stage unless we want metadata/tags only for various reasons
 		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
@@ -7997,9 +7997,9 @@ sub modelist {
 		$mlist = 'default';
 		if ( $prog->{type} =~ /live/ ) {
  			if ( ! main::exists_in_path('ffmpeg') ) {
-				$mlist = 'hlsdefault';
+				$mlist = 'hls';
 				if ( $opt->{hlsffmpeg} ) {
-					main::logger "WARNING: Not using hls/hvf modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
 					return undef unless $prog->{type} =~ /radio/;
 					$mlist = "shoutcast";
 				}
@@ -8011,74 +8011,74 @@ sub modelist {
 		} else {
 			if ( ! main::exists_in_path('rtmpdump') ) {
 				main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if ( $showwarn || $opt->{verbose} );
-				$mlist = 'hlsdefault';
+				$mlist = 'hls';
 			}
 			if ( $opt->{hlsffmpeg} ) {
 				if ( ! main::exists_in_path('ffmpeg') ) {
-					main::logger "WARNING: Not using hls/hvf modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
+					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
 					return undef unless $prog->{type} =~ /radio/;
-					$mlist = "dashdefault";
+					$mlist = "dash";
 				}
 			}
 		}
 	}
-	my $fmt = "flash";
-	if ( $prog->{type} =~ /live/ ) {
-		# deal with obsolete values
-		$mlist =~ s/(flash|rtmp)/hls/g;
-		$mlist =~ s/normal/std/g;
-		if ( $prog->{type} eq "livetv" ) {
-			$fmt = "hvf";
-		} else {
-			$fmt = "hls";
-		}
-	}
+	$mlist =~ s/rtmp/flash/g;
 	$mlist =~ s/(flash|hls)aac/$1/g;
+	$mlist =~ s/hls50/hvf/g;
+	my $fmt = "flash";
+	if ( $prog->{type} eq "livetv" ) {
+		$mlist =~ s/hls/hvf/g;
+		$fmt = "hvf";
+	} elsif ( $prog->{type} eq "liveradio" ) {
+		$mlist =~ s/hvf/hls/g;
+		$fmt = "hls";
+	} elsif ( $prog->{type} eq "radio" ) {
+		$mlist =~ s/hvf/hls/g;
+	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
 	$mlist = main::expand_list($mlist, 'default', 'best');
 	$mlist = main::expand_list($mlist, 'best', "${fmt}best");
-	$mlist = main::expand_list($mlist, 'vbetter', "${fmt}vbetter");
 	$mlist = main::expand_list($mlist, 'better', "${fmt}better");
-	$mlist = main::expand_list($mlist, 'vgood', "${fmt}vgood");
 	$mlist = main::expand_list($mlist, 'good', "${fmt}good");
+	# DASH on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
+		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
+		$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
+		$mlist = main::expand_list($mlist, 'dashbest', 'dashbetter');
+		$mlist = main::expand_list($mlist, 'dashbetter', 'dashgood');
+		$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashmed,dashlow');
+	}
 	# RTMP on-demand tv/radio
-	$mlist = main::expand_list($mlist, 'rtmp', "flashdefault");
-	$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
-	$mlist = main::expand_list($mlist, 'flashdefault', 'flashbest');
-	$mlist = main::expand_list($mlist, 'flashbest', 'flashhd,flashvbetter');
-	$mlist = main::expand_list($mlist, 'flashvbetter', 'flashbetter');
-	$mlist = main::expand_list($mlist, 'flashbetter', 'flashvgood');
-	$mlist = main::expand_list($mlist, 'flashvgood', 'flashvhigh,flashgood');
-	$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashstd,flashnormal,flashlow');
+	if ( $prog->{type} !~ /live/ && $mlist =~ /flash/ ) {
+		$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
+		$mlist = main::expand_list($mlist, 'flashdefault', 'flashbest');
+		$mlist = main::expand_list($mlist, 'flashbest', 'flashhd,flashbetter');
+		$mlist = main::expand_list($mlist, 'flashbetter', 'flashvhigh,flashgood');
+		$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashstd,flashnormal,flashlow');
+	}
 	# HLS on-demand tv/radio and live radio
-	$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
-	$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
-	$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsvbetter');
-	$mlist = main::expand_list($mlist, 'hlsvbetter', 'hlsbetter');
-	$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
-	$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
-	$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlsmed,hlslow');
+	if ( $prog->{type} ne "livetv" && $mlist =~ /hls/ ) {
+		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
+		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
+		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
+		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvhigh,hlsgood');
+		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlsmed,hlslow');
+	}
 	# HLS Video Factory on-demand and live tv
-	$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
-	$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbest');
-	$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfvbetter');
-	$mlist = main::expand_list($mlist, 'hvfvbetter', 'hvfsd,hvfbetter');
-	$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfvgood');
-	$mlist = main::expand_list($mlist, 'hvfvgood', 'hvfvhigh,hvfgood');
-	$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfstd,hvfmed,hvflow');
-	# DASH on-demand tv/radio
-	$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
-	$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
-	$mlist = main::expand_list($mlist, 'dashbest', 'dashhd,dashvbetter');
-	$mlist = main::expand_list($mlist, 'dashvbetter', 'dashbetter');
-	$mlist = main::expand_list($mlist, 'dashbetter', 'dashvgood');
-	$mlist = main::expand_list($mlist, 'dashvgood', 'dashvhigh,dashgood');
-	$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashmed,dashlow');
+	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
+		$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
+		$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbest');
+		$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfsd,hvfbetter');
+		$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfvhigh,hvfgood');
+		$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfstd,hvfmed,hvflow');
+	}
 	# Shoutcast live radio
-	$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
-	$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
-	$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
+	if ( $prog->{type} eq "liveradio" && $mlist =~ /shoutcast/ ) {
+		$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
+		$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
+		$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
+	}
 	return $mlist;
 }
 
@@ -8183,7 +8183,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,flashlow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: good,vgood,better,vbetter,best,rtmp,flash,hls,hvf. (default=flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow)"],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes: flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,flashlow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: good,better,best,rtmp,flash,hls,hvf. (default=flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow)"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		vlc		=> [ 1, "vlc=s", 'Ignored', '--vlc <path>', "Location of vlc or cvlc binary"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Recording', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
@@ -8779,6 +8779,7 @@ sub download {
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf)/;
+	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
 
@@ -9222,7 +9223,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow,dashhigh,dashstd,dashmed,dashlow. Shortcuts: default(=best),good,vgood,better,vbetter,best,rtmp,flash,hls,dash. ('default'=flashhigh,flashstd,flashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow,dashhigh,dashstd,dashmed,dashlow. Shortcuts: default(=best),good,better,best,rtmp,flash,hls,dash. ('default'=flashhigh,flashstd,flashlow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Ignored', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 1, "lame=s", 'Ignored', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
@@ -9503,7 +9504,7 @@ sub hls_pid_map {
 # Class cmdline Options
 sub opt_format {
 	return {
-		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: good,vgood,better,vbetter,best,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)"],
+		livetvmode	=> [ 1, "livetvmode=s", 'Recording', '--livetvmode <mode>,<mode>,...', "Live TV recording modes: hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: good,better,best,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)"],
 		outputlivetv	=> [ 1, "outputlivetv=s", 'Output', '--outputlivetv <dir>', "Output directory for live tv recordings (overrides --output)"],
 		rtmplivetvopts	=> [ 1, "rtmp-livetv-opts|rtmplivetvopts=s", 'Ignored', '--rtmp-livetv-opts <options>', "Add custom options to rtmpdump for livetv"],
 		hlslivetvopts	=> [ 1, "hls-livetv-opts|hlslivetvopts=s", 'Recording', '--hls-livetv-opts <options>', "Add custom options to ffmpeg HLS download encoding for livetv"],
@@ -9630,7 +9631,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: hlshigh,hlsstd,hlsmed,hlslow,shoutcastmp3std,shoutcastaachigh(R3 only, UK only). Shortcuts: default(=best),good,vgood,better,vbetter,best,hls,shoutcast. ('default'=hlshigh,hlsstd,hlsmed,hlslow)"],
+		liveradiomode	=> [ 1, "liveradiomode=s", 'Recording', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes: hlshigh,hlsstd,hlsmed,hlslow,shoutcastmp3std,shoutcastaachigh(R3 only, UK only). Shortcuts: default(=best),good,better,best,hls,shoutcast. ('default'=hlshigh,hlsstd,hlsmed,hlslow)"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Output', '--outputliveradio <dir>', "Output directory for live radio recordings (overrides --output)"],
 		rtmpliveradioopts => [ 1, "rtmp-liveradio-opts|rtmpliveradioopts=s", 'Ignored', '--rtmp-liveradio-opts <options>', "Add custom options to rtmpdump for liveradio"],
 		hlsliveradioopts	=> [ 1, "hls-liveradio-opts|hlsliveradioopts=s", 'Recording', '--hls-liveradio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for liveradio"],
