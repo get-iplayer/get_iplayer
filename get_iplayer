@@ -8746,7 +8746,7 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^hls/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^(hls|hvf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
@@ -8778,7 +8778,7 @@ sub download {
 	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^hls/;
+	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf)/;
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
 
@@ -9238,11 +9238,6 @@ sub opt_format {
 
 # This gets run before the download retry loop if this class type is selected
 sub init {
-	# Force certain options for radio
-	# Force --raw otherwise realaudio stdout streaming fails
-	# (this would normally be a bad thing but since its a stdout stream we
-	# won't be downloading other types of progs afterwards)
-	$opt->{raw} = 1 if $opt->{stdout} && $opt->{nowrite};
 }
 
 
@@ -10252,6 +10247,9 @@ sub postproc {
 	my @cmd;
 	my $return;
 
+	# do nothing if not recording
+	return 0 unless ( ! $opt->{nowrite} && -f $file_tmp ); 
+	
 	# Retain raw format if required or if shoutcast mp3
 	if ( $opt->{raw} || $prog->{mode} =~ /mp3/ ) {
 		if ( $file_tmp ne $prog->{filename} && ! $opt->{nowrite} ) {
@@ -10521,7 +10519,7 @@ sub get {
 	}
 
 	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording file: $prog->{filename}\n";
+		main::logger "INFO: Begin recording file: $file_tmp\n";
 	}
 
 	$return = main::run_cmd( 'normal', @cmd );
@@ -10619,11 +10617,11 @@ sub get {
 	}
 	my $rc;
 	if ( $opt->{hlsffmpeg} ) {
-		$rc = return $self->get_ffmpeg( $file_tmp, $prog, %streamdata );
-		return $rc if $rc =~ /(retry|next)/;
+		$rc = $self->get_ffmpeg( $file_tmp, $prog, %streamdata );
+	} else {
+		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
 	}
-	$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
-	return $rc if $rc =~ /(retry|next)/;
+	return $rc if $rc;
 	return $self->postproc($file_tmp, $prog, %streamdata);
 }
 
@@ -11029,7 +11027,7 @@ sub get_ffmpeg {
 	}
 
 	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording file: $prog->{filename}\n";
+		main::logger "INFO: Begin recording file: $file_tmp\n";
 	}
 
 	my $begin_time = time();
