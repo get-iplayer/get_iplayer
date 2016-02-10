@@ -4213,12 +4213,11 @@ sub cmp_modes($$) {
 		'[^v]low(\d?)' => 80,
 	);
 	my %ranks2 = (
-		'^dash' => 100,
-		'^flash' => 200,
-		'^hls' => 300,
-		'^hvf' => 400,
-		'^shoutcast' => 500,
-		'^subtitle' => 600,
+		'^flash' => 100,
+		'^hls' => 200,
+		'^hvf' => 300,
+		'^shoutcast' => 400,
+		'^subtitle' => 500,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -7020,6 +7019,8 @@ sub parse_dash_connection {
 	} 
 	my $media = shift;
 	my $conn = shift;
+	my $min_bitrate = shift;
+	my $max_bitrate = shift;
 	my $prefix = shift || "dash";
 	my $now = time();
  	my @dash_medias;
@@ -7084,6 +7085,9 @@ sub parse_dash_connection {
 		my $content_type = $set->{contentType};
 		my $template = $set->{SegmentTemplate}->[0];
 		for my $repr ( @{$set->{Representation}} ) {
+			my $bitrate = int($repr->{bandwidth}/1000.0);
+			next if $min_bitrate && $bitrate < $min_bitrate;
+			next if $max_bitrate && $bitrate > $max_bitrate;
 			if ( ! $template ) {
 				$template = $repr->{SegmentTemplate}->[0];
 			}
@@ -7094,7 +7098,7 @@ sub parse_dash_connection {
 			$repr_media->{id} = $repr->{id};
 			$repr_media->{live} = $mpd_type eq "dynamic" ? 1 : 0;;
 			$repr_media->{content_type} = $content_type;
-			$repr_media->{bitrate} = int($repr->{bandwidth}/1000.0);
+			$repr_media->{bitrate} = $bitrate;
 			$repr_media->{file_size} = int($programme_duration * $repr_media->{bitrate} * 1000.0 / 8.0);
 			$repr_media->{num_segments} = $num_segments;
 			$repr_media->{segment_duration} = $segment_duration;
@@ -7551,8 +7555,8 @@ sub get_stream_data {
 						}
 					}
 				}
-				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
-					# get MPEG-DASH streams for on-demand
+				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /hls/ ) ) {
+					# get 320k MPEG-DASH stream for on-demand radio
 					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
@@ -7571,7 +7575,7 @@ sub get_stream_data {
 									last;
 								}
 								next if ( $pc_media->{kind} eq "captions" );
-								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
+								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn, 192, undef );
 								for my $dash_media ( @dash_medias ) {
 									for my $dash_conn ( @{$dash_media->{connections}} ) {
 										$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
@@ -7787,8 +7791,8 @@ sub get_stream_data {
 		$mattribs->{modelist} = $modelist;
 
 		if ( $mattribs->{service} =~ /hls/ ) {
-			my $ext = "mp4";
 			if ( $mattribs->{kind} =~ 'video' ) {
+				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
 				}	elsif ( $mattribs->{height} > 400 ) {
@@ -7838,35 +7842,17 @@ sub get_stream_data {
 			}
 
 		} elsif ( $mattribs->{service} =~ /dash/ ) {
-			if ( $mattribs->{kind} =~ 'video' ) {
-				my $ext = "mp4";
-				if ( $mattribs->{height} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashhd", 'dash', $ext );
-				} elsif ( $mattribs->{height} > 400 ) {
-					if ( $mattribs->{bitrate} > 2000 ) {
-						get_stream_data_cdn( $data, $mattribs, "dashsd", 'dash', $ext );
-					} else {
-						get_stream_data_cdn( $data, $mattribs, "dashvhigh", 'dash', $ext );
-					}
-				} elsif ( $mattribs->{height} > 200 ) {
-					if ( $mattribs->{bitrate} > 700 ) {
-						get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
-					} elsif ( $mattribs->{bitrate} > 400 ) {
-						get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
-					} elsif ( $mattribs->{bitrate} > 200 ) {
-						get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
-					}
-				}
-			} elsif ( $mattribs->{kind} =~ 'audio' ) {
+			if ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
+				# use DASH 320k stream as HLS 320k stream
 				if (  $mattribs->{bitrate} >= 192 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
-				} elsif ( $mattribs->{bitrate} >= 120 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
-				} elsif ( $mattribs->{bitrate} >= 80 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashmed", 'dash', $ext );
-				} else {
-					get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "hlshigh", 'dash', $ext );
+				#} elsif ( $mattribs->{bitrate} >= 120 ) {
+				#	get_stream_data_cdn( $data, $mattribs, "hlsstd", 'dash', $ext );
+				#} elsif ( $mattribs->{bitrate} >= 80 ) {
+				#	get_stream_data_cdn( $data, $mattribs, "hlshmed", 'dash', $ext );
+				#} else {
+				#	get_stream_data_cdn( $data, $mattribs, "hlslow", 'dash', $ext );
 				}
 			}
 
@@ -7997,7 +7983,6 @@ sub modelist {
 		$mlist = 'default';
 		if ( $prog->{type} =~ /live/ ) {
  			if ( ! main::exists_in_path('ffmpeg') ) {
-				$mlist = 'hls';
 				if ( $opt->{hlsffmpeg} ) {
 					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
 					return undef unless $prog->{type} =~ /radio/;
@@ -8016,8 +8001,7 @@ sub modelist {
 			if ( $opt->{hlsffmpeg} ) {
 				if ( ! main::exists_in_path('ffmpeg') ) {
 					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-					return undef unless $prog->{type} =~ /radio/;
-					$mlist = "dash";
+					return undef;
 				}
 			}
 		}
@@ -8030,10 +8014,7 @@ sub modelist {
 		$mlist =~ s/hls/hvf/g;
 		$fmt = "hvf";
 	} elsif ( $prog->{type} eq "liveradio" ) {
-		$mlist =~ s/hvf/hls/g;
 		$fmt = "hls";
-	} elsif ( $prog->{type} eq "radio" ) {
-		$mlist =~ s/hvf/hls/g;
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -8041,14 +8022,6 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', "${fmt}best");
 	$mlist = main::expand_list($mlist, 'better', "${fmt}better");
 	$mlist = main::expand_list($mlist, 'good', "${fmt}good");
-	# DASH on-demand radio
-	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
-		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
-		$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
-		$mlist = main::expand_list($mlist, 'dashbest', 'dashbetter');
-		$mlist = main::expand_list($mlist, 'dashbetter', 'dashgood');
-		$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashmed,dashlow');
-	}
 	# RTMP on-demand tv/radio
 	if ( $prog->{type} !~ /live/ && $mlist =~ /flash/ ) {
 		$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
@@ -8751,7 +8724,8 @@ sub download {
 			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
 		} else {
-			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .ts file\n";
+			my $ext = $mode =~ /^hlshigh/ && $prog->{type} eq 'radio' ? ".m4a" : ".ts";
+			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting $ext file\n";
 			$opt->{raw} = 1;
 		}
 	}
@@ -8779,7 +8753,8 @@ sub download {
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf)/;
-	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
+	# DASH stream masquerading as hlshigh for on-demand radio
+	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^hlshigh/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
 
@@ -9223,7 +9198,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow,dashhigh,dashstd,dashmed,dashlow. Shortcuts: default(=best),good,better,best,rtmp,flash,hls,dash. ('default'=flashhigh,flashstd,flashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow. Shortcuts: default(=best),good,better,best,rtmp,flash,hls. ('default'=flashhigh,flashstd,flashlow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Ignored', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 1, "lame=s", 'Ignored', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
@@ -10569,9 +10544,9 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader."],
+		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. 320k on-demand radio programmes are not available with --hls-ffmpeg."],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
-		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to init player cache on slow connections. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
+		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to initialise player cache. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
 }
 
