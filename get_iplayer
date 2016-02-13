@@ -7981,35 +7981,15 @@ sub modelist {
 	# Defaults
 	if ( ! $mlist ) {
 		$mlist = 'default';
-		if ( $prog->{type} =~ /live/ ) {
- 			if ( ! main::exists_in_path('ffmpeg') ) {
-				if ( $opt->{hlsffmpeg} ) {
-					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-					return undef unless $prog->{type} =~ /radio/;
-					$mlist = "shoutcast";
-				}
-				if ( $mlist eq "shoutcast" ) {
-					main::logger "WARNING: Not using shoutcast modes since ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-					return undef;
-				}
-			}
-		} else {
-			if ( ! main::exists_in_path('rtmpdump') ) {
-				main::logger "WARNING: Not using flash modes since rtmpdump is not found\n" if ( $showwarn || $opt->{verbose} );
-				$mlist = 'hls';
-			}
-			if ( $opt->{hlsffmpeg} ) {
-				if ( ! main::exists_in_path('ffmpeg') ) {
-					main::logger "WARNING: Not using hls/hvf modes since --hls-ffmpeg specified and ffmpeg is not found\n" if ( $showwarn || $opt->{verbose} );
-					return undef;
-				}
-			}
+		if ( $opt->{hlsffmpeg} && ! main::exists_in_path('ffmpeg') ) {
+			main::logger "ERROR: Cannot use default hls/hvf modes because --hls-ffmpeg is specified and ffmpeg is not found - exiting\n";
+			exit 1;
 		}
 	}
 	$mlist =~ s/rtmp/flash/g;
 	$mlist =~ s/(flash|hls)aac/$1/g;
 	$mlist =~ s/hls50/hvf/g;
-	my $fmt = "flash";
+	my $fmt = "hls";
 	if ( $prog->{type} eq "livetv" ) {
 		$mlist =~ s/hls/hvf/g;
 		$fmt = "hvf";
@@ -8721,7 +8701,7 @@ sub download {
 	# require ffmpeg for HLS
 	if ( $mode =~ /^(hls|hvf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
-			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
+			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
 		} else {
 			my $ext = $mode =~ /^hlshigh/ && $prog->{type} eq 'radio' ? ".m4a" : ".ts";
@@ -10544,7 +10524,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. 320k on-demand radio programmes are not available with --hls-ffmpeg."],
+		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. ignored for 320k on-demand radio programmes, which use DASH downloader"],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
 		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to initialise player cache. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
