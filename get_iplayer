@@ -292,6 +292,7 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
+	ybbcy	=> [ 1, "ybbcy!", 'Misc', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect."],
 
 };
 
@@ -1386,6 +1387,9 @@ sub list_progs {
 		}
 	}
 	logger "\nINFO: ".($#matches + 1)." Matching Programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
+	if ( $opt->{ybbcy} && ! $opt->{pvr} && $#matches < 0 ) {
+		logger "\nINFO: Ensure that you have refreshed the programme data cache and included all channels of interest\n";
+	}
 }
 
 
@@ -3888,6 +3892,9 @@ sub channels_filtered {
 	(my $prog_type = $prog) =~ s/Programme:://;
 	my $exclude_groups = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
 	my $include_groups = $opt->{'refreshincludegroups'.$prog_type} || $opt->{'refreshincludegroups'};
+	if ( $opt->{ybbcy} && $prog_type eq "tv" && ! $exclude_groups ) {
+		$exclude_groups = "local";
+	}
 	my %channels;
 	my %group_channels;
 	# include/exclude matching channels as required
@@ -3904,6 +3911,7 @@ sub channels_filtered {
 		}
 	}
 	my $use_group_channels = scalar keys %group_channels;
+	$use_group_channels = 1 if ! $use_group_channels && $exclude_groups;
 	for my $channel ( keys %channels ) {
 		if ( $use_group_channels ) {
 			if ( $exclude_regex ne '^ROGUEVALUE$' && $group_channels{$channel} =~ /$exclude_regex/i ) {
@@ -5697,7 +5705,7 @@ sub get_metadata {
 	eval "use XML::Simple";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for more accurate programme metadata.\n";
-	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
+	} elsif ( ! $opt->{ybbcy} && $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
 		my $url = $prog_data_url.$prog->{pid}.".xml";
 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
 		my $xml = main::request_url_retry($ua, $url, 3, '', '');
@@ -5845,7 +5853,7 @@ sub get_metadata {
 							$prog->{durations}->{$version} = $ver->{duration}->[0];
 						}
 					}
-					$got_metadata = 1;
+					$got_metadata = 1 if $pid;
 				} else {
 					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode. Download may fail and metadata may be inaccurate.\n";
 				}
@@ -5868,7 +5876,7 @@ sub get_metadata {
 	}
 
 	# use fallback metadata if necessary
-	unless ( $got_metadata ) {
+	unless ( $got_metadata || $opt->{ybbcy} ) {
 		$prog->get_metadata_fallback( $ua );
 	}
 
@@ -5946,6 +5954,8 @@ sub get_metadata {
 		# Set duration for this version if it is not defined
 		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
 		next unless $prog->{verpids}->{$version} =~ /^[bp]0[a-z0-9]{6}$/;
+		# assume RDF unavailable with --ybbcy
+		next if $opt->{ybbcy};
 		# get the last/first broadcast dates from the RDF for this verpid
 		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
 		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
@@ -6488,6 +6498,11 @@ sub get_pids_recursive {
 	main::logger "Cleaning pid Old: '$prog->{pid}', " if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " New: '$prog->{pid}'\n" if $opt->{verbose};
+
+	if ( $opt->{ybbcy} ) {
+		main::logger "WARNING: --ybbcy specified - trying to record PID directly.\n";
+		return $prog->{pid};
+	}
 
 	# Skip RDF retrieval if a web URL
 	return $prog->{pid} if $prog->{pid} =~ '^http';
@@ -8098,9 +8113,9 @@ sub channels_schedule {
 			'bbcone/programmes/schedules/hd'	=> 'BBC One',
 			'bbctwo/programmes/schedules/hd'	=> 'BBC Two',
 			'bbcfour/programmes/schedules'		=> 'BBC Four',
-			'bbcnews/programmes/schedules'		=> 'BBC News',
 			'cbbc/programmes/schedules'		=> 'CBBC',
 			'cbeebies/programmes/schedules'		=> 'CBeebies',
+			'bbcnews/programmes/schedules'		=> 'BBC News',
 			'bbcparliament/programmes/schedules'	=> 'BBC Parliament',
 		},
 		'regional' => {
@@ -8402,20 +8417,58 @@ sub get_links_schedule {
 	my $prog_type = shift;
 	my $future = shift;
 	my $now = shift || time();
+	my $parser;
+	if ( $opt->{ybbcy} ) {
+		eval "use XML::LibXML '1.70'";
+		if ( $@ ) {
+			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
+			return;
+		} else {
+			$parser = XML::LibXML->new();
+		}
+	}
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
-	my %aod_channels;
+	my (%aod_channels, %aod_channel_ids);
 	if ( $prog_type eq "radio" ) {
 		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
+		if ( $opt->{ybbcy} ) {
+			while ( my ($k1, $v1) = each %channels ) {
+				keys %aod_channels;
+				while ( my ($k2, $v2) = each %aod_channels ) {
+					if ( $v1 eq $v2 ) {
+						$aod_channel_ids{$k1} = $k2;
+						last;
+					}
+				}
+			}
+		}
 	}
 	my @channel_list = sort keys %channels;
-	my $limit = 0;
 	my @schedule_dates;
+	my $limit = 0;
+	my $one_week = 7 * 86400;
+	my $then = $now - $one_week;
+	my $this_year = (gmtime($now))[5];
+	my $that_year = (gmtime($then))[5];
+	my $this_week = strftime( "%W", gmtime($now) );
+	my $that_week = strftime( "%W", gmtime($then) );
+	my $cache_file = "${profile_dir}/${prog_type}.cache";
+	my ($cache_this_week, $cache_last_week);
+	if ( ! $opt->{refresh} && ! $opt->{cachereset} && -f $cache_file ) {
+		my $cache_time = stat($cache_file)->mtime;
+		my $cache_year = (gmtime($cache_time))[5];
+		my $cache_week = strftime( "%W", gmtime($cache_time) );
+		$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
+		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
+	}
 	if ( $future ) {
-		push @schedule_dates, "this_week", "next_week";
+		if ( $opt->{ybbcy} ) {
+			push @schedule_dates, "this_week" unless $cache_this_week;
+			push @schedule_dates, "next_week";
+		} else {
+			push @schedule_dates, "this_week", "next_week";
+		}
 	} else {
-		my $one_week = 7 * 86400;
-		my $this_year = (gmtime($now))[5];
-		my $this_week = strftime( "%W", gmtime($now) );
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 		$limit_days = 0 if $limit_days < 0;
 		$limit_days = 30 if $limit_days > 30;
@@ -8430,28 +8483,39 @@ sub get_links_schedule {
 				$limit_year = (gmtime($limit_time))[5];
 				$limit_week = strftime( "%W", gmtime($limit_time) );
 			}
+			push @schedule_dates, "this_week";
 		} else {
-			my $cache_file = "${profile_dir}/${prog_type}.cache";
-			if ( ! $opt->{refresh} && ! $opt->{cachereset} && -f $cache_file ) {
-				my $cache_time = stat($cache_file)->mtime;
-				my $cache_year = (gmtime($cache_time))[5];
-				my $cache_week = strftime( "%W", gmtime($cache_time) );
-				if ( ! ( $this_year == $cache_year && $this_week == $cache_week ) ) {
-					push @schedule_dates, "last_week";
-				}
+			if ( $opt->{ybbcy} ) {
+				push @schedule_dates, "last_week" unless $cache_last_week || $cache_this_week;
+				push @schedule_dates, "this_week" unless $cache_this_week;
 			} else {
-				push @schedule_dates, "last_week";
+				push @schedule_dates, "last_week" unless $cache_this_week;
+				push @schedule_dates, "this_week";
 			}
 		}
-		push @schedule_dates, "this_week";
 	}
+	return unless @schedule_dates;
+	my $ua = main::create_ua( 'desktop', 1 );
+	$ua->timeout(60) if $opt->{ybbcy};
 	my $known_bad = "radiosolent";
+	undef $known_bad if $opt->{ybbcy};
 	my %aod_seen;
 	for my $channel_id ( @channel_list ) {
-		my $ua = main::create_ua( 'desktop', 1 );
 		for my $schedule_date ( @schedule_dates ) {
-			my $url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
-			my $rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+			my ($url, $rc);
+			if ( $opt->{ybbcy} ) {
+				if ( $prog_type eq "radio" ) {
+					my $aod_channel_id = $aod_channel_ids{$channel_id};
+					$aod_seen{$channel_id}++;
+					$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
+				} else {
+					$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+					$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad, $parser);
+				}
+			} else {
+				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
+				$rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+			}
 			if ( $rc ) {
 				if ( $prog_type eq "radio" && ! $aod_seen{$channel_id} ) {
 					my $aod_channel_id;
@@ -8481,6 +8545,133 @@ sub get_links_schedule {
 	}
 }
 
+# get cache info from schedule html
+sub get_links_schedule_html {
+	my $self = shift;
+	my $ua = shift;
+	my $prog = shift;
+	my $prog_type = shift;
+	my $channel_id = shift;
+	my $channel = shift;
+	my $future = shift;
+	my $url = shift;
+	my $limit = shift;
+	my $now = shift || time();
+	my $known_bad = shift;
+	my $parser = shift;
+	my $cache_channel = $channel;
+	if ( $prog_type eq "tv" ) {
+		# collapse BBC One/Two variants
+		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
+	}
+	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
+	my $thirty_days = 30 * 86400;
+	my $min_available = $limit || ( $now - $thirty_days );
+	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
+	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
+	return 1 if ! $html;
+	#decode_entities($html);
+	my $dom = $parser->load_html(string => $html, recover => 1, suppress_errors => 1);
+	my @entries = $dom->findnodes('//li[@class="week-guide__table__item"]');
+	# get list of entries within <broadcast> </broadcast> tags
+	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
+	foreach my $entry (@entries) {
+		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort );
+		my ($available_str, $until_str);
+		my $pid = $entry->findvalue('.//div[@typeof="Episode" or @typeof="RadioEpisode"]/@data-pid');
+		next unless $pid;
+		my $available_str = $entry->findvalue('.//h3[@property="startDate"]/@content');
+		next unless $available_str;
+		$available = Programme::get_time_string( $available_str );
+		next if $available < $min_available;
+		$expires = $available + $thirty_days;
+		if ( defined $prog->{$pid} ) {
+			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
+			# use listing with earliest availability
+			if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
+				$prog->{$pid}->{available} = $available_str;
+			}
+			# use listing with latest expiry
+			if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
+				$prog->{$pid}->{expires} = $expires;
+			}
+			next;
+		}
+		my $end_date = $entry->findvalue('.//meta[@property="endDate"]/@content');
+		if ( $end_date ) {
+			# compute duration
+			my $finish = Programme::get_time_string( $end_date );
+			if ( $finish ) {
+				$duration = $finish - $available;
+			}
+		}
+		$channel = $entry->findvalue('.//span[@typeof="BroadcastService"]/meta[@property="name"]/@content');
+		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="description"]');
+		$desc =~ s/[\r\n]/ /g;
+		my @titles = $entry->findnodes('.//h4[@class="programme__titles"]//span[@property="name"]/text()');
+		if ( $#titles == 2 ) {
+			$name = "$titles[0]: $titles[1]";
+			$episode = $titles[2];
+		} elsif ( $#titles == 1 ) {
+			$name = $titles[0];
+			$episode = $titles[1];
+		} elsif ( $#titles == 0 ) {
+			$name = $titles[0];
+			$episode = "-";
+		}
+		$episodenum = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="position"]');
+		if ( ! $episodenum ) {
+			# Extract the episode num
+			my $regex_1 = 'Episode\s+'.main::regex_numbers();
+			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+			if ( $episode =~ m{$regex_1}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			} elsif ( $episode =~ m{$regex_2}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			}
+		}
+		# Extract the seriesnum
+		my $regex = 'Series\s+'.main::regex_numbers();
+		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		my $series_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Season")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
+		my $brand_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Series")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
+		my ($thumb_pid, $thumb_type);
+		if ( $brand_pid ) {
+			$thumb_pid = $brand_pid;
+			$thumb_type = "brand";
+		} elsif ( $series_pid ) {
+			$thumb_pid = $series_pid;
+			$thumb_type = "series";
+		}
+		if ( $thumb_pid ) {
+			my $thumbsize = $opt->{thumbsizecache} || 150;
+			my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
+			$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } unless $recipe;
+			$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/legacy/${thumb_type}/${thumb_pid}.jpg";
+		}
+		# only default version in schedules
+		$version = 'default';
+		# build data structure
+		$prog->{$pid} = main::progclass($prog_type)->new(
+			'pid'		=> $pid,
+			'name'		=> $name,
+			'versions'	=> $version,
+			'episode'	=> $episode,
+			'seriesnum'	=> $seriesnum,
+			'episodenum'	=> $episodenum,
+			'desc'		=> $desc,
+			'duration'	=> $duration,
+			'thumbnail'	=> $thumbnail,
+			'channel'	=> $cache_channel,
+			'type'		=> $prog_type,
+			'web'		=> "${bbc_prog_page_prefix}/${pid}",
+			'available' => $available_str,
+			'expires' => $expires,
+		);
+	}
+}
+
+
 # get cache info from schedule page
 sub get_links_schedule_page {
 	my $self = shift;
@@ -8500,7 +8691,7 @@ sub get_links_schedule_page {
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	main::logger "DEBUG: Getting feed $url\n" if $opt->{debug};
+	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 	my $warning = "\nWARNING: Failed to download programme schedule $url\n" unless $channel_id =~ /$known_bad/;
 	my $xml = main::request_url_retry($ua, $url, 3, '.', $warning);
 	return 1 if ! $xml;
@@ -8977,16 +9168,16 @@ sub channels_aod {
 	return {
 		'national' => {
 			'radio1'		=> 'BBC Radio 1',
+			'1xtra'			=> 'BBC Radio 1Xtra',
 			'radio2'		=> 'BBC Radio 2',
 			'radio3'		=> 'BBC Radio 3',
 			'radio4'		=> 'BBC Radio 4',
-			'fivelive'		=> 'BBC Radio 5 live',
-			'worldservice'	=> 'BBC World Service',
-			'1xtra'			=> 'BBC Radio 1Xtra',
 			'radio4extra'	=> 'BBC Radio 4 Extra',
+			'fivelive'		=> 'BBC Radio 5 live',
 			'sportsextra'	=> 'BBC 5 live sports extra',
 			'6music'		=> 'BBC 6 Music',
 			'asiannetwork'	=> 'BBC Asian Network',
+			'worldservice'	=> 'BBC World Service',
 		},
 		'regional' => {
 			'radiofoyle'	=> 'BBC Radio Foyle',
@@ -9116,17 +9307,17 @@ sub channels_schedule {
 	return {
 		'national' => {
 			'radio1/programmes/schedules/england'	=> 'BBC Radio 1',
+			'1xtra/programmes/schedules'		=> 'BBC Radio 1Xtra',
 			'radio2/programmes/schedules'		=> 'BBC Radio 2',
 			'radio3/programmes/schedules'		=> 'BBC Radio 3',
 			'radio4/programmes/schedules/fm'	=> 'BBC Radio 4',
 			'radio4/programmes/schedules/lw'	=> 'BBC Radio 4',
-			'5live/programmes/schedules'		=> 'BBC Radio 5 live',
-			'worldserviceradio/programmes/schedules/uk'	=> 'BBC World Service',
-			'1xtra/programmes/schedules'		=> 'BBC Radio 1Xtra',
 			'radio4extra/programmes/schedules'	=> 'BBC Radio 4 Extra',
+			'5live/programmes/schedules'		=> 'BBC Radio 5 live',
 			'5livesportsextra/programmes/schedules'	=> 'BBC 5 live sports extra',
 			'6music/programmes/schedules'		=> 'BBC 6 Music',
 			'asiannetwork/programmes/schedules'	=> 'BBC Asian Network',
+			'worldserviceradio/programmes/schedules/uk'	=> 'BBC World Service',
 		},
 		'regional' => {
 			'radioscotland/programmes/schedules/fm'	=> 'BBC Radio Scotland',
