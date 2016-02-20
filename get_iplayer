@@ -4213,11 +4213,12 @@ sub cmp_modes($$) {
 		'[^v]low(\d?)' => 80,
 	);
 	my %ranks2 = (
-		'^flash' => 100,
-		'^hls' => 200,
-		'^hvf' => 300,
-		'^shoutcast' => 400,
-		'^subtitle' => 500,
+		'^dash' => 100,
+		'^flash' => 200,
+		'^hls' => 300,
+		'^hvf' => 400,
+		'^shoutcast' => 500,
+		'^subtitle' => 600,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -7555,8 +7556,8 @@ sub get_stream_data {
 						}
 					}
 				}
-				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /hls/ ) ) {
-					# get 320k MPEG-DASH stream for on-demand radio
+				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
+					# get MPEG-DASH streams for on-demand
 					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
@@ -7575,7 +7576,7 @@ sub get_stream_data {
 									last;
 								}
 								next if ( $pc_media->{kind} eq "captions" );
-								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn, 192, undef );
+								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
 								for my $dash_media ( @dash_medias ) {
 									for my $dash_conn ( @{$dash_media->{connections}} ) {
 										$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
@@ -7846,13 +7847,13 @@ sub get_stream_data {
 				my $ext = "m4a";
 				# use DASH 320k stream as HLS 320k stream
 				if (  $mattribs->{bitrate} >= 192 ) {
-					get_stream_data_cdn( $data, $mattribs, "hlshigh", 'dash', $ext );
-				#} elsif ( $mattribs->{bitrate} >= 120 ) {
-				#	get_stream_data_cdn( $data, $mattribs, "hlsstd", 'dash', $ext );
-				#} elsif ( $mattribs->{bitrate} >= 80 ) {
-				#	get_stream_data_cdn( $data, $mattribs, "hlshmed", 'dash', $ext );
-				#} else {
-				#	get_stream_data_cdn( $data, $mattribs, "hlslow", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, "dashmed", 'dash', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
 				}
 			}
 
@@ -7983,7 +7984,7 @@ sub modelist {
 		$mlist = 'default';
 		if ( $opt->{hlsffmpeg} && ! main::exists_in_path('ffmpeg') ) {
 			main::logger "ERROR: Cannot use default hls/hvf modes because --hls-ffmpeg is specified and ffmpeg is not found - exiting\n";
-			exit 1;
+			return undef unless $prog->{type} =~ /radio/;
 		}
 	}
 	$mlist =~ s/rtmp/flash/g;
@@ -7994,7 +7995,9 @@ sub modelist {
 		$mlist =~ s/hls/hvf/g;
 		$fmt = "hvf";
 	} elsif ( $prog->{type} eq "liveradio" ) {
-		$fmt = "hls";
+		$mlist =~ s/hvf/hls/g;
+	} elsif ( $prog->{type} eq "radio" ) {
+		$fmt = "dash";
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -8002,6 +8005,14 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', "${fmt}best");
 	$mlist = main::expand_list($mlist, 'better', "${fmt}better");
 	$mlist = main::expand_list($mlist, 'good', "${fmt}good");
+	# DASH on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
+		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
+		$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
+		$mlist = main::expand_list($mlist, 'dashbest', 'dashbetter');
+		$mlist = main::expand_list($mlist, 'dashbetter', 'dashgood');
+		$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashmed,dashlow');
+	}
 	# RTMP on-demand tv/radio
 	if ( $prog->{type} !~ /live/ && $mlist =~ /flash/ ) {
 		$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
@@ -8732,8 +8743,7 @@ sub download {
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf)/;
-	# DASH stream masquerading as hlshigh for on-demand radio
-	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^hlshigh/ && $prog->{type} eq 'radio';
+	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
 
@@ -9177,7 +9187,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow. Shortcuts: default(=best),good,better,best,rtmp,flash,hls. ('default'=flashhigh,flashstd,flashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlslow,dashhigh,dashstd,dashmed,dashlow. Shortcuts: default(=best),good,better,best,dash,flash,hls. ('default'=dashhigh,dashstd,dashmed,dashlow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Ignored', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 1, "lame=s", 'Ignored', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
