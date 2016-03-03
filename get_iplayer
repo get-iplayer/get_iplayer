@@ -7997,7 +7997,12 @@ sub modelist {
 	} elsif ( $prog->{type} eq "liveradio" ) {
 		$mlist =~ s/hvf/hls/g;
 	} elsif ( $prog->{type} eq "radio" ) {
-		$fmt = "dash";
+		# cannot stream DASH with ffmpeg
+		if ( $opt->{stdout} ) {
+			$fmt = "hls";
+		} else {
+			$fmt = "dash";
+		}
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -10531,8 +10536,8 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. ignored for 320k on-demand radio programmes, which use DASH downloader"],
-		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media. Requires --hls-ffmpeg"],
+		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
+		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media."],
 		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to initialise player cache. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
 }
@@ -10579,7 +10584,7 @@ sub get {
 		$file_tmp = $prog->{filepart};
 	}
 	my $rc;
-	if ( $opt->{hlsffmpeg} ) {
+	if ( $opt->{hlsffmpeg} || $opt->{stdout} || $streamdata{live} ) {
 		$rc = $self->get_ffmpeg( $file_tmp, $prog, %streamdata );
 	} else {
 		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
@@ -11054,11 +11059,15 @@ use strict;
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $rc;
+	if ( $opt->{stdout} ) {
+		main::logger "ERROR: Cannot stream DASH to STDOUT. Use default modes or --radiomode=hls\n";
+		exit 1;
+	}
 	my $audio_media = $streamdata{audio_media};
 	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
 	$audio_file .= ".m4a" unless $opt->{raw};
 	$streamdata{media} = $audio_media;
-	$streamdata{prog_type} = $streamdata{live} ? "liveradio" : "radio";
+	$streamdata{prog_type} = "radio";
 	$rc = $self->get_builtin( $ua, $url, $audio_file, $prog, %streamdata );
 	return $rc if $rc;
 	return $self->postproc($audio_file, $prog, %streamdata);
