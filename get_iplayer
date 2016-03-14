@@ -10538,7 +10538,6 @@ sub opt_format {
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
 		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Recording', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Recording', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media."],
-		streaminit		=> [ 1, "stream-init|streaminit=n", 'Recording', '--stream-init', "Initial number of segments to preload at start of streaming (built-in downloader only). Usually unnecessary, but can be increased to initialise player cache. Default (and minimum): 4. Segments typically 6-8 secs in duration."],
 	};
 }
 
@@ -10599,7 +10598,6 @@ sub get_builtin {
 	my $file_size = $streamdata{size};
 	my $media = $streamdata{media};
 	my $prog_type = $streamdata{prog_type} || $prog->{type};
-	my $live_ext = $streamdata{live_ext} || ".ts";
 	my $return;
 	my $fh;
 	my $last_sequence = 0;
@@ -10610,57 +10608,42 @@ sub get_builtin {
 	my $hash_count = 0;
 	my $elapsed = 0;
 	my $retries = 3;
-	my $count = 0;
-	my $lagging = 0;
-	my $stop = 0;
 	my %seen;
 	my $proxy_prefix;
-	my $init = max(4, $opt->{streaminit});
 
 	my $min_download_size = main::progclass($prog_type)->min_download_size();
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
+
+	# Create symlink if required
+	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
+
 	if ( $opt->{streamresume} ) {
 		($last_sequence, $size, $elapsed, $begin_time) = split /,/, $opt->{streamresume};
-	}
-	if ( ! $opt->{nowrite} ) {
-		if ( ! $live && $opt->{streamresume} ) {
-			if ( ! open($fh, ">>:raw", $file_tmp) ) {
-				main::logger "ERROR: Cannot append to $file_tmp\n";
-				exit 1;
-			}
-			binmode $fh;
-			my $tmp_size = stat($file_tmp)->size;
-			if ( $size < $tmp_size ) {
-				main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
-				truncate($fh, $size);
-			}
-		} else {
-			if ( ! open($fh, ">:raw", $file_tmp) ) {
-				main::logger "ERROR: Cannot write to $file_tmp\n";
-				exit 1;
-			}
-			binmode $fh;
+		if ( ! open($fh, ">>:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot append to $file_tmp\n";
+			exit 1;
 		}
-	}
-	if ( $opt->{stdout} ) {
-		binmode STDOUT;
-		STDOUT->autoflush(1);
-		STDERR->autoflush(1);
+		binmode $fh;
+		my $tmp_size = stat($file_tmp)->size;
+		if ( $size < $tmp_size ) {
+			main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
+			truncate($fh, $size);
+		}
+	} else {
+		if ( ! open($fh, ">:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot write to $file_tmp\n";
+			exit 1;
+		}
+		binmode $fh;
 	}
 
-	my $callback_ondemand = sub {
+	my $callback = sub {
 		my ($data, $res, undef) = @_;
 		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
-		print $fh $data if ! $opt->{nowrite};
-		print STDOUT $data if $opt->{stdout};
-		if ( ! $opt->{nowrite} ) {
-			$size = tell $fh;
-		} else {
-			$size += length($data);
-		}
-		#return if $opt->{stdout} && $opt->{nowrite};
+		print $fh $data;
+		$size = tell $fh;
 		return if $opt->{quiet} || $opt->{silent};
 		my $percent = 0;
 		$percent = 100.0 * $size / $file_size if $file_size;
@@ -10699,176 +10682,83 @@ sub get_builtin {
 		}
 	};
 
-	my $callback_live = sub {
-		my ($data, $res, undef) = @_;
-		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
-		print $fh $data if ! $opt->{nowrite};
-		print STDOUT $data if $opt->{stdout};
-		if ( ! $opt->{nowrite} ) {
-			$size = tell $fh;
-		} else {
-			$size += length($data);
-		}
-		#return if $opt->{stdout} && $opt->{nowrite};
-		return if $opt->{hash} || $opt->{quiet} || $opt->{silent};
-		my $time_called = time();
-		my $rate_bps;
-		my $rate;
-		my $time;
-		if ($time_called - $begin_time < 1) {
-			$rate = '-----kbps';
-			$time = '--:--:--';
-		} else {
-			$rate_bps = ($size - $begin_size) / (($time_called - $begin_time) + 1);
-			$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
-			$time = sprintf("%02d:%02d:%02d", ( gmtime( $size / $rate_bps ))[2,1,0] );
-		}
-		main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB @ %s [%s]\r",
-			$size / 1024.0 / 1024.0,
-			$rate,
-			$time
-		);
-	};
-
-	my $callback = $live ? $callback_live : $callback_ondemand;
-
-	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: ".( ! $live && $opt->{streamresume} ? "Resume" : "Begin" )." recording file: $file_tmp\n";
-	}
+	main::logger "INFO: ".( $opt->{streamresume} ? "Resume" : "Begin" )." recording file: $file_tmp\n";
 
 	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
 	}
 	
-	while ( 1 ) {
-		my $curr_time = time();
-		my $curr_count = 0;
-		my $segment_duration;
-		my $segments = $self->parse_playlist($ua, $url, $media, $last_sequence);
-		my @sequences = sort { $a <=> $b } keys %{$segments};
-		unless ( @sequences ) {
-			main::logger "ERROR: no segments in playlist $url\n";
-			$return = 6;
-			last;
-		}
-		# estimate expected file size for on-demand if necessary
-		if ( ! $live && ! $file_size) {
-			my $total_duration = 0;
-			for my $sequence ( @sequences ) {
-				$total_duration += $segments->{$sequence}->{duration};
-			}
-			$file_size = int($total_duration * $streamdata{bitrate} * 1024.0 / 8.0);
-		}
-		# truncate iptv playlist with 2h rewind
-		if ( $live && scalar @sequences > $init ) {
-			@sequences = splice @sequences, -1 * $init;
-		}
-		# check for gap compared to last live playlist
-		if ( $live && $last_sequence ) {
-			my $diff = $last_sequence - $sequences[-1] - 1;
-			$diff = max(0, $diff);
-			if ( $diff ) {
-				my $missing = int($diff * $segments->{$sequences[-1]}->{duration});
-				main::logger "WARNING: Missing approximately $missing secs near $elapsed secs in programme\n";
-			}
-		}
-		# process segments in current playlist
+	my $segment_duration;
+	my $segments = $self->parse_playlist($ua, $url, $media, $last_sequence);
+	my @sequences = sort { $a <=> $b } keys %{$segments};
+	unless ( @sequences ) {
+		main::logger "ERROR: no segments in playlist $url\n";
+		return 6;
+	}
+	# estimate expected file size for on-demand if necessary
+	if ( ! $file_size) {
+		my $total_duration = 0;
 		for my $sequence ( @sequences ) {
-			my $seq_time = time();
-			# skip overlapping segments
-			next if $seen{$sequence};
-			# skip segments already downloaded
-			next if $sequence > 0 && $sequence <= $last_sequence;
-			$segment_duration = $segments->{$sequence}->{duration};
-			$elapsed += $segment_duration;
-			# check --start
-			next if ! $segments->{$sequence}->{initialization} && defined $opt->{start} && $elapsed <= $opt->{start};
-			my $segment_url;
-			if ( $proxy_prefix ) {
-				$segment_url = $proxy_prefix.main::url_encode( $segments->{$sequence}->{url} );
-			} else {
-				$segment_url = $segments->{$sequence}->{url};
-			}
-			main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
-			my $i;
-			for ($i = 0; $i < $retries; $i++) {
-				my $res = $ua->get($segment_url, ':content_cb' => $callback);
-				if ( ! $res->is_success || ! $res->header("Content-Length") ) {
-					if ( $res->code == 404 ) {
-						if ( $live ) {
-							# wait for segment production to catch up 
-							while ( time() - $seq_time < int($segment_duration) ) {
-								sleep 1;
-							}
-							next;
-						} else {
-							# don't retry if 404 received - may be due to inaccurate manifest
-							if ( $sequence == $sequences[$#sequences] ) {
-								if ( $opt->{verbose} ) {
-									main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
-									main::logger "WARNING: The message above may appear due to inaccurate programme data\n";
-									main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
-								}
-							} else {
-								main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
-								main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." secs in programme\n";
-							}
-							last;
+			$total_duration += $segments->{$sequence}->{duration};
+		}
+		$file_size = int($total_duration * $streamdata{bitrate} * 1024.0 / 8.0);
+	}
+	# process segments in current playlist
+	for my $sequence ( @sequences ) {
+		# skip overlapping segments
+		next if $seen{$sequence};
+		# skip segments already downloaded
+		next if $sequence > 0 && $sequence <= $last_sequence;
+		$segment_duration = $segments->{$sequence}->{duration};
+		$elapsed += $segment_duration;
+		# check --start
+		next if ! $segments->{$sequence}->{initialization} && defined $opt->{start} && $elapsed <= $opt->{start};
+		my $segment_url;
+		if ( $proxy_prefix ) {
+			$segment_url = $proxy_prefix.main::url_encode( $segments->{$sequence}->{url} );
+		} else {
+			$segment_url = $segments->{$sequence}->{url};
+		}
+		main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
+		my $i;
+		for ($i = 0; $i < $retries; $i++) {
+			my $res = $ua->get($segment_url, ':content_cb' => $callback);
+			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
+				if ( $res->code == 404 ) {
+					# don't retry if 404 received - may be due to inaccurate manifest
+					if ( $sequence == $sequences[$#sequences] ) {
+						if ( $opt->{verbose} ) {
+							main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+							main::logger "WARNING: The message above may appear due to inaccurate programme data\n";
+							main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 						}
+					} else {
+						main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+						main::logger "WARNING: There may be a gap near ".(int($elapsed - $segment_duration))." secs in programme\n";
 					}
-				} else {
 					last;
 				}
-			}
-			if ( $i == $retries ) {
-				main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
-				$return = 5;
-				$stop = 1;
+			} else {
 				last;
-			}
-			$seen{$sequence}++;
-			# capture for resuming
-			$last_sequence = $sequence;
-			$opt->{streamresume} = "$last_sequence,$size,$elapsed,$begin_time";
-			$count++;
-			$curr_count++;
-			if ( $live && $opt->{hash} && ! ( $opt->{quiet} || $opt->{silent} ) ) {
-				if ( ! ($hash_count % 3) ) {
-					main::logger '#';
-				}
-				$hash_count++;
-				if ( ! ($hash_count % 300) ) {
-					main::logger "\n";
-				}
-			}
-			# check --stop
-			if ( defined $opt->{stop} && $elapsed >= $opt->{stop} ) {
-				$stop = 1;
-				last;
-			}
-			# don't wait while initialising
-			next if $count < $init;
-			# wait if streaming on-demand
-			if ( ! $live && $opt->{stdout} ) {
-				while ( time() - $seq_time < int($segment_duration) ) {
-					sleep 1;
-				}
 			}
 		}
-		# all done if on-demand or stopped
-		last if ( ! $live || $stop );
-		# don't wait while initialising
-		next if $count < $init;
-		# wait before re-pulling live playlist
-		if ( $live ) {
-			while ( time() - $curr_time <  int(max(1, $curr_count - 1) * $segment_duration) ) {
-				sleep 1;
-			}
+		if ( $i == $retries ) {
+			main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
+			$return = 5;
+			last;
+		}
+		$seen{$sequence}++;
+		# capture for resuming
+		$last_sequence = $sequence;
+		$opt->{streamresume} = "$last_sequence,$size,$elapsed,$begin_time";
+		# check --stop
+		if ( defined $opt->{stop} && $elapsed >= $opt->{stop} ) {
+			last;
 		}
 	}
-	close $fh if ! $opt->{nowrite};
+	close $fh;
 	# summary stats if downloading
-	if ( ! $opt->{nowrite} && ! ( $opt->{quiet} || $opt->{silent} ) ) {
+	if ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
 		my $end_time = time() + 0.0001;
 		my $end_size = stat($file_tmp)->size;
 		main::logger sprintf("\rINFO: Recorded: %.2fMB in %s at %5.0fkbps to %s\n",
@@ -10878,36 +10768,11 @@ sub get_builtin {
 			$file_tmp );
 	}
 
-	# fix up start/stop for live streams
-	if ( $live ) {
-		my $stop_time;
-		if ( defined $opt->{stop} ) {
-			$stop_time = max(0, $opt->{stop} - $elapsed);
-		}
-		if ( $stop_time ) {
-			if ( ! $opt->{nowrite} && -f $file_tmp ) {
-				$prog->{filename} =~ s/\.$prog->{ext}$/$live_ext/ if ! $opt->{raw};
-				$opt->{raw} = 1;
-				$self->postproc($file_tmp, $prog, %streamdata);
-			}
-			return 'retry';
-		}
-	}
-
-	# exit behaviour when streaming
-	if ( $opt->{nowrite} && $opt->{stdout} ) {
-		if ( $return == 0 ) {
-			main::logger "\nINFO: Streaming completed successfully\n";
-			return 0;
-		} else {
-			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'retry';
-		}
-	}
-
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
-	delete $opt->{streamresume} unless $live;
+
+	# clear resume data
+	delete $opt->{streamresume};
 
 	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
