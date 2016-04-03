@@ -9689,197 +9689,199 @@ sub modelist {
 	return 'podcast';
 }
 
-# Feed info:
-#	# Also see http://derivadow.com/2008/07/18/interesting-bbc-data-to-hack-with/
-#	# All podcasts menu (iphone)
-#	http://www.bbc.co.uk/radio/podcasts/ip/
-#	# All radio1 podcasts
-#	http://www.bbc.co.uk/radio/podcasts/ip/lists/radio1.sssi
-#	# All radio1 -> moyles podcasts
-#	http://www.bbc.co.uk/radio/podcasts/moyles/assets/iphone_keepnet.sssi
-#	# RSS Feed (indexed from?)
-#	http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml
-#	# aod by channel see http://docs.google.com/View?docid=d9sxx7p_38cfsmxfcq
-#	# http://www.bbc.co.uk/radio/aod/availability/<channel>.xml
-
 # Usage: Programme::podcast->get_links( $prog, 'podcast' );
 sub get_links {
 	shift; # ignore obj ref
 	my $prog = shift;
 	my $prog_type = shift;
-	my $podcast_index_feed_url = 'http://downloads.bbc.co.uk/podcasts/ppg.xml';
+	my $podcast_index_feed_url = 'http://www.bbc.co.uk/podcasts.opml';
 	my $xml;
 	my $res;
+	eval "use XML::Simple";
+	if ($@) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module to use '$prog_type' programme type\n";
+		return 0;
+	};
 	main::logger "INFO: Getting podcast Index Feeds\n";
 	# Setup User agent
 	my $ua = main::create_ua('get_iplayer');
 
 	# Method
 	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
-	# http://downloads.bbc.co.uk/podcasts/$channel/$name/rss.xml =>
+	# http://www.bbc.co.uk/programmes/$pid/episodes/downloads.rss
 
 	# Download index feed
 	my $xmlindex = main::request_url_retry($ua, $podcast_index_feed_url, 3, '.', "WARNING: Failed to get podcast index from site\n");
 	$xmlindex =~ s/\n/ /g;
 
 	# Every RSS feed has an extry like below (all in a text block - not formatted like below)
-	#  <program xmlns="" language="en-gb" typicalDuration="P30M" active="true" public="true" bbcFlavour="Programme Highlights" region="all" wwpid="0">
-	#    <title>Best of Chris Moyles</title>
-	#    <shortTitle>moyles</shortTitle>
-	#    <description>Weekly highlights from the award-winning Chris Moyles breakfast show, as broadcast by Chris and team every morning from 6.30am to 10am.</description>
-	#    <network id="radio1" name="BBC Radio 1" />
-	#    <image use="itunes" url="http://www.bbc.co.uk/radio/podcasts/moyles/assets/_300x300.jpg" />
-	#    <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
-	#    <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
-	#    <link target="currentItem" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/moyles_20080926-0630a.mp3">
-	#      <title>Moyles: Guestfest. 26 Sep 08</title>
-	#      <description>Rihanna, Ross Kemp, Jack Osbourne, John
-	#      Barrowman, Cheggars, the legend that is Roy Walker and more,
-	#      all join the team in a celeb laden bundle of mirth and
-	#      merriment. It&#226;&#8364;&#8482;s all the best bits of the
-	#      week from The Chris Moyles Show on BBC Radio 1.</description>
-	#      <publishDate>2008-09-26T06:30:00+01:00</publishDate>
-	#    </link>
-	#    <bbcGenre id="entertainment" name="Entertainment" />
-	#    <systemRef systemId="podcast" key="42" />
-	#    <systemRef systemId="pid.brand" key="b006wkqb" />
-	#    <feed mimeType="audio/mpeg" content="audio" audioCodec="mp3" audioProfile="cbr" />
-	#  </program>
+	# <opml version="1.1">
+	# 	...
+	# 	<body>
+	# 		<outline text="BBC Station List">
+	# 			<outline text="BBC Radio 1"
+	# 				   fullname="BBC Radio 1"
+	# 				   networkId="radio1">
+	# 				<outline type="rss"
+	# 						 version="RSS2"
+	# 						 language="en-gb"
+	# 						 text="In Our Time"
+	# 						 description="Melvyn Bragg and guests discuss the history of ideas"
+	# 						 xmlUrl="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads.rss"
+	# 						 htmlUrl="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads"
+	# 						 imageHref="http://ichef.bbci.co.uk/images/ic/304x304/p02sfr3z.jpg"
+	# 						 keyname="b006qykl"
+	# 						 allow="all"
+	# 						 active="true"
+	# 						 page="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads"
+	# 						 flavour="Programme Highlights"
+	# 						 typicalDurationMins="46"
+	# 						 bbcgenres="History" />
+	# 				...
+	# 			</outline>
+	# 			...
+	# 		</outline>
+	# 		...
+	# 	<body>
+	# </opml>
 
-	for ( split /<program/, $xmlindex ) {
-		# Extract channel name, rss feed data
-		my ($channel, $url, $web, $header, $name, $thumbnail);
-		# <network id="radio1" name="BBC Radio 1" />
-		$channel = $1 if m{<network\s+id=".*?"\s+name="(.*?)"\s*\/>};
-		# <link target="feed" url="http://downloads.bbc.co.uk/podcasts/radio1/moyles/rss.xml" />
-		$url = $1 if m{<link\s+target="feed"\s+url="(.*?)"\s*\/>};
-		# <link target="homepage" url="http://www.bbc.co.uk/radio1/chrismoyles/" />
-		$web = $1 if m{<link\s+target="homepage"\s+url="(.*?)"\s*\/>};
-		# Skip if there is no feed data for channel
-		next if ! ($channel || $url);
-		# Get RSS feeds for each podcast programme
-		main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
-		$xml = main::request_url_retry($ua, $url, 3, '.', '') if ! $opt->{verbose};
-		# skip if no data
-		next if ! $xml;
-		main::logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt->{verbose};
-		decode_entities($xml);
+	my $doc = eval { XMLin($xmlindex, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
+	if ( $@ ) {
+		main::logger "ERROR: Could not parse podcast index\n";
+		return 0;
+	}
+	for my $station (@{$doc->{body}[0]->{outline}[0]->{outline}}) {
+		my $channel = $station->{text};
+		for my $program (@{$station->{outline}}) {
+			my ($url, $web, $header, $name, $thumbnail);
+			$url = $program->{xmlUrl};
+			$web = $program->{htmlUrl};
+			# Skip if there is no feed data for channel
+			next if ! ($channel || $url);
+			# Get RSS feeds for each podcast programme
+			main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
+			$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
+			$xml = main::request_url_retry($ua, $url, 3, '.', '') if ! $opt->{verbose};
+			# skip if no data
+			next if ! $xml;
+			main::logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt->{verbose};
+			decode_entities($xml);
 
-		# First entry is channel data
-		# <?xml version="1.0" encoding="utf-8"?>
-		#<rss xmlns:media="http://search.yahoo.com/mrss/"
-		#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-		#version="2.0">
-		#  <channel>
-		#    <title>Stuart Maconie's Freak Zone</title>
-		#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-		#    <description>Weekly highlights from Stuart Maconie's
-		#    ...podcast is only available in the UK.</description>
-		#    <itunes:summary>Weekly highlights from Stuart Maconie's
-		#    ...podcast is only available in the UK.</itunes:summary>
-		#    <itunes:author>BBC 6 Music</itunes:author>
-		#    <itunes:owner>
-		#      <itunes:name>BBC</itunes:name>
-		#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
-		#    </itunes:owner>
-		#    <language>en</language>
-		#    <ttl>720</ttl>
-		#    <image>
-		#      <url>
-		#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
-		#      <title>Stuart Maconie's Freak Zone</title>
-		#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-		#    </image>
-		#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-		#    <copyright>(C) BBC 2008</copyright>
-		#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
-		#    <itunes:category text="Music" />
-		#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
-		#    freakzone, macoonie</itunes:keywords>
-		#    <media:keywords>Stewart Maconie, Macconie, freekzone,
-		#    freakzone, macoonie</media:keywords>
-		#   <itunes:explicit>no</itunes:explicit>
-		#    <media:rating scheme="urn:simple">nonadult</media:rating>
+			# First entry is channel data
+			# <?xml version="1.0" encoding="utf-8"?>
+			#<rss xmlns:media="http://search.yahoo.com/mrss/"
+			#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+			#version="2.0">
+			#  <channel>
+			#    <title>Stuart Maconie's Freak Zone</title>
+			#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+			#    <description>Weekly highlights from Stuart Maconie's
+			#    ...podcast is only available in the UK.</description>
+			#    <itunes:summary>Weekly highlights from Stuart Maconie's
+			#    ...podcast is only available in the UK.</itunes:summary>
+			#    <itunes:author>BBC 6 Music</itunes:author>
+			#    <itunes:owner>
+			#      <itunes:name>BBC</itunes:name>
+			#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
+			#    </itunes:owner>
+			#    <language>en</language>
+			#    <ttl>720</ttl>
+			#    <image>
+			#      <url>
+			#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
+			#      <title>Stuart Maconie's Freak Zone</title>
+			#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
+			#    </image>
+			#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+			#    <copyright>(C) BBC 2008</copyright>
+			#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
+			#    <itunes:category text="Music" />
+			#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
+			#    freakzone, macoonie</itunes:keywords>
+			#    <media:keywords>Stewart Maconie, Macconie, freekzone,
+			#    freakzone, macoonie</media:keywords>
+			#   <itunes:explicit>no</itunes:explicit>
+			#    <media:rating scheme="urn:simple">nonadult</media:rating>
 
-		# Parse XML
-		# get list of entries within <entry> </entry> tags
-		my @entries = split /<item>/, $xml;
-		# first element == <channel> header
-		$header = shift @entries;
-		# Get podcast name
-		$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
-		# Parse the categories into hash
-		# <itunes:category text="Music" />
-		my @category;
-		for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
-			push @category, $1 if $line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
-		}
-		# Get thumbnail from header
-		# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-		$thumbnail = $1 if $header =~ m{<itunes:image href="\s*(.+?)\s*"};
-
-		# Followed by items:
-		#    <item>
-		#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
-		#      pop francais?</title>
-		#      <description>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's module.</description>
-		#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's
-		#      module....</itunes:subtitle>
-		#      <itunes:summary>Stuart and Justin discuss the sub-genre of
-		#      French 'cold wave' in this week's module.</itunes:summary>
-		#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-		#      <itunes:duration>14:23</itunes:duration>
-		#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-		#      length="13891916" type="audio/mpeg" />
-		#      <guid isPermaLink="false">
-		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
-		#      <link>
-		#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-		#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-		#      fileSize="13891916" type="audio/mpeg" medium="audio"
-		#      expression="full" duration="863" />
-		#      <itunes:author>BBC 6 Music</itunes:author>
-		#    </item>
-
-		foreach my $entry (@entries) {
-			$entry =~ s/[\r\n]+/ /g;
-			my ($episode, $desc, $pid, $available, $duration);
-			# Use the link as a guid
-			# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-			$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
-			next if ! $pid;
-			# Skip if this pid is a duplicate
-			if ( defined $prog->{$pid} ) {
-				main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-				next;
+			# Parse XML
+			# get list of entries within <entry> </entry> tags
+			my @entries = split /<item>/, $xml;
+			# first element == <channel> header
+			$header = shift @entries;
+			# Get podcast name
+			$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
+			# Parse the categories into hash
+			# <itunes:category text="Music" />
+			my @category;
+			for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
+				push @category, $1 if $line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
 			}
-			# parse episode
-			# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
-			$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
-			# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-			$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
-			# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
-			$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
-			# Duration
-			$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
-			# build data structure
-			$prog->{$pid} = Programme::podcast->new(
-				'pid'		=> $pid,
-				'name'		=> $name,
-				'versions'	=> 'default',
-				'episode'	=> $episode,
-				'desc'		=> $desc,
-				'available'	=> $available,
-				'duration'	=> $duration,
-				'thumbnail'	=> $thumbnail,
-				'channel'	=> $channel,
-				'categories'	=> join(',', @category),
-				'type'		=> $prog_type,
-				'web'		=> $web,
-			);
+			# Get thumbnail from header
+			# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
+			$thumbnail = $1 if $header =~ m{<itunes:image href="\s*(.+?)\s*"};
+
+			# Followed by items:
+			#    <item>
+			#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
+			#      pop francais?</title>
+			#      <description>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's module.</description>
+			#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's
+			#      module....</itunes:subtitle>
+			#      <itunes:summary>Stuart and Justin discuss the sub-genre of
+			#      French 'cold wave' in this week's module.</itunes:summary>
+			#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+			#      <itunes:duration>14:23</itunes:duration>
+			#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+			#      length="13891916" type="audio/mpeg" />
+			#      <guid isPermaLink="false">
+			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
+			#      <link>
+			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+			#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
+			#      fileSize="13891916" type="audio/mpeg" medium="audio"
+			#      expression="full" duration="863" />
+			#      <itunes:author>BBC 6 Music</itunes:author>
+			#    </item>
+
+			foreach my $entry (@entries) {
+				$entry =~ s/[\r\n]+/ /g;
+				my ($episode, $desc, $pid, $available, $duration);
+				# Use the link as a guid
+				# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
+				$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
+				next if ! $pid;
+				# Skip if this pid is a duplicate
+				if ( defined $prog->{$pid} ) {
+					main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
+					next;
+				}
+				# parse episode
+				# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
+				$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
+				# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
+				$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
+				# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
+				$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
+				# Duration
+				$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
+				# build data structure
+				$prog->{$pid} = Programme::podcast->new(
+					'pid'		=> $pid,
+					'name'		=> $name,
+					'versions'	=> 'default',
+					'episode'	=> $episode,
+					'desc'		=> $desc,
+					'available'	=> $available,
+					'duration'	=> $duration,
+					'thumbnail'	=> $thumbnail,
+					'channel'	=> $channel,
+					'categories'	=> join(',', @category),
+					'type'		=> $prog_type,
+					'web'		=> $web,
+				);
+			}
 		}
 	}
 	main::logger "\n";
