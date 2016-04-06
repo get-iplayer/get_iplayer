@@ -5216,10 +5216,8 @@ sub get_verpids {
 	
 	# news site video page	
 	} elsif ( $prog->{pid} =~ m{^(http://)www(\.bbc\.co\.uk/news/.*?(\d+))$} ) {
-		# hard-code playlist path
-		$url = $1."playlists".$2."A/playlist.sxml";
-		# use asset id as pid
-		$prog->{pid} = $3;
+		$prog->{web} = $prog->{pid} if ! $prog->{web};
+		# fall through
 
 	# Determine if the is a standard pid, Live TV or EMP TV URL
 	# EMP URL
@@ -5312,7 +5310,8 @@ sub get_verpids {
 	#main::logger "INFO: Getting version pids for programme $prog->{pid}        \n" if ! $opt->{verbose};
 
 	# send request
-	my $xml = main::request_url_retry( $ua, $url, 3 );
+	my $xml;
+	$xml = main::request_url_retry( $ua, $url, 3 ) if $url;
 	#if ( ! $xml ) {
 	#	main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
 	#	return 1;
@@ -5608,7 +5607,7 @@ sub get_verpids_html {
 		main::logger "INFO: pid changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
 		$prog->{pid} = $pid;
 	}
-	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ ) {
+	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ && $pid !~ /^http/ ) {
 		main::logger "INFO: skipping playlist for non-PID $pid (HTML)\n" if $opt->{verbose};
 		return;
 	}
@@ -5616,14 +5615,27 @@ sub get_verpids_html {
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
 	for my $version ( "default", "audiodescribed", "signed" ) {
 		next if $prog->{verpids}->{$version};
-		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
+		my $html;
+		my $url;
+		if ( $pid =~ /^[bp]0[a-z0-9]{6}$/ ) {
+			$url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
+		} else {
+			$url = $pid;
+		}
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
-		my $html = main::request_url_retry( $ua, $url, 3 );
+		$html = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $html ) {
 			main::logger "\nINFO: No metadata for $version version retrieved from iplayer site (HTML)\n" if $opt->{verbose};
 			next;
 		}
 		my $config = $1 if $html =~ /bind\(\{\s*"player":(.*?)\<\/script\>/s;
+		unless ($config) {
+			$config = $1 if $html =~ /data-playable='(.*?)'/s;
+		}
+		unless ($config) {
+			$config = $1 if $html =~ /data-playable="(.*?)"/s;
+			$config =~ s/&quot;/"/g;
+		}
 		main::logger "DEBUG: Block (HTML): $config\n" if $opt->{debug};
 		my $verpid = $1 if $config =~ /"vpid":"(.*?)"/;
 		if ( ! $verpid ) {
@@ -5670,10 +5682,14 @@ sub get_verpids_html {
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
-			if ( $prog->{type} eq 'tv' ) {
-				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
-			} elsif ( $prog->{type} eq 'radio' ) {
-				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+			if ( $pid =~ /^[bp]0[a-z0-9]{6}$/ ) {
+				if ( $prog->{type} eq 'tv' ) {
+					$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+				} elsif ( $prog->{type} eq 'radio' ) {
+					$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+				}
+			} elsif ( $pid =~ /^http/ ) {
+				$episode_url = $pid;
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
@@ -7410,8 +7426,8 @@ sub get_stream_data {
 		$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
 		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
 	} else {
-		# assume URL in $verpid is XML playlist from news site
-		if ( $verpid =~ /http:/ || $prog->{pid} =~ /^\d+$/ ) {
+		# assume URL as PID is from news site
+		if ( $verpid =~ /^http/ || $prog->{pid} =~ /^http/ ) {
 			@pc_mediasets = ( 'journalism-pc' ); 
 			@mobile_mediasets = ('journalism-http-tablet');
 		} else {
