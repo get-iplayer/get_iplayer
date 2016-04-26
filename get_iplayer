@@ -141,6 +141,7 @@ my $opt_format = {
 	_url		=> [ 2, "", 'Recording', '--url "<url>"', "Record the embedded media player in the specified URL. Use with --type=<type>."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>', "Record an arbitrary pid that does not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "When used with --pid record all the embedded pids if the pid is a series or brand pid."],
+	pidrecursivenoclips	=> [ 1, "pidrecursivenoclips|pid-recursive-noclips!", 'Recording', '--pid-recursive-noslips', "When used with --pid-recursive skip all associated programme clips if the pid is a brand pid."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless --partial-proxy is specified."],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't transcode or change the recording/stream in any way (i.e. radio/realaudio, rtmp/flv)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (rtmp and realaudio only)"],
@@ -6663,11 +6664,13 @@ sub parse_rdf_brand {
 		push @pids, extract_pid( $episode_element->{'rdf:resource'} );
 		parse_rdf_episode( $ua, $episode_element->{'rdf:resource'} );
 	}
-	my @clips = ensure_array($rdf->{'po:Brand'}->{'po:clip'});
-	for my $clip_element ( @clips ) {
-		main::logger "INFO:      Clip pid: ".$clip_element->{'rdf:resource'}."\n" if $opt->{debug};
-		push @pids, extract_pid( $clip_element->{'rdf:resource'} );
-		parse_rdf_clip( $ua, $clip_element->{'rdf:resource'} );
+	unless ( $opt->{pidrecursivenoclips} ) {
+		my @clips = ensure_array($rdf->{'po:Brand'}->{'po:clip'});
+		for my $clip_element ( @clips ) {
+			main::logger "INFO:      Clip pid: ".$clip_element->{'rdf:resource'}."\n" if $opt->{debug};
+			push @pids, extract_pid( $clip_element->{'rdf:resource'} );
+			parse_rdf_clip( $ua, $clip_element->{'rdf:resource'} );
+		}
 	}
 	return @pids;
 }
