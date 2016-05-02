@@ -4520,8 +4520,7 @@ sub tag_file {
 		# create metadata
 		my $meta = $prog->tag_metadata;
 		# tag file
-		my $tagger = Tagger->new();
-		$tagger->tag_file($meta);
+		Tagger->tag_file($meta);
 	}
 	# clean up thumbnail if necessary
 	unlink $prog->{thumbfile} if ! $opt->{thumb};
@@ -11747,6 +11746,7 @@ use constant FB_EMPTY => sub { '' };
 
 # already in scope
 # my ($opt, $bin);
+my $ap_check;
 
 # constructor
 sub new {
@@ -12033,6 +12033,16 @@ sub tag_file_mp4 {
 	my ($self, $meta, $tags) = @_;
 	# Only tag if the required tool exists
 	if ( main::exists_in_path( 'atomicparsley' ) ) {
+		if ( ! $ap_check ) {
+			# determine AtomicParsley features
+			$ap_check = 1;
+			my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
+			$opt->{tag_cnid} = 1 if ! defined($opt->{tag_cnid}) and $ap_help =~ /--cnID/;
+			$opt->{tag_hdvideo} = 1 if ! defined($opt->{tag_hdvideo}) and $ap_help =~ /--hdvideo/;
+			$opt->{tag_longdesc} = 1 if ! defined($opt->{tag_longdesc}) and $ap_help =~ /--longdesc/;
+			$opt->{tag_longdescription} = 1 if ! defined($opt->{tag_longdescription}) and $ap_help =~ /--longDescription/;
+			$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
+		}
 		main::logger "INFO: MP4 tagging \U$meta->{ext}\E file\n";
 		# handle embedded quotes
 		tags_escape_quotes($tags);
