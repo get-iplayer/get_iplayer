@@ -286,6 +286,8 @@ my $opt_format = {
 	mplayer		=> [ 1, "mplayer=s", 'Ignored', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Tagging
+	formatshow		=> [ 1, "formatshow|format-show=s", 'Tagging', '--format-show', "Format template for programme name in metadata (use substitution parameters). Default: none"],
+	formattitle		=> [ 1, "formattitle|format-title=s", 'Tagging', '--format-title', "Format template for episode title in metadata (use substitution parameters). Default: none"],
 	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
@@ -4481,6 +4483,10 @@ sub tag_metadata {
 			$meta->{$key} = $val;
 		}
 	}
+	my $fmt_show = $opt->{formatshow}; # || "<name>"
+	my $fmt_title = $opt->{formattitle}; # || "<episode>"
+	$meta->{show} = $prog->substitute($fmt_show, 99) if $fmt_show;
+	$meta->{title} = $prog->substitute($fmt_title, 99) if $fmt_title;
 	return $meta;
 }
 
@@ -11759,8 +11765,27 @@ sub new {
 sub tags_from_metadata {
 	my ($self, $meta) = @_;
 	my $tags;
-	my $name = $opt->{tag_shortname} ? $meta->{nameshort} : $meta->{name};
-	my $episode = $opt->{tag_longepisode} ? $meta->{episode} : $meta->{episodeshort};
+	my $name;
+	if ( $meta->{show} ) {
+		$name = $meta->{show};
+	} else {
+		$name = $opt->{tag_shortname} ? $meta->{nameshort} : $meta->{name};
+	}
+	if ( $meta->{title} ) {
+		($tags->{title} = $meta->{title}) =~ s/[\s\-]+$//;
+		$tags->{title} ||= $name;
+	} else {
+		my $episode = $opt->{tag_longepisode} ? $meta->{episode} : $meta->{episodeshort};
+		# select version of of episode title to use
+		if ( $opt->{tag_fulltitle} ) {
+			$tags->{title} = "$name: $episode";
+		} else {
+			# fix up episode if necessary
+			(my $title = $episode) =~ s/[\s\-]+$//;
+			$title = "$meta->{series}: $title" if $opt->{tag_longtitle} && $meta->{series};
+			$tags->{title} = $title ? $title : $name;
+		}
+	}
 	# iTunes media kind
 	$tags->{stik} = 'Normal';
 	if ( $meta->{ext} =~ /(mp4|m4v)/i) {
@@ -11769,15 +11794,6 @@ sub tags_from_metadata {
 	$tags->{advisory} = $meta->{guidance} ? 'explicit' : 'remove';
 	# copyright message from download date
 	$tags->{copyright} = substr($meta->{dldate}, 0, 4)." British Broadcasting Corporation, all rights reserved";
-	# select version of of episode title to use
-	if ( $opt->{tag_fulltitle} ) {
-		$tags->{title} = "$name: $episode";
-	} else {
-		# fix up episode if necessary
-		(my $title = $episode) =~ s/[\s\-]+$//;
-		$title = "$meta->{series}: $title" if $opt->{tag_longtitle} && $meta->{series};
-		$tags->{title} = $title ? $title : $name;
-	}
 	$tags->{artist} = $meta->{channel};
 	# album artist from programme type
 	($tags->{albumArtist} = "BBC " . ucfirst($meta->{type})) =~ s/tv/TV/i;
