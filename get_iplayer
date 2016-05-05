@@ -4472,24 +4472,6 @@ sub report {
 
 
 
-# create metadata for tagging
-sub tag_metadata {
-	my $prog = shift;
-	my $meta;
-	while ( my ($key, $val) = each %{$prog} ) {
-		if ( ref($val) eq 'HASH' ) {
-			$meta->{$key} = $prog->{$key}->{$prog->{version}};
-		} else {
-			$meta->{$key} = $val;
-		}
-	}
-	my $fmt_show = $opt->{tag_formatshow}; # || "<name>"
-	my $fmt_title = $opt->{tag_formattitle}; # || "<episode>"
-	$meta->{show} = $prog->substitute($fmt_show, 99) if $fmt_show;
-	$meta->{title} = $prog->substitute($fmt_title, 99) if $fmt_title;
-	return $meta;
-}
-
 # add metadata tags to file
 sub tag_file {
 	my $prog = shift;
@@ -4523,10 +4505,8 @@ sub tag_file {
 	}
 	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
 	if ( $prog->{type} ne "podcast" ) {
-		# create metadata
-		my $meta = $prog->tag_metadata;
-		# tag file
-		Tagger->tag_file($meta);
+		# tag programme
+		Tagger->tag_prog($prog);
 	}
 	# clean up thumbnail if necessary
 	unlink $prog->{thumbfile} if ! $opt->{thumb};
@@ -11891,9 +11871,22 @@ sub tags_encode {
 	}
 }
 
-# add metadata tag to file
-sub tag_file {
-	my ($self, $meta) = @_;
+# add metadata tag to programme
+sub tag_prog {
+	my ($self, $prog) = @_;
+	# create metadata for tagging
+	my $meta;
+	while ( my ($key, $val) = each %{$prog} ) {
+		if ( ref($val) eq 'HASH' ) {
+			$meta->{$key} = $prog->{$key}->{$prog->{version}};
+		} else {
+			$meta->{$key} = $val;
+		}
+	}
+	my $fmt_show = $opt->{tag_formatshow}; # || "<name>"
+	my $fmt_title = $opt->{tag_formattitle}; # || "<episode>"
+	$meta->{show} = $prog->substitute($fmt_show, 99) if $fmt_show;
+	$meta->{title} = $prog->substitute($fmt_title, 99) if $fmt_title;
 	my $tags = $self->tags_from_metadata($meta);
 	# dispatch to appropriate tagging function
 	if ( $meta->{filename} =~ /\.(mp3)$/i ) {
