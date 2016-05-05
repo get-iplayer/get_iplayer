@@ -5718,6 +5718,13 @@ sub get_metadata {
 					$summary = $doc->{short_synopsis}->[0];
 					$channel = $doc->{ownership}->[0]->{service}->[0]->{title}->[0];
 					my $image_pid = $doc->{image}->[0]->{pid}->[0];
+					my $series_image_pid = $doc->{parent}->[0]->{programme}->[0]->{image}->[0]->{pid}->[0];
+					my $brand_image_pid = $doc->{parent}->[0]->{programme}->[0]->{parent}->[0]->{programme}->[0]->{image}->[0]->{pid}->[0];
+					if ( $brand_image_pid ) {
+						$image_pid = $brand_image_pid;
+					} elsif ( $series_image_pid ) {
+						$image_pid = $series_image_pid;
+					}
 					my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
 					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
 					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
@@ -8659,6 +8666,13 @@ sub get_links_schedule_page {
 		# Default to 150px width thumbnail;
 		my $thumbsize = $opt->{thumbsizecache} || 150;
 		my $image_pid = $1 if $entry =~ m{<image><pid>(.*?)</pid>}s;
+		my $series_image_pid = $1 if $entry =~ m{<programme\s+type="series">.*?<image><pid>(.*?)</pid>};
+		my $brand_image_pid = $1 if $entry =~ m{<programme\s+type="brand">.*?<image><pid>(.*?)</pid>};
+		if ( $brand_image_pid ) {
+			$image_pid = $brand_image_pid;
+		} elsif ( $series_image_pid ) {
+			$image_pid = $series_image_pid;
+		}
 		my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
 		$suffix = Programme::bbciplayer->thumb_url_suffixes->{ 150 } unless $suffix;
 		my $thumbnail = "http://ichef.bbci.co.uk/programmeimages/${image_pid}/${pid}${suffix}";
