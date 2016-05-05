@@ -286,11 +286,11 @@ my $opt_format = {
 	mplayer		=> [ 1, "mplayer=s", 'Ignored', '--mplayer <path>', "Location of mplayer binary"],
 
 	# Tagging
-	formatshow		=> [ 1, "formatshow|format-show=s", 'Tagging', '--format-show', "Format template for programme name in metadata (use substitution parameters). Default: none"],
-	formattitle		=> [ 1, "formattitle|format-title=s", 'Tagging', '--format-title', "Format template for episode title in metadata (use substitution parameters). Default: none"],
 	noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 	notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 	tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Tagging', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
+	tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in metadata (use substitution parameters). Default: none"],
+	tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in metadata (use substitution parameters). Default: none"],
 	tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Tagging', '--tag-fulltitle', "Prepend album/show title to track title"],
 	tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Tagging', '--tag-hdvideo', "AtomicParsley accepts --hdvideo argument for HD video flag"],
 	tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Tagging', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
@@ -4483,8 +4483,8 @@ sub tag_metadata {
 			$meta->{$key} = $val;
 		}
 	}
-	my $fmt_show = $opt->{formatshow}; # || "<name>"
-	my $fmt_title = $opt->{formattitle}; # || "<episode>"
+	my $fmt_show = $opt->{tag_formatshow}; # || "<name>"
+	my $fmt_title = $opt->{tag_formattitle}; # || "<episode>"
 	$meta->{show} = $prog->substitute($fmt_show, 99) if $fmt_show;
 	$meta->{title} = $prog->substitute($fmt_title, 99) if $fmt_title;
 	return $meta;
