@@ -7040,8 +7040,8 @@ sub parse_dash_connection {
 		return;
 	}
 	my $mpd_type = $doc->{type};
-	$doc->{mediaPresentationDuration} =~ /T(([0-9]+)H)?(([0-9]+)M)?(([.0-9]+)S)$/;
-	my $programme_duration = $2 * 3600 + $4 * 60 + $6;
+	$doc->{mediaPresentationDuration} =~ /^(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:((\d+)(\.(\d+))?)S)?)?$/;
+	my $programme_duration = int($5 * 3600 + $6 * 60 + $7);
 	my $available_start = Programme::get_time_string($doc->{availabilityStartTime});
 	my $period = $doc->{Period}->[0];
 	my $baseurl = $doc->{BaseURL}->[0]->{content};
