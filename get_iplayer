@@ -2463,14 +2463,14 @@ sub create_html {
 
 # Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
-# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>], <1=mustproxy> );
+# Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>], <1=mustproxy>, [<fail_content>] );
 sub request_url_retry {
 
 	my %OPTS = @LWP::Protocol::http::EXTRA_SOCK_OPTS;
 	$OPTS{SendTE} = 0;
 	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
 
-	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy) = @_;
+	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content) = @_;
 	my $res;
 
 
@@ -2501,8 +2501,8 @@ sub request_url_retry {
 	}
 	# Re-enable proxy unless mustproxy is flagged
 	main::proxy_enable($ua) if $opt->{partialproxy} && ! $mustproxy;
-	# Return empty string if we failed
-	return '' if $i == $retries;
+	# Return empty string if we failed and content not required
+	return '' if $i == $retries and ! $fail_content;
 
 	# Only return decoded content if gzip is used - otherwise this severely slows down stco scanning! Perl bug?
 	main::logger "DEBUG: ".($res->header('Content-Encoding') || 'No')." Encoding used on $url\n" if $opt->{debug};
@@ -4181,7 +4181,7 @@ sub generate_version_list {
 	}
 
 	if ( $got == 0 ) {
-		main::logger "INFO: No versions of this programme were selected (available versions: ".(join ',', sort keys %{ $prog->{verpids} }).")\n";
+		main::logger "INFO: No versions of this programme were selected (available versions: ".(keys %{ $prog->{verpids} } == 0 ? "none" : join ',', sort keys %{ $prog->{verpids} } ).")\n";
 	} else {
 		main::logger "INFO: Will search for versions: ".(join ',', @version_list)."\n" if $opt->{verbose};
 	}
@@ -4319,7 +4319,6 @@ sub download_retry_loop {
 				} else {
 					main::logger "INFO: No other modes are available\n";
 				}
-				main::logger "INFO: You may receive this message if you are using get_iplayer outside the UK\n" if $#available_modes < 0;
 				next;
 			}
 			main::logger "INFO: ".join(',', @modes)." modes will be tried for version $version\n";
@@ -6042,8 +6041,10 @@ sub get_metadata {
 
 	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
-		main::logger "WARNING: No programme versions found with media streams for requested modes\n";
-		main::logger "WARNING: You may receive this message if you are using get_iplayer outside the UK\n";
+		main::logger "WARNING: No media streams found for requested programme versions and recording modes.\n";
+		if ( $prog->{geoblocked} ) {
+			main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK.\n";
+		}
 		# Return at this stage unless we want metadata/tags only for various reasons
 		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 	}
@@ -7390,6 +7391,10 @@ sub get_stream_set_type {
 }
 
 
+sub check_geoblock {
+	return shift =~ /geolocation|notukerror/;
+}
+
 
 # Generic
 # Gets media streams data for this version pid
@@ -7484,8 +7489,10 @@ sub get_stream_data {
 
 	# If this is an EMP stream verpid
 	if ( $verpid =~ /^\?/ ) {
-		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3, undef, undef, 1 );
+		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3, undef, undef, 1, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
+		$prog->{geoblocked} = check_geoblock( $xml );
+		return undef if $prog->{geoblocked};
 		my $mattribs;
 		my $cattribs;
 		# Parse connection attribs
@@ -7520,8 +7527,10 @@ sub get_stream_data {
 	} else {
 		my (%seen, $stream_key);
 		if ( $verpid =~ /http:/ ) {
-			$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1 );
+			$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
+			$prog->{geoblocked} = check_geoblock( $xml );
+			return undef if $prog->{geoblocked};
 			if  ( $xml =~ m{<mediator identifier=\"(.+?)\"} ) {
 				$verpid = $1;
 				main::logger "new verpid $verpid" if $opt->{debug};
@@ -7534,8 +7543,10 @@ sub get_stream_data {
 				if (  $opt->{info} || $modelist =~ /flash/ ) {
 					# get Flash streams for on-demand
 					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
+						$prog->{geoblocked} = check_geoblock( $xml );
+						return undef if $prog->{geoblocked};
 						my @pc_medias = parse_metadata( $xml );
 						for my $pc_media ( @pc_medias ) {
 							my @pc_conns;
@@ -7562,8 +7573,10 @@ sub get_stream_data {
 				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
 					# get MPEG-DASH streams for on-demand
 					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
+						$prog->{geoblocked} = check_geoblock( $xml );
+						return undef if $prog->{geoblocked};
 						my @pc_medias = parse_metadata( $xml );
 						for my $pc_media ( @pc_medias ) {
 							for my $pc_conn ( @{$pc_media->{connections}} ) {
@@ -7601,8 +7614,10 @@ sub get_stream_data {
 				if ( $prog->{type} =~ /tv/ ) {
 					# get HLS streams from IPTV data
 					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+						$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
+						$prog->{geoblocked} = check_geoblock( $xml );
+						return undef if $prog->{geoblocked};
 						my @iptv_medias = parse_metadata( $xml );
 						my $min_bitrate = ( $version eq "audiodescribed" ? 0 : 2000 );
 						for my $iptv_media ( @iptv_medias ) {
@@ -7641,8 +7656,10 @@ sub get_stream_data {
 				}
 				# get HLS streams from mobile data
 				for my $media_stream_mobile_prefix ( @media_stream_mobile_prefixes ) {
-					$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+					$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 					main::logger "\n$xml\n" if $opt->{debug};
+					$prog->{geoblocked} = check_geoblock( $xml );
+					return undef if $prog->{geoblocked};
 					my @mobile_medias = parse_metadata( $xml );
 					for my $mobile_media ( @mobile_medias ) {
 						for my $mobile_conn ( @{$mobile_media->{connections}} ) {
@@ -7746,8 +7763,10 @@ sub get_stream_data {
 				# generate shoutcast streams
 				if ( $opt->{info} || $modelist =~ /shoutcast/ ) {
 					for my $media_stream_shoutcast_prefix ( @media_stream_shoutcast_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_shoutcast_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1 );
+						$xml = main::request_url_retry( $ua, $media_stream_shoutcast_prefix.$verpid.'?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 						main::logger "\n$xml\n" if $opt->{debug};
+						$prog->{geoblocked} = check_geoblock( $xml );
+						return undef if $prog->{geoblocked};
 						my @shoutcast_medias = parse_metadata( $xml );
 						for my $shoutcast_media ( @shoutcast_medias ) {
 							for my $shoutcast_conn ( @{$shoutcast_media->{connections}} ) {
