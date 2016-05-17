@@ -293,6 +293,8 @@ my $opt_format = {
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 	ybbcy	=> [ 1, "ybbcy!", 'Misc', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect."],
+	indexconcurrent	=> [ 1, "indexconcurrent|index-concurrent!", 'Misc', '--index-concurrent', "Perform concurrent indexing when web scraping TV schedules (i.e., index faster). Requires --ybbcy and Parallel::ForkManager Perl module. Not supported on Windows."],
+	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent indexing. Requires --index-concurrent. Default: 4"],
 
 };
 
@@ -1724,7 +1726,7 @@ sub get_links {
 		# Get links for specific type of programme class into %prog
 		if ( progclass( $prog_type )->get_links( $prog, $prog_type, $now ) != 0 ) {
 			# failed - leave cache unchanged
-			main::logger "ERROR: Errors encountered when retrieving $prog_type programmes - skipping\n";
+			main::logger "\nERROR: Errors encountered when indexing $prog_type programmes - skipping\n";
 			return 0;
 		}
 
@@ -8440,14 +8442,47 @@ sub get_links_schedule {
 	my $prog_type = shift;
 	my $future = shift;
 	my $now = shift || time();
-	my $parser;
+	my $pm;
+	my $rc_pm;
 	if ( $opt->{ybbcy} ) {
 		eval "use XML::LibXML '1.70'";
 		if ( $@ ) {
 			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
 			return;
-		} else {
-			$parser = XML::LibXML->new();
+		}
+		if ( $opt->{indexconcurrent} ) {
+			if ( $^O eq "MSWin32" ) {
+				main::logger "WARNING: Concurrent indexing is not supported on Windows. Normal indexing will be performed.\n";
+			} else {
+				eval "use Parallel::ForkManager";
+				if ( ! $@  ) {
+					$pm = Parallel::ForkManager->new($opt->{indexmaxconn} || 4);
+					$pm->run_on_finish( sub {
+						my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
+						$rc_pm = $exit_code unless $rc_pm;
+						if ( defined $data ) {
+							for my $pid ( keys %{$data} ) {
+								if ( defined $prog->{$pid} ) {
+									main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $data->{$pid}->{channel} $data->{$pid}->{available})\n" if $opt->{verbose};
+									# use listing with earliest availability
+									if ( $data->{$pid}->{available} lt $prog->{$pid}->{available} ) {
+										$prog->{$pid}->{available} = $data->{$pid}->{available};
+									}
+									# use listing with latest expiry
+									if ( $data->{$pid}->{expires} > $prog->{$pid}->{expires} ) {
+										$prog->{$pid}->{expires} = $data->{$pid}->{expires};
+									}
+									next;
+								} else {
+									$prog->{$pid} = $data->{$pid};
+								}
+							}
+						}
+					});
+				} else {
+					main::logger "WARNING: Concurrent indexing requires the Parallel::ForkManager Perl module. Normal indexing will be performed.\n";
+				}
+			}
 		}
 	}
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
@@ -8519,7 +8554,10 @@ sub get_links_schedule {
 	undef $known_bad if $opt->{ybbcy};
 	my %aod_seen;
 	for my $channel_id ( @channel_list ) {
+		last if $opt->{refreshabortonerror} && $rc_pm;
+		SCHEDULES:
 		for my $schedule_date ( @schedule_dates ) {
+			last if $opt->{refreshabortonerror} && $rc_pm;
 			my ($url, $rc);
 			if ( $opt->{ybbcy} ) {
 				if ( $prog_type eq "radio" ) {
@@ -8528,7 +8566,15 @@ sub get_links_schedule {
 					$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
 				} else {
 					$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
-					$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad, $parser);
+					if ($pm) {
+						$pm->start($url) and next SCHEDULES;
+						my ($rc2, $prog2);
+						$prog2 = {};
+						$rc2 = $self->get_links_schedule_html($ua, $prog2, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+						$pm->finish($rc2, $prog2)
+					} else {
+						$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+					};
 				}
 			} else {
 				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
@@ -8561,6 +8607,12 @@ sub get_links_schedule {
 			}
 		}
 	}
+	if ( $pm ) {
+		$pm->wait_all_children();
+		if ( $rc_pm ) {
+			return 1 if $opt->{refreshabortonerror};
+		}
+	}
 }
 
 # get cache info from schedule html
@@ -8576,7 +8628,6 @@ sub get_links_schedule_html {
 	my $limit = shift;
 	my $now = shift || time();
 	my $known_bad = shift;
-	my $parser = shift;
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
@@ -8589,7 +8640,7 @@ sub get_links_schedule_html {
 	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
 	return 1 if ! $html;
 	#decode_entities($html);
-	my $dom = $parser->load_html(string => $html, recover => 1, suppress_errors => 1);
+	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @entries = $dom->findnodes('//li[@class="week-guide__table__item"]');
 	# get list of entries within <broadcast> </broadcast> tags
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
