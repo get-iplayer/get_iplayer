@@ -8421,8 +8421,12 @@ sub get_links {
 	$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
 	return 1 if $rc && $opt->{refreshabortonerror};
 	if ( $opt->{refreshfuture} ) {
-		$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
-		return 1 if $rc && $opt->{refreshabortonerror};
+		if ( $opt->{ybbcy} ) {
+			main::logger "\nWARNING: --refresh-future is ignored with --ybbcy.\n";
+		} else {
+			$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
+			return 1 if $rc && $opt->{refreshabortonerror};
+		}
 	}
 	main::logger "\n";
 	return 0;
@@ -8481,12 +8485,7 @@ sub get_links_schedule {
 		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
 	}
 	if ( $future ) {
-		if ( $opt->{ybbcy} ) {
-			push @schedule_dates, "this_week" unless $cache_this_week;
-			push @schedule_dates, "next_week";
-		} else {
-			push @schedule_dates, "this_week", "next_week";
-		}
+		push @schedule_dates, "this_week", "next_week";
 	} else {
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 		$limit_days = 0 if $limit_days < 0;
