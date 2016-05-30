@@ -5595,7 +5595,7 @@ sub get_verpids_html {
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		$html = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $html ) {
-			main::logger "\nINFO: No metadata for $version version retrieved from iplayer site (HTML)\n" if $opt->{verbose};
+			main::logger "\nINFO: No metadata for $version version retrieved from iPlayer site (HTML)\n" if $opt->{verbose};
 			next;
 		}
 		my $config = $1 if $html =~ /bind\(\{\s*"player":(.*?)\<\/script\>/s;
@@ -5609,7 +5609,10 @@ sub get_verpids_html {
 		main::logger "DEBUG: Block (HTML): $config\n" if $opt->{debug};
 		my $verpid = $1 if $config =~ /"vpid":"(.*?)"/;
 		if ( ! $verpid ) {
-			main::logger "INFO: $version version not found in metadata retrieved from iplayer site (HTML)\n" if $opt->{verbose};
+			$verpid = $1 if $html =~ /data-media-vpid="(.*?)"/;
+		}
+		if ( ! $verpid ) {
+			main::logger "INFO: $version version not found in metadata retrieved from iPlayer site (HTML)\n" if $opt->{verbose};
 			next;
 		}
 		unless ( $prog->{channel} ) {
