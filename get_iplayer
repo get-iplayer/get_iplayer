@@ -8028,7 +8028,7 @@ sub modelist {
 		if ( $opt->{stdout} ) {
 			$fmt = "hls";
 		} else {
-			$fmt = "dash";
+			$fmt = "radio";
 		}
 	}
 	# Deal with fallback modes and expansions
@@ -8074,6 +8074,14 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
 		$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
 		$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
+	}
+	# default on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
+		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
+		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
+		$mlist = main::expand_list($mlist, 'radiobest', 'radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobetter', 'radiogood');
+		$mlist = main::expand_list($mlist, 'radiogood', 'hlshigh,dashhigh,hlsstd,dashstd,hlsmed,dashmed,hlslow,dashlow');
 	}
 	return $mlist;
 }
@@ -9450,7 +9458,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlslow,dashhigh,dashstd,dashmed,dashlow. Shortcuts: default(=best),good,better,best,dash,flash,hls. ('default'=dashhigh,dashstd,dashmed,dashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes: dashhigh,dashstd,dashmed,dashlow,flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow. Shortcuts: default(=best),good,better,best,dash,flash,hls. ('default'=hlshigh,dashhigh,hlsstd,dashstd,hlsmed,dashmed,hlslow,dashlow)"],
 		bandwidth 	=> [ 1, "bandwidth=n", 'Ignored', '--bandwidth', "In radio realaudio mode specify the link bandwidth in bps for rtsp streaming (default 512000)"],
 		lame		=> [ 1, "lame=s", 'Ignored', '--lame <path>', "Location of lame binary"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
