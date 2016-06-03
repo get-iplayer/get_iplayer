@@ -1359,7 +1359,7 @@ sub list_progs {
 			# subs (only for tv)
 			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
 				$this->create_dir();
-				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt" );
+				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt", \@versions );
 			}
 			# metadata
 			if ( $opt->{metadataonly} ) {
@@ -9042,7 +9042,7 @@ sub download {
 		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
 		main::logger "\n";
-		if ( $prog->download_subtitles( $ua, $subfile ) && $opt->{subsrequired} && $prog->{type} eq 'tv') {
+		if ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) && $opt->{subsrequired} && $prog->{type} eq 'tv') {
 			main::logger "WARNING: Subtitles not available and --subsrequired specified.\n";
 			return 'skip';
 		}
@@ -9081,7 +9081,7 @@ sub download {
 # Todo: get the subtitle streamurl before this...
 sub download_subtitles {
 	my $prog = shift;
-	my ( $ua, $file ) = @_;
+	my ( $ua, $file, $versions ) = @_;
 	my $suburl;
 	my $subs;
 
@@ -9092,13 +9092,14 @@ sub download_subtitles {
 	}
 
 	# Find subtitles stream
-	for ( keys %{$prog->{streams}} ) {
+	for ( @$versions ) {
 		$suburl = $prog->{streams}->{$_}->{subtitles1}->{streamurl};
 		last if $suburl;
 	}
 	# Return if we have no url
 	if (! $suburl) {
-		main::logger "INFO: Subtitles not available\n";
+		my $vermsg = " for version(s): ".(join ',', @$versions) if @$versions;
+		main::logger "INFO: Subtitles not available${vermsg}\n";
 		return 2;
 	}
 
