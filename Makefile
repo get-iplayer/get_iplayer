@@ -2,7 +2,7 @@ dummy:
 	@echo No need to make anything.
 
 ifdef VERSION
-tag:
+release:
 	@git update-index --refresh --unmerged
 	@if git diff-index --name-only HEAD | grep ^ ; then \
 		echo Uncommitted changes in above files; exit 1; fi
@@ -14,8 +14,7 @@ tag:
 		sed -i.bak -e 's/\(\.TH GET_IPLAYER "1" "\)[^"]*"/\1$(shell date +"%B %Y")\"/' get_iplayer get_iplayer.1
 	@rm -f get_iplayer.bak get_iplayer.1.bak
 	@git log --format='%aN' | sort -u > CONTRIBUTORS; git add CONTRIBUTORS
-	@git commit -m "Tag version $(VERSION)" get_iplayer get_iplayer.cgi get_iplayer.1 CONTRIBUTORS
-	@git tag v$(VERSION)
+	@git commit -m "Release $(VERSION)" get_iplayer get_iplayer.cgi get_iplayer.1 CONTRIBUTORS
 
 tarball:
 	@git update-index --refresh --unmerged
