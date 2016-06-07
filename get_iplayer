@@ -3142,7 +3142,7 @@ sub usage {
 		#Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc)
 		push @man, ".SS \"$section Options:\"" if $manpage;
 		push @dump, '', "$section Options:" if $dumpopts;
-		push @usage, '', "$section Options:";
+		push @usage, '', "$section Options:" if $section ne 'Deprecated' or $helplevel == 1;
 		# Each name in this section array
 		for my $name ( sort @{ $section_name{$section} } ) {
 			push @manlines, '.TP'."\n".'\fB'.$name_syntax{$name}."\n".$name_desc{$name} if $manpage;
@@ -3151,7 +3151,7 @@ sub usage {
 			push @dumplines, sprintf(" %-30s %-32s %s", $dumpname, $name_syntax{$name}, $name_desc{$name} ) if $dumpopts;
 			push @lines, sprintf(" %-32s %s", $name_syntax{$name}, $name_desc{$name} );
 		}
-		push @usage, sort @lines;
+		push @usage, sort @lines if $section ne 'Deprecated' or $helplevel == 1;;
 		push @man, sort @manlines;
 		push @dump, sort @dumplines;
 	}
