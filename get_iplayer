@@ -8037,13 +8037,17 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'best', "${fmt}best");
 	$mlist = main::expand_list($mlist, 'better', "${fmt}better");
 	$mlist = main::expand_list($mlist, 'good', "${fmt}good");
+	$mlist = main::expand_list($mlist, 'worse', "${fmt}worse");
+	$mlist = main::expand_list($mlist, 'worst', "${fmt}worst");
 	# DASH on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
 		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
 		$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
-		$mlist = main::expand_list($mlist, 'dashbest', 'dashbetter');
-		$mlist = main::expand_list($mlist, 'dashbetter', 'dashgood');
-		$mlist = main::expand_list($mlist, 'dashgood', 'dashhigh,dashstd,dashmed,dashlow');
+		$mlist = main::expand_list($mlist, 'dashbest', 'dashhigh,dashbetter');
+		$mlist = main::expand_list($mlist, 'dashbetter', 'dashstd,dashgood');
+		$mlist = main::expand_list($mlist, 'dashgood', 'dashmed,dashworse');
+		$mlist = main::expand_list($mlist, 'dashworse', 'dashworst');
+		$mlist = main::expand_list($mlist, 'dashworst', 'dashlow');
 	}
 	# RTMP on-demand tv/radio
 	if ( $prog->{type} !~ /live/ && $mlist =~ /flash/ ) {
@@ -8051,15 +8055,28 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'flashdefault', 'flashbest');
 		$mlist = main::expand_list($mlist, 'flashbest', 'flashhd,flashbetter');
 		$mlist = main::expand_list($mlist, 'flashbetter', 'flashvhigh,flashgood');
-		$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashstd,flashnormal,flashlow');
+		$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashworse');
+		$mlist = main::expand_list($mlist, 'flashworse', 'flashstd,flashnormal,flashworst');
+		$mlist = main::expand_list($mlist, 'flashworst', 'flashlow');
+	}
+	if ( $prog->{type} =~ /radio/ && $mlist =~ /hls/ ) {
+		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
+		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
+		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshigh,hlsbetter');
+		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsstd,hlsgood');
+		$mlist = main::expand_list($mlist, 'hlsgood', 'hlsmed,hlsworse');
+		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsworst');
+		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
 	}
 	# HLS on-demand tv/radio and live radio
-	if ( $prog->{type} ne "livetv" && $mlist =~ /hls/ ) {
+	if ( $prog->{type} eq "tv" && $mlist =~ /hls/ ) {
 		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
 		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
 		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
 		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvhigh,hlsgood');
-		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsstd,hlsmed,hlslow');
+		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsworse');
+		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsstd,hlsworst');
+		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
 	}
 	# HLS Video Factory on-demand and live tv
 	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
@@ -8067,21 +8084,25 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbest');
 		$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfsd,hvfbetter');
 		$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfvhigh,hvfgood');
-		$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfstd,hvfmed,hvflow');
+		$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfworse');
+		$mlist = main::expand_list($mlist, 'hvfworse', 'hvfstd,hvfworst');
+		$mlist = main::expand_list($mlist, 'hvfworst', 'hvflow');
+	}
+	# default on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
+		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
+		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
+		$mlist = main::expand_list($mlist, 'radiobest', 'hlshigh,dashhigh,radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobetter', 'hlsstd,dashstd,radiogood');
+		$mlist = main::expand_list($mlist, 'radiogood', 'hlsmed,dashmed,radioworse');
+		$mlist = main::expand_list($mlist, 'radioworse', 'radioworst');
+		$mlist = main::expand_list($mlist, 'radioworst', 'hlslow,dashlow');
 	}
 	# Shoutcast live radio
 	if ( $prog->{type} eq "liveradio" && $mlist =~ /shoutcast/ ) {
 		$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
 		$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
 		$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
-	}
-	# default on-demand radio
-	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
-		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
-		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
-		$mlist = main::expand_list($mlist, 'radiobest', 'radiobetter');
-		$mlist = main::expand_list($mlist, 'radiobetter', 'radiogood');
-		$mlist = main::expand_list($mlist, 'radiogood', 'hlshigh,dashhigh,hlsstd,dashstd,hlsmed,dashmed,hlslow,dashlow');
 	}
 	return $mlist;
 }
