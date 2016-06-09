@@ -3390,6 +3390,7 @@ sub get {
 
 	my $optname = get_opt_map();
 
+	my (@ignored, @deprecated);
 	# Load opts
 	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
 	my $opt_encoding = ( $^O eq "MSWin32" && $optfile eq $optfile_system ) ? $opt->{encodinglocalefs} : "utf8";
@@ -3397,32 +3398,40 @@ sub get {
 	while(<OPT>) {
 		next unless (/^\s*([\w\-_]+)\s+(.*)\s*$/);
 		# Error if the option is not valid
-		if ( ( not defined $optname->{$1} ) && ( ! $suppress_warnings ) ) {
-			# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
-			$opt->{stderr} = 1;
-			main::logger "WARNING: Ignoring invalid option in $optfile: '$1 = $2'\n";
-			main::logger "INFO: Please remove and use 'get_iplayer --dump-options' to display all valid options\n";
-			delete $opt->{stderr};
+		if ( not defined $optname->{$1} ) {
+			push @ignored, "$1 = $2";
 			next;
 		}
-		# Warn if it is listed as a deprecated or ignored internal option name
-		if ( ( defined @{ $opt_format_ref->{$1} }[2] ) && ( ! $suppress_warnings ) ) {
-			$opt->{stderr} = 1;
+		# Warn if it is listed as a deprecated internal option name
+		if ( defined @{ $opt_format_ref->{$1} }[2] ) {
 			if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
-				main::logger "WARNING: Deprecated option in $optfile: '$1 = $2'\n";
-				main::logger "INFO: Use --dump-opts to display all valid options\n";
-			} elsif ( @{ $opt_format_ref->{$1} }[2] eq 'Ignored' ) {
-				main::logger "WARNING: Ignored option in $optfile: '$1 = $2'\n";
-				main::logger "WARNING: Option '$1' is no longer used and is scheduled for removal\n";
-				main::logger "WARNING: Please delete option '$1' from $optfile\n";
-				main::logger "INFO: Use --dump-opts to display all valid options\n";
+				push @deprecated, "$1 = $2";
 			}
-			delete $opt->{stderr};
 		}
 		chomp( $entry->{ $optname->{$1} } = $2 );
 		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
 	}
 	close OPT;
+	unless ( $suppress_warnings ) {
+		# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
+		$opt->{stderr} = 1;
+ 		if ( @ignored ) {
+			main::logger "WARNING: Ignoring invalid option(s) in $optfile:\n";
+			for my $ignored ( @ignored ) {
+				main::logger "WARNING: $ignored\n";
+			}
+			main::logger "WARNING: Please remove invalid options from $optfile\n";
+		}
+ 		if ( @deprecated ) {
+			main::logger "WARNING: Deprecated option(s) found in $optfile:\n";
+			for my $deprecated ( @deprecated ) {
+				main::logger "WARNING: $deprecated\n";
+			}
+			main::logger "WARNING: Deprecated options will be removed in a future release\n";
+		}
+		main::logger "INFO: Use --dump-options to display all valid options\n" if @deprecated or @ignored;
+		delete $opt->{stderr};
+	}
 	return $entry;
 }
 
