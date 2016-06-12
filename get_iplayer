@@ -288,7 +288,7 @@ my $opt_format = {
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 	ybbcy	=> [ 1, "ybbcy!", 'Misc', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect."],
 	indexconcurrent	=> [ 1, "indexconcurrent|index-concurrent!", 'Misc', '--index-concurrent', "Perform fork()-based concurrent (i.e., faster) indexing when web scraping TV schedules only. Requires --ybbcy and Parallel::ForkManager Perl module. Not supported on Windows."],
-	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of forks (connections) to use for concurrent indexing. Requires --index-concurrent. Default: 4"],
+	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of forks (connections) to use for concurrent indexing. Requires --index-concurrent. Default: 4 Max: 10"],
 
 };
 
@@ -8487,7 +8487,9 @@ sub get_links_schedule {
 			} else {
 				eval "use Parallel::ForkManager";
 				if ( ! $@  ) {
-					$pm = Parallel::ForkManager->new($opt->{indexmaxconn} || 4);
+					my $max_conn = $opt->{indexmaxconn} || 4;
+					$max_conn = 10 if $max_conn > 10;
+					$pm = Parallel::ForkManager->new($max_conn);
 					$pm->run_on_finish( sub {
 						my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
 						$rc_pm = $exit_code unless $rc_pm;
