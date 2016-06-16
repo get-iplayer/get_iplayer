@@ -11,14 +11,10 @@
 * Filter search results by channel
 * PVR capability (may be used with cron or Task Scheduler)
 * HTTP proxy support
-* Perl 5.22+ supported, known to work with Perl 5.8.8+
-* Requires LWP, XML::Simple and XML::LibXML Perl modules
-* Supported platforms:
-    * Linux/Unix (Ubuntu, Fedora, OpenBSD and many others)
-    * OS X (10.9+ supported, known to work with 10.5-10.8)
-    * Windows (7/8/10 supported, known to work with XP/Vista)
+* Perl 5.8.8+ required, plus LWP, XML::Simple and XML::LibXML modules
+* Runs on Linux/Unix (Ubuntu, Fedora, OpenBSD and others), OS X, Windows (7/8/10 supported, known to run on XP/Vista)
 
-**NOTE: get_iplayer can only search programmes broadcast within the previous 30 days, even if some are available for more than 30 days on the iPlayer web site.**
+**NOTE: get_iplayer can only search programmes broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer web site. Other programmes must be downloaded directly.**
 
 ## Documentation
 
@@ -28,7 +24,7 @@
 
 <https://github.com/get-iplayer/get_iplayer/wiki/help>
 
-## Installation (all platforms)
+## Installation
 
 <https://github.com/get-iplayer/get_iplayer/wiki/installation>
 
