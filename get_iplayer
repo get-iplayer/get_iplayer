@@ -9627,11 +9627,15 @@ sub clean_pid {
 	#if ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer/console/}i ) {
 	#	# Just leave the URL as the pid
 	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
-	if ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
+	if ( $prog->{pid} =~ m{http.+bbc\.co\.uk/(i|radio/)player}i ) {
 		# Remove trailing path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_fourfm/listenlive'
 		$prog->{pid} =~ s/\/\w+live\/?$//;
 		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_radio_one/'
 		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
+		$prog->{pid} =~ s/^bbc([^_])/bbc_$1/;
+		$prog->{pid} .= '_hd' if $prog->{pid} =~ /bbc_(one|two)$/;
+		$prog->{pid} .= '24' if $prog->{pid} =~ /bbc_news$/;
+		$prog->{pid} .= 'pbs' if $prog->{pid} =~ /s4c$/;
 
 	# Else this is an embedded media player URL (live or otherwise)
 	} elsif ($prog->{pid} =~ m{^http}i ) {
