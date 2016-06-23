@@ -14,7 +14,7 @@
 * Perl 5.8.8+ required, plus LWP, XML::Simple and XML::LibXML modules
 * Runs on Linux/Unix (Ubuntu, Fedora, OpenBSD and others), OS X, Windows (7/8/10 supported, known to run on XP/Vista)
 
-**NOTE: get_iplayer can only search programmes broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer web site. Other programmes must be downloaded directly.**
+**NOTE: get_iplayer can only search programmes broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer web site. Other programmes must be downloaded directly.**
 
 ## Documentation
 
@@ -58,29 +58,29 @@
 
 	`get_iplayer --type=radio`
 
-* List all TV programmes with "doctor who" in the title/episode:
+* List all TV programmes with "doctor who" in the name (matching is case-insensitive):
 
 	`get_iplayer "doctor who"`
 
-* List all TV and radio programmes with "doctor who" in the title/episode:
+* List all TV and radio programmes with "doctor who" in the name:
 
 	`get_iplayer --type tv,radio "doctor who"`
 
-* List all BBC One TV programmes:
+* List all BBC One programmes:
 
 	`get_iplayer --channel="BBC One"`
 
-* List all Radio 4 Extra programmes:
+* List Radio 4 and Radio 4 Extra programmes with "Book at Bedtime" in the title:
 
-	`get_iplayer --type=radio --channel="Radio 4 Extra"`
+	`get_iplayer --type=radio --channel="Radio 4" "Book at Bedtime"`
 	
-* List all Radio 4 programmes:
+* List only Radio 4 programmes with "Book at Bedtime" in the title:
 
-	`get_iplayer --type=radio --channel="Radio 4$"`
+	`get_iplayer --type=radio --channel="Radio 4$" "Book at Bedtime"`
 
 	*(The `$` regular expression metacharacter matches "Radio 4" only at the end of the channel name, thus avoiding matches against "Radio 4 Extra")*
 
-* Record programme number 208 (index from search results) in HD, with SD fallback if HD not available:
+* Record TV programme number 208 (index from search results) in HD, with SD fallback if HD not available:
 
 	`get_iplayer --get 208` [default is to download best available]
 	
@@ -88,23 +88,28 @@
 
 	`get_iplayer --get 208 --modes=best`
 
-* Record programme number 208 in lower resolution (640x360):
+* Record TV programme number 208 in lower resolution (640x360):
 
 	`get_iplayer --get 208 --modes=good`
 
-* Record programme number 208 and download subtitles in SubRip (SRT) format:
+* Record TV programme number 208 and download subtitles in SubRip (SRT) format:
 
 	`get_iplayer --get 208 --subtitles`
 
-* Record a programme using its iPlayer URL:
+* Record a TV programme using its iPlayer URL:
 
 	`get_iplayer http://www.bbc.co.uk/iplayer/episode/b01sc0wf/Doctors_Series_15_Perfect/`
 
-* Record a programme using the PID (b01sc0wf) from its iPlayer URL:
+* Record a TV programme using the PID (b01sc0wf) from its iPlayer URL:
 
 	`get_iplayer --pid=b01sc0wf`
+	
+* Record a radio programme using its iPlayer URL:
+
+    `get_iplayer http://www.bbc.co.uk/programmes/b07gcv34`	
+* Record a radio programme using the PID (b07gcv34) from its iPlayer URL:
+
+	`get_iplayer --pid=b07gcv34`
   
 
-Notes:
-
-* Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC programmes may not be available from iPlayer.
+NOTE: Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC programmes may not be available from iPlayer.
