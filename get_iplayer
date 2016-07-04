@@ -9020,11 +9020,16 @@ sub download {
 			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
 		} else {
-			my $ext = $mode =~ /^hlshigh/ && $prog->{type} eq 'radio' ? ".m4a" : ".ts";
-			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting $ext file\n";
+			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .ts file\n";
 			$opt->{raw} = 1;
 		}
 	}
+	# require ffmpeg for DASH
+	if ( $mode =~ /^dash/ && (! main::exists_in_path('ffmpeg')) ) {
+		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .m4a file\n";
+		$opt->{raw} = 1;
+	}
+	# require ffmpeg for Shoutcast
 	if ( $mode =~ /^shoutcast/ && (! main::exists_in_path('ffmpeg')) ) {
 		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download Shoutcast audio\n";
 		return 'next';
