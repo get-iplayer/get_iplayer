@@ -7683,6 +7683,10 @@ sub get_stream_data {
 							}
 							my $prefix;
 							$prefix = "hvf" unless $mobile_conn->{supplier} =~ /hls_open/ || $prog->{type} =~ /radio/;
+							if ( $prog->{type} eq 'radio' ) {
+								# for HLS 320k and 96k
+								$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+							}
 							my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
 							for my $hls_media ( @hls_medias ) {
 								for my $hls_conn ( @{$hls_media->{connections}} ) {
