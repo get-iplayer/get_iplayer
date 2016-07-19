@@ -306,6 +306,7 @@ my @nosearch_params = qw/ /;
 ### Perl CGI Web Server ###
 use Socket;
 use IO::Socket;
+use POSIX ":sys_wait_h";
 my $IGNOREEXIT = 0;
 # If the port number is specified then run embedded web server
 if ( $opt_cmdline->{port} > 0 ) {
@@ -332,6 +333,10 @@ if ( $opt_cmdline->{port} > 0 ) {
 			# Parent
 			if ( $procid ) {
 				close $client;
+				# must call waitpid() on Windows
+				if ( IS_WIN32 ) {
+					while ( abs(waitpid(-1, WNOHANG)) > 1 ) {}
+				}
 				next;
 			}
 			# Child
@@ -739,6 +744,9 @@ sub run_cgi {
 
 sub pvr_run {
 	print $fh "<strong><p>The PVR will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
+	if ( IS_WIN32 ) {
+		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOPVRRUN}->{current};
+	}
 	print $se "INFO: Starting PVR Run\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
@@ -2740,6 +2748,9 @@ sub refresh {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	my $refreshfuture = $cgi->param( 'REFRESHFUTURE' ) || 0;
 	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+	if ( IS_WIN32 ) {
+		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+	}
 	print $se "INFO: Refreshing\n";
 	my @cmd = (
 		$opt_cmdline->{getiplayer},
