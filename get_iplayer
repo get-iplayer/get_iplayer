@@ -7618,7 +7618,7 @@ sub get_stream_data {
 					}
 				}
 			}
-			if ( $opt->{info} || $modelist =~ /(hls|hvf)/ ) {
+			if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
 				if ( $prog->{type} =~ /tv/ ) {
 					# get HLS streams from IPTV data
 					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
@@ -7641,8 +7641,7 @@ sub get_stream_data {
 									push @medias, $iptv_media;
 									last;
 								}
-								my $prefix;
-								$prefix = "hvf" unless $iptv_conn->{supplier} =~ /hls_open/;
+								my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
 								my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
 								for my $hls_media ( @hls_medias ) {
 									for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7682,8 +7681,8 @@ sub get_stream_data {
 								push @medias, $mobile_media;
 								last;
 							}
-							my $prefix;
-							$prefix = "hvf" unless $mobile_conn->{supplier} =~ /hls_open/ || $prog->{type} =~ /radio/;
+							my $prefix = $mobile_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
+							$prefix = "haf" if $prog->{type} =~ /radio/;
 							if ( $prog->{type} eq 'radio' ) {
 								# for HLS 320k and 96k
 								$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
@@ -7747,15 +7746,15 @@ sub get_stream_data {
 						@sbr = ( 'sbr_low', 'sbr_vlow' );
 					}
 					my $media = { encoding => "aac", kind => "audio", type => "audio/mp4" };
-					if ( $opt->{info} || $modelist =~ /hls/ ) {
+					if ( $opt->{info} || $modelist =~ /haf/ ) {
 						my $min_bitrate = 0;
 						my $href_prefix = "http://a.files.bbci.co.uk/media/live/manifesto/audio/simulcast/hls";
 						my $href_ext = ".m3u8";
-						my $conn = { supplier => "${cdn}_gip_hls_live", priority => $conn_priority, transferFormat => 'hls', protocol => 'http' };
+						my $conn = { supplier => "${cdn}_gip_haf_live", priority => $conn_priority, transferFormat => 'hls', protocol => 'http' };
 						$conn->{kind} = $conn->{supplier};
 						for my $sbr ( @sbr ) {
 							$conn->{href} = "${href_prefix}/${loc}/${sbr}/${cdn}/${verpid}${href_ext}";
-							push @lr_medias, parse_hls_connection( $media, $conn, $min_bitrate);
+							push @lr_medias, parse_hls_connection( $media, $conn, $min_bitrate, undef, "haf");
 						}
 					}
 				}
@@ -7873,6 +7872,20 @@ sub get_stream_data {
 					} elsif ( $mattribs->{bitrate} > 300 ) {
 						get_stream_data_cdn( $data, $mattribs, "hvflow", 'hls', $ext );
 					}
+				}
+			}
+
+		} elsif ( $mattribs->{service} =~ /haf/ ) {
+			if ( $mattribs->{kind} =~ 'audio' ) {
+				my $ext = "m4a";
+				if (  $mattribs->{bitrate} >= 192 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hafhigh', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hafstd', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hafmed', 'hls', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, 'haflow', 'hls', $ext );
 				}
 			}
 
@@ -8017,7 +8030,7 @@ sub modelist {
 	if ( ! $mlist ) {
 		$mlist = 'default';
 		if ( $opt->{hlsffmpeg} && ! main::exists_in_path('ffmpeg') ) {
-			main::logger "ERROR: Cannot use default hls/hvf modes because --hls-ffmpeg is specified and ffmpeg is not found - exiting\n";
+			main::logger "ERROR: Cannot use default hls/hvf/haf modes because --hls-ffmpeg is specified and ffmpeg is not found - exiting\n";
 			return undef unless $prog->{type} =~ /radio/;
 		}
 	}
@@ -8027,13 +8040,18 @@ sub modelist {
 	my $fmt = "hls";
 	if ( $prog->{type} eq "livetv" ) {
 		$mlist =~ s/hls/hvf/g;
+		$mlist =~ s/haf/hvf/g;
 		$fmt = "hvf";
 	} elsif ( $prog->{type} eq "liveradio" ) {
-		$mlist =~ s/hvf/hls/g;
+		$mlist =~ s/hls/haf/g;
+		$mlist =~ s/hvf/haf/g;
+		$fmt = "haf";
 	} elsif ( $prog->{type} eq "radio" ) {
+		$mlist =~ s/hls/haf/g;
+		$mlist =~ s/hvf/haf/g;
 		# cannot stream DASH with ffmpeg
 		if ( $opt->{stdout} ) {
-			$fmt = "hls";
+			$fmt = "haf";
 		} else {
 			$fmt = "radio";
 		}
@@ -8076,15 +8094,15 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'flashworse', 'flashworst');
 		$mlist = main::expand_list($mlist, 'flashworst', 'flashlow');
 	}
-	# HLS on-demand and live radio
-	if ( $prog->{type} =~ /radio/ && $mlist =~ /hls/ ) {
-		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
-		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
-		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshigh,hlsbetter');
-		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsstd,hlsgood');
-		$mlist = main::expand_list($mlist, 'hlsgood', 'hlsmed,hlsworse');
-		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsworst');
-		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
+	# HLS Audio Factory on-demand and live radio
+	if ( $prog->{type} =~ /radio/ && $mlist =~ /haf/ ) {
+		$mlist = main::expand_list($mlist, 'haf', 'hafdefault');
+		$mlist = main::expand_list($mlist, 'hafdefault', 'hafbest');
+		$mlist = main::expand_list($mlist, 'hafbest', 'hafhigh,hafbetter');
+		$mlist = main::expand_list($mlist, 'hafbetter', 'hafstd,hafgood');
+		$mlist = main::expand_list($mlist, 'hafgood', 'hafmed,hafworse');
+		$mlist = main::expand_list($mlist, 'hafworse', 'hafworst');
+		$mlist = main::expand_list($mlist, 'hafworst', 'haflow');
 	}
 	# HLS on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /hls/ ) {
@@ -8110,11 +8128,11 @@ sub modelist {
 	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
 		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
 		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
-		$mlist = main::expand_list($mlist, 'radiobest', 'hlshigh,dashhigh,radiobetter');
-		$mlist = main::expand_list($mlist, 'radiobetter', 'hlsstd,dashstd,radiogood');
-		$mlist = main::expand_list($mlist, 'radiogood', 'hlsmed,dashmed,radioworse');
+		$mlist = main::expand_list($mlist, 'radiobest', 'hafhigh,dashhigh,radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobetter', 'hafstd,dashstd,radiogood');
+		$mlist = main::expand_list($mlist, 'radiogood', 'hafmed,dashmed,radioworse');
 		$mlist = main::expand_list($mlist, 'radioworse', 'radioworst');
-		$mlist = main::expand_list($mlist, 'radioworst', 'hlslow,dashlow');
+		$mlist = main::expand_list($mlist, 'radioworst', 'haflow,dashlow');
 	}
 	# Shoutcast live radio
 	if ( $prog->{type} eq "liveradio" && $mlist =~ /shoutcast/ ) {
@@ -9016,7 +9034,7 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hvf)/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^(hls|hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
 			return 'next';
@@ -9054,7 +9072,7 @@ sub download {
 	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf)/;
+	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
 	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
@@ -9500,7 +9518,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dashhigh,dashstd,dashmed,dashlow,flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow. Shortcuts: worst,worse,good,better,best,dash,flash,hls. (default=hlshigh,dashhigh,hlsstd,dashstd,hlsmed,dashmed,hlslow,dashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dashhigh,dashstd,dashmed,dashlow,flashhigh,flashstd,flashlow,hafhigh,hafstd,hafmed,haflow. Shortcuts: worst,worse,good,better,best,dash,flash,haf. (default=hafhigh,dashhigh,hafstd,dashstd,hafmed,dashmed,haflow,dashlow)"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 		hlsradioopts	=> [ 1, "hls-radio-opts|hlsradioopts=s", 'Deprecated', '--hls-radio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for radio"],
@@ -9904,7 +9922,7 @@ sub channels {
 # Class cmdline Options
 sub opt_format {
 	return {
-		liveradiomode	=> [ 1, "liveradiomode=s", 'Deprecated', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes (overrides --modes): hlshigh,hlsstd,hlsmed,hlslow,shoutcastmp3std,shoutcastaachigh (R3 only, UK only). Shortcuts: worst,worse,good,better,best,hls,shoutcast. (default=hlshigh,hlsstd,hlsmed,hlslow)"],
+		liveradiomode	=> [ 1, "liveradiomode=s", 'Deprecated', '--liveradiomode <mode>,<mode>,..', "Live Radio recording modes (overrides --modes): hafhigh,hafstd,hafmed,haflow,shoutcastmp3std,shoutcastaachigh (R3 only, UK only). Shortcuts: worst,worse,good,better,best,haf,shoutcast. (default=hafhigh,hafstd,hafmed,haflow)"],
 		outputliveradio	=> [ 1, "outputliveradio=s", 'Deprecated', '--outputliveradio <dir>', "Output directory for live radio recordings (overrides --output)"],
 		hlsliveradioopts	=> [ 1, "hls-liveradio-opts|hlsliveradioopts=s", 'Deprecated', '--hls-liveradio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for liveradio"],
 		ffmpegliveradioopts => [ 1, "ffmpeg-liveradio-opts|ffmpegliveradioopts=s", 'Deprecated', '--ffmpeg-liveradio-opts <options>', "Add custom options to ffmpeg re-muxing for liveradio"],
