@@ -7840,17 +7840,6 @@ sub get_stream_data {
 						get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
 					}
 				}
-			} elsif ( $mattribs->{kind} =~ 'audio' ) {
-				my $ext = "m4a";
-				if (  $mattribs->{bitrate} >= 192 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlshigh', 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} >= 120 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsstd', 'hls', $ext );
-				} elsif ( $mattribs->{bitrate} >= 80 ) {
-					get_stream_data_cdn( $data, $mattribs, 'hlsmed', 'hls', $ext );
-				} else {
-					get_stream_data_cdn( $data, $mattribs, 'hlslow', 'hls', $ext );
-				}
 			}
 
 		} elsif ( $mattribs->{service} =~ /hvf/ ) {
@@ -7975,17 +7964,17 @@ sub get_stream_data {
 				# This also catches worldservice who happen not to set the encoding type
 				# && $mattribs->{encoding} eq 'aac'
 		) {
-			# flashhigh
+			# flashaachigh
 			if (  $mattribs->{bitrate} >= 192 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashhigh', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaachigh', 'rtmp', 'aac' );
 
-			# flashstd
+			# flashaacstd
 			} elsif ( $mattribs->{bitrate} >= 96 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashstd', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaacstd', 'rtmp', 'aac' );
 
-			# flashlow
+			# flashaaclow
 			} elsif ( $mattribs->{service} !~ /3gp/ ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashlow', 'rtmp', 'aac' );
+				get_stream_data_cdn( $data, $mattribs, 'flashaaclow', 'rtmp', 'aac' );
 			}
 
 		# Subtitles modes
@@ -8035,7 +8024,7 @@ sub modelist {
 		}
 	}
 	$mlist =~ s/rtmp/flash/g;
-	$mlist =~ s/(flash|hls)aac/$1/g;
+	$mlist =~ s/hlsaac/haf/g;
 	$mlist =~ s/hls50/hvf/g;
 	my $fmt = "hls";
 	if ( $prog->{type} eq "livetv" ) {
@@ -8049,6 +8038,7 @@ sub modelist {
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hls/haf/g;
 		$mlist =~ s/hvf/haf/g;
+ 		$mlist =~ s/flash/flashaac/g if $mlist =~ /flash/ and $mlist !~ /flashaac/;
 		# cannot stream DASH with ffmpeg
 		if ( $opt->{stdout} ) {
 			$fmt = "haf";
@@ -8087,16 +8077,16 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'flashworse', 'flashstd,flashnormal,flashworst');
 		$mlist = main::expand_list($mlist, 'flashworst', 'flashlow');
 	}
-	# RTMP on-demand tv
-	if ( $prog->{type} eq "radio" && $mlist =~ /flash/ ) {
-		$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
-		$mlist = main::expand_list($mlist, 'flashdefault', 'flashbest');
-		$mlist = main::expand_list($mlist, 'flashbest', 'flashhigh,flashbetter');
-		$mlist = main::expand_list($mlist, 'flashbetter', 'flashvgood');
-		$mlist = main::expand_list($mlist, 'flashvgood', 'flashstd,flashgood');
-		$mlist = main::expand_list($mlist, 'flashgood', 'flashworse');
-		$mlist = main::expand_list($mlist, 'flashworse', 'flashworst');
-		$mlist = main::expand_list($mlist, 'flashworst', 'flashlow');
+	# RTMP on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /flashaac/ ) {
+		$mlist = main::expand_list($mlist, 'flashaac', 'flashaacdefault');
+		$mlist = main::expand_list($mlist, 'flashaacdefault', 'flashaacbest');
+		$mlist = main::expand_list($mlist, 'flashaacbest', 'flashaachigh,flashaacbetter');
+		$mlist = main::expand_list($mlist, 'flashaacbetter', 'flashaacvgood');
+		$mlist = main::expand_list($mlist, 'flashaacvgood', 'flashaacstd,flashaacgood');
+		$mlist = main::expand_list($mlist, 'flashaacgood', 'flashaacworse');
+		$mlist = main::expand_list($mlist, 'flashaacworse', 'flashaacworst');
+		$mlist = main::expand_list($mlist, 'flashaacworst', 'flashaaclow');
 	}
 	# HLS Audio Factory on-demand and live radio
 	if ( $prog->{type} =~ /radio/ && $mlist =~ /haf/ ) {
@@ -9526,7 +9516,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dashhigh,dashstd,dashmed,dashlow,flashhigh,flashstd,flashlow,hafhigh,hafstd,hafmed,haflow. Shortcuts: worst,worse,good,vgood,better,best,dash,flash,haf. (default=hafhigh,dashhigh,hafstd,dashstd,hafmed,dashmed,haflow,dashlow)"],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dashhigh,dashstd,dashmed,dashlow,flasaachhigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow. Shortcuts: worst,worse,good,vgood,better,best,dash,flashaac,haf. (default=hafhigh,dashhigh,hafstd,dashstd,hafmed,dashmed,haflow,dashlow)"],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 		hlsradioopts	=> [ 1, "hls-radio-opts|hlsradioopts=s", 'Deprecated', '--hls-radio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for radio"],
