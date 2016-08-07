@@ -7705,18 +7705,6 @@ sub get_stream_data {
 						}
 					}
 				}
-				# ensure hvf stream for AD programmes
-				if ( $version eq "audiodescribed" ) {
-					my @hvf_ad = grep { $_->{service} =~ /hvf/ } @medias;
-					my @hls_ad = grep { $_->{service} =~ /hls/ } @medias;
-					if ( ! @hvf_ad && @hls_ad ) {
-						for my $hls_ad ( @hls_ad ) {
-							my $hvf_ad = dclone($hls_ad);
-							$hvf_ad->{service} =~ s/hls/hvf/;
-							push @medias, $hvf_ad;
-						}
-					}
-				}
 			}
 			# generate additional live streams
 			if ( $prog->{type} eq "liveradio" ) {
