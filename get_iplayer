@@ -9105,6 +9105,10 @@ sub download {
 
 		# Instantiate new streamer based on streamdata
 		my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
+		if ( ! $class->can('new') ) {
+			main::logger "ERROR: Cannot instantiate streamer for class=$class version=$version mode=$mode\n";
+			return 'skip';
+		}
 		my $stream = $class->new;
 
 		# Do recording
