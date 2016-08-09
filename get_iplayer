@@ -177,7 +177,7 @@ my $opt_format = {
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', sort keys %prog_types).",all (tv is default)"],
 
 	# Output
-	aactomp3	=> [ 1, "aactomp3|mp3", 'Deprecated', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg/avconv (CBR 128k unless --mp3vbr is specified).  Applied only to radio programmes. (Synonyms: --mp3)"],
+	aactomp3	=> [ 1, "aactomp3|mp3", 'Deprecated', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg (CBR appropriate for mode unless --mp3vbr is specified).  Applied only to radio programmes. (Synonyms: --mp3)"],
 	mp3vbr		=> [ 1, "mp3vbr=n", 'Deprecated', '--mp3vbr', "Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires --aactomp3). Applied only to radio programmes."],
 	avi			=> [ 1, "avi", 'Deprecated', '--avi', "Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output."],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
@@ -879,9 +879,16 @@ sub init_search {
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
 	# External Binaries
-	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'avconv';
+	$bin->{ffmpeg} = $opt->{ffmpeg} || 'ffmpeg';
 	if (! main::exists_in_path('ffmpeg') ) {
-		$bin->{ffmpeg} = 'ffmpeg';
+		if ( ! $opt->{ffmpeg} ) {
+			$bin->{ffmpeg} = 'avconv';
+			if (! main::exists_in_path('ffmpeg') ) {
+				$bin->{ffmpeg} = 'ffmpeg';
+			}
+		} else {
+			$bin->{ffmpeg} = 'ffmpeg';
+		}
 	}
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} },  ();
@@ -9012,32 +9019,37 @@ sub download {
 
 	# if rtmpdump does not exist
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
-		main::logger "WARNING: Required rtmpdump does not exist - cannot download Flash audio/video\n";
+		main::logger "WARNING: Required rtmpdump utility not found - cannot download Flash audio/video\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
 	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('ffmpeg')) {
-		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .flv file\n";
+		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .flv file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
 	if ( $mode =~ /^(hls|hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
-			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg/avconv does not exist - cannot download HLS audio/video\n";
+			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg utility not found - cannot download HLS audio/video\n";
 			return 'next';
 		} else {
-			main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .ts file\n";
+			main::logger "\nWARNING: Required ffmpeg utility not found - not converting .ts file\n";
 			$opt->{raw} = 1;
 		}
 	}
+	# cannot convert hvf with avconv
+	if ( $mode =~ /^hvf/ && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
+		main::logger "\nWARNING: Cannot convert hvf modes with avconv (ffmpeg required) - not converting .ts file\n";
+		$opt->{raw} = 1;
+	}
 	# require ffmpeg for DASH
 	if ( $mode =~ /^dash/ && (! main::exists_in_path('ffmpeg')) ) {
-		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - not converting .m4a file\n";
+		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .m4a file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for Shoutcast
 	if ( $mode =~ /^shoutcast/ && (! main::exists_in_path('ffmpeg')) ) {
-		main::logger "\nWARNING: Required ffmpeg/avconv does not exist - cannot download Shoutcast audio\n";
+		main::logger "\nWARNING: Required ffmpeg utility not found - cannot download Shoutcast audio\n";
 		return 'next';
 	}
 
@@ -10519,8 +10531,8 @@ sub opt {
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg (or avconv) binary. Note: avconv cannot be used with hvf modes."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
 	};
 }
 
@@ -10557,7 +10569,7 @@ sub postproc {
 
 	# use backwards-compatible option for ffmpeg
 	my @filter_opts;
-	if ( $bin->{ffmpeg} =~ /avconv/ ) {
+	if ( ! $opt->{ffmpegobsolete} ) {
 		push @filter_opts, '-bsf:a';
 	} else {
 		push @filter_opts, '-absf';
@@ -10677,8 +10689,8 @@ use URI;
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
 		rtmpport	=> [ 1, "rtmpport=n", 'Deprecated', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "rtmpdump|flvstreamer=s", 'Deprecated', '--rtmpdump <path>', "Location of rtmpdump binary. Synonyms: --flvstreamer"],
 		swfurl	=> [ 1, "swfurl=s", 'Deprecated', '--swfurl <URL>', "URL of Flash player used by rtmpdump for verification.  Only use if default Flash player URL is not working."],
@@ -10850,9 +10862,9 @@ use strict;
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
-		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Deprecated', '--hls-ffmpeg', "Use ffmpeg/avconv instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
+		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Deprecated', '--hls-ffmpeg', "Use ffmpeg instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
 		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Deprecated', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media."],
 	};
 }
@@ -11302,8 +11314,8 @@ use Text::ParseWords;
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg|avconv=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg or avconv binary. Synonyms: --avconv"],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete|avconv-obsolete|avconvobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg. Synonym: --avconv-obsolete"],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
 	};
 }
 
