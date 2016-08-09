@@ -9053,6 +9053,12 @@ sub download {
 		return 'next';
 	}
 
+	# force --raw with --allow-gaps
+	if ( $mode =~ /^(dash|hls|hvf|haf)/ && $opt->{allowgaps} ) {
+		main::logger "\nWARNING: --allow-gaps specified so also using --raw - not converting.ts file\n";
+		$opt->{raw} = 1;
+	}
+
 	# Get extension from streamdata if defined and raw not specified
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 
@@ -10862,6 +10868,7 @@ use strict;
 
 sub opt_format {
 	return {
+		allowgaps		=> [ 1, "allow-gaps|allowgaps!", 'Deprecated', '--allow-gaps', "Allow gaps due to missing segments in HLS and DASH streams. Without this option, an error is generated if gap is encountered and stream is skipped. Forces use of --raw. Only works with built-in downloader."],
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel option, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
 		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Deprecated', '--hls-ffmpeg', "Use ffmpeg instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
@@ -11017,6 +11024,7 @@ sub get_builtin {
 	}
 	
 	my $segment_duration;
+	my ($gap_location, $gap_duration);
 	my $segments = $self->parse_playlist($ua, $url, $media, $last_sequence);
 	my @sequences = sort { $a <=> $b } keys %{$segments};
 	unless ( @sequences ) {
@@ -11049,6 +11057,7 @@ sub get_builtin {
 		}
 		main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
 		my $i;
+		my $gap_found;
 		for ($i = 0; $i < $retries; $i++) {
 			my $res = $ua->get($segment_url, ':content_cb' => $callback);
 			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
@@ -11059,12 +11068,20 @@ sub get_builtin {
 						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as missing due to inaccurate programme data\n";
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 					} else {
-						# don't retry if 404 received
-						main::logger "\nERROR: Segment not found ($sequence) $segment_url\n";
-						main::logger "ERROR: Download aborted at ".(int($elapsed - $segment_duration))." secs in programme\n";
-						close $fh;
-						unlink $file_tmp;
-						return 'next';
+						# don't retry if 404 received and gaps not allowed
+						$gap_location = (int($elapsed - $segment_duration)) unless $gap_location;
+						$gap_found = 1;
+						if ( $opt->{allowgaps} ) {
+							main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
+							$gap_duration += $segment_duration;
+							last;
+						} else {
+							main::logger "\nERROR: Segment not found ($sequence) $segment_url\n";
+							main::logger "ERROR: Download aborted at $gap_location secs in programme\n";
+							close $fh;
+							unlink $file_tmp;
+							return 'next';
+						}
 					}
 					last;
 				}
@@ -11076,6 +11093,11 @@ sub get_builtin {
 			main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
 			$return = 5;
 			last;
+		}
+		if ( ! $gap_found && $gap_location && $gap_duration ) {
+			main::logger "\nWARNING: There is a $gap_duration sec gap near $gap_location secs in programme\n";
+			$gap_location = 0;
+			$gap_duration = 0;
 		}
 		$seen{$sequence}++;
 		# capture for resuming
