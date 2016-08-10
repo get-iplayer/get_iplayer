@@ -879,16 +879,9 @@ sub init_search {
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
 
 	# External Binaries
-	$bin->{ffmpeg} = $opt->{ffmpeg} || 'ffmpeg';
+	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'avconv';
 	if (! main::exists_in_path('ffmpeg') ) {
-		if ( ! $opt->{ffmpeg} ) {
-			$bin->{ffmpeg} = 'avconv';
-			if (! main::exists_in_path('ffmpeg') ) {
-				$bin->{ffmpeg} = 'ffmpeg';
-			}
-		} else {
-			$bin->{ffmpeg} = 'ffmpeg';
-		}
+		$bin->{ffmpeg} = 'ffmpeg';
 	}
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} },  ();
