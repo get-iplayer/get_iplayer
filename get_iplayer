@@ -7619,7 +7619,7 @@ sub get_stream_data {
 					}
 				}
 			}
-			if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
+			if ( $opt->{info} || $modelist =~ /(hvf|haf)/ ) {
 				if ( $prog->{type} =~ /tv/ ) {
 					# get HLS streams from IPTV data
 					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
@@ -7642,7 +7642,8 @@ sub get_stream_data {
 									push @medias, $iptv_media;
 									last;
 								}
-								my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
+								next if $iptv_conn->{supplier} =~ /hls_open/;
+								my $prefix = "hvf";
 								my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
 								for my $hls_media ( @hls_medias ) {
 									for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7682,8 +7683,8 @@ sub get_stream_data {
 								push @medias, $mobile_media;
 								last;
 							}
-							my $prefix = $mobile_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
-							$prefix = "haf" if $prog->{type} =~ /radio/;
+							next if $mobile_conn->{supplier} =~ /hls_open/;
+							my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
 							if ( $prog->{type} eq 'radio' ) {
 								# for HLS 320k and 96k
 								$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
@@ -7813,25 +7814,7 @@ sub get_stream_data {
 		$mattribs->{verpid} = $verpid;
 		$mattribs->{modelist} = $modelist;
 
-		if ( $mattribs->{service} =~ /hls/ ) {
-			if ( $mattribs->{kind} =~ 'video' ) {
-				my $ext = "mp4";
-				if ( $mattribs->{height} > 700 ) {
-					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
-				}	elsif ( $mattribs->{height} > 400 ) {
-					get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
-				} elsif ( $mattribs->{height} > 200 ) {
-					if ( $mattribs->{bitrate} > 700 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlshigh", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 450 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlsstd", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 300 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
-					}
-				}
-			}
-
-		} elsif ( $mattribs->{service} =~ /hvf/ ) {
+		if ( $mattribs->{service} =~ /hvf/ ) {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
@@ -8024,6 +8007,9 @@ sub modelist {
 		$mlist =~ s/hls/haf/g;
 		$mlist =~ s/hvf/haf/g;
 		$fmt = "haf";
+	} elsif ( $prog->{type} eq "tv" ) {
+		$mlist =~ s/hls/hvf/g;
+		$mlist =~ s/haf/hvf/g;
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hls/haf/g;
 		$mlist =~ s/hvf/haf/g;
@@ -8087,17 +8073,6 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hafgood', 'hafmed,hafworse');
 		$mlist = main::expand_list($mlist, 'hafworse', 'hafworst');
 		$mlist = main::expand_list($mlist, 'hafworst', 'haflow');
-	}
-	# HLS on-demand tv
-	if ( $prog->{type} eq "tv" && $mlist =~ /hls/ ) {
-		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
-		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
-		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
-		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
-		$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
-		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsworse');
-		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsstd,hlsworst');
-		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
 	}
 	# HLS Video Factory on-demand and live tv
 	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
@@ -8229,7 +8204,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,flashlow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,vgood,better,best,flash,hls,hvf. (default=hlshd,hlsvhigh,hlshigh,hlsstd,hlslow)"],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,vgood,better,best,flash,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)"],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 		hlstvopts	=> [ 1, "hls-tv-opts|hlstvopts=s", 'Deprecated', '--hls-tv-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for tv"],
@@ -9021,7 +8996,7 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^(hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg utility not found - cannot download HLS audio/video\n";
 			return 'next';
@@ -9047,7 +9022,7 @@ sub download {
 	}
 
 	# force --raw with --allow-gaps
-	if ( $mode =~ /^(dash|hls|hvf|haf)/ && $opt->{allowgaps} ) {
+	if ( $mode =~ /^(dash|hvf|haf)/ && $opt->{allowgaps} ) {
 		main::logger "\nWARNING: --allow-gaps specified so also using --raw - not converting .ts file\n";
 		$opt->{raw} = 1;
 	}
@@ -9070,7 +9045,7 @@ sub download {
 	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
+	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hvf|haf)/;
 	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
