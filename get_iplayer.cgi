@@ -4420,6 +4420,10 @@ sub insert_stylesheet {
 		font-family: "Courier New", monospace;
 	}
 
+	.darker {
+		color: #7D7D7D;
+	}
+
 	</STYLE>
 EOF
 
