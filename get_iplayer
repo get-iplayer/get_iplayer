@@ -11023,12 +11023,14 @@ sub get_builtin {
 				if ( $res->code == 404 ) {
 					if ( $prog->{type} eq "radio" && $sequence == $sequences[$#sequences] ) {
 						# potential edge cases with incorrect DASH manifests
-						main::logger "\nWARNING: Segment not found ($sequence) $segment_url\n";
-						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as missing due to inaccurate programme data\n";
+						main::logger "\nWARNING: Segment not available from server ($sequence)\n";
+						main::logger "WARNING: Segment URL: $segment_url\n";
+						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as not available due to inaccurate programme data\n";
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 					} else {
 						# don't retry if 404 received
-						main::logger "\nERROR: Segment not found ($sequence) $segment_url\n";
+						main::logger "\nERROR: Segment not available from server ($sequence)\n"; 
+						main::logger "ERROR: Segment URL: $segment_url\n";
 						main::logger "ERROR: Download aborted at ".(int($elapsed - $segment_duration))." secs in programme\n";
 						close $fh;
 						unlink $file_tmp;
@@ -11041,7 +11043,8 @@ sub get_builtin {
 			}
 		}
 		if ( $i == $retries ) {
-			main::logger "\nERROR: Failed to download segment ($sequence) $segment_url\n";
+			main::logger "\nERROR: Failed to download segment ($sequence)\n";
+			main::logger "ERROR: Segment URL: $segment_url\n";
 			$return = 5;
 			last;
 		}
