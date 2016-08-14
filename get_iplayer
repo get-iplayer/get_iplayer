@@ -8031,7 +8031,7 @@ sub modelist {
 	}
 	$mlist =~ s/rtmp/flash/g;
 	$mlist =~ s/hls50/hvf/g;
-	my $fmt = "hvf";
+	my $fmt = "tv";
 	if ( $prog->{type} eq "livetv" ) {
 		$mlist =~ s/hls/hvf/g;
 		$mlist =~ s/haf/hvf/g;
@@ -8042,6 +8042,7 @@ sub modelist {
 		$fmt = "haf";
 	} elsif ( $prog->{type} eq "tv" ) {
 		$mlist =~ s/haf/hvf/g;
+		$fmt = "tv";
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hvf/haf/g;
 		$mlist =~ s/hls/hlsaac/g if $mlist =~ /hls/ and $mlist !~ /hlsaac/;
@@ -8155,6 +8156,17 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'shoutcast', 'shoutcastaac,shoutcastmp3');
 		$mlist = main::expand_list($mlist, 'shoutcastaac', 'shoutcastaachigh,shoutcastaacstd,shoutcastaaclow');
 		$mlist = main::expand_list($mlist, 'shoutcastmp3', 'shoutcastmp3high,shoutcastmp3std,shoutcastmp3low');
+	}
+	# default on-demand tv
+	if ( $prog->{type} eq "tv" && $mlist =~ /tv/ ) {
+		$mlist = main::expand_list($mlist, 'tv', 'tvdefault');
+		$mlist = main::expand_list($mlist, 'tvdefault', 'tvbest');
+		$mlist = main::expand_list($mlist, 'tvbest', 'hvfhd,hlshd,tvbetter');
+		$mlist = main::expand_list($mlist, 'tvbetter', 'hvfsd,tvvgood');
+		$mlist = main::expand_list($mlist, 'tvvgood', 'hvfvhigh,hlsvigh,tvgood');
+		$mlist = main::expand_list($mlist, 'tvgood', 'hvfhigh,hlshigh,tvworse');
+		$mlist = main::expand_list($mlist, 'tvworse', 'hvfstd,hlsstd,tvworst');
+		$mlist = main::expand_list($mlist, 'tvworst', 'hvflow,hlslow');
 	}
 	return $mlist;
 }
