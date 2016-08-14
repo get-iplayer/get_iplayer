@@ -7619,7 +7619,7 @@ sub get_stream_data {
 					}
 				}
 			}
-			if ( $opt->{info} || $modelist =~ /(hvf|haf)/ ) {
+			if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
 				if ( $prog->{type} =~ /tv/ ) {
 					# get HLS streams from IPTV data
 					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
@@ -7642,8 +7642,7 @@ sub get_stream_data {
 									push @medias, $iptv_media;
 									last;
 								}
-								next if $iptv_conn->{supplier} =~ /hls_open/;
-								my $prefix = "hvf";
+								my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
 								my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
 								for my $hls_media ( @hls_medias ) {
 									for my $hls_conn ( @{$hls_media->{connections}} ) {
@@ -7683,8 +7682,14 @@ sub get_stream_data {
 								push @medias, $mobile_media;
 								last;
 							}
-							next if $mobile_conn->{supplier} =~ /hls_open/;
 							my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
+							if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
+								if ( $prog->{type} eq 'tv' ) {
+									$prefix = "hls";
+								} elsif ( $prog->{type} eq 'radio' ) {
+									$prefix = "hlsaac";
+								}
+							}
 							if ( $prog->{type} eq 'radio' ) {
 								# for HLS 320k and 96k
 								$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
@@ -7814,7 +7819,36 @@ sub get_stream_data {
 		$mattribs->{verpid} = $verpid;
 		$mattribs->{modelist} = $modelist;
 
-		if ( $mattribs->{service} =~ /hvf/ ) {
+		if ( $mattribs->{service} =~ /hls/ ) {
+			if ( $mattribs->{kind} =~ 'video' ) {
+				my $ext = "mp4";
+				if ( $mattribs->{height} > 700 ) {
+					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
+				}	elsif ( $mattribs->{height} > 400 ) {
+					get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
+				} elsif ( $mattribs->{height} > 200 ) {
+					if ( $mattribs->{bitrate} > 700 ) {
+						get_stream_data_cdn( $data, $mattribs, "hlshigh", 'hls', $ext );
+					} elsif ( $mattribs->{bitrate} > 450 ) {
+						get_stream_data_cdn( $data, $mattribs, "hlsstd", 'hls', $ext );
+					} elsif ( $mattribs->{bitrate} > 300 ) {
+						get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
+					}
+				}
+			} elsif ( $mattribs->{kind} =~ 'audio' ) {
+				my $ext = "m4a";
+				if (  $mattribs->{bitrate} >= 192 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlsaachigh', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlsaacstd', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlsaacmed', 'hls', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, 'hlsaaclow', 'hls', $ext );
+				}
+			}
+
+		} elsif ( $mattribs->{service} =~ /hvf/ ) {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
@@ -7930,7 +7964,7 @@ sub get_stream_data {
 			$mattribs->{encoding} = 'vp6';
 			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
-		# flash modes
+		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
 				$mattribs->{type} eq 'audio/mp4'
 				# This also catches worldservice who happen not to set the encoding type
@@ -7996,7 +8030,6 @@ sub modelist {
 		}
 	}
 	$mlist =~ s/rtmp/flash/g;
-	$mlist =~ s/hlsaac/haf/g;
 	$mlist =~ s/hls50/hvf/g;
 	my $fmt = "hvf";
 	if ( $prog->{type} eq "livetv" ) {
@@ -8008,12 +8041,11 @@ sub modelist {
 		$mlist =~ s/hvf/haf/g;
 		$fmt = "haf";
 	} elsif ( $prog->{type} eq "tv" ) {
-		$mlist =~ s/hls/hvf/g;
 		$mlist =~ s/haf/hvf/g;
 	} elsif ( $prog->{type} eq "radio" ) {
-		$mlist =~ s/hls/haf/g;
 		$mlist =~ s/hvf/haf/g;
- 		$mlist =~ s/flash/flashaac/g if $mlist =~ /flash/ and $mlist !~ /flashaac/;
+		$mlist =~ s/hls/hlsaac/g if $mlist =~ /hls/ and $mlist !~ /hlsaac/;
+		$mlist =~ s/flash/flashaac/g if $mlist =~ /flash/ and $mlist !~ /flashaac/;
 		# cannot stream DASH with ffmpeg
 		if ( $opt->{stdout} ) {
 			$fmt = "haf";
@@ -8073,6 +8105,28 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hafgood', 'hafmed,hafworse');
 		$mlist = main::expand_list($mlist, 'hafworse', 'hafworst');
 		$mlist = main::expand_list($mlist, 'hafworst', 'haflow');
+	}
+	# HLS video clips
+	if ( $prog->{type} eq "tv" && $mlist =~ /hls/ ) {
+		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
+		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
+		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
+		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
+		$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
+		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsworse');
+		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsstd,hlsworst');
+		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
+	}
+	# HLS audio clips
+	if ( $prog->{type} eq "radio" && $mlist =~ /hlsaac/ ) {
+		$mlist = main::expand_list($mlist, 'hlsaac', 'hlsaacdefault');
+		$mlist = main::expand_list($mlist, 'hlsaacdefault', 'hlsaacbest');
+		$mlist = main::expand_list($mlist, 'hlsaacbest', 'hlsaachigh,hlsaacbetter');
+		$mlist = main::expand_list($mlist, 'hlsaacbetter', 'hlsaacvgood');
+		$mlist = main::expand_list($mlist, 'hlsaacvgood', 'hlsaacstd,hlsaacgood');
+		$mlist = main::expand_list($mlist, 'hlsaacgood', 'hlsaacworse');
+		$mlist = main::expand_list($mlist, 'hlsaacworse', 'hlsaacworst');
+		$mlist = main::expand_list($mlist, 'hlsaacworst', 'hlsaaclow');
 	}
 	# HLS Video Factory on-demand and live tv
 	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
@@ -8996,7 +9050,7 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^(hls|hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg utility not found - cannot download HLS audio/video\n";
 			return 'next';
@@ -9039,7 +9093,7 @@ sub download {
 	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
 	# Override ext based on mkv option
 	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hvf|haf)/;
+	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
 	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 	$prog->{ext} = 'aac' if $opt->{raw} && $mode =~ /^shoutcastaac/;
 	$prog->{ext} = 'mp3' if $opt->{raw} && $mode =~ /^shoutcastmp3/;
