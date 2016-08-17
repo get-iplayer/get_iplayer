@@ -8045,8 +8045,9 @@ sub modelist {
 		$fmt = "tv";
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hvf/haf/g;
-		$mlist =~ s/hls/hlsaac/g if $mlist =~ /hls/ and $mlist !~ /hlsaac/;
-		$mlist =~ s/flash/flashaac/g if $mlist =~ /flash/ and $mlist !~ /flashaac/;
+		print $mlist =~ /\bhls\b/;
+		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
+		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
 		# cannot stream DASH with ffmpeg
 		if ( $opt->{stdout} ) {
 			$fmt = "haf";
