@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "June 2016" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "August 2016" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more
 .SH SYNOPSIS
@@ -167,7 +167,7 @@ Comma\-delimited list of media stream suppliers to use if not included by defaul
 Create specified metadata info file without any recording or streaming (can also be used with thumbnail option).
 .TP
 \fB\-\-modes <mode>,<mode>,...
-Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults. Shortcuts: worst,worse,good,better,best
+Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults. Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type).
 .TP
 \fB\-\-no\-proxy
 Ignore \-\-proxy setting in preferences
@@ -191,16 +191,16 @@ When used with \-\-pid and \-\-pid\-recursive, skip all associated programme cli
 Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless \-\-partial\-proxy is specified.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dashhigh,dashstd,dashmed,dashlow,flashhigh,flashstd,flashlow,hlshigh,hlsstd,hlsmed,hlslow. Shortcuts: worst,worse,good,better,best,dash,flash,hls. (default=hlshigh,dashhigh,hlsstd,dashstd,hlsmed,dashmed,hlslow,dashlow)
+Radio recording modes (overrides \-\-modes): dashhigh,dashstd,dashmed,dashlow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,dash,flashaac,haf,hlsaac (default=dashhigh,hafhigh,dashstd,hafstd,hlsaacstd,dashmed,hafmed,dashlow,haflow,hlsaaclow).
 .TP
 \fB\-\-raw
 Don't transcode or change the recording/stream in any way (i.e. RTMP\->FLV, HLS\->MPEG\-TS)
 .TP
 \fB\-\-start <secs|hh:mm:ss>
-Recording/streaming start offset
+Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
 .TP
 \fB\-\-stop <secs|hh:mm:ss>
-Recording/streaming stop offset
+Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)
 .TP
 \fB\-\-suboffset <offset>
 Offset the subtitle timestamps by the specified number of milliseconds
@@ -236,7 +236,7 @@ Download Thumbnail image if available
 Only Download Thumbnail image if available, not the programme
 .TP
 \fB\-\-tvmode <mode>,<mode>,...
-TV recording modes (overrides \-\-modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,flashlow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,better,best,flash,hls,hvf. (default=hlshd,hlsvhigh,hlshigh,hlsstd,hlslow)
+TV recording modes (overrides \-\-modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,vgood,better,best,flash,hls,hvf (default=hvfhd,hlshd,hvfsd,hvfvhigh,hlsvhigh,hvfhigh,hlshigh,hvfstd,hlsstd,hvflow,hlslow).
 .TP
 \fB\-\-url "<url>"
 Record the embedded media player in the specified URL. Use with \-\-type=<type>.
@@ -387,10 +387,10 @@ Specify all options as a urlencoded string of "name=val&name=val&..."
 Location of AtomicParsley binary
 .TP
 \fB\-\-ffmpeg <path>
-Location of ffmpeg or avconv binary. Synonyms: \-\-avconv
+Location of ffmpeg binary.
 .TP
 \fB\-\-ffmpeg\-obsolete
-Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the \-loglevel option, so  \-\-quiet, \-\-verbose and \-\-debug will not be applied to ffmpeg. Synonym: \-\-avconv\-obsolete
+Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the \-loglevel or \-stats options, so  \-\-quiet, \-\-verbose and \-\-debug will not be applied to ffmpeg.
 .SS "Tagging Options:"
 .TP
 \fB\-\-no\-artwork
@@ -450,7 +450,7 @@ Use alternate programme indexing and metadata retrieval if the BBC removes its X
 .SS "Deprecated Options:"
 .TP
 \fB\-\-aactomp3
-Transcode AAC audio to MP3 with ffmpeg/avconv (CBR 128k unless \-\-mp3vbr is specified).  Applied only to radio programmes. (Synonyms: \-\-mp3)
+Transcode AAC audio to MP3 with ffmpeg (CBR appropriate for mode unless \-\-mp3vbr is specified).  Applied only to radio programmes. (Synonyms: \-\-mp3)
 .TP
 \fB\-\-avi
 Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output.
@@ -507,10 +507,10 @@ Create Freevo FXD XML of matching programmes in specified file
 Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides \-\-punctuation.
 .TP
 \fB\-\-hls\-ffmpeg
-Use ffmpeg/avconv instead of built\-in HLS downloader. Ignored for downloading on\-demand radio programmes, which use DASH downloader. 320k on\-demand radio programmes cannot be streamed with \-\-hls\-ffmpeg.
+Use ffmpeg instead of built\-in HLS downloader. Ignored for downloading on\-demand radio programmes, which use DASH downloader. 320k on\-demand radio programmes cannot be streamed with \-\-hls\-ffmpeg.
 .TP
 \fB\-\-hls\-ffmpeg\-encode
-Make ffmpeg HLS downloader re\-encode streams. For avconv and old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher\-quality media.
+Make ffmpeg HLS downloader re\-encode streams. For old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher\-quality media.
 .TP
 \fB\-\-hls\-liveradio\-opts <options>
 Add custom options to ffmpeg HLS download re\-muxing for liveradio
@@ -549,10 +549,10 @@ Force use of hard\-coded international streams for HLS live radio.  Ignored for 
 Force use of hard\-coded UK streams for HLS live radio (overrides \-\-liveradio\-intl). Ignored for World Service
 .TP
 \fB\-\-liveradiomode <mode>,<mode>,..
-Live Radio recording modes (overrides \-\-modes): hlshigh,hlsstd,hlsmed,hlslow,shoutcastmp3std,shoutcastaachigh (R3 only, UK only). Shortcuts: worst,worse,good,better,best,hls,shoutcast. (default=hlshigh,hlsstd,hlsmed,hlslow)
+Live Radio recording modes (overrides \-\-modes): hafhigh,hafstd,hafmed,haflow,shoutcastmp3std,shoutcastaachigh (R3 only, UK only). Shortcuts: worst,worse,good,vgood,better,best,haf,shoutcast. (default=hafhigh,hafstd,hafmed,haflow)
 .TP
 \fB\-\-livetvmode <mode>,<mode>,...
-Live TV recording modes (overrides \-\-modes): hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,better,best,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)
+Live TV recording modes (overrides \-\-modes): hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,vgood,better,best,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)
 .TP
 \fB\-\-localfilesdirs <dir>[,dir,]
 Directories/Folders to scan for new files
@@ -687,7 +687,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v2.95, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v2.96, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
