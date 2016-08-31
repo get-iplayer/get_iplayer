@@ -10596,8 +10596,13 @@ sub postproc {
 	}
 
 	my @globals = ( '-y' );
-	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
+	if ( ! $opt->{ffmpegobsolete} ) {
+		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-loglevel', 'error' );
+		}
+		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-stats' );
+		}
 	}
 
 	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
@@ -11213,8 +11218,13 @@ sub get_ffmpeg {
 	}
 
 	my @globals = ( '-y' );
-	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
+	if ( ! $opt->{ffmpegobsolete} ) {
+		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-loglevel', 'error' );
+		}
+		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-stats' );
+		}
 	}
 	@cmd = (
 		$bin->{ffmpeg},
@@ -11411,8 +11421,13 @@ sub get {
 	}
 
 	my @globals = ( '-y' );
-	if ( (! $opt->{ffmpegobsolete}) && (! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) ) {
-		push @globals, ( '-loglevel', 'error', '-stats' );
+	if ( ! $opt->{ffmpegobsolete} ) {
+		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-loglevel', 'error' );
+		}
+		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}}) ) {
+			push @globals, ( '-stats' );
+		}
 	}
 	@cmd = (
 		$bin->{ffmpeg},
