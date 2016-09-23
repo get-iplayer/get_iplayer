@@ -1873,7 +1873,7 @@ sub show_pvr_list {
 					{
 						-class => 'action',
 						-title => 'Delete selected programmes from PVR search list',
-						-onClick => "if(! check_if_selected(document.form, 'PVRSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.NEXTPAGE.value='pvr_del'; form.submit(); RestoreFormVars(form);",
+						-onClick => "if(! check_if_selected(document.form1, 'PVRSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form1); form1.NEXTPAGE.value='pvr_del'; form1.submit(); RestoreFormVars(form1);",
 					},
 					'Delete'
 				),
@@ -1885,16 +1885,16 @@ sub show_pvr_list {
 	my @displaycols = ( 'pvrsearch', ( grep !/pvrsearch/, ( sort keys %fields ) ) );
 	# Build header row
 	push @html, "<tr class=\"search\" >";
-	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All PVR Searches', -onClick=>"check_toggle(document.form, 'PVRSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All PVR Searches', -onClick=>"check_toggle(document.form1, 'PVRSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 	# Display data in nested table
 	for my $heading (@displaycols) {
 
 		# Sort by column click and change display class (colour) according to sort status
 		my ($title, $class, $onclick);
 		if ( $sort_field eq $heading && not $reverse ) {
-			($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.PVRREVERSE.value=1; form.submit(); RestoreFormVars(form);");
+			($title, $class, $onclick) = ("Sort by Reverse $fieldname{$heading}", 'sorted pointer', "BackupFormVars(form1); form1.NEXTPAGE.value='pvr_list'; form1.PVRSORT.value='$heading'; form1.PVRREVERSE.value=1; form1.submit(); RestoreFormVars(form1);");
 		} else {
-			($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form); form.NEXTPAGE.value='pvr_list'; form.PVRSORT.value='$heading'; form.submit(); RestoreFormVars(form); ");
+			($title, $class, $onclick) = ("Sort by $fieldname{$heading}", 'unsorted pointer', "BackupFormVars(form1); form1.NEXTPAGE.value='pvr_list'; form1.PVRSORT.value='$heading'; form1.submit(); RestoreFormVars(form1); ");
 		}
 		$class = 'sorted_reverse pointer' if $sort_field eq $heading && $reverse;
 
@@ -1928,7 +1928,7 @@ sub show_pvr_list {
 				label( {
 					-title		=> "Click to Edit",
 					-class		=> 'search',
-					-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='pvr_edit'; form.PVRSEARCH.value='$name'; form.submit(); RestoreFormVars(form);",
+					-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='pvr_edit'; form1.PVRSEARCH.value='$name'; form1.submit(); RestoreFormVars(form1);",
 					},
 					$pvrsearch->{$name}->{$_},
 				)
@@ -1940,7 +1940,7 @@ sub show_pvr_list {
 
 	# Search form
 	print $fh start_form(
-		-name   => "form",
+		-name   => "form1",
 		-method => "POST",
 	);
 	print $fh p("Click to Edit any PVR Search");
@@ -2016,7 +2016,7 @@ sub pvr_edit {
 
 	# Editing form
 	print $fh start_form(
-		-name   => "form",
+		-name   => "form1",
 		-method => "POST",
 	);
 
@@ -2038,7 +2038,7 @@ sub pvr_edit {
 					{
 						-class => 'action',
 						-title => 'Save changes',
-						-onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_save'; form.submit(); RestoreFormVars(form);",
+						-onClick => "BackupFormVars(form1); form1.NEXTPAGE.value='pvr_save'; form1.submit(); RestoreFormVars(form1);",
 					},
 					'Save Changes'
 				),
@@ -2839,7 +2839,7 @@ sub search_progs {
 	# Default displaycols
 	my @html;
 	push @html, "<tr>";
-	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
+	push @html, th( { -class => 'search' }, checkbox( -class=>'search', -title=>'Select/Unselect All Programmes', -onClick=>"check_toggle(document.form1, 'PROGSELECT')", -name=>'SELECTOR', -value=>'1', -label=>'' ) );
 
 	# Pad empty column for R/S
 	push @html, th( { -class => 'search' }, 'Actions' );
@@ -2851,9 +2851,9 @@ sub search_progs {
 		my ($title, $class, $onclick);
 
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[0].checked=true; form.submit();");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[0].checked=true; form1.submit();");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form.NEXTPAGE.value='search_progs'; form.SORT.value='$heading'; form.REVERSE[1].checked=true; form.submit();");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[1].checked=true; form1.submit();");
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
@@ -2946,9 +2946,9 @@ sub search_progs {
 			# Play
 			$links .= a( { -class=>$search_class, -title=>"Play from Internet", -target=>'_newtab_play_$pid', -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, 'out.flv', $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
 			# Record
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='record_now'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.target='_newtab_$pid'; form.submit(); RestoreFormVars(form); form.target='';" }, 'Record' ).'<br />';
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Record '$prog{$pid}->{name} - $prog{$pid}->{episode}' Now", -onClick => "BackupFormVars(form1); form1.NEXTPAGE.value='record_now'; form1.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form1.target='_newtab_$pid'; form1.submit(); RestoreFormVars(form1); form1.target='';" }, 'Record' ).'<br />';
 			# Queue
-			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form); form.NEXTPAGE.value='pvr_queue'; form.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form.submit(); RestoreFormVars(form);" }, 'Queue' ).'<br />';
+			$links .= label( { -id=>'nowrap', -class=>$search_class, -title=>"Queue '$prog{$pid}->{name} - $prog{$pid}->{episode}' for PVR Recording", -onClick => "BackupFormVars(form1); form1.NEXTPAGE.value='pvr_queue'; form1.SEARCH.value='".encode_entities("$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}")."'; form1.submit(); RestoreFormVars(form1);" }, 'Queue' ).'<br />';
 			# Add Series
 			# escape regex metacharacters in programme name
 			(my $escaped_name = $prog{$pid}->{name}) =~ s/([\\\^\$\.\|\?\*\+\(\)\[\]])/\\\\$1/g;
@@ -2956,7 +2956,7 @@ sub search_progs {
 				-id=>'nowrap',
 				-class=>'search pointer_noul',
 				-title=>"Add Series '$prog{$pid}->{name}' to PVR",
-				-onClick=>"BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.SEARCH.value='".encode_entities("^$escaped_name\$")."'; form.SEARCHFIELDS.value='name'; form.PROGTYPES.value='$prog{$pid}->{type}'; form.HISTORY.value='0'; form.SINCE.value=''; form.BEFORE.value=''; form.submit(); RestoreFormVars(form);" }, 'Add Series' );
+				-onClick=>"BackupFormVars(form1); form1.NEXTPAGE.value='pvr_add'; form1.SEARCH.value='".encode_entities("^$escaped_name\$")."'; form1.SEARCHFIELDS.value='name'; form1.PROGTYPES.value='$prog{$pid}->{type}'; form1.HISTORY.value='0'; form1.SINCE.value=''; form1.BEFORE.value=''; form1.submit(); RestoreFormVars(form1);" }, 'Add Series' );
 		}
 
 		# Add links to row
@@ -2979,7 +2979,7 @@ sub search_progs {
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, "${years}$t[7]d $t[2]h ago" ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form1); form1.NEXTPAGE.value='show_info'; form1.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form1.target='_blank'; form1.submit(); RestoreFormVars(form1); form1.target='';" }, "${years}$t[7]d $t[2]h ago" ) );
 			} elsif ( /^expires$/ ) {
 				my $expires;
 				if ( $prog{$pid}->{$_} && $prog{$pid}->{$_} > $time ) {
@@ -2987,37 +2987,37 @@ sub search_progs {
 					my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
 					$expires = "in ${years}$t[7]d $t[2]h";
 				}
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $expires ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form1); form1.NEXTPAGE.value='show_info'; form1.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form1.target='_blank'; form1.submit(); RestoreFormVars(form1); form1.target='';" }, $expires ) );
 			# truncate the description if it is too long
 			} elsif ( /^desc$/ ) {
 				my $text = $prog{$pid}->{$_};
 				$text = substr($text, 0, 256).'...[more]' if length( $text ) > 256;
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $text ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form1); form1.NEXTPAGE.value='show_info'; form1.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form1.target='_blank'; form1.submit(); RestoreFormVars(form1); form1.target='';" }, $text ) );
 			# Name / Series link
 			} elsif ( /^name$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
 					-onClick=>"
-						BackupFormVars(form);
-						form.NEXTPAGE.value='search_progs';
-						form.SEARCHFIELDS.value='name';
-						form.SEARCH.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
-						form.PAGENO.value=1;
-						form.submit();
-						RestoreFormVars(form);
+						BackupFormVars(form1);
+						form1.NEXTPAGE.value='search_progs';
+						form1.SEARCHFIELDS.value='name';
+						form1.SEARCH.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
+						form1.PAGENO.value=1;
+						form1.submit();
+						RestoreFormVars(form1);
 					"}, $prog{$pid}->{$_} )
 				);
 			# Channel link
 			} elsif ( /^channel$/ ) {
 				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$prog{$pid}->{$_}'",
 					-onClick=>"
-						BackupFormVars(form);
-						form.NEXTPAGE.value='search_progs';
-						form.CHANNEL.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
-						form.EXCLUDECHANNEL.value='';
-						form.SEARCH.value='.*';
-						form.PAGENO.value=1;
-						form.submit();
-						RestoreFormVars(form);
+						BackupFormVars(form1);
+						form1.NEXTPAGE.value='search_progs';
+						form1.CHANNEL.value='".encode_entities('^'.$prog{$pid}->{$_}.'$')."';
+						form1.EXCLUDECHANNEL.value='';
+						form1.SEARCH.value='.*';
+						form1.PAGENO.value=1;
+						form1.submit();
+						RestoreFormVars(form1);
 					"}, $prog{$pid}->{$_} )
 				);
 			# Category links
@@ -3027,22 +3027,22 @@ sub search_progs {
 					my $category = $_;
 					$_ = label( { -class=>$search_class, -id=>'underline', -title=>"Click to list '$category'",
 						-onClick=>"
-							BackupFormVars(form);
-							form.NEXTPAGE.value='search_progs';
-							form.EXCLUDE.value='';
-							form.CATEGORY.value='".encode_entities($category)."';
-							form.EXCLUDECATEGORY.value='';
-							form.SEARCH.value='.*';
-							form.PAGENO.value=1;
-							form.submit();
-							RestoreFormVars(form);
+							BackupFormVars(form1);
+							form1.NEXTPAGE.value='search_progs';
+							form1.EXCLUDE.value='';
+							form1.CATEGORY.value='".encode_entities($category)."';
+							form1.EXCLUDECATEGORY.value='';
+							form1.SEARCH.value='.*';
+							form1.PAGENO.value=1;
+							form1.submit();
+							RestoreFormVars(form1);
 						"},
 					$category );
 				}
 				push @row, td( {-class=>$search_class}, @cats );
 			# Every other column type
 			} else {
-				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form); form.NEXTPAGE.value='show_info'; form.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form.target='_blank'; form.submit(); RestoreFormVars(form); form.target='';" }, $prog{$pid}->{$_} ) );
+				push @row, td( {-class=>$search_class}, label( { -class=>$search_class, -title=>"Click for full info", -onClick=>"BackupFormVars(form1); form1.NEXTPAGE.value='show_info'; form1.INFO.value='".encode_entities("$prog{$pid}->{type}|$pid")."'; form1.target='_blank'; form1.submit(); RestoreFormVars(form1); form1.target='';" }, $prog{$pid}->{$_} ) );
 			}
 		}
 		push @html, Tr( {-class=>$search_class}, @row );
@@ -3050,7 +3050,7 @@ sub search_progs {
 
 	# Search form
 	print $fh start_form(
-		-name   => "form",
+		-name   => "form1",
 		-method => "POST",
 	);
 
@@ -3087,7 +3087,7 @@ sub search_progs {
 			label( {
 				-class		=> 'options_outer pointer_noul',
 				-title		=> 'Apply Current Options',
-				-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
+				-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=1; form1.submit(); RestoreFormVars(form1);",
 				-role	=> "button",
 				},
 				'Apply Settings',
@@ -3096,7 +3096,7 @@ sub search_progs {
 			label( {
 				-class		=> 'options_outer pointer_noul',
 				-title		=> 'Remember Current Options as Default',
-				-onClick	=> "BackupFormVars(form); form.SAVE.value=1; form.submit(); RestoreFormVars(form);",
+				-onClick	=> "BackupFormVars(form1); form1.SAVE.value=1; form1.submit(); RestoreFormVars(form1);",
 				-role	=> "button",
 				},
 				'Save As Default',
@@ -3148,7 +3148,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Perform search based on search options',
-			-onClick => "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
+			-onClick => "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=1; form1.submit(); RestoreFormVars(form1);",
 		},
 		'Search'
 	);
@@ -3156,7 +3156,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Queue selected programmes (or Quick URL) for one-off recording',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='pvr_queue'; form.submit(); RestoreFormVars(form); form.URL.value=''; disable_selected_checkboxes(document.form, 'PROGSELECT');",
+			-onClick => "if(! ( check_if_selected(document.form1, 'PROGSELECT') ||  form1.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.NEXTPAGE.value='pvr_queue'; form1.submit(); RestoreFormVars(form1); form1.URL.value=''; disable_selected_checkboxes(document.form1, 'PROGSELECT');",
 		},
 		'Queue'
 	);
@@ -3164,7 +3164,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Immediately Record selected programmes (or Quick URL) in a new tab',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='record_now'; var random=Math.floor(Math.random()*99999); form.target='_newtab_'+random; form.submit(); RestoreFormVars(form); form.target=''; form.URL.value=''; disable_selected_checkboxes(document.form, 'PROGSELECT');",
+			-onClick => "if(! ( check_if_selected(document.form1, 'PROGSELECT') ||  form1.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.NEXTPAGE.value='record_now'; var random=Math.floor(Math.random()*99999); form1.target='_newtab_'+random; form1.submit(); RestoreFormVars(form1); form1.target=''; form1.URL.value=''; disable_selected_checkboxes(document.form1, 'PROGSELECT');",
 		},
 		'Record'
 	);
@@ -3172,7 +3172,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Permanently delete selected recorded files',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.NEXTPAGE.value='recordings_delete'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form1, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.NEXTPAGE.value='recordings_delete'; form1.submit(); RestoreFormVars(form1);",
 		},
 		'Delete'
 	);
@@ -3180,7 +3180,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes (or Quick URL) to stream in your media player',
-			-onClick => "if(! ( check_if_selected(document.form, 'PROGSELECT') ||  form.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylist'; form.submit(); form.ACTION.value=''; RestoreFormVars(form); form.URL.value='';",
+			-onClick => "if(! ( check_if_selected(document.form1, 'PROGSELECT') ||  form1.URL.value ) ) { alert('No Quick URL or programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.ACTION.value='genplaylist'; form1.submit(); form1.ACTION.value=''; RestoreFormVars(form1); form1.URL.value='';",
 		},
 		'Play'
 	);
@@ -3188,7 +3188,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for local file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylistfile'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form1, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.ACTION.value='genplaylistfile'; form1.submit(); RestoreFormVars(form1);",
 		},
 		'Play Files'
 	);
@@ -3196,7 +3196,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Get a Playlist based on selected programmes for remote file streaming in your media player',
-			-onClick => "if(! check_if_selected(document.form, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form); form.SEARCH.value=''; form.ACTION.value='genplaylistdirect'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if(! check_if_selected(document.form1, 'PROGSELECT')) { alert('No programmes were selected'); return false; } BackupFormVars(form1); form1.SEARCH.value=''; form1.ACTION.value='genplaylistdirect'; form1.submit(); RestoreFormVars(form1);",
 		},
 		'Play Remote'
 	);
@@ -3216,7 +3216,7 @@ sub search_progs {
 		{
 			-class => 'action'.$add_search_class_suffix,
 			-title => 'Create a persistent PVR search using the current search terms (i.e. all below programmes)',
-			-onClick => "if ('".$escaped_search."' == '.*' && $num_adv_srch == 0) { alert('Search = .* will download all available programmes.  Please enter a more specific search term or additional advanced search criteria (excluding $opt->{VERSIONLIST}->{title} and $opt->{FUTURE}->{title}).'); return false; } if ('".$escaped_search."' == '' ) { alert('Please enter a search term. Use Search = .* to record all programmes matching advanced search criteria.'); return false; } if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; }  BackupFormVars(form); form.NEXTPAGE.value='pvr_add'; form.submit(); RestoreFormVars(form);",
+			-onClick => "if ('".$escaped_search."' == '.*' && $num_adv_srch == 0) { alert('Search = .* will download all available programmes.  Please enter a more specific search term or additional advanced search criteria (excluding $opt->{VERSIONLIST}->{title} and $opt->{FUTURE}->{title}).'); return false; } if ('".$escaped_search."' == '' ) { alert('Please enter a search term. Use Search = .* to record all programmes matching advanced search criteria.'); return false; } if ( $matchcount > 30 ) { alert('Please limit your search to result in no more than 30 current programmes'); return false; }  BackupFormVars(form1); form1.NEXTPAGE.value='pvr_add'; form1.submit(); RestoreFormVars(form1);",
 		},
 		'Add Search to PVR'
 	);
@@ -3225,7 +3225,7 @@ sub search_progs {
 		{
 			-class => 'action',
 			-title => 'Refresh the list of programmes - can take a while',
-			-onClick => "BackupFormVars(form); form.target='_newtab_refresh'; form.NEXTPAGE.value='refresh'; form.submit(); RestoreFormVars(form); form.target=''; form.NEXTPAGE.value=''; ",
+			-onClick => "BackupFormVars(form1); form1.target='_newtab_refresh'; form1.NEXTPAGE.value='refresh'; form1.submit(); RestoreFormVars(form1); form1.target=''; form1.NEXTPAGE.value=''; ",
 			#-onClick => "window.frames['dataframe'].window.location.replace('?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh')",
 		},
 		'Refresh Cache'
@@ -3297,14 +3297,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Previous Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page-1; form.submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=$page-1; form1.submit(); RestoreFormVars(form1);",},
 		"<<",
 	)) if $page > 1;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page 1",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=1; form1.submit(); RestoreFormVars(form1);",},
 		"1",
 	)) if $page > 1;
 
@@ -3314,7 +3314,7 @@ sub pagetrail {
 		push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 			-title		=> "Page $pn",
 			-class		=> 'pagetrail pointer',
-			-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value='$pn'; form.submit(); RestoreFormVars(form);",},
+			-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value='$pn'; form1.submit(); RestoreFormVars(form1);",},
 			"$pn",
 		)) if $pn > 1 && $pn != $page && $pn < $pages;
 		push @pagetrail, td( { -class=>'pagetrail' }, label( {
@@ -3328,14 +3328,14 @@ sub pagetrail {
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Page ".$pages,
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$pages; form.submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=$pages; form1.submit(); RestoreFormVars(form1);",},
 		"$pages",
 	)) if $page < $pages;
 
 	push @pagetrail, td( { -class=>'pagetrail pointer' }, label( {
 		-title		=> "Next Page",
 		-class		=> 'pagetrail pointer',
-		-onClick	=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=$page+1; form.submit(); RestoreFormVars(form);",},
+		-onClick	=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=$page+1; form1.submit(); RestoreFormVars(form1);",},
 		">>",
 	)) if $page < $pages;
 
@@ -3566,7 +3566,7 @@ sub process_params {
 		type	=> 'popup', # type
 		default	=> 20, # default
 		value	=> ['10','25','50','100','200','400'], # values
-		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.PAGENO.value=1; form.submit(); RestoreFormVars(form);",
+		onChange=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=1; form1.submit(); RestoreFormVars(form1);",
 		save	=> 1,
 	};
 
@@ -3578,7 +3578,7 @@ sub process_params {
 		label	=> \%fieldname, # labels
 		default	=> 'index', # default
 		value	=> [@headings], # values
-		onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.submit(); RestoreFormVars(form);",
+		onChange=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.submit(); RestoreFormVars(form1);",
 		save	=> 1,
 	};
 
@@ -3587,7 +3587,7 @@ sub process_params {
 		tooltip	=> 'Reverse the sort order', # Tooltip
 		webvar	=> 'REVERSE', # webvar
 		type	=> 'radioboolean', # type
-		#onChange=> "BackupFormVars(form); form.NEXTPAGE.value='search_progs'; form.submit(); RestoreFormVars(form);",
+		#onChange=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.submit(); RestoreFormVars(form1);",
 		default	=> '0', # value
 		save	=> 1,
 	};
@@ -3882,7 +3882,7 @@ sub process_params {
 		label	=> , \%streamtype_labels, # labels
 		default	=> '', # default
 		value	=> [ '', 'none', 'flv', 'mov', 'asf', 'avi', 'mp3', 'aac', 'wav', 'flac' ], # values
-		onChange=> "form.submit();",
+		onChange=> "form1.submit();",
 		save	=> 1,
 	};
 
@@ -4077,14 +4077,14 @@ sub insert_javascript {
 	//
 	// Copy all non-grouped form values into a global hash
 	//
-	function BackupFormVars( form ) {
+	function BackupFormVars( f ) {
 		// empty out array
 		for(var key in form_backup) {
 			delete( form_backup[key] );
 		}
 
 		// copy forms elements
-		var elem = form.elements;
+		var elem = f.elements;
 		for(var i = 0; i < elem.length; i++) {
 			// exclude radio and checkbox types - can be duplicate names in groups...
 			if ( elem[i].type != "checkbox" && elem[i].type != "radio" ) {
@@ -4096,10 +4096,10 @@ sub insert_javascript {
 	//
 	// Copy all form values in the global hash into the specified form
 	//
-	function RestoreFormVars( form ) {
+	function RestoreFormVars( f ) {
 		// copy form elements
 		for(var key in form_backup) {
-			form.elements[ key ].value = form_backup[key];
+			f.elements[ key ].value = form_backup[key];
 			// delete element
 			delete( form_backup[key] );
 		}
@@ -4224,9 +4224,9 @@ sub insert_javascript {
 	function submitonEnter(evt){
 		var charCode = (evt.which) ? evt.which : event.keyCode
 		if ( charCode == "13" ) {
-			document.form.NEXTPAGE.value='search_progs';
-			document.form.PAGENO.value=1;
-			document.form.submit();
+			document.form1.NEXTPAGE.value='search_progs';
+			document.form1.PAGENO.value=1;
+			document.form1.submit();
 		}
 	}
 
