@@ -2663,7 +2663,8 @@ sub build_option_html {
 			radio_group(
 				-class		=> 'options',
 				-name		=> $webvar,
-				-values		=> { 0=>'Off' , 1=>'On' },
+				-values => [ 0 , 1 ],
+				-labels		=> { 0=>'Off' , 1=>'On' },
 				-default	=> $current,
 				-override	=> 1,
 			)
