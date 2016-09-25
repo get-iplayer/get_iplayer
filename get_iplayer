@@ -4415,11 +4415,10 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			my $command = $opt->{"command".$prog->{type}} || $opt->{command};
 			# No need to do all these post-tasks if its streaming-only
 			if ( $opt->{nowrite} && $opt->{stdout} ) {
 				# Run user command if streaming-only or a stream was writtem
-				$prog->run_user_command( $command ) if $command;
+				$prog->run_user_command( $opt->{command} ) if $opt->{command};
 				# Skip
 			} else {
 				# Add to history, tag file, and run post-record command if a stream was written
@@ -4436,8 +4435,8 @@ sub mode_ver_download_retry_loop {
 					$hist->add( $prog );
 					$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
 				}
-				if ( $command && ! $opt->{nowrite} ) {
-					$prog->run_user_command( $command );
+				if ( $opt->{command} && ! $opt->{nowrite} ) {
+					$prog->run_user_command( $opt->{command} );
 				}
 			}
 			$prog->report() if $opt->{pvr};
@@ -8274,7 +8273,6 @@ sub channels_schedule {
 sub opt_format {
 	return {
 		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,vgood,better,best,flash,hls,hvf (default=hvfhd,hlshd,hvfsd,hvfvhigh,hlsvhigh,hvfhigh,hlshigh,hvfstd,hlsstd,hvflow,hlslow)."],
-		commandtv	=> [ 1, "commandtv|command-tv=s", 'Output', '--command-tv <command>', "Run user command after successful recording of tv programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 		hlstvopts	=> [ 1, "hls-tv-opts|hlstvopts=s", 'Deprecated', '--hls-tv-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for tv"],
@@ -9560,7 +9558,6 @@ sub channels_schedule {
 sub opt_format {
 	return {
 		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dashhigh,dashstd,dashmed,dashlow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,dash,flashaac,haf,hlsaac (default=dashhigh,hafhigh,dashstd,hafstd,hlsaacstd,dashmed,hafmed,dashlow,haflow,hlsaaclow)."],
-		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "Run user command after successful recording of radio programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 		hlsradioopts	=> [ 1, "hls-radio-opts|hlsradioopts=s", 'Deprecated', '--hls-radio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for radio"],
