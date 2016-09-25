@@ -11655,7 +11655,7 @@ sub opt_format {
 		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr [pvr search name]', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command. Synonyms: --pvrrun, --pvr-run"],
 		pvrexclude	=> [ 0, "pvrexclude|pvr-exclude=s", 'PVR', '--pvr-exclude <string>', "Exclude the PVR searches to run by search name (regex or comma separated values). Synonyms: --pvrexclude"],
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search. Synonyms: --pvrsingle"],
-		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvr-add <search name>', "Save the named PVR search with the specified search terms. Search terms required unless --pid specified. Synonyms: --pvradd"],
+		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvr-add <search name>', "Save the named PVR search with the specified search terms.  Search terms required. Use --search=.* to force download of all available programmes. Synonyms: --pvradd"],
 		pvrdel		=> [ 0, "pvrdel|pvr-del=s", 'PVR', '--pvr-del <search name>', "Remove the named search from the PVR searches. Synonyms: --pvrdel"],
 		pvrdisable	=> [ 1, "pvrdisable|pvr-disable=s", 'PVR', '--pvr-disable <search name>', "Disable (not delete) a named PVR search. Synonyms: --pvrdisable"],
 		pvrenable	=> [ 1, "pvrenable|pvr-enable=s", 'PVR', '--pvr-enable <search name>', "Enable a previously disabled named PVR search. Synonyms: --pvrenable"],
@@ -11777,20 +11777,18 @@ sub run {
 		$opt->{get} = 1 if ! $opt->{test};
 
 		my $failcount = 0;
-		if ( $pvr->{$name}->{pid} ) {
+		# If this is a one-off queue pid entry then delete the PVR entry upon successful recording(s)
+		if ( $pvr->{$name}->{pid} && $name =~ /^ONCE_/ ) {
 			my @pids = split( /,/, $pvr->{$name}->{pid}  );
 			for ( @pids ) {
 				$opt->{pid} = $_;
 				$failcount += main::find_pid_matches( $hist );
 			}
+			$pvr->del( $name ) if not $failcount;
 
 		# Just make recordings of matching progs
 		} else {
 			$failcount = main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
-		}
-		# If this is a one-off queue entry then delete the PVR entry upon successful recording(s)
-		if ( $name =~ /^ONCE_/ ) {
-			$pvr->del( $name ) if not $failcount;
 		}
 		if ( $failcount ) {
 			main::logger "WARNING: PVR Run: $name: $failcount download failure(s)\n";
@@ -11845,6 +11843,9 @@ sub queue {
 		if ( $opt->{type} && $opt->{type} !~ /,/ ) {
 			# Add to PVR if not already in history (unless multimode specified)
 			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) ) || $opt->{multimode};
+		} else {
+			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
+			return 1;
 		}
 
 	# Search specified
