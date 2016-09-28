@@ -9058,37 +9058,37 @@ sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
 	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump')) {
+	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump') ) {
 		main::logger "WARNING: Required rtmpdump utility not found - cannot download Flash audio/video\n";
 		return 'next';
 	}
 	# Force raw mode if ffmpeg is not installed
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('ffmpeg')) {
+	if ( $mode =~ /^(rtmp|flash)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
 		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .flv file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hvf|haf)/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^(hls|hvf|haf)/ && ! main::exists_in_path('ffmpeg') ) {
 		if ( $opt->{hlsffmpeg} ) {
 			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg utility not found - cannot download HLS audio/video\n";
 			return 'next';
-		} else {
+		} elsif ( ! $opt->{raw} ) {
 			main::logger "\nWARNING: Required ffmpeg utility not found - not converting .ts file\n";
 			$opt->{raw} = 1;
 		}
 	}
 	# cannot convert hvf with avconv
-	if ( $mode =~ /^hvf/ && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
+	if ( $mode =~ /^hvf/ && ! $opt->{raw} && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
 		main::logger "\nWARNING: Cannot convert hvf modes with avconv (ffmpeg required) - not converting .ts file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for DASH
-	if ( $mode =~ /^dash/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^dash/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
 		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .m4a file\n";
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for Shoutcast
-	if ( $mode =~ /^shoutcast/ && (! main::exists_in_path('ffmpeg')) ) {
+	if ( $mode =~ /^shoutcast/ && ! main::exists_in_path('ffmpeg') ) {
 		main::logger "\nWARNING: Required ffmpeg utility not found - cannot download Shoutcast audio\n";
 		return 'next';
 	}
