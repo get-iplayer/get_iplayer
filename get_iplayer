@@ -5840,24 +5840,26 @@ sub get_metadata {
 					# programme versions
 					my %found;
 					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						my $type;
-						# check for audiodescribed and signed first
-						if ( grep /describe/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "audiodescribed";
-						} elsif ( grep /sign/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "signed";
-						} elsif ( grep /open subtitles/i, @{$ver->{types}->[0]->{type}} ) {
-							$type = "opensubtitles";
-						} else {
-							($type = lc($ver->{types}->[0]->{type}->[0])) =~ s/\s+.*$//;
-						}
-						# skip store only
-						next if $type =~ /store/;
-						if ( $type ) {
-							my $version = $type;
-							$version .= $found{$type} if ++$found{$type} > 1;
-							$prog->{verpids}->{$version} = $ver->{pid}->[0];
-							$prog->{durations}->{$version} = $ver->{duration}->[0];
+						for my $ver_type ( @{$ver->{types}->[0]->{type}} ) {
+							my $type;
+							# check for audiodescribed and signed first
+							if ( $ver_type =~ /describe/i ) {
+								$type = "audiodescribed";
+							} elsif ( $ver_type =~ /sign/i ) {
+								$type = "signed";
+							} elsif ( $type =~ /open subtitles/i ) {
+								$type = "opensubtitles";
+							} else {
+								($type = lc($ver_type)) =~ s/\s+.*$//;
+							}
+							# skip store only
+							next if $type =~ /store/;
+							if ( $type ) {
+								my $version = $type;
+								$version .= $found{$type} if ++$found{$type} > 1;
+								$prog->{verpids}->{$version} = $ver->{pid}->[0];
+								$prog->{durations}->{$version} = $ver->{duration}->[0];
+							}
 						}
 					}
 					$got_metadata = 1 if $pid;
