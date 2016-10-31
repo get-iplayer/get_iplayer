@@ -124,6 +124,7 @@ my $opt_format = {
 	checkduration		=> [ 1, "checkduration|check-duration!", 'Deprecated', '--check-duration', "Print message showing recorded duration, expected duration and difference between them."],
 	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to skip.  Possible values: level3,akamai,limelight,bidi"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
+	fps50		=> [ 1, "fps50", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
@@ -2470,7 +2471,7 @@ sub usage {
 		if ( $format =~ /!$/ ) {
 			$name_args{$name} = "1";
 		} elsif ( $syntax =~ / (<.*)$/ ) {
-			$name_args{$name} = $1; 
+			$name_args{$name} = $1;
 		}	
 		$name_desc{$name} = $desc;
 	}
@@ -3540,22 +3541,24 @@ sub generate_version_list {
 sub cmp_modes($$) {
 	my ($x, $y) = @_;
 	my %ranks = (
-		'vhd(\d?)' => 10,
-		'[^v]hd(\d?)' => 20,
-		'sd(\d?)' => 30,
+		'hd(\d?)' => 10,
+		'[^x]sd(\d?)' => 20,
+		'xsd(\d?)' => 30,
 		'vhigh(\d?)' => 40,
-		'[^v]high(\d?)' => 50,
-		'std(\d?)' => 60,
-		'med(\d?)' => 70,
-		'[^v]low(\d?)' => 80,
+		'[^vx]high(\d?)' => 50,
+		'xhigh(\d?)' => 60,
+		'[^x]std(\d?)' => 70,
+		'xstd(\d?)' => 80,
+		'med(\d?)' => 90,
+		'low(\d?)' => 100,
 	);
 	my %ranks2 = (
-		'^dash' => 100,
-		'^flash' => 200,
-		'^haf' => 300,
-		'^hls' => 400,
-		'^hvf' => 500,
-		'^subtitle' => 700,
+		'^dash' => 1000,
+		'^flash' => 2000,
+		'^haf' => 3000,
+		'^hls' => 4000,
+		'^hvf' => 5000,
+		'^subtitle' => 6000,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -5409,6 +5412,7 @@ sub parse_hls_connection {
 		for my $stream ( @streams ) {
 			next if $stream->{AUDIO} && $best_audio->{$stream->{RESOLUTION}} && $stream->{AUDIO} ne $best_audio->{$stream->{RESOLUTION}};
 			my $hls_media = dclone($media);
+			delete $hls_media->{fps};
 			delete $hls_media->{width};
 			delete $hls_media->{height};
 			delete $hls_media->{bitrate};
@@ -5420,6 +5424,7 @@ sub parse_hls_connection {
 				$hls_media->{audio_bitrate} = int($ab/1000);
 				$hls_media->{video_bitrate} = int($vb/1000);
 			}
+			$hls_media->{fps} = $stream->{"FRAME-RATE"};
 			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1024.0);
 			next if $min_bitrate && $hls_media->{bitrate} < $min_bitrate;
 			next if $max_bitrate && $hls_media->{bitrate} > $max_bitrate;
@@ -5494,7 +5499,7 @@ sub parse_dash_connection {
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for MPEG-DASH streams.\n";
 		return;
-	} 
+	}
 	my $media = shift;
 	my $conn = shift;
 	my $min_bitrate = shift;
@@ -5663,18 +5668,23 @@ sub get_stream_data_cdn {
 		# Common attributes
 		# swfurl = Default iPlayer swf version
 		my $conn = {
-			swfurl		=> $opt->{swfurl} || "http://emp.bbci.co.uk/emp/SMPf/1.16.6/StandardMediaPlayerChromelessFlash.swf",
-			ext		=> $ext,
+			ext			=> $ext,
 			streamer	=> $streamer,
 			bitrate		=> $mattribs->{bitrate},
-			server		=> $cattribs->{server},
-			identifier	=> $cattribs->{identifier},
-			authstring	=> $cattribs->{authString},
 			priority	=> $cattribs->{priority},
 			expires		=> $mattribs->{expires},
-			size			=>  $mattribs->{media_file_size},
+			size		=> $mattribs->{media_file_size},
 		};
-
+				
+		if ( $streamer =~ /rtmp/ ) {
+			%$conn = (%$conn,
+				swfurl		=> $opt->{swfurl} || "http://emp.bbci.co.uk/emp/SMPf/1.16.6/StandardMediaPlayerChromelessFlash.swf",
+				server		=> $cattribs->{server},
+				identifier	=> $cattribs->{identifier},
+				authstring	=> $cattribs->{authString}
+			);
+		}
+		
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Default appication is 'ondemand'
@@ -5807,6 +5817,7 @@ sub get_stream_set_type {
 		push @type, "$conn->{streamer}";
 		push @type, "$mattribs->{encoding}" if $mattribs->{encoding};
 		push @type, "$mattribs->{width}x$mattribs->{height}" if $mattribs->{width} && $mattribs->{height};
+		push @type, "$mattribs->{fps}fps" if $mattribs->{fps};
 		push @type, "$mattribs->{bitrate}kbps" if $mattribs->{bitrate};
 		push @type, "stream";
 		push @type, "(CDN: $cattribs->{kind}/$cattribs->{priority})" if $cattribs->{kind} && $cattribs->{priority};
@@ -5964,7 +5975,7 @@ sub get_stream_data {
 				next if check_geoblock( $xml );
 				$unblocked = 1;
 				my @iptv_medias = parse_metadata( $xml );
-				my $min_bitrate = 2000;
+				my $min_bitrate = 1500;
 				for my $iptv_media ( @iptv_medias ) {
 					for my $iptv_conn ( @{$iptv_media->{connections}} ) {
 						next if $iptv_conn->{supplier} =~ /$exclude_regex/;
@@ -6065,13 +6076,11 @@ sub get_stream_data {
 					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
 				}	elsif ( $mattribs->{height} > 400 ) {
 					get_stream_data_cdn( $data, $mattribs, "hlsvhigh", 'hls', $ext );
-				} elsif ( $mattribs->{height} > 200 ) {
+				} elsif ( $mattribs->{height} > 300 ) {
 					if ( $mattribs->{bitrate} > 700 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlshigh", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 450 ) {
 						get_stream_data_cdn( $data, $mattribs, "hlsstd", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 300 ) {
-						get_stream_data_cdn( $data, $mattribs, "hlslow", 'hls', $ext );
+					} elsif ( $mattribs->{bitrate} > 450 ) {
+						get_stream_data_cdn( $data, $mattribs, "hlsxstd", 'hls', $ext );
 					}
 				}
 			} elsif ( $mattribs->{kind} =~ 'audio' ) {
@@ -6092,20 +6101,20 @@ sub get_stream_data {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hvfhd", 'hls', $ext );
-				} elsif ( $mattribs->{height} > 400 ) {
-					if ( $mattribs->{bitrate} > 2000 ) {
+				} elsif ( $mattribs->{height} > 500 ) {
+					if ( $mattribs->{bitrate} > 2500 ) {
 						get_stream_data_cdn( $data, $mattribs, "hvfsd", 'hls', $ext );
 					} else {
-						get_stream_data_cdn( $data, $mattribs, "hvfvhigh", 'hls', $ext );
+						get_stream_data_cdn( $data, $mattribs, "hvfxsd", 'hls', $ext );
 					}
-				} elsif ( $mattribs->{height} > 200 ) {
-					if ( $mattribs->{bitrate} > 700 ) {
+				} elsif ( $mattribs->{height} > 350 ) {
+					if ( $mattribs->{bitrate} > 1500 ) {
 						get_stream_data_cdn( $data, $mattribs, "hvfhigh", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 500 ) {
-						get_stream_data_cdn( $data, $mattribs, "hvfstd", 'hls', $ext );
-					} elsif ( $mattribs->{bitrate} > 300 ) {
-						get_stream_data_cdn( $data, $mattribs, "hvflow", 'hls', $ext );
+					} else {
+						get_stream_data_cdn( $data, $mattribs, "hvfxhigh", 'hls', $ext );
 					}
+				} elsif ( $mattribs->{height} > 250 ) {
+					get_stream_data_cdn( $data, $mattribs, "hvflow", 'hls', $ext );
 				}
 			}
 
@@ -6220,7 +6229,7 @@ sub get_stream_data {
 
 	# Report modes found
 	if ( $opt->{verbose} ) {
-		main::logger "INFO: Found mode $_: $data->{$_}->{type}\n" for sort keys %{ $data };
+	main::logger "INFO: Found mode $_: $data->{$_}->{type}\n" for sort Programme::cmp_modes keys %{ $data };
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
@@ -6242,27 +6251,33 @@ sub modelist {
 		$mlist = 'default';
 	}
 	$mlist =~ s/rtmp/flash/g;
-	$mlist =~ s/hls50/hvf/g;
-	my $fmt = "tv";
 	if ( $prog->{type} eq "tv" ) {
 		$mlist =~ s/haf/hvf/g;
-		$fmt = "tv";
+		# backcompat
+		if ( $mlist =~ /tv25fps/ ) {
+			undef $opt->{fps50};
+		}
+		$mlist =~ s/hlshigh/hlsstd/g;
+		$mlist =~ s/hlsxhigh/hlsstd/g;
+		$mlist =~ s/hlslow/hlsxstd/g;
+		$mlist =~ s/hvfvhigh/hvfhigh/g;
+		$mlist =~ s/hvfxvhigh/hvfhigh/g;
+		$mlist =~ s/hvfstd/hvflow/g;
+		$mlist =~ s/hvfxstd/hvflow/g;
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hvf/haf/g;
-		print $mlist =~ /\bhls\b/;
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
-		$fmt = "radio";
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
-	$mlist = main::expand_list($mlist, 'default', 'best');
-	$mlist = main::expand_list($mlist, 'best', "${fmt}best");
-	$mlist = main::expand_list($mlist, 'better', "${fmt}better");
-	$mlist = main::expand_list($mlist, 'vgood', "${fmt}vgood");
-	$mlist = main::expand_list($mlist, 'good', "${fmt}good");
-	$mlist = main::expand_list($mlist, 'worse', "${fmt}worse");
-	$mlist = main::expand_list($mlist, 'worst', "${fmt}worst");
+	$mlist = main::expand_list($mlist, 'default', "$prog->{type}default");
+	$mlist = main::expand_list($mlist, 'best', "$prog->{type}best");
+	$mlist = main::expand_list($mlist, 'better', "$prog->{type}better");
+	$mlist = main::expand_list($mlist, 'vgood', "$prog->{type}vgood");
+	$mlist = main::expand_list($mlist, 'good', "$prog->{type}good");
+	$mlist = main::expand_list($mlist, 'worse', "$prog->{type}worse");
+	$mlist = main::expand_list($mlist, 'worst', "$prog->{type}worst");
 	# DASH on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
 		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
@@ -6314,9 +6329,9 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hlsbest', 'hlshd,hlsbetter');
 		$mlist = main::expand_list($mlist, 'hlsbetter', 'hlsvgood');
 		$mlist = main::expand_list($mlist, 'hlsvgood', 'hlsvhigh,hlsgood');
-		$mlist = main::expand_list($mlist, 'hlsgood', 'hlshigh,hlsworse');
+		$mlist = main::expand_list($mlist, 'hlsgood', 'hlsworse');
 		$mlist = main::expand_list($mlist, 'hlsworse', 'hlsstd,hlsworst');
-		$mlist = main::expand_list($mlist, 'hlsworst', 'hlslow');
+		$mlist = main::expand_list($mlist, 'hlsworst', 'hlsxstd');
 	}
 	# HLS audio clips
 	if ( $prog->{type} eq "radio" && $mlist =~ /hlsaac/ ) {
@@ -6333,11 +6348,18 @@ sub modelist {
 	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
 		$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
 		$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbest');
-		$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfbetter');
-		$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfsd,hvfvgood');
-		$mlist = main::expand_list($mlist, 'hvfvgood', 'hvfvhigh,hvfgood');
-		$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfworse');
-		$mlist = main::expand_list($mlist, 'hvfworse', 'hvfstd,hvfworst');
+		if ( $opt->{fps50} ) {
+			$mlist = main::expand_list($mlist, 'hvfbest', 'hvfhd,hvfbetter');
+			$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfsd,hvfxsd,hvfvgood');
+			$mlist = main::expand_list($mlist, 'hvfvgood', 'hvfgood');
+			$mlist = main::expand_list($mlist, 'hvfgood', 'hvfhigh,hvfxhigh,hvfworse');
+		} else {
+			$mlist = main::expand_list($mlist, 'hvfbest', 'hvfbetter');
+			$mlist = main::expand_list($mlist, 'hvfbetter', 'hvfxsd,hvfvgood');
+			$mlist = main::expand_list($mlist, 'hvfvgood', 'hvfgood');
+			$mlist = main::expand_list($mlist, 'hvfgood', 'hvfxhigh,hvfworse');
+		}
+		$mlist = main::expand_list($mlist, 'hvfworse', 'hvfworst');
 		$mlist = main::expand_list($mlist, 'hvfworst', 'hvflow');
 	}
 	# default on-demand radio
@@ -6353,15 +6375,22 @@ sub modelist {
 	}
 	# default on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /tv/ ) {
-		$mlist = main::expand_list($mlist, 'tv25fps', 'hlshd,tvvgood');
 		$mlist = main::expand_list($mlist, 'tv', 'tvdefault');
+		$mlist = main::expand_list($mlist, 'tv25fps', 'tvdefault');
 		$mlist = main::expand_list($mlist, 'tvdefault', 'tvbest');
-		$mlist = main::expand_list($mlist, 'tvbest', 'hvfhd,hlshd,tvbetter');
-		$mlist = main::expand_list($mlist, 'tvbetter', 'hvfsd,tvvgood');
-		$mlist = main::expand_list($mlist, 'tvvgood', 'hvfvhigh,hlsvhigh,tvgood');
-		$mlist = main::expand_list($mlist, 'tvgood', 'hvfhigh,hlshigh,tvworse');
-		$mlist = main::expand_list($mlist, 'tvworse', 'hvfstd,hlsstd,tvworst');
-		$mlist = main::expand_list($mlist, 'tvworst', 'hvflow,hlslow');
+		if ( $opt->{fps50} ) {
+			$mlist = main::expand_list($mlist, 'tvbest', 'hvfhd,hlshd,tvbetter');
+			$mlist = main::expand_list($mlist, 'tvbetter', 'hvfsd,hvfxsd,tvvgood');
+			$mlist = main::expand_list($mlist, 'tvvgood', 'hlsvhigh,tvgood');
+			$mlist = main::expand_list($mlist, 'tvgood', 'hvfhigh,hvfxhigh,tvworse');
+		} else {
+			$mlist = main::expand_list($mlist, 'tvbest', 'hlshd,tvbetter');
+			$mlist = main::expand_list($mlist, 'tvbetter', 'hvfxsd,tvvgood');
+			$mlist = main::expand_list($mlist, 'tvvgood', 'hlsvhigh,tvgood');
+			$mlist = main::expand_list($mlist, 'tvgood', 'hvfxhigh,tvworse');
+		}
+		$mlist = main::expand_list($mlist, 'tvworse', 'hlsstd,hlsxstd,tvworst');
+		$mlist = main::expand_list($mlist, 'tvworst', 'hvflow');
 	}
 	return $mlist;
 }
@@ -6465,7 +6494,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,vgood,better,best,flash,hls,hvf (default=hvfhd,hlshd,hvfsd,hvfvhigh,hlsvhigh,hvfhigh,hlshigh,hvfstd,hlsstd,hvflow,hlslow)."],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,hvfhd,hvfxd,hvfsd,hvfxhigh,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,vgood,better,best,flash,hls,hvf (default=hvfhd,hlshd,hvfsd,hvfvhigh,hlsvhigh,hvfhigh,hlshigh,hvfstd,hlsstd,hvflow,hlslow)."],
 		commandtv	=> [ 1, "commandtv|command-tv=s", 'Output', '--command-tv <command>', "Run user command after successful recording of tv programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
@@ -7777,7 +7806,7 @@ sub postproc {
 	my $return;
 
 	# do nothing if no file
-	return 0 unless ( -f $file_tmp ); 
+	return 0 unless ( -f $file_tmp );
 	
 	# Retain raw format if required
 	if ( $opt->{raw} ) {
@@ -8217,7 +8246,7 @@ sub get_builtin {
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 					} else {
 						# don't retry if 404 received
-						main::logger "\nERROR: Segment not available from server ($sequence)\n"; 
+						main::logger "\nERROR: Segment not available from server ($sequence)\n";
 						main::logger "ERROR: Segment URL: $segment_url\n";
 						main::logger "ERROR: Download aborted at ".(int($elapsed - $segment_duration))." secs in programme\n";
 						close $fh;
