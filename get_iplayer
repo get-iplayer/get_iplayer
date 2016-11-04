@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes and BBC podcasts
+# get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes
 #
 #    Copyright (C) 2008-2010 Phil Lewis
 #
@@ -90,8 +90,7 @@ my %prog_types = (
 	tv		=> 'Programme::tv',
 	radio		=> 'Programme::radio',
 	liveradio	=> 'Programme::liveradio',
-	livetv		=> 'Programme::livetv',
-	podcast		=> 'Programme::podcast'
+	livetv		=> 'Programme::livetv'
 );
 
 
@@ -161,10 +160,10 @@ my $opt_format = {
 	# Search
 	availablesince		=> [ 0, "availablesince|available-since=n", 'Search', '--available-since <hours>', "Limit search to programmes that have become available in the last N hours"],
 	before		=> [ 1, "before=n", 'Search', '--before <hours>', "Limit search to programmes added to the cache before N hours ago"],
-	category 	=> [ 0, "category=s", 'Deprecated', '--category <string>', "Narrow search to matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes)."],
+	category 	=> [ 0, "category=s", 'Deprecated', '--category <string>', "Narrow search to matched categories (regex or comma separated values). No longer supported."],
 	channel		=> [ 0, "channel=s", 'Search', '--channel <string>', "Narrow search to matched channel(s) (regex or comma separated values)"],
 	exclude		=> [ 0, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (regex or comma separated values)"],
-	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Deprecated', '--exclude-category <string>', "Narrow search to exclude matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes)."],
+	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Deprecated', '--exclude-category <string>', "Narrow search to exclude matched categories (regex or comma separated values). No longer supported."],
 	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (regex or comma separated values)"],
 	expiresbefore		=> [ 1, "expiresbefore|expires-before=n", 'Search', '--expires-before <hours>', "Limit search to programmes that will expire in the next N hours"],
 	fields		=> [ 0, "fields=s", 'Search', '--fields <field1>,<field2>,..', "Searches only in the specified comma separated fields"],
@@ -477,7 +476,7 @@ logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr Tagger );
 Options->get_class_options( progclass($_) ) for progclass();
-Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast http );
+Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls shoutcast );
 
 
 # Parse the cmdline using the opt_format hash
@@ -1876,187 +1875,6 @@ sub proxy_enable {
 
 
 # Generic
-# Usage download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
-#  ensure filehandle $fh is open in append mode
-# or, $content = download_block(undef, $url_2, $ua, $start, $end, $file_len);
-# Called in 4 ways:
-# 1) write to real file			=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh);
-# 2) write to real file + STDOUT	=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt->{stdout}==true
-# 3) write to STDOUT only		=> download_block($file, $url_2, $ua, $start, $end, $file_len, $fh); + $opt->{stdout}==true + $opt->{nowrite}==false
-# 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end, $file_len, undef);
-# 4) write to memory (and return data)  => download_block(undef, $url_2, $ua, $start, $end);
-sub download_block {
-
-	my ($file, $url, $ua, $start, $end, $file_len, $fh) = @_;
-	my $orig_length;
-	my $buffer;
-	my $lastpercent = 0;
-	my $now = time();
-
-	# If this is an 'append to file' mode call
-	if ( defined $file && $fh && (!$opt->{nowrite}) ) {
-		# Stage 3b: Record File
-		$orig_length = tell $fh;
-		logger "INFO: Appending to $file\n" if $opt->{verbose};
-	}
-
-	# Setup request headers
-	my $h = new HTTP::Headers(
-		'User-Agent'	=> main::user_agent( 'desktop' ),
-		'Accept'	=> '*/*',
-		'Range'        => "bytes=${start}-${end}",
-	);
-
-	# Use url prepend if required
-	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
-		$url = $opt->{proxy}.main::url_encode( $url );
-		$url =~ s/^prepend://g;
-	}
-
-	my $req = HTTP::Request->new ('GET', $url, $h);
-
-	# Set time to use for download rate calculation
-	# Define callback sub that gets called during download request
-	# This sub actually writes to the open output file and reports on progress
-	my $callback = sub {
-		my ($data, $res, undef) = @_;
-		# Don't write the output to the file if there is no content-length header
-		return 0 if ( ! $res->header("Content-Length") );
-		# If we don't know file length in advanced then set to size reported reported from server upon download
-		$file_len = $res->header("Content-Length") + $start if ! defined $file_len;
-		# Write output
-		print $fh $data if ! $opt->{nowrite};
-		print STDOUT $data if $opt->{stdout};
-		# return if streaming to stdout - no need for progress
-		return if $opt->{stdout} && $opt->{nowrite};
-		return if $opt->{quiet} || $opt->{silent};
-		# current file size
-		my $size = tell $fh;
-		# Download percent
-		my $percent = 100.0 * $size / $file_len;
-		# Don't update display if we haven't dowloaded at least another 0.1%
-		if ( not $opt->{hash} ) {
-			return if ($percent - $lastpercent) < 0.1;
-		} else {
-			return if ($percent - $lastpercent) < 1;
-		}
-		$lastpercent = $percent;
-		if ( $opt->{hash} ) {
-			logger '#';
-		} else {
-			# download rates in bytes per second and time remaining
-			my $rate_bps;
-			my $rate;
-			my $time;
-			my $timecalled = time();
-			if ($timecalled - $now < 1) {
-				$rate = '-----kbps';
-				$time = '--:--:--';
-			} else {
-				$rate_bps = ($size - $orig_length) / ($timecalled - $now);
-				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
-				$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
-			}
-			logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r",
-				$size / 1024.0 / 1024.0,
-				$file_len / 1024.0 / 1024.0,
-				$rate,
-				$percent,
-				$time,
-			;
-		}
-	};
-
-	my $callback_memory = sub {
-		my ($data, $res, undef) = @_;
-		# append output to buffer
-		$buffer .= $data;
-		return if $opt->{quiet} || $opt->{silent};
-		# current buffer size
-		my $size = length($buffer);
-		# download rates in bytes per second
-		my $timecalled = time();
-		my $rate_bps;
-		my $rate;
-		my $time;
-		my $percent;
-		# If we can get Content_length then display full progress
-		if ($res->header("Content-Length")) {
-			$file_len = $res->header("Content-Length") if ! defined $file_len;
-			# Download percent
-			$percent = 100.0 * $size / $file_len;
-			if ( not $opt->{hash} ) {
-				return if ($percent - $lastpercent) < 0.1;
-			} else {
-				return if ($percent - $lastpercent) < 1;
-			}
-			$lastpercent = $percent;
-			if ( $opt->{hash} ) {
-				logger '#';
-			} else {
-				# Block length
-				$file_len = $res->header("Content-Length");
-				if ($timecalled - $now < 0.1) {
-					$rate = '-----kbps';
-					$time = '--:--:--';
-				} else {
-					$rate_bps = $size / ($timecalled - $now);
-					$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps );
-					$time = sprintf("%02d:%02d:%02d", ( gmtime( ($file_len - $size) / $rate_bps ) )[2,1,0] );
-				}
-				# time remaining
-				logger sprintf "%8.2fMB / %.2fMB %s %5.1f%%, %s remaining         \r",
-					$size / 1024.0 / 1024.0,
-					$file_len / 1024.0 / 1024.0,
-					$rate,
-					$percent,
-					$time,
-				;
-			}
-		# Just used simple for if we cannot determine content length
-		} else {
-			if ($timecalled - $now < 0.1) {
-				$rate = '-----kbps';
-			} else {
-				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $size / ($timecalled - $now) );
-			}
-			logger sprintf "%8.2fMB %s         \r", $size / 1024.0 / 1024.0, $rate;
-		}
-	};
-
-	# send request
-	logger "\nINFO: Downloading range ${start}-${end}\n" if $opt->{verbose};
-	logger "\r                              \r" if not $opt->{hash};
-	my $res;
-
-	# If $fh undefined then get block to memory (fh always defined for stdout or file d/load)
-	if (defined $fh) {
-		logger "DEBUG: writing stream to stdout, Range: $start - $end of $url\n" if $opt->{verbose} && $opt->{stdout};
-		logger "DEBUG: writing stream to $file, Range: $start - $end of $url\n" if $opt->{verbose} && !$opt->{nowrite};
-		$res = $ua->request($req, $callback);
-		if (  (! $res->is_success) || (! $res->header("Content-Length")) ) {
-			logger "ERROR: Failed to Download block\n\n";
-			return 5;
-		}
-		logger "INFO: Content-Length = ".$res->header("Content-Length")."                               \n" if $opt->{verbose};
-		return 0;
-
-	# Memory Block
-	} else {
-		logger "DEBUG: writing stream to memory, Range: $start - $end of $url\n" if $opt->{debug};
-		$res = $ua->request($req, $callback_memory);
-		if ( (! $res->is_success) ) {
-			logger "ERROR: Failed to Download block\n\n";
-			return '';
-		} else {
-			return $buffer;
-		}
-	}
-}
-
-
-
-# Generic
 # create_ua( <agentname>|'', [<cookie mode>] )
 # cookie mode:	0: retain cookies
 #		1: no cookies
@@ -3067,7 +2885,7 @@ sub usage {
 	my @dump;
 	push @man,
 		'.TH GET_IPLAYER "1" "September 2016" "Phil Lewis" "get_iplayer Manual"',
-		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more',
+		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer',
 		'.SH SYNOPSIS',
 		'\fBget_iplayer\fR [<options>] [<regex|index> ...]',
 		'.PP',
@@ -3085,7 +2903,7 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--refresh\fR',
 		'.SH DESCRIPTION',
-		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV/Radio, BBC Podcast programmes. Other 3rd-Party plugins may be available.',
+		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV and Radio programmes.',
 		'.PP',
 		'\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme',
 		'directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to',
@@ -4495,10 +4313,8 @@ sub tag_file {
 		main::logger("WARNING: File $prog->{thumbfile} already exists\n\n");
 	}
 	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
-	if ( $prog->{type} ne "podcast" ) {
-		# tag programme
-		Tagger->tag_prog($prog);
-	}
+	# tag programme
+	Tagger->tag_prog($prog);
 	# clean up thumbnail if necessary
 	unlink $prog->{thumbfile} if ! $opt->{thumb};
 }
@@ -9991,313 +9807,6 @@ sub min_download_size {
 }
 
 
-################### Podcast class #################
-package Programme::podcast;
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-# Inherit from Programme class
-use base 'Programme';
-# Class vars
-# Global options
-my $opt;
-
-# Constructor
-# Usage: $prog{$pid} = Programme->new( 'pid' => $pid, 'name' => $name, <and so on> );
-sub new {
-	my $type = shift;
-	my %params = @_;
-	my $self = {};
-	for (keys %params) {
-		$self->{$_} = $params{$_};
-	}
-	# Ensure the subclass $opt var is pointing to the Superclass global optref
-	$opt = $Programme::optref;
-	bless $self, $type;
-}
-
-sub index_min { return 200001 }
-sub index_max { return 299999 }
-
-# Class cmdline Options
-sub opt_format {
-	return {
-		outputpodcast	=> [ 1, "outputpodcast=s", 'Deprecated', '--outputpodcast <dir>', "Output directory for podcast recordings (overrides --output)"],
-	};
-}
-
-# Method to return optional list_entry format
-sub optional_list_entry_format {
-	my $prog = shift;
-	my @format;
-	for ( qw/ available channel categories / ) {
-		push @format, $prog->{$_} if defined $prog->{$_};
-	}
-	return ', '.join ', ', @format;
-}
-
-# Returns the modes to try for this prog type
-sub modelist {
-	return 'podcast';
-}
-
-# Usage: Programme::podcast->get_links( $prog, 'podcast' );
-sub get_links {
-	shift; # ignore obj ref
-	my $prog = shift;
-	my $prog_type = shift;
-	my $podcast_index_feed_url = 'http://www.bbc.co.uk/podcasts.opml';
-	my $xml;
-	my $res;
-	eval "use XML::Simple";
-	if ($@) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module to use '$prog_type' programme type\n";
-		return 0;
-	};
-	main::logger "INFO: Getting podcast Index Feeds\n";
-	# Setup User agent
-	my $ua = main::create_ua('get_iplayer');
-
-	# Method
-	# $podcast_index_feed_url (gets list of rss feeds for each podcast prog) =>
-	# http://www.bbc.co.uk/programmes/$pid/episodes/downloads.rss
-
-	# Download index feed
-	my $xmlindex = main::request_url_retry($ua, $podcast_index_feed_url, 3, '.', "WARNING: Failed to get podcast index from site\n");
-	$xmlindex =~ s/\n/ /g;
-
-	# Every RSS feed has an extry like below (all in a text block - not formatted like below)
-	# <opml version="1.1">
-	# 	...
-	# 	<body>
-	# 		<outline text="BBC Station List">
-	# 			<outline text="BBC Radio 1"
-	# 				   fullname="BBC Radio 1"
-	# 				   networkId="radio1">
-	# 				<outline type="rss"
-	# 						 version="RSS2"
-	# 						 language="en-gb"
-	# 						 text="In Our Time"
-	# 						 description="Melvyn Bragg and guests discuss the history of ideas"
-	# 						 xmlUrl="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads.rss"
-	# 						 htmlUrl="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads"
-	# 						 imageHref="http://ichef.bbci.co.uk/images/ic/304x304/p02sfr3z.jpg"
-	# 						 keyname="b006qykl"
-	# 						 allow="all"
-	# 						 active="true"
-	# 						 page="http://www.bbc.co.uk/programmes/b006qykl/episodes/downloads"
-	# 						 flavour="Programme Highlights"
-	# 						 typicalDurationMins="46"
-	# 						 bbcgenres="History" />
-	# 				...
-	# 			</outline>
-	# 			...
-	# 		</outline>
-	# 		...
-	# 	<body>
-	# </opml>
-
-	my $doc = eval { XMLin($xmlindex, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
-	if ( $@ ) {
-		main::logger "ERROR: Could not parse podcast index\n";
-		return 0;
-	}
-	for my $station (@{$doc->{body}[0]->{outline}[0]->{outline}}) {
-		my $channel = $station->{text};
-		for my $program (@{$station->{outline}}) {
-			my ($url, $web, $header, $name, $thumbnail);
-			$url = $program->{xmlUrl};
-			$web = $program->{htmlUrl};
-			# Skip if there is no feed data for channel
-			next if ! ($channel || $url);
-			# Get RSS feeds for each podcast programme
-			main::logger "DEBUG: Getting podcast feed $url\n" if $opt->{verbose};
-			$xml = main::request_url_retry($ua, $url, 3, '.', "WARNING: Failed to get podcast feed for $channel / $_ from iplayer site\n") if $opt->{verbose};
-			$xml = main::request_url_retry($ua, $url, 3, '.', '') if ! $opt->{verbose};
-			# skip if no data
-			next if ! $xml;
-			main::logger "INFO: Got ".(grep /<media:content/, split /<item>/, $xml)." programmes\n" if $opt->{verbose};
-			decode_entities($xml);
-
-			# First entry is channel data
-			# <?xml version="1.0" encoding="utf-8"?>
-			#<rss xmlns:media="http://search.yahoo.com/mrss/"
-			#xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-			#version="2.0">
-			#  <channel>
-			#    <title>Stuart Maconie's Freak Zone</title>
-			#    <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-			#    <description>Weekly highlights from Stuart Maconie's
-			#    ...podcast is only available in the UK.</description>
-			#    <itunes:summary>Weekly highlights from Stuart Maconie's
-			#    ...podcast is only available in the UK.</itunes:summary>
-			#    <itunes:author>BBC 6 Music</itunes:author>
-			#    <itunes:owner>
-			#      <itunes:name>BBC</itunes:name>
-			#      <itunes:email>podcast.support@bbc.co.uk</itunes:email>
-			#    </itunes:owner>
-			#    <language>en</language>
-			#    <ttl>720</ttl>
-			#    <image>
-			#      <url>
-			#      http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg</url>
-			#      <title>Stuart Maconie's Freak Zone</title>
-			#      <link>http://www.bbc.co.uk/6music/shows/freakzone/</link>
-			#    </image>
-			#    <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-			#    <copyright>(C) BBC 2008</copyright>
-			#    <pubDate>Sun, 06 Jul 2008 20:00:05 +0100</pubDate>
-			#    <itunes:category text="Music" />
-			#    <itunes:keywords>Stewart Maconie, Macconie, freekzone,
-			#    freakzone, macoonie</itunes:keywords>
-			#    <media:keywords>Stewart Maconie, Macconie, freekzone,
-			#    freakzone, macoonie</media:keywords>
-			#   <itunes:explicit>no</itunes:explicit>
-			#    <media:rating scheme="urn:simple">nonadult</media:rating>
-
-			# Parse XML
-			# get list of entries within <entry> </entry> tags
-			my @entries = split /<item>/, $xml;
-			# first element == <channel> header
-			$header = shift @entries;
-			# Get podcast name
-			$name = $1 if $header =~ m{<title>\s*(.+?)\s*</title>};
-			# Parse the categories into hash
-			# <itunes:category text="Music" />
-			my @category;
-			for my $line ( grep /<itunes:category/, (split /\n/, $header) ) {
-				push @category, $1 if $line =~ m{<itunes:category\s+text="\s*(.+?)\s*"};
-			}
-			# Get thumbnail from header
-			# <itunes:image href="http://www.bbc.co.uk/radio/podcasts/freakzone/assets/_300x300.jpg" />
-			$thumbnail = $1 if $header =~ m{<itunes:image href="\s*(.+?)\s*"};
-
-			# Followed by items:
-			#    <item>
-			#      <title>FreakZone: C'est Stuart avec le Professeur Spear et le
-			#      pop francais?</title>
-			#      <description>Stuart and Justin discuss the sub-genre of
-			#      French 'cold wave' in this week's module.</description>
-			#      <itunes:subtitle>Stuart and Justin discuss the sub-genre of
-			#      French 'cold wave' in this week's
-			#      module....</itunes:subtitle>
-			#      <itunes:summary>Stuart and Justin discuss the sub-genre of
-			#      French 'cold wave' in this week's module.</itunes:summary>
-			#      <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-			#      <itunes:duration>14:23</itunes:duration>
-			#      <enclosure url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-			#      length="13891916" type="audio/mpeg" />
-			#      <guid isPermaLink="false">
-			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</guid>
-			#      <link>
-			#      http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-			#      <media:content url="http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3"
-			#      fileSize="13891916" type="audio/mpeg" medium="audio"
-			#      expression="full" duration="863" />
-			#      <itunes:author>BBC 6 Music</itunes:author>
-			#    </item>
-
-			foreach my $entry (@entries) {
-				$entry =~ s/[\r\n]+/ /g;
-				my ($episode, $desc, $pid, $available, $duration);
-				# Use the link as a guid
-				# <link>   http://downloads.bbc.co.uk/podcasts/6music/freakzone/freakzone_20080706-2000.mp3</link>
-				$pid = $1 if $entry =~ m{<link>\s*(.+?)</link>};
-				next if ! $pid;
-				# Skip if this pid is a duplicate
-				if ( defined $prog->{$pid} ) {
-					main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel)\n" if $opt->{verbose};
-					next;
-				}
-				# parse episode
-				# <title>FreakZone: C'est Stuart avec le Professeur Spear et le pop francais?</title>
-				$episode = $1 if $entry =~ m{<title>\s*(.*?)\s*</title>};
-				# <pubDate>Sun, 06 Jul 2008 20:00:00 +0100</pubDate>
-				$available = $1 if $entry =~ m{<pubDate>\s*(.*?)\s*</pubDate>};
-				# <description>Stuart and Justin discuss the sub-genre of French 'cold wave' in this week's module.</description>
-				$desc = $1 if $entry =~ m{<description>\s*(.*?)\s*</description>};
-				# Duration
-				$duration = $1 if $entry =~ m{<itunes:duration>\s*(.*?)\s*</itunes:duration>};
-				# build data structure
-				$prog->{$pid} = Programme::podcast->new(
-					'pid'		=> $pid,
-					'name'		=> $name,
-					'versions'	=> 'default',
-					'episode'	=> $episode,
-					'desc'		=> $desc,
-					'available'	=> $available,
-					'duration'	=> $duration,
-					'thumbnail'	=> $thumbnail,
-					'channel'	=> $channel,
-					'categories'	=> join(',', @category),
-					'type'		=> $prog_type,
-					'web'		=> $web,
-				);
-			}
-		}
-	}
-	main::logger "\n";
-	return 0;
-}
-
-# Gets media streams data for this version pid
-# $media = http|undef
-sub get_stream_data {
-	my ( $prog, $verpid, $media ) = @_;
-	my $data = {};
-	$opt->{quiet} = 0 if $opt->{streaminfo};
-	$data->{podcast}->{ext} = $prog->{pid};
-	$data->{podcast}->{ext} =~ s|^.*\.(\w+)$|$1|g;
-	$data->{podcast}->{streamer} = 'http';
-	$data->{podcast}->{streamurl} = $prog->{pid};
-	$data->{podcast}->{type} = 'Podcast stream';
-	# Return a hash with media => url if '' is specified - otherwise just the specified url
-	if ( ! $media ) {
-		return $data;
-	} else {
-		# Make sure this hash exists before we pass it back...
-		$data->{$media}->{exists} = 0 if not defined $data->{$media};
-		return $data->{$media};
-	}
-}
-
-sub download {
-	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
-	# if subsonly required then skip
-	return 'skip' if $opt->{subsonly};
-	# Determine the correct filename and extension for this download
-	my $filename_orig = $prog->{pid};
-	$filename_orig =~ s|^.+/(.+?)\.\w+$|$1|g;
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-	# Determine the correct filenames for this download
-	return 'skip' if $prog->generate_filenames( $ua, "<longname> - <episode> $filename_orig" );
-	# Create dir for prog if not streaming-only
-	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
-		$prog->create_dir();
-	}
-	# Skip from here if we are only testing downloads
-	return 1 if $opt->{test};
-	# Instantiate new streamer based on streamdata
-	my $class = "Streamer::$prog->{streams}->{$version}->{$mode}->{streamer}";
-	my $stream = $class->new;
-	return $stream->get( $ua, $prog->{pid}, $prog );
-}
-
-
 ################### Streamer class #################
 package Streamer;
 use File::stat;
@@ -11273,74 +10782,6 @@ sub get {
 }
 
 
-################### Streamer::http class #################
-package Streamer::http;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Time::Local;
-use URI;
-
-# Generic
-# Actually do the http streaming
-sub get {
-	my ( $stream, $ua, $url, $prog ) = @_;
-	my $start_time = time();
-
-	# Set user agent
-	$ua->agent('get_iplayer');
-
-	main::logger "INFO: URL = $url\n" if $opt->{verbose};
-
-	# Resume partial recording?
-	my $start = 0;
-	if ( -f $prog->{filepart} ) {
-		$start = stat($prog->{filepart})->size;
-		main::logger "INFO: Resuming recording from $start\n";
-	}
-
-	my $fh = main::open_file_append($prog->{filepart});
-
-	if ( main::download_block($prog->{filepart}, $url, $ua, $start, undef, undef, $fh) != 0 ) {
-		main::logger "\rERROR: Recording failed\n";
-		close $fh;
-		return 'next';
-	} else {
-		close $fh;
-		# end marker
-		my $end_time = time() + 0.0001;
-		# Final file size
-		my $size = stat($prog->{filepart})->size;
-		# Calculate average speed, duration and total bytes downloaded
-		main::logger sprintf("\rINFO: Recorded %.2fMB in %s at %5.0fkbps to %s\n",
-			($size - $start) / (1024.0 * 1024.0),
-			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $start_time))[2,1,0] ),
-			( $size - $start ) / ($end_time - $start_time) / 1024.0 * 8.0,
-			$prog->{filename} );
-		move $prog->{filepart}, $prog->{filename} if $prog->{filepart} ne $prog->{filename};
-		# re-symlink file
-		$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-	}
-
-	return 0;
-}
-
-
 ############# PVR Class ##############
 package Pvr;
 
@@ -11937,7 +11378,7 @@ sub tags_from_metadata {
 	# tvshow flag
 	$tags->{is_tvshow} = $tags->{stik} eq 'TV Show';
 	# podcast flag
-	$tags->{is_podcast} = $meta->{type} =~ /podcast/i || $opt->{tag_podcast}
+	$tags->{is_podcast} = $opt->{tag_podcast}
 		|| ( $opt->{tag_podcast_radio} && ! $tags->{is_video} )
 		|| ( $opt->{tag_podcast_tv} && $tags->{is_video} );
 	$tags->{cnID} = $self->tag_cnid_from_pid($meta->{pid}) if $opt->{tag_cnid};
