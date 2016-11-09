@@ -205,7 +205,6 @@ my $opt_format = {
 	stream		=> [ 0, "stream!", 'Deprecated', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
-	symlink		=> [ 1, "symlink|freevo=s", 'Deprecated', '--symlink <file>', "Create symlink to <file> once we have the header of the recording"],
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Deprecated', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
@@ -409,7 +408,7 @@ if ( defined $ENV{GETIPLAYERSYSPREFS} ) {
 # System options on unix-like systems
 } else {
 	$optfile_system = '/etc/get_iplayer/options';
-	# Show warning if this deprecated location exists and is not a symlink
+	# Show warning if this deprecated location exists and is not a symbolic link
 	if ( -f '/var/lib/get_iplayer/options' && ! -l '/var/lib/get_iplayer/options' ) {
 		logger "WARNING: System-wide options file /var/lib/get_iplayer/options will be deprecated in future, please use /etc/get_iplayer/options instead\n";
 	}
@@ -4531,7 +4530,6 @@ sub substitute {
 #	$prog->{fileprefix}
 #	$prog->{filename}
 #	$prog->{filepart}
-#	$prog->{symlink}
 # Returns 0 on success, 1 on failure (i.e. if the <filename> already exists)
 #
 sub generate_filenames {
@@ -4544,17 +4542,6 @@ sub generate_filenames {
 			return 1;
 		}
 		$prog->get_metadata_general();
-	}
-
-	# Create symlink filename if required
-	# do first before <dir> or <fileprefix> are encoded
-	if ( $opt->{symlink} ) {
-		# Substitute the fields for the pid
-		$prog->{symlink} = $prog->substitute( $opt->{symlink}, 1 );
-		$prog->{symlink} = main::encode_fs($prog->{symlink});
-		main::logger("INFO: Symlink file name will be '$prog->{symlink}'\n") if $opt->{verbose};
-		# remove old symlink
-		unlink $prog->{symlink} if -l $prog->{symlink} && ! $opt->{test};
 	}
 
 	# Determine directory and find its absolute path
@@ -4803,24 +4790,6 @@ sub list_entry_html {
 		\n";
 	return $html;
 }
-
-
-# Creates symlink
-# Usage: $prog->create_symlink( <symlink>, <target> );
-sub create_symlink {
-	my $prog = shift;
-	my $symlink = shift;
-	my $target = shift;
-
-	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
-		# remove old symlink
-		unlink $symlink if -l $symlink;
-		# Create symlink
-		symlink $target, $symlink;
-		main::logger "INFO: Created symlink from '$symlink' -> '$target'\n" if $opt->{verbose};
-	}
-}
-
 
 
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and specified epoch time
@@ -8936,9 +8905,6 @@ sub download {
 		return 'skip';
 	}
 
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename}) if $opt->{symlink};
-
 	# Create dir for prog if not streaming-only
 	if ( ( ! ( $opt->{stdout} && $opt->{nowrite} ) ) && ( ! $opt->{test} ) ) {
 		$prog->create_dir();
@@ -9980,9 +9946,6 @@ sub postproc {
 		main::logger "INFO: Recorded file: $prog->{filename}\n";
 	}
 
-	# Re-symlink file
-	$prog->create_symlink( $prog->{symlink}, $prog->{filename} ) if $opt->{symlink};
-
 	return 0;
 }
 
@@ -10095,9 +10058,6 @@ sub get {
 
 	# Add hashes option if required
 	push @cmdopts, '--hashes' if $opt->{hash};
-
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	# Deal with stdout streaming
 	if ( $opt->{stdout} && not $opt->{nowrite} ) {
@@ -10268,9 +10228,6 @@ sub get_builtin {
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
-
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	if ( $opt->{streamresume} ) {
 		($last_sequence, $size, $elapsed, $begin_time) = split /,/, $opt->{streamresume};
@@ -10466,9 +10423,6 @@ sub get_ffmpeg {
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
-
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	# Add start/stop options if defined
 	push @cmdopts, ( '-ss', $opt->{start} ) if defined $opt->{start};
@@ -10687,9 +10641,6 @@ sub get {
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
 		unlink( $file_tmp );
 	}
-
-	# Create symlink if required
-	$prog->create_symlink( $prog->{symlink}, $file_tmp ) if $opt->{symlink};
 
 	# Add start/stop options if defined
 	push @cmdopts, ( '-ss', $opt->{start} ) if defined $opt->{start};
