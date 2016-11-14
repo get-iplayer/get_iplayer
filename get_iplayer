@@ -132,7 +132,6 @@ my $opt_format = {
 	mediaselector	=> [ 1, "mediaselector|media-selector=s", 'Deprecated', '--mediaselector <identifier>', "Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults. Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
-	multimode	=> [ 1, "multimode!", 'Deprecated', '--multimode', "Allow the recording of more than one mode for the same programme - WARNING: will record all specified/default modes!!"],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails). If specified, value of http_proxy environment variable (if any) in parent process is retained and passed to child processes."],
@@ -946,7 +945,7 @@ sub find_pid_matches {
 		@try_types = (keys %{ $type });
 	}
 	logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-	return 0 if ( ! ( $opt->{multimode} || $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $pid );
+	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $pid );
 
 	# Maybe we don't want to populate caches - this slows down --pid recordings ...
 	# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
@@ -1155,12 +1154,12 @@ sub find_matches {
 	# De-dup matches and retain order
 	@match_list = main::make_array_unique_ordered( @match_list );
 
-	# Prune out pids already recorded if opt{hide} is specified (cannot hide for multimode)
-	if ( $opt->{hide} && ( not $opt->{force} ) && ( not $opt->{multimode} ) ) {
+	# Prune out pids already recorded if opt{hide} is specified
+	if ( $opt->{hide} && ( not $opt->{force} ) ) {
 		my @pruned;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
-			if ( $hist->check( $this->{pid}, undef, 1 ) ) {
+			if ( $hist->check( $this->{pid}, 1 ) ) {
 				logger "DEBUG: Ignoring Prog: '$this->{index}: $this->{name} - $this->{episode}'\n" if $opt->{debug};
 			} else {
 				push @pruned, $this;
@@ -3461,7 +3460,7 @@ sub load {
 		# Create new history entry
 		if ( defined $hist->{ $record_entries->{pid} } ) {
 			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
-			# Append filename and modes - could be a multimode entry
+			# Append filename and modes
 			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode} if defined $record_entries->{mode};
 			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename} if defined $record_entries->{filename};
 			main::logger "DEBUG: Loaded and merged '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
@@ -3624,7 +3623,6 @@ sub list_progs {
 sub check {
 	my $hist = shift;
 	my $pid = shift;
-	my $mode = shift;
 	my $silent = shift;
 	return 0 if ! $pid;
 
@@ -3637,22 +3635,8 @@ sub check {
 	if ( defined $hist->{ $pid } ) {
 		my ( $name, $episode, $histmode ) = ( $hist->{$pid}->{name}, $hist->{$pid}->{episode}, $hist->{$pid}->{mode} );
 		main::main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in history\n" if $opt->{debug};
-		if ( $opt->{multimode} ) {
-			# Strip any number off the end of the mode names for the comparison
-			$mode =~ s/\d+$//g;
-			# Check against all modes in the comma separated list
-			my @hmodes = split /,/, $histmode;
-			for ( @hmodes ) {
-				s/\d+$//g;
-				if ( $mode eq $_ ) {
-					main::logger "INFO: $name - $episode ($pid / $mode) Already in history ($historyfile) - use --force to override\n" if ! $silent;
-					return 1;
-				}
-			}
-		} else {
-			main::logger "INFO: $name - $episode ($pid) Already in history ($historyfile) - use --force to override\n" if ! $silent;
-			return 1;
-		}
+		main::logger "INFO: $name - $episode ($pid) Already in history ($historyfile) - use --force to override\n" if ! $silent;
+		return 1;
 	}
 
 	main::logger "INFO: Programme not in history\n" if $opt->{verbose} && ! $silent;
@@ -4052,8 +4036,8 @@ sub download_retry_loop {
 	# Run the type init
 	$prog->init();
 
-	# If already downloaded then return (unless its for multimode)
-	return 0 if ( ! $opt->{multimode} ) && $hist->check( $prog->{pid} );
+	# If already downloaded then return
+	return 0 if $hist->check( $prog->{pid} );
 
 	# Skip and warn if there is no pid
 	if ( ! $prog->{pid} ) {
@@ -4080,7 +4064,7 @@ sub download_retry_loop {
 	}
 
 	# Re-check history because get_verpids() can update the pid (e.g. BBC /programmes/ URLs)
-	return 0 if ( ! $opt->{multimode} ) && $hist->check( $prog->{pid} );
+	return 0 if ( $hist->check( $prog->{pid} ) );
 
 	# if %{ $prog->{verpids} } is empty then skip this programme recording attempt
 	if ( (keys %{ $prog->{verpids} }) == 0 ) {
@@ -4159,17 +4143,14 @@ sub download_retry_loop {
 				# Keep short mode name for substitutions
 				$prog->{modeshort} = $modeshort;
 
-				# If multimode is used, skip only modes which are in the history
-				next if $opt->{multimode} && $hist->check( $prog->{pid}, $mode );
-
 				main::logger "INFO: Trying $mode mode to ".($opt->{nowrite} && $opt->{stdout} ? "stream" : "record")." $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
-				# quit if successful or skip (unless --multimode selected)
-				last if ( $retcode == 0 || $retcode == 2 ) && ! $opt->{multimode};
+				# quit if successful or skip
+				last if ( $retcode == 0 || $retcode == 2 );
 			}
 		}
 		# Break out of loop if we have a successful recording for this version and mode
@@ -4548,9 +4529,6 @@ sub generate_filenames {
 	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
 	$prog->{dir} = main::encode_fs($prog->{dir});
 
-	# Add modename to default format string if multimode option is used
-	$format .= ' <mode>' if $opt->{multimode};
-
 	$prog->{fileprefix} = $opt->{fileprefix} || $format;
 
 	# get $name, $episode from title
@@ -4629,15 +4607,15 @@ sub generate_filenames {
 
 	# check if file extension has changed as a result of failed attempt with different mode
 	my $ext_changed = 0;
-	if ( ! $opt->{history} && ! $opt->{multimode} && defined $prog->{filename} && $prog->{filename} ne '' ) {
+	if ( ! $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
 		( my $fileprefix, my $dir, my $ext ) = fileparse($prog->{filename}, qr/\.[^.]*/);
 		$ext =~ s/\.//;
 		$ext_changed = ( defined $ext && $ext ne '' && $ext ne $prog->{ext} );
 		main::logger "DEBUG: File ext changed:   $ext -> $prog->{ext}\n" if $ext_changed && $opt->{debug};
 	}
 
-	# Don't override the {filename} if it is already set (i.e. for history info) or unless multimode option is specified
-	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || $opt->{multimode} || ! $prog->{filename} || $ext_changed;
+	# Don't override the {filename} if it is already set (i.e. for history info)
+	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || ! $prog->{filename} || $ext_changed;
 	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 	$prog->{filename} = main::encode_fs($prog->{filename});
 	$prog->{filepart} = main::encode_fs($prog->{filepart});
@@ -10950,8 +10928,8 @@ sub queue {
 	if ( $opt_cmdline->{pid} ) {
 		# ensure we only have one prog type defined
 		if ( $opt->{type} && $opt->{type} !~ /,/ ) {
-			# Add to PVR if not already in history (unless multimode specified)
-			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) ) || $opt->{multimode};
+			# Add to PVR if not already in history
+			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) );
 		}
 
 	# Search specified
