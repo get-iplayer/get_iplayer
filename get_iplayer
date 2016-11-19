@@ -178,13 +178,6 @@ my $opt_format = {
 	mp3vbr		=> [ 1, "mp3vbr=n", 'Deprecated', '--mp3vbr', "Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires --aactomp3). Applied only to radio programmes."],
 	avi			=> [ 1, "avi", 'Deprecated', '--avi', "Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output."],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
-	email		=> [ 1, "email=s", 'Deprecated', '--email <address>', "Email HTML index of matching programmes to specified address"],
-	emailsmtp	=> [ 1, "emailsmtpserver|email-smtp=s", 'Deprecated', '--email-smtp <hostname>', "SMTP server IP address to use to send email (default: localhost)"],
-	emailsender	=> [ 1, "emailsender|email-sender=s", 'Deprecated', '--email-sender <address>', "Optional email sender address"],
-	emailsecurity	=> [ 1, "emailsecurity|email-security=s", 'Deprecated', '--email-security <TLS|SSL>', "Email security TLS, SSL (default: none)"],
-	emailpassword	=> [ 1, "emailpassword|email-password=s", 'Deprecated', '--email-password <password>', "Email password"],
-	emailport       => [ 1, "emailport|email-port=s", 'Deprecated', '--email-port <port number>', "Email port number (default: appropriate port for --email-security)"],
-	emailuser	=> [ 1, "emailuser|email-user=s", 'Deprecated', '--email-user <username>', "Email username"],
 	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Deprecated', '--fatfilename', "Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides --punctuation."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	fxd		=> [ 1, "fxd=s", 'Deprecated', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
@@ -1195,7 +1188,6 @@ sub find_matches {
 
 	# Write HTML and XML files if required (with search options applied)
 	create_html_file( @match_list ) if $opt->{html};
-	create_html_email( (join ' ', @search_args), @match_list ) if $opt->{email};
 	create_xml( $opt->{fxd}, @match_list ) if $opt->{fxd};
 	create_xml( $opt->{mythtv}, @match_list ) if $opt->{mythtv};
 
@@ -2134,118 +2126,6 @@ sub create_html_file {
 	} else {
 		logger "WARNING: Couldn't open html file $opt->{html} for writing\n";
 	}
-}
-
-
-
-# Usage: create_email( @prog_objects )
-# References: http://sial.org/howto/perl/Net-SMTP/, http://cpansearch.perl.org/src/RJBS/Email-Send-2.198/lib/Email/Send/SMTP.pm
-# Credit: Network Ned, andy <AT SIGN> networkned.co.uk, http://networkned.co.uk
-sub create_html_email {
-	# Check if we have Net::SMTP::TLS::ButMaintained/Net::SMTP::TLS/Net::SMTP::SSL/Net::SMTP installed
-	my $smtpclass;
-	if ( $opt->{emailsecurity} eq "TLS" ) {
-		# prefer Net::SMTP::TLS::ButMaintained if installed
-		$smtpclass = 'Net::SMTP::TLS::ButMaintained';
-		eval "use $smtpclass";
-		if ($@) {
-			$smtpclass = 'Net::SMTP::TLS';
-		}
-	} elsif ( $opt->{emailsecurity} eq "SSL" ) {
-		$smtpclass = 'Net::SMTP::SSL';
-		eval "use Authen::SASL";
-		if ($@) {
-			main::logger "WARNING: Authen::SASL Perl module is required for --email-security=$opt->{emailsecurity}.\n";
-			return 0;
-		}
-	} else {
-		$smtpclass = 'Net::SMTP';
-	}
-	eval "use $smtpclass";
-	if ($@) {
-		main::logger "WARNING: Please download and run latest installer or install the $smtpclass Perl module to use --email-security=$opt->{emailsecurity}.\n";
-		return 0;
-	};
-	my $search_args = shift;
-	my $recipient = $opt->{email};
-	my $sender = $opt->{emailsender} || 'get_iplayer <>';
-	my $smtphost = $opt->{emailsmtp} || 'localhost';
-	my $password = $opt->{emailpassword};
-	my $user = $opt->{emailuser};
-	my $port = $opt->{emailport};
-	if ( ! $port ) {
-		$port = ( $opt->{emailsecurity} eq "SSL" ) ? 465
-			: ( $opt->{emailsecurity} eq "TLS" ) ? 587 : 25;
-	}
-	my @mail_failure;
-	my @subject;
-	# Set the subject using the currently set cmdline options
-	push @subject, "get_iplayer Search Results for: $search_args ( ";
-	for my $optkey ( grep !/^email.*/, sort keys %{ $opt_cmdline } ) {
-		push @subject, "$optkey='$opt_cmdline->{$optkey}' " if $opt_cmdline->{$optkey};
-	}
-	push @subject, " )";
-
-	my $message = "MIME-Version: 1.0\n"
-		."Content-Type: text/html\n"
-		."From: $sender\n"
-		."To: $recipient\n"
-		."Subject: @subject\n\n\n"
-		.create_html( @_ )."\n";
-	main::logger "DEBUG: Email message to $recipient:\n$message\n\n" if $opt->{debug};
-
-	my $smtp;
-	if ( $opt->{emailsecurity} ne 'TLS' ) {
-		$smtp = $smtpclass->new($smtphost, Port => $port);
-	} else {
-		eval {
-			$smtp = $smtpclass->new(
-				$smtphost,
-				Port => $port,
-				User => $user,
-				Password=> $password
-			);
-		};
-	}
-	if ( ! $smtp ) {
-		main::logger "ERROR: Could not find or connect to specified SMTP server\n";
-		return 1;
-	};
-
-	if ( $opt->{emailsecurity} ne 'TLS' && $user ) {
-		if ( ! $smtp->auth($user, $password) ) {
-			main::logger "ERROR: Could not authenticate to specified SMTP server\n";
-			return 1;
-		}
-	}
-
-	if ( $opt->{emailsecurity} ne 'TLS' ) {
-		$smtp->mail( $sender ) || push @mail_failure, "MAIL FROM: $sender";
-		$smtp->to( $recipient ) || push @mail_failure, "RCPT TO: $recipient";
-		$smtp->data() || push @mail_failure, 'DATA';
-		$smtp->datasend( $message ) || push @mail_failure, 'Message Data';
-		$smtp->dataend() || push @mail_failure, 'End of DATA';
-		$smtp->quit() || push @mail_failure, 'QUIT';
-	} else {
-		# ::TLS has no useful return value, but will croak on failure.
-		eval { $smtp->mail( $sender ) };
-		push @mail_failure, "MAIL FROM: $sender" if $@;
-		eval { $smtp->to( $recipient ) };
-		push @mail_failure, "RCPT TO: $recipient" if $@;
-		eval { $smtp->data() };
-		push @mail_failure, 'DATA' if $@;
-		eval { $smtp->datasend( $message ) };
-		push @mail_failure, 'Message Data' if $@;
-		eval { $smtp->dataend() };
-		push @mail_failure, 'End of DATA' if $@;
-		eval { $smtp->quit() };
-		push @mail_failure, 'QUIT' if $@;
-	}
-
-	if ( @mail_failure ) {
-		main::logger "ERROR: Sending of email failed with $mail_failure[0]\n";
-	}
-	return 0;
 }
 
 
