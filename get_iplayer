@@ -185,7 +185,7 @@ my $opt_format = {
 	html		=> [ 1, "html=s", 'Deprecated', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Deprecated', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames and subdirectory paths. Default: true"],
 	keepall		=> [ 1, "keepall|keep-all!", 'Deprecated', '--keep-all', "Keep whitespace, all possible punctuation and non-ASCII characters in file and directory names. Shortcut for: --whitespace --non-ascii --punctuation."],
-	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: xbmc (or kodi), xbmc_movie (or kodi_movie), freevo, generic"],
+	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: generic"],
 	mkv			=> [ 1, "mkv", 'Deprecated', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
 	mythtv		=> [ 1, "mythtv=s", 'Deprecated', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nonascii	=> [ 1, "na|nonascii|non-ascii!", 'Deprecated', '--non-ascii, --na', "Keep non-ASCII characters in file and directory names. Default behaviour is to remove all non-ASCII characters."],
@@ -4187,64 +4187,6 @@ sub create_metadata_file {
 	my $template;
 	my $filename;
 
-	# XML template for XBMC/Kodi movies - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#Movies
-	$filename->{xbmc_movie} = "$prog->{dir}/$prog->{fileprefix}.nfo";
-	($template->{xbmc_movie} = <<'	XBMC_MOVIE') =~ s/^\s{2}//gm;
-		<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-		<movie>
-			<title>[name]</title>
-			<plot>[desclong]</plot>
-			<outline>[descmedium]</outline>
-			<tagline>[descshort]</tagline>
-			<thumb>[thumbnail]</thumb>
-			<genre>[categories]</genre>
-			<id>[pid]</id>
-		</movie>
-	XBMC_MOVIE
-	$filename->{kodi_movie} = $filename->{xbmc_movie};
-	$template->{kodi_movie} = $template->{xbmc_movie};
-
-	# XML template for XBMC - Ref: http://xbmc.org/wiki/?title=Import_-_Export_Library#TV_Episodes
-	$filename->{xbmc} = "$prog->{dir}/$prog->{fileprefix}.nfo";
-	($template->{xbmc} = <<'	XBMC') =~ s/^\s{2}//gm;
-		<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-		<episodedetails>
-			<title>[episodeshort]</title>
-			<plot>[desclong]</plot>
-			<thumb>[thumbnail]</thumb>
-			<aired>[lastbcastdate]</aired>
-			<season>[seriesnum]</season>
-			<episode>[episodenum]</episode>
-			<studio>[channel]</studio>
-			<genre>[categories]</genre>
-			<id>[pid]</id>
-		</episodedetails>
-	XBMC
-	$filename->{kodi} = $filename->{xbmc};
-	$template->{kodi} = $template->{xbmc};
-
-	# XML template for Freevo - Ref: http://doc.freevo.org/MovieFxd
-	$filename->{freevo} = "$prog->{dir}/$prog->{fileprefix}.fxd";
-	$template->{freevo} = '<?xml version="1.0" ?>
-	<freevo>
-		<FREEVOTYPE title="[longname]">
-			<video>
-				<file id="f1">[fileprefix].[ext]</file>
-			</video>
-			<info>
-				<rating></rating>
-				<userdate>[dldate] [dltime]</userdate>
-				<plot>[desclong]</plot>
-				<tagline>[episode]</tagline>
-				<year>[firstbcast]</year>
-				<genre>[categories]</genre>
-				<runtime>[runtime] minutes</runtime>
-				<channel>[channel]</channel>
-			</info>
-		</FREEVOTYPE>
-	</freevo>
-	';
-
 	# Generic XML template for all info
 	$filename->{generic} = "$prog->{dir}/$prog->{fileprefix}.xml";
 	$template->{generic}  = '<?xml version="1.0" encoding="UTF-8" ?>'."\n";
@@ -4254,7 +4196,7 @@ sub create_metadata_file {
 
 	return if ! -d $prog->{dir};
 	if ( not defined $template->{ $opt->{metadata} } ) {
-		main::logger "WARNING: metadata type '$opt->{metadata}' is not valid - must be one of ".(join ',', keys %{$template} )."\n";
+		main::logger "WARNING: metadata type '$opt->{metadata}' is not valid - must be one of: ".(join ',', keys %{$template} )."\n";
 		return;
 	}
 
@@ -4264,21 +4206,6 @@ sub create_metadata_file {
 		my $text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
 		# Strip out unsubstituted tags
 		$text =~ s/<.+?>\[.+?\]<.+?>[\s\n\r]*//g;
-		# Hack: substitute here because freevo needs either <audio> or <movie> depending on filetype
-		if ( $opt->{metadata} eq 'freevo' ) {
-			if ( $prog->{type} =~ /radio/i ) {
-				$text =~ s/FREEVOTYPE/audio/g;
-			} else {
-				$text =~ s/FREEVOTYPE/movie/g;
-			}
-		}
-		if ( $opt->{metadata} =~ /(xbmc|kodi)/ ) {
-			my $cats = $1 if $text =~ /<genre>(.+?)<\/genre>/;
-			if ( $cats ) {
-				$cats =~ s/,/<\/genre><genre>/g;
-				$text =~ s/<genre>.+?<\/genre>/<genre>$cats<\/genre>/;
-			}
-		}
 		print XML $text;
 		close XML;
 	} else {
