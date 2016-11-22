@@ -180,14 +180,11 @@ my $opt_format = {
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Deprecated', '--fatfilename', "Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides --punctuation."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
-	fxd		=> [ 1, "fxd=s", 'Deprecated', '--fxd <file>', "Create Freevo FXD XML of matching programmes in specified file"],
 	hfsfilename	=> [ 1, "hfsfilenames|hfsfilename!", 'Deprecated', '--hfsfilename', "Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides --punctuation."],
-	html		=> [ 1, "html=s", 'Deprecated', '--html <file>', "Create basic HTML index of matching programmes in specified file"],
 	isodate		=> [ 1, "isodate!",  'Deprecated', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames and subdirectory paths. Default: true"],
 	keepall		=> [ 1, "keepall|keep-all!", 'Deprecated', '--keep-all', "Keep whitespace, all possible punctuation and non-ASCII characters in file and directory names. Shortcut for: --whitespace --non-ascii --punctuation."],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: generic"],
 	mkv			=> [ 1, "mkv", 'Deprecated', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
-	mythtv		=> [ 1, "mythtv=s", 'Deprecated', '--mythtv <file>', "Create Mythtv streams XML of matching programmes in specified file"],
 	nonascii	=> [ 1, "na|nonascii|non-ascii!", 'Deprecated', '--non-ascii, --na', "Keep non-ASCII characters in file and directory names. Default behaviour is to remove all non-ASCII characters."],
 	nowrite		=> [ 1, "no-write|nowrite|n!", 'Deprecated', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
@@ -201,9 +198,6 @@ my $opt_format = {
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores."],
-	xmlchannels	=> [ 1, "xml-channels|fxd-channels!", 'Deprecated', '--xml-channels', "Create freevo/Mythtv menu of channels -> programme names -> episodes"],
-	xmlnames	=> [ 1, "xml-names|fxd-names!", 'Deprecated', '--xml-names', "Create freevo/Mythtv menu of programme names -> episodes"],
-	xmlalpha	=> [ 1, "xml-alpha|fxd-alpha!", 'Deprecated', '--xml-alpha', "Create freevo/Mythtv menu sorted alphabetically by programme name"],
 
 	# Config
 	cachereset	=> [ 1, "resetcache|reset-cache|cachereset|cache-reset!", 'Config', '--cache-reset', "Reset cache to retain only latest update and discard previous contents."],
@@ -1186,11 +1180,6 @@ sub find_matches {
 	# Display list for recording
 	list_progs( $type, @match_list );
 
-	# Write HTML and XML files if required (with search options applied)
-	create_html_file( @match_list ) if $opt->{html};
-	create_xml( $opt->{fxd}, @match_list ) if $opt->{fxd};
-	create_xml( $opt->{mythtv}, @match_list ) if $opt->{mythtv};
-
 	return @match_list;
 }
 
@@ -1921,236 +1910,6 @@ sub open_file_append {
 	binmode FH;
 	return *FH;
 }
-
-
-# Usage: create_xml( @prog_objects )
-# Creates the Freevo FXD or MythTV Streams meta data (and pre-downloads graphics - todo)
-sub create_xml {
-	my $xmlfile = shift;
-
-	if ( ! open(XML, "> $xmlfile") ) {
-		logger "ERROR: Couldn't open xml file $xmlfile for writing\n";
-		return 1;
-	}
-	print XML "<?xml version=\"1.0\" ?>\n";
-	print XML "<freevo>\n" if $opt->{fxd};
-	print XML "<MediaStreams>\n" if $opt->{mythtv};
-
-	if ( $opt->{xmlnames} ) {
-		# containers sorted by prog names
-		print XML "\t<container title=\"Programmes by Name\">\n" if $opt->{fxd};
-		my %program_index;
-		my %program_count;
-		# create hash of programme_name -> index
-		for my $this (@_) {
-			$program_index{ $this->{name} } = $_;
-			$program_count{ $this->{name} }++;
-		}
-		for my $name ( sort keys %program_index ) {
-			print XML "\t\t<container title=\"".encode_entities( $name, '&<>"\'' )." ($program_count{$name})\">\n" if $opt->{fxd};
-			print XML "\t<Streams>\n" if $opt->{mythtv};
-			print XML "\t\t<Name>".encode_entities( $name, '&<>"\'' )."</Name>\n" if $opt->{mythtv};
-			for my $this (@_) {
-				my $pid = $this->{pid};
-				# loop through and find matches for each progname
-				if ( $this->{name} eq $name ) {
-					my $episode = encode_entities( $this->{episode}, '&<>"\'' );
-					my $desc = encode_entities( $this->{desc}, '&<>"\'' );
-					my $title = "${episode}";
-					$title .= " ($this->{available})" if $this->{available} !~ /^(unknown|)$/i;
-					if ( $opt->{fxd} ) {
-						print XML "\t\t\t<movie title=\"${title}\">\n";
-						print XML "\t\t\t\t<video>\n";
-						print XML "\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n";
-						print XML "\t\t\t\t</video>\n";
-						print XML "\t\t\t\t<info>\n";
-						print XML "\t\t\t\t\t<description>${desc}</description>\n";
-						print XML "\t\t\t\t</info>\n";
-						print XML "\t\t\t</movie>\n";
-					} elsif ( $opt->{mythtv} ) {
-						print XML "\t\t<Stream>\n";
-						print XML "\t\t\t<Name>${title}</Name>\n";
-						print XML "\t\t\t<type>$this->{type}</type>\n";
-						print XML "\t\t\t<index>$this->{index}</index>\n";
-						print XML "\t\t\t<url>${pid}.mov</url>\n";
-						print XML "\t\t\t<Subtitle></Subtitle>\n";
-						print XML "\t\t\t<Synopsis>${desc}</Synopsis>\n";
-						print XML "\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n";
-						print XML "\t\t</Stream>\n";
-					}
-				}
-			}
-			print XML "\t\t</container>\n" if $opt->{fxd};
-			print XML "\t</Streams>\n" if $opt->{mythtv};
-		}
-		print XML "\t</container>\n" if $opt->{fxd};
-	}
-
-
-	if ( $opt->{xmlchannels} ) {
-		# containers for prog names sorted by channel
-		print XML "\t<container title=\"Programmes by Channel\">\n" if $opt->{fxd};
-		my %program_index;
-		my %program_count;
-		my %channels;
-		# create hash of unique channel names and hash of programme_name -> index
-		for my $this (@_) {
-			$program_index{ $this->{name} } = $_;
-			$program_count{ $this->{name} }++;
-			push @{ $channels{ $this->{channel} } }, $this->{name};
-		}
-		for my $channel ( sort keys %channels ) {
-			print XML "\t\t<container title=\"".encode_entities( $channel, '&<>"\'' )."\">\n" if $opt->{fxd};
-			print XML
-				"\t<Feed>\n".
-				"\t\t<Name>".encode_entities( $channel, '&<>"\'' )."</Name>\n".
-				"\t\t<Provider>BBC</Provider>\n".
-				"\t\t<Streams>\n" if $opt->{mythtv};
-			for my $name ( sort keys %program_index ) {
-				# Do we have any of this prog $name on this $channel?
-				my $match;
-				for ( @{ $channels{$channel} } ) {
-					$match = 1 if $_ eq $name;
-				}
-				if ( $match ) {
-					print XML "\t\t\t<container title=\"".encode_entities( $name, '&<>"\'' )." ($program_count{$name})\">\n" if $opt->{fxd};
-					#print XML "\t\t<Stream>\n" if $opt->{mythtv};
-					for my $this (@_) {
-						# loop through and find matches for each progname for this channel
-						my $pid = $this->{pid};
-						if ( $this->{channel} eq $channel && $this->{name} eq $name ) {
-							my $episode = encode_entities( $this->{episode}, '&<>"\'' );
-							my $desc = encode_entities( $this->{desc}, '&<>"\'' );
-							my $title = "${episode} ($this->{available})";
-							if ( $opt->{fxd} ) {
-								print XML
-									"\t\t\t\t<movie title=\"${title}\">\n".
-									"\t\t\t\t\t<video>\n".
-									"\t\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n".
-									"\t\t\t\t\t</video>\n".
-									"\t\t\t\t\t<info>\n".
-									"\t\t\t\t\t\t<description>${desc}</description>\n".
-									"\t\t\t\t\t</info>\n".
-									"\t\t\t\t</movie>\n";
-							} elsif ( $opt->{mythtv} ) {
-								print XML
-									"\t\t\t<Stream>\n".
-									"\t\t\t\t<Name>".encode_entities( $name, '&<>"\'' )."</Name>\n".
-									"\t\t\t\t<index>$this->{index}</index>\n".
-									"\t\t\t\t<type>$this->{type}</type>\n".
-									"\t\t\t\t<Url>${pid}.mov</Url>\n".
-									"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
-									"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
-									"\t\t\t\t<Synopsis>${desc}</Synopsis>\n".
-									"\t\t\t</Stream>\n";
-							}
-						}
-					}
-					print XML "\t\t\t</container>\n" if $opt->{fxd};
-				}
-			}
-			print XML "\t\t</container>\n" if $opt->{fxd};
-			print XML "\t\t</Streams>\n\t</Feed>\n" if $opt->{mythtv};
-		}
-		print XML "\t</container>\n" if $opt->{fxd};
-	}
-
-
-	if ( $opt->{xmlalpha} ) {
-		my %table = (
-			'A-C' => '[abc]',
-			'D-F' => '[def]',
-			'G-I' => '[ghi]',
-			'J-L' => '[jkl]',
-			'M-N' => '[mn]',
-			'O-P' => '[op]',
-			'Q-R' => '[qr]',
-			'S-T' => '[st]',
-			'U-V' => '[uv]',
-			'W-Z' => '[wxyz]',
-			'0-9' => '[\d]',
-		);
-		print XML "\t<container title=\"Programmes A-Z\">\n";
-		for my $folder (sort keys %table) {
-			print XML "\t\t<container title=\"$folder\">\n";
-			for my $this (@_) {
-				my $pid = $this->{pid};
-				my $name = encode_entities( $this->{name}, '&<>"\'' );
-				my $episode = encode_entities( $this->{episode}, '&<>"\'' );
-				my $desc = encode_entities( $this->{desc}, '&<>"\'' );
-				my $title = "${name} - ${episode} ($this->{available})";
-				my $regex = $table{$folder};
-				if ( $name =~ /^$regex/i ) {
-					if ( $opt->{fxd} ) {
-						print XML
-							"\t\t\t<movie title=\"${title}\">\n".
-							"\t\t\t\t<video>\n".
-							"\t\t\t\t\t<url id=\"p1\">${pid}.mov<playlist/></url>\n".
-							"\t\t\t\t</video>\n".
-							"\t\t\t\t<info>\n".
-							"\t\t\t\t\t<description>${desc}</description>\n".
-							"\t\t\t\t</info>\n".
-							"\t\t\t</movie>\n";
-					} elsif ( $opt->{mythtv} ) {
-						print XML
-							"\t\t\t<Stream>\n".
-							"\t\t\t\t<Name>${title}</Name>\n".
-							"\t\t\t\t<index>$this->{index}</index>\n".
-							"\t\t\t\t<type>$this->{type}</type>\n".
-							"\t\t\t\t<Url>${pid}.mov</Url>\n".
-							"\t\t\t\t<StreamImage>$this->{thumbnail}</StreamImage>\n".
-							"\t\t\t\t<Subtitle>${episode}</Subtitle>\n".
-							"\t\t\t\t<Synopsis>${desc}</Synopsis>\n".
-							"\t\t\t</Stream>\n";
-					}
-				}
-			}
-			print XML "\t\t</container>\n";
-		}
-		print XML "\t</container>\n";
-	}
-
-	print XML '</freevo>' if $opt->{fxd};
-	print XML '</MediaStreams>' if $opt->{mythtv};
-	close XML;
-}
-
-
-
-# Usage: create_html_file( @prog_objects )
-sub create_html_file {
-	# Create local web page
-	if ( open(HTML, "> $opt->{html}") ) {
-		print HTML create_html( @_ );
-		close (HTML);
-	} else {
-		logger "WARNING: Couldn't open html file $opt->{html} for writing\n";
-	}
-}
-
-
-
-# Usage: create_html( @prog_objects )
-sub create_html {
-	my @html;
-	my %name_channel;
-	# Create local web page
-	push @html, '<html><head></head><body><table border=1>';
-	for my $this ( @_ ) {
-		# Skip if pid isn't in index
-		my $pid = $this->{pid} || next;
-		# Skip if already recorded and --hide option is specified
-		if (! defined $name_channel{ "$this->{name}|$this->{channel}" }) {
-			push @html, $this->list_entry_html();
-		} else {
-			push @html, $this->list_entry_html( 1 );
-		}
-		$name_channel{ "$this->{name}|$this->{channel}" } = 1;
-	}
-	push @html, '</table></body>';
-	return join "\n", @html;
-}
-
 
 
 # Generic
@@ -4539,41 +4298,6 @@ sub list_entry {
 		main::logger "${prefix}$prog->{index}:\t${prog_type}${name}$prog->{episode}".$prog->optional_list_entry_format."\n";
 	}
 	return 0;
-}
-
-
-
-sub list_entry_html {
-	my ($prog, $tree) = (@_);
-	my $html;
-	# If tree view
-	my $name = encode_entities( $prog->{name} );
-	my $episode = encode_entities( $prog->{episode} );
-	my $desc = encode_entities( $prog->{desc} );
-	my $channel = encode_entities( $prog->{channel} );
-	my $type = encode_entities( $prog->{type} );
-	my $categories = encode_entities( $prog->{categories} );
-
-	# Header
-	if ( not $tree ) {
-		# Assume all thumbnails for a prog name are the same
-		$html = "<tr bgcolor='#cccccc'>
-			<td rowspan=1 width=150><a href=\"$prog->{web}\"><img height=84 width=150 src=\"$prog->{thumbnail}\"></a></td>
-				<td><a href=\"$prog->{web}\">${name}</a></td>
-				<td>${channel}</td>
-				<td>${type}</td>
-				<td>${categories}</td>
-			</tr>
-		\n";
-	# Follow-on episodes
-	}
-		$html .= "<tr>
-				<td>$_</td>
-				<td><a href=\"$prog->{web}\">${episode}</a></td>
-				<td colspan=3>${desc}</td>
-			</tr>
-		\n";
-	return $html;
 }
 
 
