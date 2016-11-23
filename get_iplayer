@@ -260,7 +260,6 @@ my $opt_format = {
 	warranty	=> [ 1, "warranty!", 'Display', '--warranty', 'Displays warranty section of GPLv3'],
 
 	# External Program
-	atomicparsley	=> [ 0, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley binary"],
 	id3v2		=> [ 1, "id3tag|id3v2=s", 'Deprecated', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
 
 	# Misc
@@ -10737,23 +10736,16 @@ sub new {
 # class command line options
 sub opt_format {
 	return {
+		atomicparsley	=> [ 0, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley binary"],
 		noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 		notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
-		tag_cnid => [ 1, "tagcnid|tag-cnid!", 'Deprecated', '--tag-cnid', "Use AtomicParsley --cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes"],
-		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in metadata (use substitution parameters). Default: none"],
-		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in metadata (use substitution parameters). Default: none"],
-		tag_fulltitle => [ 1, "tagfulltitle|tag-fulltitle!", 'Deprecated', '--tag-fulltitle', "Prepend album/show title to track title"],
-		tag_hdvideo => [ 1, "taghdvideo|tag-hdvideo!", 'Deprecated', '--tag-hdvideo', "AtomicParsley accepts --hdvideo argument for HD video flag"],
+		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in tag metadata (use substitution parameters). Default: <name>"],
+		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in tag metadata (use substitution parameters). Default: <episodeshort>"],
 		tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Deprecated', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
 		tag_isodate		=> [ 1, "tagisodate|tag-isodate!",  'Tagging', '--tag-isodate', "Use ISO8601 dates (YYYY-MM-DD) in album/show names and track titles"],
-		tag_longdesc => [ 1, "taglongdesc|tag-longdesc!", 'Deprecated', '--tag-longdesc', "AtomicParsley accepts --longdesc argument for long description text"],
-		tag_longdescription => [ 1, "taglongdescription|tag-longdescription!", 'Deprecated', '--tag-longdescription', "AtomicParsley accepts --longDescription argument for long description text"],
-		tag_longepisode => [ 1, "taglongepisode|tag-longepisode!", 'Deprecated', '--tag-longepisode', "Use <episode> (incl. episode number) instead of <episodeshort> for track title"],
-		tag_longtitle => [ 1, "taglongtitle|tag-longtitle!", 'Deprecated', '--tag-longtitle', "Prepend <series> (if available) to track title. Ignored with --tag-fulltitle."],
 		tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 		tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 		tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts"],
-		tag_shortname => [ 1, "tagshortname|tag-shortname!", 'Deprecated', '--tag-shortname', "Use <nameshort> instead of <name> for album/show title"],
 		tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "Use UTF-8 encoding for non-ASCII characters in AtomicParsley parameter values (Linux/Unix/OS X only). Use only if auto-detect fails."],
 	};
 }
@@ -10762,27 +10754,8 @@ sub opt_format {
 sub tags_from_metadata {
 	my ($self, $meta) = @_;
 	my $tags;
-	my $name;
-	if ( $meta->{show} ) {
-		$name = $meta->{show};
-	} else {
-		$name = $opt->{tag_shortname} ? $meta->{nameshort} : $meta->{name};
-	}
-	if ( $meta->{title} ) {
-		($tags->{title} = $meta->{title}) =~ s/[\s\-]+$//;
-		$tags->{title} ||= $name;
-	} else {
-		my $episode = $opt->{tag_longepisode} ? $meta->{episode} : $meta->{episodeshort};
-		# select version of of episode title to use
-		if ( $opt->{tag_fulltitle} ) {
-			$tags->{title} = "$name: $episode";
-		} else {
-			# fix up episode if necessary
-			(my $title = $episode) =~ s/[\s\-]+$//;
-			$title = "$meta->{series}: $title" if $opt->{tag_longtitle} && $meta->{series};
-			$tags->{title} = $title ? $title : $name;
-		}
-	}
+	($tags->{title} = $meta->{title}) =~ s/[\s\-]+$//;
+	$tags->{title} ||= $meta->{show};
 	# iTunes media kind
 	$tags->{stik} = 'Normal';
 	if ( $meta->{ext} =~ /(mp4|m4v)/i) {
@@ -10794,7 +10767,7 @@ sub tags_from_metadata {
 	$tags->{artist} = $meta->{channel};
 	# album artist from programme type
 	($tags->{albumArtist} = "BBC " . ucfirst($meta->{type})) =~ s/tv/TV/i;
-	$tags->{album} = $name;
+	$tags->{album} = $meta->{show};
 	$tags->{grouping} = $meta->{categories};
 	# composer references iPlayer
 	$tags->{composer} = "BBC iPlayer";
@@ -10823,7 +10796,7 @@ sub tags_from_metadata {
 	$tags->{description} = $meta->{descshort};
 	$tags->{longDescription} = $meta->{desclong};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
-	$tags->{TVShowName} = $name;
+	$tags->{TVShowName} = $meta->{show};
 	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
 	$tags->{TVSeasonNum} = $tags->{disk};
 	$tags->{TVEpisodeNum} = $tags->{tracknum};
@@ -10841,7 +10814,7 @@ sub tags_from_metadata {
 	$tags->{is_podcast} = $opt->{tag_podcast}
 		|| ( $opt->{tag_podcast_radio} && ! $tags->{is_video} )
 		|| ( $opt->{tag_podcast_tv} && $tags->{is_video} );
-	$tags->{cnID} = $self->tag_cnid_from_pid($meta->{pid}) if $opt->{tag_cnid};
+	$tags->{pid} = $meta->{pid};
 	if ( $opt->{tag_isodate} ) {
 		for my $field ( 'title', 'album', 'TVShowName' ) {
 			$tags->{$field} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
@@ -10851,19 +10824,6 @@ sub tags_from_metadata {
 		$tags->{$key} = StringUtils::convert_punctuation($val);
 	}
 	return $tags;
-}
-
-# convert PID into 32-bit fake cnID
-sub tag_cnid_from_pid {
-	use integer;
-	my ($self, $pid) = @_;
-	my $cnid = 0;
-	foreach( split(//, $pid) ) {
-		$cnid = (unpack("L", (pack("L", 33 * $cnid))));
-		$cnid = (unpack("L", (pack "L", $cnid + ord($_))));
-	}
-	$cnid = (unpack("L", (pack "L", $cnid + ($cnid >> 5))));
-	return $cnid;
 }
 
 # in-place escape/enclose embedded quotes in command line parameters
@@ -10900,10 +10860,10 @@ sub tag_prog {
 			$meta->{$key} = $val;
 		}
 	}
-	my $fmt_show = $opt->{tag_formatshow}; # || "<name>"
-	my $fmt_title = $opt->{tag_formattitle}; # || "<episode>"
-	$meta->{show} = $prog->substitute($fmt_show, 99) if $fmt_show;
-	$meta->{title} = $prog->substitute($fmt_title, 99) if $fmt_title;
+	my $fmt_show = $opt->{tag_formatshow} || "<name>";
+	my $fmt_title = $opt->{tag_formattitle} || "<episodeshort>";
+	$meta->{show} = $prog->substitute($fmt_show, 99);
+	$meta->{title} = $prog->substitute($fmt_title, 99);
 	my $tags = $self->tags_from_metadata($meta);
 	# dispatch to appropriate tagging function
 	if ( $meta->{filename} =~ /\.(mp3)$/i ) {
@@ -11063,10 +11023,9 @@ sub tag_file_mp4 {
 			# determine AtomicParsley features
 			$ap_check = 1;
 			my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
-			$opt->{tag_cnid} = 1 if ! defined($opt->{tag_cnid}) and $ap_help =~ /--cnID/;
-			$opt->{tag_hdvideo} = 1 if ! defined($opt->{tag_hdvideo}) and $ap_help =~ /--hdvideo/;
-			$opt->{tag_longdesc} = 1 if ! defined($opt->{tag_longdesc}) and $ap_help =~ /--longdesc/;
-			$opt->{tag_longdescription} = 1 if ! defined($opt->{tag_longdescription}) and $ap_help =~ /--longDescription/;
+			$opt->{tag_hdvideo} = 1 if $ap_help =~ /--hdvideo/;
+			$opt->{tag_longdesc} = 1 if $ap_help =~ /--longdesc/;
+			$opt->{tag_longdescription} = 1 if $ap_help =~ /--longDescription/;
 			$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
 		}
 		main::logger "INFO: MP4 tagging \U$meta->{ext}\E file\n";
@@ -11108,7 +11067,6 @@ sub tag_file_mp4 {
 		# video only
 		if ( $tags->{is_video} ) {
 			# all video
-			push @cmd, ( '--cnID', $tags->{cnID} ) if $opt->{tag_cnid};
 			push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
 			# tv only
 			if ( $tags->{is_tvshow} ) {
