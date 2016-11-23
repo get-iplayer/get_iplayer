@@ -260,7 +260,6 @@ my $opt_format = {
 	warranty	=> [ 1, "warranty!", 'Display', '--warranty', 'Displays warranty section of GPLv3'],
 
 	# External Program
-	id3v2		=> [ 1, "id3tag|id3v2=s", 'Deprecated', '--id3v2 <path>', "Location of id3v2 or id3tag binary"],
 
 	# Misc
 	encodingconsolein	=> [ 1, "encodingconsolein|encoding-console-in=s", 'Misc', '--encoding-console-in <name>', "Character encoding for standard input (currently unused). Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
@@ -878,7 +877,6 @@ sub init_search {
 	}
 
 
-	$bin->{id3v2}		= $opt->{id3v2} || 'id3v2';
 	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
 
 	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
@@ -10741,7 +10739,6 @@ sub opt_format {
 		notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes"],
 		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in tag metadata (use substitution parameters). Default: <name>"],
 		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in tag metadata (use substitution parameters). Default: <episodeshort>"],
-		tag_id3sync => [ 1, "tagid3sync|tag-id3sync!", 'Deprecated', '--tag-id3sync', "Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module."],
 		tag_isodate		=> [ 1, "tagisodate|tag-isodate!",  'Tagging', '--tag-isodate', "Use ISO8601 dates (YYYY-MM-DD) in album/show names and track titles"],
 		tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
 		tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)"],
@@ -10782,11 +10779,6 @@ sub tags_from_metadata {
 		$utc[5] += 1900;
 		$tags->{year} = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ", reverse @utc[0..5]);
 	}
-	# extract date components for ID3v2.3
-	my @date = split(//, $tags->{year});
-	$tags->{tyer} = join('', @date[0..3]);
-	$tags->{tdat} = join('', @date[8,9,5,6]);
-	$tags->{time} = join('', @date[11,12,14,15]);
 	$tags->{tracknum} = $meta->{episodenum};
 	$tags->{disk} = $meta->{seriesnum};
 	# generate lyrics text with links if available
@@ -10865,152 +10857,10 @@ sub tag_prog {
 	$meta->{show} = $prog->substitute($fmt_show, 99);
 	$meta->{title} = $prog->substitute($fmt_title, 99);
 	my $tags = $self->tags_from_metadata($meta);
-	# dispatch to appropriate tagging function
-	if ( $meta->{filename} =~ /\.(mp3)$/i ) {
-		return $self->tag_file_id3($meta, $tags);
-	} elsif ( $meta->{filename} =~ /\.(mp4|m4v|m4a)$/i ) {
+	if ( $meta->{filename} =~ /\.(mp4|m4v|m4a)$/i ) {
 		return $self->tag_file_mp4($meta, $tags);
 	} else {
 		main::logger "WARNING: Don't know how to tag \U$meta->{ext}\E file\n" if $opt->{verbose};
-	}
-}
-
-# add full ID3 tag with MP3::Tag
-sub tag_file_id3 {
-	my ($self, $meta, $tags) = @_;
-	# suppress Perl 5.22 warnings from MP3::Tag::parse_prepare
-	local $SIG{__WARN__} = sub {
-			warn @_ unless $_[0] =~ m(^Unescaped left brace in regex is deprecated);
-	};
-	# look for required module
-	eval 'use MP3::Tag';
-	if ( $@ ) {
-		if ( $opt->{verbose} ) {
-			main::logger "INFO: Install the MP3::Tag module for full taggging of \U$meta->{ext}\E files\n";
-			main::logger "INFO: Falling back to ID3 BASIC taggging of \U$meta->{ext}\E files\n";
-		}
-		return $self->tag_file_id3_basic($meta, $tags);
-	}
-	eval {
-		main::logger "INFO: ID3 tagging \U$meta->{ext}\E file\n";
-		# translate podcast flag
-		$tags->{podcastFlag} = "\x01";
-		for ( keys %$tags ) {
-			$tags->{$_} = '' if ! defined $tags->{$_};
-		}
-		# encode for MP3::Tag
-		tags_encode($tags);
-		# remove existing tag(s) to avoid decoding errors
-		my $mp3 = MP3::Tag->new($meta->{filename});
-		$mp3->get_tags();
-		$mp3->{ID3v1}->remove_tag() if exists $mp3->{ID3v1};
-		$mp3->{ID3v2}->remove_tag() if exists $mp3->{ID3v2};
-		$mp3->close();
-		# add metadata
-		if ( $opt->{tag_id3sync} ) {
-			MP3::Tag->config(id3v23_unsync => 0);
-		}
-		$mp3 = MP3::Tag->new($meta->{filename});
-		$mp3->select_id3v2_frame_by_descr('TCOP', $tags->{copyright});
-		$mp3->select_id3v2_frame_by_descr('TIT2', $tags->{title});
-		$mp3->select_id3v2_frame_by_descr('TPE1', $tags->{artist});
-		$mp3->select_id3v2_frame_by_descr('TPE2', $tags->{albumArtist});
-		$mp3->select_id3v2_frame_by_descr('TALB', $tags->{album});
-		$mp3->select_id3v2_frame_by_descr('TIT1', $tags->{grouping});
-		$mp3->select_id3v2_frame_by_descr('TCOM', $tags->{composer});
-		$mp3->select_id3v2_frame_by_descr('TCON', $tags->{genre});
-		$mp3->select_id3v2_frame_by_descr('COMM(eng,#0)[]', $tags->{comment});
-		$mp3->select_id3v2_frame_by_descr('TYER', $tags->{tyer});
-		$mp3->select_id3v2_frame_by_descr('TDAT', $tags->{tdat});
-		$mp3->select_id3v2_frame_by_descr('TIME', $tags->{time});
-		$mp3->select_id3v2_frame_by_descr('TRCK', $tags->{tracknum});
-		$mp3->select_id3v2_frame_by_descr('TPOS', $tags->{disk});
-		$mp3->select_id3v2_frame_by_descr('USLT', $tags->{lyrics});
-		# tag iTunes podcast
-		if ( $tags->{is_podcast} ) {
-			# ID3v2.4 only, but works in iTunes
-			$mp3->select_id3v2_frame_by_descr('TDRL', $tags->{year});
-			# ID3v2.3 and ID3v2.4
-			$mp3->select_id3v2_frame_by_descr('TIT3', $tags->{description});
-			# Neither ID3v2.3 nor ID3v2.4, but work in iTunes
-			$mp3->select_id3v2_frame_by_descr('TDES', $tags->{longDescription});
-			$mp3->{ID3v2}->add_raw_frame('PCST', $tags->{podcastFlag});
-			$mp3->select_id3v2_frame_by_descr('TCAT', $tags->{category});
-			$mp3->select_id3v2_frame_by_descr('TKWD', $tags->{keyword});
-			$mp3->select_id3v2_frame_by_descr('TGID', $tags->{podcastGUID});
-		}
-		# add artwork if available
-		if ( $opt->{noartwork} ) {
-				$mp3->select_id3v2_frame_by_descr('APIC', undef);
-		} else {
-			if ( -f $meta->{thumbfile} ) {
-				my $data;
-				open(THUMB, "<:raw", $meta->{thumbfile});
-				read(THUMB, $data, stat($meta->{thumbfile})->size());
-				close(THUMB);
-				$mp3->select_id3v2_frame_by_descr('APIC', $data);
-			}
-		}
-		# write metadata to file
-		$mp3->update_tags();
-		$mp3->close();
-	};
-	if ( $@ ) {
-		main::logger "ERROR: Failed to tag \U$meta->{ext}\E file\n";
-		main::logger "ERROR: $@" if $opt->{verbose};
-		# clean up thumbnail if necessary
-		unlink $meta->{thumbfile} if ! $opt->{thumb};
-		return 4;
-	}
-}
-
-# add basic ID3 tag with id3v2
-sub tag_file_id3_basic {
-	my ($self, $meta, $tags) = @_;
-	if ( main::exists_in_path('id3v2') ) {
-		main::logger "INFO: ID3 BASIC tagging \U$meta->{ext}\E file\n";
-		# notify about limitations of basic tagging
-		if ( $opt->{verbose} ) {
-			main::logger "INFO: ID3 BASIC tagging cannot add artwork to \U$meta->{ext}\E files\n";
-			main::logger "INFO: ID3 BASIC tagging cannot add podcast metadata to \U$meta->{ext}\E files\n" if $tags->{is_podcast};
-		}
-		# colons are parsed as frame field separators by id3v2
-		# so replace them to make safe comment text
-		$tags->{comment} =~ s/:/_/g;
-		# make safe lyrics text as well
-		# can't use $tags->{lyrics} because of colons in links
-		$tags->{longDescription} =~ s/:/_/g;
-		# handle embedded quotes
-		tags_escape_quotes($tags);
-		# encode for id3v2
-		tags_encode($tags);
-		# build id3v2 command
-		my @cmd = (
-			$bin->{id3v2},
-			'--TCOP', $tags->{copyright},
-			'--TIT2', $tags->{title},
-			'--TPE1', $tags->{artist},
-			'--TPE2', $tags->{albumArtist},
-			'--TALB', $tags->{album},
-			'--TIT1', $tags->{grouping},
-			'--TCOM', $tags->{composer},
-			'--TCON', $tags->{genre},
-			'--COMM', $tags->{comment},
-			'--TYER', $tags->{tyer},
-			'--TDAT', $tags->{tdat},
-			'--TIME', $tags->{time},
-			'--TRCK', $tags->{tracknum},
-			'--TPOS', $tags->{disk},
-			'--USLT', $tags->{longDescription},
-			$meta->{filename},
-		);
-		# run id3v2 command
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
-			main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
-			return 2;
-		}
-	} else {
-		main::logger "WARNING: Cannot tag \U$meta->{ext}\E file\n" if $opt->{verbose};
 	}
 }
 
@@ -11028,7 +10878,7 @@ sub tag_file_mp4 {
 			$opt->{tag_longdescription} = 1 if $ap_help =~ /--longDescription/;
 			$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
 		}
-		main::logger "INFO: MP4 tagging \U$meta->{ext}\E file\n";
+		main::logger "INFO: Begin tagging file: $meta->{filename}\n";
 		# handle embedded quotes
 		tags_escape_quotes($tags);
 		# encode metadata for atomicparsley
@@ -11101,6 +10951,7 @@ sub tag_file_mp4 {
 		}
 		# remove images left behind by AtomicParsley
 		unlink glob qq("$meta->{dir}/$meta->{fileprefix}-resized-*");
+		main::logger "INFO: Tagged file: $meta->{filename}\n";
 	} else {
 		main::logger "WARNING: Cannot tag \U$meta->{ext}\E file\n" if $opt->{verbose};
 	}
