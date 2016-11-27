@@ -7542,7 +7542,7 @@ sub get_links_schedule_page {
 	shift @entries;
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort );
+		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort, $channel );
 		my ($available_str, $until_str);
 		$available_str = $1 if $entry =~ m{<end>\s*(.+?)\s*</end>};
 		if ( ! $available_str ) {
@@ -7578,6 +7578,10 @@ sub get_links_schedule_page {
 				$prog->{$pid}->{expires} = $expires;
 			}
 			next;
+		}
+		$channel = $1 if $entry =~ m{<programme\s+type="episode">.*?<ownership>.*?<service\s+.*?>.*?<title>\s*(.*?)\s*</title>};
+		unless ( $prog_type eq "radio" && $channel eq "BBC Local Radio" ) {
+			$channel = $cache_channel;
 		}
 		$desc = $1 if $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>};
 		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
@@ -7645,7 +7649,7 @@ sub get_links_schedule_page {
 			'desc'		=> $desc,
 			'duration'	=> $duration,
 			'thumbnail'	=> $thumbnail,
-			'channel'	=> $cache_channel,
+			'channel'	=> $channel,
 			'type'		=> $prog_type,
 			'web'		=> "${bbc_prog_page_prefix}/${pid}",
 			'available' => $available_str,
@@ -7930,8 +7934,8 @@ sub channels_aod {
 			'radio4'		=> 'BBC Radio 4',
 			'radio4extra'	=> 'BBC Radio 4 Extra',
 			'fivelive'		=> 'BBC Radio 5 live',
-			'sportsextra'	=> 'BBC 5 live sports extra',
-			'6music'		=> 'BBC 6 Music',
+			'sportsextra'	=> 'BBC Radio 5 live sports extra',
+			'6music'		=> 'BBC Radio 6 Music',
 			'asiannetwork'	=> 'BBC Asian Network',
 			'worldservice'	=> 'BBC World Service',
 		},
@@ -7969,7 +7973,7 @@ sub channels_aod {
 			'bbc_radio_norfolk'			=> 'BBC Radio Norfolk',
 			'bbc_radio_suffolk'			=> 'BBC Radio Suffolk',
 			'bbc_radio_essex'			=> 'BBC Essex',
-			'bbc_london'				=> 'BBC London 94.9',
+			'bbc_london'				=> 'BBC Radio London',
 			'bbc_radio_kent'			=> 'BBC Radio Kent',
 			'bbc_radio_surrey'			=> 'BBC Surrey',
 			'bbc_radio_sussex'			=> 'BBC Sussex',
@@ -7999,9 +8003,8 @@ sub channels {
 			'bbc_world_service'			=> 'BBC World Service',
 			'bbc_1xtra'				=> 'BBC Radio 1Xtra',
 			'bbc_radio_four_extra'			=> 'BBC Radio 4 Extra',
-			'bbc_radio_five_live_sports_extra'	=> 'BBC 5 live sports extra',
-			'bbc_6music'				=> 'BBC 6 Music',
-			#'bbc_7'					=> 'BBC 7',
+			'bbc_radio_five_live_sports_extra'	=> 'BBC Radio 5 live sports extra',
+			'bbc_6music'				=> 'BBC Radio 6 Music',
 			'bbc_asian_network'			=> 'BBC Asian Network',
 		},
 		'regional' => {
@@ -8038,7 +8041,7 @@ sub channels {
 			'bbc_radio_norfolk'			=> 'BBC Radio Norfolk',
 			'bbc_radio_suffolk'			=> 'BBC Radio Suffolk',
 			'bbc_radio_essex'			=> 'BBC Essex',
-			'bbc_london'				=> 'BBC London 94.9',
+			'bbc_london'				=> 'BBC Radio London',
 			'bbc_radio_kent'			=> 'BBC Radio Kent',
 			'bbc_radio_surrey'			=> 'BBC Surrey',
 			'bbc_radio_sussex'			=> 'BBC Sussex',
@@ -8070,8 +8073,8 @@ sub channels_schedule {
 			'radio4/programmes/schedules/lw'	=> 'BBC Radio 4',
 			'radio4extra/programmes/schedules'	=> 'BBC Radio 4 Extra',
 			'5live/programmes/schedules'		=> 'BBC Radio 5 live',
-			'5livesportsextra/programmes/schedules'	=> 'BBC 5 live sports extra',
-			'6music/programmes/schedules'		=> 'BBC 6 Music',
+			'5livesportsextra/programmes/schedules'	=> 'BBC Radio 5 live sports extra',
+			'6music/programmes/schedules'		=> 'BBC Radio 6 Music',
 			'asiannetwork/programmes/schedules'	=> 'BBC Asian Network',
 			'worldserviceradio/programmes/schedules/uk'	=> 'BBC World Service',
 		},
@@ -8108,7 +8111,7 @@ sub channels_schedule {
 			'radioleeds/programmes/schedules'		=> 'BBC Radio Leeds',
 			'radioleicester/programmes/schedules'	=> 'BBC Radio Leicester',
 			'radiolincolnshire/programmes/schedules'	=> 'BBC Radio Lincolnshire',
-			'radiolondon/programmes/schedules'		=> 'BBC London 94.9',
+			'radiolondon/programmes/schedules'		=> 'BBC Radio London',
 			'radiomanchester/programmes/schedules'	=> 'BBC Radio Manchester',
 			'radiomerseyside/programmes/schedules'	=> 'BBC Radio Merseyside',
 			'bbcnewcastle/programmes/schedules'		=> 'BBC Newcastle',
