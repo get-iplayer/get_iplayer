@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# get_iplayer - Lists, Records and Streams BBC iPlayer TV and Radio programmes
+# get_iplayer - Lists and records BBC iPlayer TV and radio programmes
 #
 #    Copyright (C) 2008-2010 Phil Lewis
 #
@@ -184,12 +184,8 @@ my $opt_format = {
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: generic"],
 	mkv			=> [ 1, "mkv", 'Deprecated', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
 	nonascii	=> [ 1, "na|nonascii|non-ascii!", 'Deprecated', '--non-ascii, --na', "Keep non-ASCII characters in file and directory names. Default behaviour is to remove all non-ASCII characters."],
-	nowrite		=> [ 1, "no-write|nowrite|n!", 'Deprecated', '--nowrite, -n', "No writing of file to disk (use with -x to prevent a copy being stored on disk)"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
-	player		=> [ 0, "player=s", 'Deprecated', "--player \'<command> <options>\'", "Use specified command to directly play the stream"],
 	punctuation	=> [ 1, "symbols|pu|punct|punctuation!", 'Deprecated', '--punctuation, --pu', "Keep punctuation characters and symbols in file and directory names, with ellipsis always replaced by underscore. Default behaviour is to remove all punctuation and symbols except underscore, hyphen and full stop. Overridden by --fatfilename and --hfsfilename."],
-	stdout		=> [ 1, "stdout|x", 'Deprecated', '--stdout, -x', "Additionally stream to STDOUT (so you can pipe output to a player)"],
-	stream		=> [ 0, "stream!", 'Deprecated', '--stream', "Stream to STDOUT (so you can pipe output to a player)"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Deprecated', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
@@ -301,8 +297,8 @@ sub logger(@) {
 	my $msg = shift || '';
 	# Make sure quiet can be overridden by verbose and debug options
 	if ( $opt->{verbose} || $opt->{debug} || ! $opt->{silent} ) {
-		# Only send messages to STDERR if pvr or stdout options are being used.
-		if ( $opt->{stdout} || $opt->{pvr} || $opt->{stderr} || $opt->{stream} ) {
+		# Only send messages to STDERR if pvr
+		if ( $opt->{pvr} || $opt->{stderr} ) {
 			print STDERR $msg;
 		} else {
 			print STDOUT $msg;
@@ -357,7 +353,6 @@ $opt->{verbose} = 1 if $opt_pre->{verbose};
 $opt->{silent} = $opt->{quiet} = 1 if $opt_pre->{silent};
 $opt->{quiet} = 1 if $opt_pre->{quiet};
 $opt->{pvr} = 1 if $opt_pre->{pvr};
-$opt->{stdout} = 1 if $opt_pre->{stdout} || $opt_pre->{stream};
 
 # show version and exit
 if ( $opt_pre->{showver} ) {
@@ -760,13 +755,6 @@ sub init_search {
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 
-	# --stream is the same as --stdout --nowrite
-	if ( $opt->{stream} ) {
-		$opt->{nowrite} = 1;
-		$opt->{stdout} = 1;
-		delete $opt->{stream};
-	}
-
 	# Force nowrite if metadata/subs/thumb-only
 	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
@@ -795,19 +783,11 @@ sub init_search {
 	}
 
 
-	# Set --get && --nowrite if --metadataonly is used
+	# require --metadata with --metadata-only
 	if ( $opt->{metadataonly} ) {
 		if ( ! $opt->{metadata} ) {
 			main::logger "ERROR: Please specify metadata type using --metadata=<type>\n";
 			exit 2;
-		}
-	}
-
-	# Sanity check some conflicting options
-	if ( $opt->{nowrite} && ! $opt->{stdout} ) {
-		if ( ! ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) ) {
-			logger "ERROR: Cannot record to nowhere\n";
-			exit 1;
 		}
 	}
 
@@ -879,13 +859,6 @@ sub init_search {
 		push @{ $binopts->{rtmpdump}	}, '--verbose';
 	} elsif ( $opt->{quiet} || $opt->{silent} ) {
 		push @{ $binopts->{rtmpdump}	}, '--quiet';
-	}
-
-	# Redirect STDOUT to player command if one is specified
-	if ( $opt->{player} && $opt->{nowrite} && $opt->{stdout} ) {
-		open (STDOUT, "| $opt->{player}") || die "ERROR: Cannot open player command\n";
-		STDOUT->autoflush(1);
-		binmode STDOUT;
 	}
 
 	return ( $type, $prog, $index_prog );
@@ -977,7 +950,7 @@ sub download_pid_not_in_cache {
 
 	# Force prog type and create new prog instance if it doesn't exist
 	my $this;
-	logger "INFO: Trying to stream pid using type $prog_type\n";
+	logger "INFO: Trying to download PID using type $prog_type\n";
 	logger "INFO: pid not found in $prog_type cache\n";
 	$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
 	# if only one type is specified then we can clean up the pid which might actually be a url
@@ -1012,7 +985,7 @@ sub download_pid_in_cache {
 		# Don't attempt to download
 		return 1;
 	}
-	logger "INFO Trying to stream pid using type $this->{type}\n";
+	logger "INFO Trying to download PID using type $this->{type}\n";
 	logger "INFO: pid found in cache\n";
 	# Display pid match for recording
 	if ( $opt->{history} ) {
@@ -1175,7 +1148,7 @@ sub download_matches {
 
 	# Do the recordings based on list of index numbers if required
 	my $failcount = 0;
-	if ( $opt->{get} || $opt->{stdout} ) {
+	if ( $opt->{get} ) {
 		for my $this (@match_list) {
 			$failcount += $this->download_retry_loop( $hist );
 		}
@@ -1977,7 +1950,7 @@ sub purge_downloaded_files {
 	my $days = shift;
 
 	# Return if disabled or running in a typically non-interactive mode
-	return 0 if $opt->{nopurge} || $opt->{stdout} || $opt->{nowrite} || $opt->{quiet} || $opt->{silent};
+	return 0 if $opt->{nopurge} || $opt->{nowrite} || $opt->{quiet} || $opt->{silent};
 
 	for my $pid ( $hist->get_pids() ) {
 		my $record = $hist->get_record( $pid );
@@ -2083,7 +2056,7 @@ sub run_cmd {
 	my $fh_child_out = ">&STDOUT";
 	my $fh_child_err = ">&STDERR";
 
-	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{stdout} || $opt->{debug} || $opt->{verbose});
+	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
 
 	if ( $mode eq 'STDOUT' ) {
 		$fh_child_out = $fh_child_err = ">&STDOUT";
@@ -2512,27 +2485,21 @@ sub usage {
 		'.PP',
 		'\fBget_iplayer\fR \fB--get\fR [<options>] <regex|index> ...',
 		'.br',
-		'\fBget_iplayer\fR <url> \fB--type\fR=<type> [<options>]',
+		'\fBget_iplayer\fR <url> [\fB--type\fR=<type> <options>]',
 		'.PP',
-		'\fBget_iplayer\fR <pid|url> [\fB--type\fR=<type> <options>]',
+		'\fBget_iplayer\fR <pid> [\fB--type\fR=<type> <options>]',
 		'.PP',
-		'\fBget_iplayer\fR \fB--stream\fR [<options>] <regex|index> | mplayer \fB-cache\fR 3072 -',
-		'.PP',
-		'\fBget_iplayer\fR \fB--stream\fR [<options>] \fB--type\fR=<type> <pid|url> | mplayer \fB-cache\fR 3072 -',
-		'.PP',
-		'\fBget_iplayer\fR \fB--refresh\fR',
+		'\fBget_iplayer\fR \fB--refresh\fR [\fB--type\fR=<type> <options>]',
 		'.SH DESCRIPTION',
-		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV and Radio programmes.',
+		'\fBget_iplayer\fR lists, searches and records BBC iPlayer TV and radio programmes.',
 		'.PP',
-		'\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme',
-		'directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to',
+		'\fBget_iplayer\fR has two modes: recording a complete programme for later playback, and as a Personal Video Recorder (PVR), subscribing to',
 		'search terms and recording programmes automatically.',
 		'.PP',
-		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.',
-		'Each available programme has a numerical identifier, \fBpid\fR.',
-		'\fBget_iplayer\fR utilises the \fBrtmpdump\fR tool to record BBC iPlayer programmes from RTMP flash streams at various qualities.',
+		'If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available TV programmes.',
+		'Use --type=radio for radio programmes Each available programme has an alphanumeric identifier (\fBPID\fR).',
 		'.PP',
-		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.',
+		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes on a schedule.',
 		'.SH "OPTIONS"' if $manpage;
 	push @usage, 'Usage ( Also see https://github.com/get-iplayer/get_iplayer/wiki/documentation ):';
 	push @usage, ' List All Programmes:            get_iplayer [--type=<TYPE>]';
@@ -2541,10 +2508,8 @@ sub usage {
 	push @usage, ' Record Programmes by Index:     get_iplayer <INDEX> --get';
 	push @usage, ' Record Programmes by URL:       get_iplayer [--type=<TYPE>] "<URL>"';
 	push @usage, ' Record Programmes by PID:       get_iplayer [--type=<TYPE>] --pid=<PID>';
-	push @usage, ' Stream Programme to Player:     get_iplayer --stream <INDEX> | mplayer -cache 3072 -' if $helplevel == 1;
-	push @usage, ' Stream BBC Embedded Media URL:  get_iplayer --stream --type=<TYPE> "<URL>" | mplayer -cache 128 -' if $helplevel != 2;
 	push @usage, '';
-	push @usage, ' Update get_iplayer cache:       get_iplayer --refresh [--force]';
+	push @usage, ' Update get_iplayer cache:       get_iplayer --refresh [--type=<TYPE>] [--force]';
 	push @usage, '';
 	push @usage, ' Basic Help:                     get_iplayer --basic-help' if $helplevel != 2;
 	push @usage, ' Intermediate Help:              get_iplayer --help' if $helplevel == 2;
@@ -3049,8 +3014,8 @@ sub add {
 sub load {
 	my $hist = shift;
 
-	# Return if force option specified or stdout streaming only
-	return 0 if ( $opt->{force} && ! $opt->{pid} ) || $opt->{stdout} || $opt->{nowrite};
+	# Return if force option specified
+	return 0 if ( $opt->{force} && ! $opt->{pid} ) || $opt->{nowrite};
 
 	# clear first
 	$hist->clear();
@@ -3246,8 +3211,8 @@ sub check {
 	my $silent = shift;
 	return 0 if ! $pid;
 
-	# Return if force option specified or stdout streaming only
-	return 0 if $opt->{force} || $opt->{stdout} || $opt->{nowrite};
+	# Return if force option specified
+	return 0 if $opt->{force} || $opt->{nowrite};
 
 	# Load if empty
 	$hist->conditional_load();
@@ -3762,7 +3727,7 @@ sub download_retry_loop {
 				# Keep short mode name for substitutions
 				$prog->{modeshort} = $modeshort;
 
-				main::logger "INFO: Trying $mode mode to ".($opt->{nowrite} && $opt->{stdout} ? "stream" : "record")." $prog->{type}: $prog->{name} - $prog->{episode}\n";
+				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
@@ -3794,8 +3759,8 @@ sub mode_ver_download_retry_loop {
 	# Use different number of retries for flash modes
 	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
-	# can only resume on retries unless streaming-only
-	delete $opt->{streamresume} unless ( $opt->{nowrite} && $opt->{stdout} );
+	# can only resume on retries
+	delete $opt->{streamresume};
 	
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
@@ -3823,36 +3788,29 @@ sub mode_ver_download_retry_loop {
 		# Success
 		} elsif ( $retcode eq '0' ) {
 			my $command = $opt->{"command".$prog->{type}} || $opt->{command};
-			# No need to do all these post-tasks if its streaming-only
-			if ( $opt->{nowrite} && $opt->{stdout} ) {
-				# Run user command if streaming-only or a stream was writtem
-				$prog->run_user_command( $command ) if $command;
-				# Skip
-			} else {
-				# Add to history, tag file, and run post-record command if a stream was written
-				main::logger "\n";
-				if ( $opt->{thumb} ) {
-					$prog->create_dir();
-					$prog->download_thumbnail();
-				}
-				if ( $opt->{metadata} ) {
-					$prog->create_dir();
-					$prog->create_metadata_file();
-				}
-				if ( ! $opt->{nowrite} ) {
-					$hist->add( $prog );
-					$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
-				}
-				if ( $command && ! $opt->{nowrite} ) {
-					$prog->run_user_command( $command );
-				}
+			# Add to history, tag file, and run post-record command if a stream was written
+			main::logger "\n";
+			if ( $opt->{thumb} ) {
+				$prog->create_dir();
+				$prog->download_thumbnail();
+			}
+			if ( $opt->{metadata} ) {
+				$prog->create_dir();
+				$prog->create_metadata_file();
+			}
+			if ( ! $opt->{nowrite} ) {
+				$hist->add( $prog );
+				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
+			}
+			if ( $command && ! $opt->{nowrite} ) {
+				$prog->run_user_command( $command );
 			}
 			$prog->report() if $opt->{pvr};
 			return 0;
 
 		# Retry this mode
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
-			main::logger "WARNING: Retry ".( ! $opt->{nowrite} ? "recording" : "streaming")." for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+			main::logger "WARNING: Retry recording for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
 			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version );
 		}
@@ -7113,12 +7071,7 @@ sub modelist {
 		print $mlist =~ /\bhls\b/;
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
-		# cannot stream DASH with ffmpeg
-		if ( $opt->{stdout} ) {
-			$fmt = "haf";
-		} else {
-			$fmt = "radio";
-		}
+		$fmt = "radio";
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -8193,8 +8146,8 @@ sub download {
 	}
 
 	my $return = 0;
-	# Only get the stream if we are writing a file or streaming
-	if ( $opt->{stdout} || ! $opt->{nowrite} ) {
+	# Only get the stream if we are writing a file
+	if ( ! $opt->{nowrite} ) {
 		# set mode
 		$prog->{mode} = $mode;
 
@@ -8748,12 +8701,12 @@ sub postproc {
 	my @cmd;
 	my $return;
 
-	# do nothing if not recording
-	return 0 unless ( ! $opt->{nowrite} && -f $file_tmp ); 
+	# do nothing if no file
+	return 0 unless ( -f $file_tmp ); 
 	
 	# Retain raw format if required
 	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} && ! $opt->{nowrite} ) {
+		if ( $file_tmp ne $prog->{filename} ) {
 			move($file_tmp, $prog->{filename});
 			$prog->check_duration() if $opt->{checkduration};
 			main::logger "INFO: Recorded file: $prog->{filename}\n";
@@ -8974,12 +8927,7 @@ sub get {
 	# Add hashes option if required
 	push @cmdopts, '--hashes' if $opt->{hash};
 
-	# Deal with stdout streaming
-	if ( $opt->{stdout} && not $opt->{nowrite} ) {
-		main::logger "ERROR: Cannot stream RTMP to STDOUT and file simultaneously\n";
-		exit 4;
-	}
-	push @cmdopts, ( '--resume', '-o', $file_tmp ) if ! ( $opt->{stdout} && $opt->{nowrite} );
+	push @cmdopts, ( '--resume', '-o', $file_tmp );
 	push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
 
 	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
@@ -9014,22 +8962,9 @@ sub get {
 		);
 	}
 
-	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording file: $file_tmp\n";
-	}
+	main::logger "INFO: Begin recording file: $file_tmp\n";
 
 	$return = main::run_cmd( 'normal', @cmd );
-
-	# exit behaviour when streaming
-	if ( $opt->{nowrite} && $opt->{stdout} ) {
-		if ( $return == 0 ) {
-			main::logger "\nINFO: Streaming completed successfully\n";
-			return 0;
-		} else {
-			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'retry';
-		}
-	}
 
 	# rtmpdump returns 2 with --stop
 	unless ( $return == 2 && $opt->{stop} ) {
@@ -9111,7 +9046,7 @@ sub get {
 		$file_tmp = $prog->{filepart};
 	}
 	my $rc;
-	if ( $opt->{hlsffmpeg} || $opt->{stdout} ) {
+	if ( $opt->{hlsffmpeg} ) {
 		$rc = $self->get_ffmpeg( $file_tmp, $prog, %streamdata );
 	} else {
 		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
@@ -9196,7 +9131,7 @@ sub get_builtin {
 				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
 				$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
 			}
-			main::logger sprintf (( ! $opt->{nowrite} ? "Recording" : "Streaming" ).": %8.2fMB / %.2fMB %s %5.1f%% %s remaining\r",
+			main::logger sprintf ( "Recording: %8.2fMB / %.2fMB %s %5.1f%% %s remaining\r",
 				$size / 1024.0 / 1024.0,
 				$file_size / 1024.0 / 1024.0,
 				$rate,
@@ -9325,12 +9260,6 @@ sub get_ffmpeg {
 	my $mode = $prog->{mode};
 	my $pfx = substr($mode, 0, 3);
 
-	# Deal with stdout streaming
-	#if ( $opt->{stdout} && ! $opt->{nowrite} ) {
-	#	main::logger "ERROR: Cannot stream HLS to STDOUT and file simultaneously\n";
-	#	exit 4;
-	#}
-
 	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
@@ -9380,33 +9309,14 @@ sub get_ffmpeg {
 		@globals,
 		'-i', $url,
 	);
-	if ( ! $opt->{nowrite} ) {
-		push @cmd, @cmdopts;
-		push @cmd, $file_tmp;
-	}
-	if ( $opt->{stdout} ) {
-		push @cmd, @cmdopts;
-		push @cmd, ( '-f', 'mpegts', 'pipe:1' );
-	}
+	push @cmd, @cmdopts;
+	push @cmd, $file_tmp;
 
-	if ( ! $opt->{nowrite} ) {
-		main::logger "INFO: Begin recording file: $file_tmp\n";
-	}
+	main::logger "INFO: Begin recording file: $file_tmp\n";
 
 	my $begin_time = time();
 	$return = main::run_cmd( 'normal', @cmd );
 	my $elapsed = time() - $begin_time;
-
-	# exit behaviour when streaming
-	if ( $opt->{nowrite} && $opt->{stdout} ) {
-		if ( $return == 0 ) {
-			main::logger "\nINFO: Streaming completed successfully\n";
-			return 0;
-		} else {
-			main::logger "\nINFO: Streaming failed with exit code $return\n";
-			return 'retry';
-		}
-	}
 
 	# if we fail during the streaming, try again
 	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
@@ -9432,10 +9342,6 @@ use strict;
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $rc;
-	if ( $opt->{stdout} ) {
-		main::logger "ERROR: Cannot stream DASH to STDOUT. Use default modes or --radiomode=haf\n";
-		exit 1;
-	}
 	my $audio_media = $streamdata{audio_media};
 	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
 	$audio_file .= ".m4a" unless $opt->{raw};
@@ -9721,7 +9627,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|stdout|^get|refresh|^save|^prefs|help|expiry|nowrite|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
