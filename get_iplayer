@@ -7284,7 +7284,6 @@ sub opt_format {
 		commandtv	=> [ 1, "commandtv|command-tv=s", 'Output', '--command-tv <command>', "Run user command after successful recording of tv programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
-		ffmpegtvopts	=> [ 1, "ffmpeg-tv-opts|ffmpegtvopts=s", 'Deprecated', '--ffmpeg-tv-opts <options>', "Add custom options to ffmpeg re-muxing for tv"],
 	};
 }
 
@@ -8556,7 +8555,6 @@ sub opt_format {
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "Run user command after successful recording of radio programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
-		ffmpegradioopts	=> [ 1, "ffmpeg-radio-opts|ffmpegradioopts=s", 'Deprecated', '--ffmpeg-radio-opts <options>', "Add custom options to ffmpeg re-muxing for radio"],
 	};
 }
 
@@ -8715,12 +8713,6 @@ sub postproc {
 		}
 	}
 
-	# Add custom options to ffmpeg for this type if specified with --ffmpeg-<type>-opts
-	my @ffmpeg_opts = ();
-	if ( defined $opt->{'ffmpeg'.$prog->{type}.'opts'} ) {
-		push @ffmpeg_opts, shellwords( $opt->{'ffmpeg'.$prog->{type}.'opts'} );
-	}
-
 	# use backwards-compatible option for ffmpeg
 	my @filter_opts;
 	if ( $bin->{ffmpeg} =~ /avconv/ ) {
@@ -8756,7 +8748,6 @@ sub postproc {
 				'-i', $file_tmp,
 				'-vn',
 				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				@ffmpeg_opts,
 				$prog->{filepart},
 			);
 		} else {
@@ -8768,7 +8759,6 @@ sub postproc {
 				'-vn',
 				'-acodec', 'copy',
 				@filter_opts,
-				@ffmpeg_opts,
 				$prog->{filepart},
 			);
 		}
@@ -8781,7 +8771,6 @@ sub postproc {
 			'-vcodec', 'copy',
 			'-acodec', 'copy',
 			@filter_opts,
-			@ffmpeg_opts,
 			$prog->{filepart},
 		);
 	}
@@ -8985,13 +8974,6 @@ use File::stat;
 use List::Util qw(max);
 use Text::ParseWords;
 use strict;
-
-sub opt_format {
-	return {
-		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
-	};
-}
 
 sub parse_playlist {
 	my (undef, $ua, $url) = @_;
