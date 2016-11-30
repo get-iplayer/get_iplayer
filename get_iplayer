@@ -7055,10 +7055,6 @@ sub modelist {
 	# Defaults
 	if ( ! $mlist ) {
 		$mlist = 'default';
-		if ( $opt->{hlsffmpeg} && ! main::exists_in_path('ffmpeg') ) {
-			main::logger "ERROR: Cannot use default hls/hvf/haf modes because --hls-ffmpeg is specified and ffmpeg is not found - exiting\n";
-			return undef unless $prog->{type} =~ /radio/;
-		}
 	}
 	$mlist =~ s/rtmp/flash/g;
 	$mlist =~ s/hls50/hvf/g;
@@ -7288,7 +7284,6 @@ sub opt_format {
 		commandtv	=> [ 1, "commandtv|command-tv=s", 'Output', '--command-tv <command>', "Run user command after successful recording of tv programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
-		hlstvopts	=> [ 1, "hls-tv-opts|hlstvopts=s", 'Deprecated', '--hls-tv-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for tv"],
 		ffmpegtvopts	=> [ 1, "ffmpeg-tv-opts|ffmpegtvopts=s", 'Deprecated', '--ffmpeg-tv-opts <options>', "Add custom options to ffmpeg re-muxing for tv"],
 	};
 }
@@ -8078,10 +8073,7 @@ sub download {
 	}
 	# require ffmpeg for HLS
 	if ( $mode =~ /^(hls|hvf|haf)/ && ! main::exists_in_path('ffmpeg') ) {
-		if ( $opt->{hlsffmpeg} ) {
-			main::logger "\nWARNING: --hls-ffmpeg specified and required ffmpeg utility not found - cannot download HLS audio/video\n";
-			return 'next';
-		} elsif ( ! $opt->{raw} ) {
+		if ( ! $opt->{raw} ) {
 			main::logger "\nWARNING: Required ffmpeg utility not found - not converting .ts file\n";
 			$opt->{raw} = 1;
 		}
@@ -8564,7 +8556,6 @@ sub opt_format {
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "Run user command after successful recording of radio programme using args such as <pid>, <name> etc. Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
-		hlsradioopts	=> [ 1, "hls-radio-opts|hlsradioopts=s", 'Deprecated', '--hls-radio-opts <options>', "Add custom options to ffmpeg HLS download re-muxing for radio"],
 		ffmpegradioopts	=> [ 1, "ffmpeg-radio-opts|ffmpegradioopts=s", 'Deprecated', '--ffmpeg-radio-opts <options>', "Add custom options to ffmpeg re-muxing for radio"],
 	};
 }
@@ -8999,8 +8990,6 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
-		hlsffmpeg		=> [ 1, "hls-ffmpeg|hlsffmpeg!", 'Deprecated', '--hls-ffmpeg', "Use ffmpeg instead of built-in HLS downloader. Ignored for downloading on-demand radio programmes, which use DASH downloader. 320k on-demand radio programmes cannot be streamed with --hls-ffmpeg."],
-		hlsffmpegencode		=> [ 1, "hls-ffmpeg-encode|hlsffmpegencode!", 'Deprecated', '--hls-ffmpeg-encode', "Make ffmpeg HLS downloader re-encode streams. For old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher-quality media."],
 	};
 }
 
@@ -9046,11 +9035,7 @@ sub get {
 		$file_tmp = $prog->{filepart};
 	}
 	my $rc;
-	if ( $opt->{hlsffmpeg} ) {
-		$rc = $self->get_ffmpeg( $file_tmp, $prog, %streamdata );
-	} else {
-		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
-	}
+	$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
 	return $rc if $rc;
 	return $self->postproc($file_tmp, $prog, %streamdata);
 }
@@ -9237,89 +9222,6 @@ sub get_builtin {
 
 	# clear resume data
 	delete $opt->{streamresume};
-
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-
-	return 0;
-}
-
-sub get_ffmpeg {
-	my ( $self, $file_tmp, $prog, %streamdata ) = @_;
-	my @cmd;
-	my @cmdopts;
-	my $return;
-	my $url = $streamdata{streamurl};
-	my $ab = $streamdata{audio_bitrate};
-	my $vb = $streamdata{video_bitrate};
-	my $kind = $streamdata{kind};
-	my $mode = $prog->{mode};
-	my $pfx = substr($mode, 0, 3);
-
-	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
-	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
-		unlink( $file_tmp );
-	}
-
-	# Add start/stop options if defined
-	push @cmdopts, ( '-ss', $opt->{start} ) if defined $opt->{start};
-	push @cmdopts, ( '-t', $opt->{stop} - $opt->{start} ) if defined $opt->{stop};
-	# requires ffmpeg 1.2
-	# push @cmdopts, ( '-to', $opt->{stop} ) if defined $opt->{stop};
-	if ( $opt->{hlsffmpegencode} ) {
-		if ( $kind eq 'video' ) {
-			push @cmdopts, ( '-vb', "${vb}k" ) if $vb;
-			push @cmdopts, ( '-vcodec', 'h264' );
-		} else {
-			push @cmdopts, ( '-vn' );
-		}
-		push @cmdopts, ( '-ab', "${ab}k" ) if $ab;
-		push @cmdopts, ( '-acodec', 'aac', '-strict', 'experimental' );
-	} else {
-		if ( $kind eq 'video' ) {
-			push @cmdopts, ( '-vcodec', 'copy' );
-		} else {
-			push @cmdopts, ( '-vn' );
-		}
-		push @cmdopts, ( '-acodec', 'copy' );
-	}
-
-	# Add custom options to ffmpeg for this type if specified with --hls-<type>-opts
-	if ( defined $opt->{$pfx.$prog->{type}.'opts'} ) {
-		push @cmdopts, shellwords( $opt->{$pfx.$prog->{type}.'opts'} );
-	}
-
-	my @globals = ( '-y' );
-	if ( ! $opt->{ffmpegobsolete} ) {
-		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
-			push @globals, ( '-loglevel', 'error' );
-		}
-		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}}) ) {
-			push @globals, ( '-stats' );
-		}
-	}
-	@cmd = (
-		$bin->{ffmpeg},
-		@{$binopts->{ffmpeg}},
-		@globals,
-		'-i', $url,
-	);
-	push @cmd, @cmdopts;
-	push @cmd, $file_tmp;
-
-	main::logger "INFO: Begin recording file: $file_tmp\n";
-
-	my $begin_time = time();
-	$return = main::run_cmd( 'normal', @cmd );
-	my $elapsed = time() - $begin_time;
-
-	# if we fail during the streaming, try again
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
 
 	# If file is too small or non-existent then delete and try next mode
 	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
