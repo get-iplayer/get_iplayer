@@ -127,7 +127,6 @@ my $opt_format = {
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <suppliers>', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
-	mediaselector	=> [ 1, "mediaselector|media-selector=s", 'Deprecated', '--mediaselector <identifier>', "Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5"],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults. Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
@@ -953,12 +952,13 @@ sub download_pid_not_in_cache {
 	logger "INFO: Trying to download PID using type $prog_type\n";
 	logger "INFO: pid not found in $prog_type cache\n";
 	$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
-	# if only one type is specified then we can clean up the pid which might actually be a url
-	#if ( $#try_types == 0 ) {
-		logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
-		$this->clean_pid;
-		logger " New: '$this->{pid}'\n" if $opt->{verbose};
-	#}
+	logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
+	$this->clean_pid();
+	logger " New: '$this->{pid}'\n" if $opt->{verbose};
+	if ( $this->{pid} !~ m{^([pb]0[a-z0-9]{6})$} ) {
+		logger "ERROR: Could not extract a valid PID from $this->{pid}\n";
+		return 1;
+	}
 	# Display pid match for recording
 	if ( $opt->{history} ) {
 		$hist->list_progs( 'pid:'.$pid );
@@ -3395,8 +3395,13 @@ sub opt {
 }
 
 
-# Cleans up a pid and removes url parts that might be specified
+# extract PID from URL if necessary
 sub clean_pid {
+	my $prog = shift;
+
+	if ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} ) {
+		$prog->{pid} = $1;
+	}
 }
 
 
@@ -4166,7 +4171,7 @@ sub run_user_command {
 	my $prog = shift;
 	my $command = shift;
 
-	# Substitute the fields for the pid (and sanitize for double-quoted shell use)
+	# Substitute the fields for the PID (and sanitize for double-quoted shell use)
 	$command = $prog->substitute( $command, 4 );
 	$command = main::encode_fs($command);
 
@@ -4390,258 +4395,18 @@ use URI;
 use base 'Programme';
 
 
-# Return hash of version => verpid given a pid
+# Return hash of version => verpid given a PID
 sub get_verpids {
 	my ( $prog, $ua ) = @_;
-	my $url;
 
-	# If this is already a live or streaming verpid just pass it through
-	# e.g. http://www.bbc.co.uk/mediaselector/4/gtis/?server=cp52115.live.edgefcs.net&identifier=sport1a@s2388&kind=akamai&application=live&cb=28022
-	if ( $prog->{pid} =~ m{^http.+/mediaselector/4/[gm]tis}i ) {
-		# bypass all the xml parsing and return
-		$prog->{verpids}->{default} = $1 if $prog->{pid} =~ m{^.+(\?.+)$};
-
-		# Name
-		my $title;
-		$title = $1 if $prog->{pid} =~ m{identifier=(.+?)&};
-		$title =~ s/\@/_/g;
-
-		# Add to prog hash
-		$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-		$prog->{title} = decode_entities($title);
-		return 0;
-	
-	# news site video page	
-	} elsif ( $prog->{pid} =~ m{^(http://)www(\.bbc\.co\.uk/news/.*?(\d+))$} ) {
-		$prog->{web} = $prog->{pid} if ! $prog->{web};
-		# fall through
-
-	# Determine if the is a standard pid, Live TV or EMP TV URL
-	# EMP URL
-	} elsif ( $prog->{pid} =~ /^http/i ) {
-		$url = $prog->{pid};
-		if ( $HTML::Parser::VERSION < 3.71 ) {
-			main::logger "WARNING: Page parsing may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
-		}
-		# May aswell set the web page metadata here if not set
-		$prog->{web} = $prog->{pid} if ! $prog->{web};
-		# Scrape the EMP web page and get playlist URL
-		my $xml = main::request_url_retry( $ua, $url, 3 );
-		if ( ! $xml ) {
-			main::logger "\rERROR: Failed to get EMP page from BBC site\n\n";
-			return 1;
-		}
-		# flatten
-		$xml =~ s/\n/ /g;
-		# Find playlist URL in various guises
-		# JSON config block
-		if ( $xml =~ m{["\s]pid["\s]:\s?["']([bp]0[a-z0-9]{6})["']} ) {
-			$prog->{pid} = $1;
-			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
-		} elsif ( $xml =~ m{<param\s+name="playlist"\s+value="(http.+?)"}i ) {
-			$url = $1;
-		# setPlaylist("http://www.bbc.co.uk/mundo/meta/dps/2009/06/emp/090625_video_festival_ms.emp.xml")
-		# emp.setPlaylist("http://www.bbc.co.uk/learningzone/clips/clips/p_chin/bb/p_chin_ch_05303_16x9_bb.xml")
-		} elsif ( $xml =~ m{setPlaylist\("(http.+?)"\)}i ) {
-			$url = $1;
-			$url =~ s/["']\+location\.host\+["']/www.bbc.co.uk/;
-		# playlist = "http://www.bbc.co.uk/worldservice/meta/tx/flash/live/eneuk.xml";
-		} elsif ( $xml =~ m{\splaylist\s+=\s+"(http.+?)";}i ) {
-			$url = $1;
-		# iplayer Programmes page format (also rewrite the pid)
-		# href="http://www.bbc.co.uk/iplayer/episode/b00ldhj2"
-		} elsif ( $xml =~ m{href="http://www.bbc.co.uk/iplayer/episode/([bp]0[a-z0-9]{6})"} ) {
-			$prog->{pid} = $1;
-			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
-		# live streams (e.g., olympics)
-		} elsif ( $xml =~ m{"href":\s*"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"[^\}]+?"live":\s*true} ) {
-			($url = $1) =~ s/\\//g;
-			$prog->{pid} = $url;
-		} elsif ( $xml =~ m{live-experience\/services.+?pid=([bp]0[a-z0-9]{6})} ) {
-			$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$1;
-			$prog->{pid} = $url;
-		# playlist embedded in JSON
-		} elsif ( $xml =~ m{"href":"(http:\\/\\/playlists.bbc.co.uk\\/.+?\\/playlist.sxml)"} ) {
-			($url = $1) =~ s/\\//g;
-		# playlist in data-media-id attribute
-		} elsif ( $xml =~ m{data-media-id="(http://playlists.bbc.co.uk/.+?/(\d+)\w?/playlist.sxml)"} ) {
-			$url = $1;
-			$prog->{pid} = $2;
-		# embedded player
-		} elsif ( $xml =~ m{emp\.load\("(http://www.bbc.co.uk/iplayer/playlist/([bp]0[a-z0-9]{6}))"\)} ) {
-			$url = $1;
-			$prog->{pid} = $2;
-		} elsif ( $url =~ m{^http.+.xml$} ) {
-			# Just keep the url as it is probably already an xml playlist
-		## playlist: "http://www.bbc.co.uk/iplayer/playlist/bbc_radio_one",
-		#} elsif ( $xml =~ m{playlist: "http.+?playlist\/(\w+?)"}i ) {
-		#	$prog->{pid} = $1;
-		#	$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
-		}
-		# URL decode url
-		$url = main::url_decode( $url );
-	# iPlayer PID
-	} else {
-		$url = 'http://www.bbc.co.uk/iplayer/playlist/'.$prog->{pid};
-		# use the audiodescribed playlist url if non-default versions are specified
-		$url .= '/ad' if defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/;
+	my $rc_json = $prog->get_verpids_json( $ua );
+	my $rc_html = 1;
+	if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
+		$rc_html = $prog->get_verpids_html( $ua );
 	}
-
-	main::logger "INFO: iPlayer metadata URL = $url\n" if $opt->{verbose};
-	#main::logger "INFO: Getting version pids for programme $prog->{pid}        \n" if ! $opt->{verbose};
-
-	# send request
-	my $xml;
-	$xml = main::request_url_retry( $ua, $url, 3 ) if $url;
-	#if ( ! $xml ) {
-	#	main::logger "\rERROR: Failed to get version pid metadata from iplayer site\n\n";
-	#	return 1;
-	#}
-	# The URL http://www.bbc.co.uk/iplayer/playlist/<PID> contains for example:
-	#<?xml version="1.0" encoding="UTF-8"?>
-	#<playlist xmlns="http://bbc.co.uk/2008/emp/playlist" revision="1">
-	#  <id>tag:bbc.co.uk,2008:pips:b00dlrc8:playlist</id>
-	#  <link rel="self" href="http://www.bbc.co.uk/iplayer/playlist/b00dlrc8"/>
-	#  <link rel="alternate" href="http://www.bbc.co.uk/iplayer/episode/b00dlrc8"/>
-	#  <link rel="holding" href="http://www.bbc.co.uk/iplayer/images/episode/b00dlrc8_640_360.jpg" height="360" width="640" type="image/jpeg" />
-	#  <title>Amazon with Bruce Parry: Episode 1</title>
-	#  <summary>Bruce Parry begins an epic adventure in the Amazon following the river from source to sea, beginning  in the High Andes and visiting the Ashaninka tribe.</summary>
-	#  <updated>2008-09-18T14:03:35Z</updated>
-	#  <item kind="ident">
-	#    <id>tag:bbc.co.uk,2008:pips:bbc_two</id>
-	#    <mediator identifier="bbc_two" name="pips"/>
-	#  </item>
-	#  <item kind="programme" duration="3600" identifier="b00dlr9p" group="b00dlrc8" publisher="pips">
-	#    <tempav>1</tempav>
-	#    <id>tag:bbc.co.uk,2008:pips:b00dlr9p</id>
-	#    <service id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</service>
-	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>
-	#
-	#    <alternate id="default" />
-	#    <guidance>Contains some strong language.</guidance>
-	#    <mediator identifier="b00dlr9p" name="pips"/>
-	#  </item>
-	#  <item kind="programme" duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
-	#    <tempav>1</tempav>
-	#    <id>tag:bbc.co.uk,2008:pips:b00dp4xn</id>
-	#    <service id="bbc_one" href="http://www.bbc.co.uk/iplayer/bbc_one">BBC One</service>
-	#    <masterbrand id="bbc_two" href="http://www.bbc.co.uk/iplayer/bbc_two">BBC Two</masterbrand>
-	#
-	#    <alternate id="signed" />
-	#    <guidance>Contains some strong language.</guidance>
-	#    <mediator identifier="b00dp4xn" name="pips"/>
-	#  </item>
-
-	# If a prog is totally unavailable you get
-	# ...
-	# <updated>2009-01-15T23:13:33Z</updated>
-	# <noItems reason="noMedia" />
-	#
-	#                <relatedLink>
-
-	# flatten
-	$xml =~ s/\n/ /g;
-
-	# set title here - broken in JSON playlists
-	$prog->{title} = decode_entities($1) if $xml =~ m{<title>\s*(.+?)\s*<\/title>};
-	$prog->{thumbnail} ||= $1 if $xml =~ m{<link rel="holding" href="(.*?)"};
-	$prog->{guidance} ||= $1 if $xml =~ m{<guidance.*?>(.*?)</guidance>};
-	$prog->{descshort} = $1 if $xml =~ m{<summary>(.*?)</summary>};
-	$prog->{type} ||= 'tv' if grep /kind="programme"/, $xml;
-	$prog->{type} ||= 'radio' if grep /kind="radioProgramme"/, $xml;
-
-	# Detect noItems or no programmes
-	if ( ! $xml || $xml =~ m{<noItems\s+reason="(\w+)"} || $xml !~ m{kind="(programme|radioProgramme)"} ) {
-		my $rc_json = $prog->get_verpids_json( $ua );
-		my $rc_html = 1;
-		if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
-			$rc_html = $prog->get_verpids_html( $ua );
-		}
-		return 0 if ! $rc_json || ! $rc_html;
-		main::logger "\nWARNING: No programmes are available for this pid with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
-		main::logger "WARNING: You may receive this message if you are using get_iplayer outside the UK\n";
-		return 1;
-	}
-
-	# Split into <item kind="programme"> sections
-	my $prev_version = '';
-	for ( split /<item\s+kind="(radioProgramme|programme)"/, $xml ) {
-		main::logger "DEBUG: Block: $_\n" if $opt->{debug};
-		my ($verpid, $version);
-
-		# news site video page	
-		if ( $prog->{pid} =~ /^\d+$/i && $url =~ /^http.+xml$/ ) {
-			$version = 'default';
-			$verpid = $1 if m{<mediator\s+identifier="(.+?)"};
-			$verpid ||= $url;
-			main::logger "INFO: Using Non-live news video VPID: $verpid\n" if $opt->{verbose} && $verpid;
-
-		# Live/Non-live EMP tv/radio XML URL
-		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http.+xml$/ ) {
-			$version = 'default';
-			$verpid = $url;
-			main::logger "INFO: Using Live/Non-live EMP tv/radio XML URL: $verpid\n" if $opt->{verbose} && $verpid;
-
-		# Live/Non-live EMP tv/radio URL
-		} elsif ( $prog->{pid} =~ /^http/i && $url =~ /^http/ ) {
-			$version = 'default';
-			$verpid = $url;
-			main::logger "INFO: Using Live/Non-live EMP tv/radio URL: $verpid\n" if $opt->{verbose} && $verpid;
-
-		# Live/Non-live EMP tv/radio
-		} elsif ( $prog->{pid} =~ /^http/i ) {
-			$version = 'default';
-			# <connection kind="akamai" identifier="48502/mundo/flash/2009/06/glastonbury_16x9_16x9_bb" server="cp48502.edgefcs.net"/>
-			# <connection kind="akamai" identifier="intl/abercrombie" server="cp57856.edgefcs.net" />
-			# <connection kind="akamai" application="live" identifier="sport2a@s2405" server="cp52115.live.edgefcs.net" tokenIssuer="akamaiUk" />
-			# <connection kind="akamai" identifier="secure/p_chin/p_chin_ch_05303_16x9_bb" server="cp54782.edgefcs.net" tokenIssuer="akamaiUk"/>
-			# <connection kind="akamai" application="live" identifier="eneuk_live@6512" server="wsliveflash.bbc.co.uk" />
-			# verpid = ?server=cp52115.live.edgefcs.net&identifier=sport2a@s2405&kind=akamai&application=live
-			$verpid = "?server=$4&identifier=$3&kind=$1&application=$2" if $xml =~ m{<connection\s+kind="(.+?)"\s+application="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"};
-			# Or try this if application is not defined (i.e. like in learning zone)
-			if ( ! $verpid ) {
-				$verpid = "?server=$3&identifier=$2&kind=$1&application=ondemand" if $xml =~ m{<connection\s+kind="(.+?)"\s+identifier="(.+?)"\s+server="(.+?)"};
-			}
-			main::logger "INFO: Using Live/Non-live EMP tv/radio: $verpid\n" if $opt->{verbose} && $verpid;
-
-		# Not Live standard TV and Radio
-		} else {
-			#  duration="3600" identifier="b00dp4xn" group="b00dlrc8" publisher="pips">
-			$verpid = $1 if m{\s+duration=".*?"\s+identifier="(.+?)"};
-			# assume default version
-			my $curr_version = "default";
-			# <alternate id="default" />
-			if ( m{<alternate\s+id="(.+?)"} ) {
-				$curr_version = lc($1);
-				# Remap version name from 'default' => 'audiodescribed' if we are using the /ad playlist URL:
-				if ( defined $opt->{versionlist} && $opt->{versionlist} =~ /(audiodescribed|signed)/ ) {
-					$curr_version = 'audiodescribed' if $curr_version eq 'default';
-				}
-			}
-			$version = $curr_version;
-			# check version collisions
-			if ( $prog->{verpids}->{$curr_version} ) {
-				my $vercount = 1;
-				# Search for the next free suffix
-				while ( $prog->{verpids}->{$curr_version} ) {
-					$vercount++;
-					$curr_version = $version.$vercount;
-				}
-				$version = $curr_version;
-			}
-			main::logger "INFO: Using Not Live standard TV and Radio: $verpid\n" if $opt->{verbose} && $verpid;
-		}
-
-		next if ! ($verpid && $version);
-		$prog->{verpids}->{$version} = $verpid;
-		$prog->{durations}->{$version} = $1 if m{duration="(\d+?)"};
-		main::logger "INFO: Version: $version, VersionPid: $verpid, Duration: $prog->{durations}->{$version}\n" if $opt->{verbose};
-	}
-
-	# try json playlist for channel and any missing fields
-	if ( $prog->{type} eq 'tv' || $prog->{type} eq 'radio' ) {
-		$prog->get_verpids_json( $ua );
-	}
+	return 0 if ! $rc_json || ! $rc_html;
+	main::logger "\nWARNING: No programmes are available for this PID with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
+	return 1;
 
 	# Add to prog hash
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
@@ -4659,7 +4424,7 @@ sub get_verpids_json {
 	}
 	$pid ||= $prog->{pid};
 	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: pid changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
+		main::logger "INFO: PID changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
 		$prog->{pid} = $pid;
 	}
 	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ ) {
@@ -4670,7 +4435,7 @@ sub get_verpids_json {
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3 );
 	if ( ! $json ) {
-		main::logger "ERROR: Failed to get version pid metadata from iplayer site (JSON)\n";
+		main::logger "ERROR: Failed to get version PID metadata from iplayer site (JSON)\n";
 		return 1;
 	}
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
@@ -4762,7 +4527,7 @@ sub get_verpids_html {
 	}
 	$pid ||= $prog->{pid};
 	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: pid changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
+		main::logger "INFO: PID changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
 		$prog->{pid} = $pid;
 	}
 	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ && $pid !~ /^http/ ) {
@@ -5058,7 +4823,7 @@ sub get_metadata {
 	# populate version pid metadata if we don't have it already
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
-			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
+			main::logger "ERROR: Could not get version PID metadata\n" if $opt->{verbose};
 			# Return at this stage unless we want metadata/tags only for various reasons
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
@@ -5688,14 +5453,15 @@ sub get_pids_recursive {
 	main::logger "Cleaning pid Old: '$prog->{pid}', " if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " New: '$prog->{pid}'\n" if $opt->{verbose};
+	if ( $prog->{pid} !~ m{^([pb]0[a-z0-9]{6})$} ) {
+		main::logger "ERROR: Could not extract a valid PID from $prog->{pid}\n";
+		return ();
+	}
 
 	if ( $opt->{ybbcy} ) {
 		main::logger "WARNING: --ybbcy specified - trying to record PID directly.\n";
 		return $prog->{pid};
 	}
-
-	# Skip RDF retrieval if a web URL
-	return $prog->{pid} if $prog->{pid} =~ '^http';
 
 	eval "use XML::Simple";
 	if ($@) {
@@ -6373,21 +6139,6 @@ sub get_stream_data_cdn {
 	my $count = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
 
-		# Get authstring from more specific mediaselector if this mode is specified - fails sometimes otherwise
-		if ( $opt->{mediaselector} eq '4' && $cattribs->{authString} && $cattribs->{kind} =~ /^(limelight|akamai|level3|sis|iplayertok)$/ && (grep /^$mode$/, (split /,/, $mattribs->{modelist})) ) {
-			# Build URL
-			my $media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/';
-			my $url = $media_stream_data_prefix."$mattribs->{verpid}/$mattribs->{service}/$cattribs->{kind}?cb=".( sprintf "%05.0f", 99999*rand(0) );
-			my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			# get new set of connection attributes from the new xml data
-			my $new_mattribs = (parse_metadata( $xml ))[0];
-			my $new_cattribs = $new_mattribs->{connections}[0];
-			# Override elemnts from more specific connection attribs if present
-			for my $element ( keys %{ $new_cattribs } ) {
-				$cattribs->{$element} = $new_cattribs->{$element} if $new_cattribs->{$element};
-			}
-		}
 		decode_entities($cattribs->{authString});
 
 		# Common attributes
@@ -6409,21 +6160,6 @@ sub get_stream_data_cdn {
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Default appication is 'ondemand'
 			$cattribs->{application} = 'ondemand' if ! $cattribs->{application};
-
-			# if the authString is not set and this is a live (i.e. simulcast) then try to get an authstring
-			# Maybe should this be general for all CDNs?
-			if ( $opt->{mediaselector} eq '4' && ! $cattribs->{authString} ) {
-				# Build URL
-				my $media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/';
-				my $url = ${media_stream_live_prefix}."?server=$cattribs->{server}&identifier=$cattribs->{identifier}&kind=$cattribs->{kind}&application=$cattribs->{application}";
-				my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $url, 3, undef, undef, 1 );
-				main::logger "\n$xml\n" if $opt->{debug};
-				$cattribs->{authString} = 'auth='.$1 if $xml =~ m{<token>auth=(.+?)</token>};
-				if ( ! $cattribs->{authString} ) {
-					$cattribs->{authString} = 'auth='.$1 if $xml =~ m{<token>(.+?)</token>};
-				}
-				$conn->{authstring} = $cattribs->{authString};
-			}
 
 			$conn->{playpath} = $cattribs->{identifier};
 			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
@@ -6574,44 +6310,28 @@ sub get_stream_data {
 	my $modelist = $prog->modelist();
 	my $data = {};
 	my $media_stream_data_prefix;
-	my $media_stream_live_prefix;
 	my @media_stream_pc_prefixes;
 	my @media_stream_iptv_prefixes;
 	my @media_stream_mobile_prefixes;
 	my ( @pc_mediasets, @iptv_mediasets, @mobile_mediasets );
-	# use mediaselector/4 for obvious archive programmes
-	my $mediaselector = $opt->{mediaselector};
-	$opt->{mediaselector} = '4' if $verpid =~ /http:.+?\/archive\/xml\//;
-	if ( $opt->{mediaselector} eq '4' ) {
-		$media_stream_data_prefix = 'http://www.bbc.co.uk/mediaselector/4/mtis/stream/'; # $verpid
-		$media_stream_live_prefix = 'http://www.bbc.co.uk/mediaselector/4/gtis/stream/'; # $verpid
-	} else {
-		# assume URL as PID is from news site
-		if ( $verpid =~ /^http/ || $prog->{pid} =~ /^http/ ) {
-			@pc_mediasets = ( 'journalism-pc' ); 
-			@mobile_mediasets = ('journalism-http-tablet');
-		} else {
-			@pc_mediasets = ( 'pc' );
-			if ( $prog->{type} =~ /tv/ ) {
-				push @pc_mediasets, 'apple-ipad-hls';
-			}
-			@iptv_mediasets = ( 'iptv-all' );
-			@mobile_mediasets = ( 'apple-ipad-hls' );
-			if ( $prog->{type} =~ /radio/ ) {
-				push @mobile_mediasets, 'apple-iphone4-ipad-hls-3g';
-			}
-		}
-		$media_stream_data_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$pc_mediasets[0]/vpid/"; # $verpid
-		$media_stream_live_prefix = $media_stream_data_prefix;
-		for my $mediaset ( @pc_mediasets ) {
-			push @media_stream_pc_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
-		}
-		for my $mediaset ( @iptv_mediasets ) {
-			push @media_stream_iptv_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
-		}
-		for my $mediaset ( @mobile_mediasets ) {
-			push @media_stream_mobile_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
-		}
+	@pc_mediasets = ( 'pc' );
+	if ( $prog->{type} eq "tv" ) {
+		push @pc_mediasets, 'apple-ipad-hls';
+	}
+	@iptv_mediasets = ( 'iptv-all' );
+	@mobile_mediasets = ( 'apple-ipad-hls' );
+	if ( $prog->{type} eq "radio" ) {
+		push @mobile_mediasets, 'apple-iphone4-ipad-hls-3g';
+	}
+	$media_stream_data_prefix = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$pc_mediasets[0]/vpid/"; # $verpid
+	for my $mediaset ( @pc_mediasets ) {
+		push @media_stream_pc_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
+	}
+	for my $mediaset ( @iptv_mediasets ) {
+		push @media_stream_iptv_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
+	}
+	for my $mediaset ( @mobile_mediasets ) {
+		push @media_stream_mobile_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/"; # $verpid
 	}
 
 	# filter CDN suppliers
@@ -6645,213 +6365,160 @@ sub get_stream_data {
 	my $xml;
 	my @medias;
 
-	# If this is an EMP stream verpid
-	if ( $verpid =~ /^\?/ ) {
-		$xml = main::request_url_retry( $ua, $media_stream_live_prefix.$verpid, 3, undef, undef, 1, 1 );
-		main::logger "\n$xml\n" if $opt->{debug};
-		$prog->{geoblocked} = check_geoblock( $xml );
-		return undef if $prog->{geoblocked};
-		my $mattribs;
-		my $cattribs;
-		# Parse connection attribs
-		$cattribs->{server} = $1 if $xml =~ m{<server>(.+?)</server>};
-		$cattribs->{kind} = $1 if $xml =~ m{<kind>(.+?)</kind>};
-		$cattribs->{identifier} = $1 if $xml =~ m{<identifier>(.+?)</identifier>};
-		$cattribs->{authString} = $1 if $xml =~ m{<token>(.+?)</token>};
-		$cattribs->{application} = $1 if $xml =~ m{<application>(.+?)</application>};
-		# TV / EMP video (flashnormal mode)
-		if ( $prog->{type} eq 'tv' ) {
-			# Parse XML
-			#<server>cp56493.live.edgefcs.net</server>
-			#<identifier>bbc1_simcast@s3173</identifier>
-			#<token>dbEb_c0abaHbWcxaYbRcHcQbfcMczaocvaB-bklOc_-c0-d0i_-EpnDBnzoNDqEnxF</token>
-			#<kind>akamai</kind>
-			#<application>live</application>
-			#width="512" height="288" type="video/x-flv" encoding="vp6"
-			$mattribs = { kind => 'video', type => 'video/x-flv', encoding => 'vp6', width => 512, height => 288 };
-		# AAC Live Radio / EMP Audio
-		} elsif ( $prog->{type} eq 'radio' ) {
-			# MP3 (flashaudio mode)
-			if ( $cattribs->{identifier} =~ m{mp3:} ) {
-				$mattribs = { kind => 'audio', type => 'audio/mpeg', encoding => 'mp3' };
-			# AAC (flash mode)
-			} else {
-				$mattribs = { kind => 'audio', type => 'audio/mp4', encoding => 'aac' };
-			}
-		}
-		# Push into media data structure
-		push @{ $mattribs->{connections} }, $cattribs;
-		push @medias, $mattribs;
-	} else {
-		my (%seen, $stream_key);
-		if ( $verpid =~ /http:/ ) {
-			$xml = main::request_url_retry( $ua, $verpid, 3, undef, undef, 1, 1 );
+	my (%seen, $stream_key);
+	if (  $opt->{info} || $modelist =~ /flash/ ) {
+		# get Flash streams for on-demand
+		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
+			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
 			$prog->{geoblocked} = check_geoblock( $xml );
 			return undef if $prog->{geoblocked};
-			if  ( $xml =~ m{<mediator identifier=\"(.+?)\"} ) {
-				$verpid = $1;
-				main::logger "new verpid $verpid" if $opt->{debug};
+			my @pc_medias = parse_metadata( $xml );
+			for my $pc_media ( @pc_medias ) {
+				my @pc_conns;
+				for my $pc_conn ( @{$pc_media->{connections}} ) {
+					next if $pc_conn->{supplier} =~ /$exclude_regex/;
+					$stream_key = "$pc_conn->{identifier}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					if ( $pc_media->{kind} eq "captions" ) {
+						$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+						last if $seen{$stream_key};
+						$seen{$stream_key}++;
+						push @medias, $pc_media;
+						last;
+					}
+					push @pc_conns, $pc_conn;
+				}
+				next if ( $pc_media->{kind} eq "captions" );
+				@{$pc_media->{connections}} = @pc_conns;
+				push @medias, $pc_media;
 			}
 		}
-		if ( $verpid =~ /http:/ ) {
-			@medias = parse_metadata( $xml );
-		} else {
-			if (  $opt->{info} || $modelist =~ /flash/ ) {
-				# get Flash streams for on-demand
-				for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-					$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-					main::logger "\n$xml\n" if $opt->{debug};
-					$prog->{geoblocked} = check_geoblock( $xml );
-					return undef if $prog->{geoblocked};
-					my @pc_medias = parse_metadata( $xml );
-					for my $pc_media ( @pc_medias ) {
-						my @pc_conns;
-						for my $pc_conn ( @{$pc_media->{connections}} ) {
-							next if $pc_conn->{supplier} =~ /$exclude_regex/;
-							$stream_key = "$pc_conn->{identifier}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+	}
+	if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
+		# get MPEG-DASH streams for on-demand
+		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
+			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
+			main::logger "\n$xml\n" if $opt->{debug};
+			$prog->{geoblocked} = check_geoblock( $xml );
+			return undef if $prog->{geoblocked};
+			my @pc_medias = parse_metadata( $xml );
+			for my $pc_media ( @pc_medias ) {
+				for my $pc_conn ( @{$pc_media->{connections}} ) {
+					next if $pc_conn->{supplier} =~ /$exclude_regex/;
+					$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					($stream_key = $pc_conn->{href}) =~ s/\?.*//;
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					if ( $pc_media->{kind} eq "captions" ) {
+						push @medias, $pc_media;
+						last;
+					}
+					next if ( $pc_media->{kind} eq "captions" );
+					my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
+					for my $dash_media ( @dash_medias ) {
+						for my $dash_conn ( @{$dash_media->{connections}} ) {
+							$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
 							next if $seen{$stream_key};
 							$seen{$stream_key}++;
-							if ( $pc_media->{kind} eq "captions" ) {
-								$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
-								last if $seen{$stream_key};
-								$seen{$stream_key}++;
-								push @medias, $pc_media;
-								last;
-							}
-							push @pc_conns, $pc_conn;
+							($stream_key = $dash_conn->{href}) =~ s/\?.*//;
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							push @medias, $dash_media;
+							last;
 						}
-						next if ( $pc_media->{kind} eq "captions" );
-						@{$pc_media->{connections}} = @pc_conns;
-						push @medias, $pc_media;
 					}
 				}
-				if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
-					# get MPEG-DASH streams for on-demand
-					for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-						main::logger "\n$xml\n" if $opt->{debug};
-						$prog->{geoblocked} = check_geoblock( $xml );
-						return undef if $prog->{geoblocked};
-						my @pc_medias = parse_metadata( $xml );
-						for my $pc_media ( @pc_medias ) {
-							for my $pc_conn ( @{$pc_media->{connections}} ) {
-								next if $pc_conn->{supplier} =~ /$exclude_regex/;
-								$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+			}
+		}
+	}
+	if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
+		if ( $prog->{type} eq "tv" ) {
+			# get HLS streams from IPTV data
+			for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
+				$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
+				main::logger "\n$xml\n" if $opt->{debug};
+				$prog->{geoblocked} = check_geoblock( $xml );
+				return undef if $prog->{geoblocked};
+				my @iptv_medias = parse_metadata( $xml );
+				my $min_bitrate = 2000;
+				for my $iptv_media ( @iptv_medias ) {
+					for my $iptv_conn ( @{$iptv_media->{connections}} ) {
+						next if $iptv_conn->{supplier} =~ /$exclude_regex/;
+						$stream_key = "$iptv_media->{service}-$iptv_conn->{protocol}-$iptv_conn->{supplier}";
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						($stream_key = $iptv_conn->{href}) =~ s/\?.*//;
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						if ( $iptv_media->{kind} eq "captions" ) {
+							push @medias, $iptv_media;
+							last;
+						}
+						my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
+						my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
+						for my $hls_media ( @hls_medias ) {
+							for my $hls_conn ( @{$hls_media->{connections}} ) {
+								$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
 								next if $seen{$stream_key};
 								$seen{$stream_key}++;
-								($stream_key = $pc_conn->{href}) =~ s/\?.*//;
+								($stream_key = $hls_conn->{href}) =~ s/\?.*//;
 								next if $seen{$stream_key};
 								$seen{$stream_key}++;
-								if ( $pc_media->{kind} eq "captions" ) {
-									push @medias, $pc_media;
-									last;
-								}
-								next if ( $pc_media->{kind} eq "captions" );
-								my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
-								for my $dash_media ( @dash_medias ) {
-									for my $dash_conn ( @{$dash_media->{connections}} ) {
-										$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
-										next if $seen{$stream_key};
-										$seen{$stream_key}++;
-										($stream_key = $dash_conn->{href}) =~ s/\?.*//;
-										next if $seen{$stream_key};
-										$seen{$stream_key}++;
-										push @medias, $dash_media;
-										last;
-									}
-								}
+								push @medias, $hls_media;
+								last;
 							}
 						}
 					}
 				}
 			}
-			if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
-				if ( $prog->{type} =~ /tv/ ) {
-					# get HLS streams from IPTV data
-					for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
-						$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-						main::logger "\n$xml\n" if $opt->{debug};
-						$prog->{geoblocked} = check_geoblock( $xml );
-						return undef if $prog->{geoblocked};
-						my @iptv_medias = parse_metadata( $xml );
-						my $min_bitrate = 2000;
-						for my $iptv_media ( @iptv_medias ) {
-							for my $iptv_conn ( @{$iptv_media->{connections}} ) {
-								next if $iptv_conn->{supplier} =~ /$exclude_regex/;
-								$stream_key = "$iptv_media->{service}-$iptv_conn->{protocol}-$iptv_conn->{supplier}";
-								next if $seen{$stream_key};
-								$seen{$stream_key}++;
-								($stream_key = $iptv_conn->{href}) =~ s/\?.*//;
-								next if $seen{$stream_key};
-								$seen{$stream_key}++;
-								if ( $iptv_media->{kind} eq "captions" ) {
-									push @medias, $iptv_media;
-									last;
-								}
-								my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
-								my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
-								for my $hls_media ( @hls_medias ) {
-									for my $hls_conn ( @{$hls_media->{connections}} ) {
-										$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
-										next if $seen{$stream_key};
-										$seen{$stream_key}++;
-										($stream_key = $hls_conn->{href}) =~ s/\?.*//;
-										next if $seen{$stream_key};
-										$seen{$stream_key}++;
-										push @medias, $hls_media;
-										last;
-									}
-								}
-							}
+		}
+		# get HLS streams from mobile data
+		for my $media_stream_mobile_prefix ( @media_stream_mobile_prefixes ) {
+			$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
+			main::logger "\n$xml\n" if $opt->{debug};
+			$prog->{geoblocked} = check_geoblock( $xml );
+			return undef if $prog->{geoblocked};
+			my @mobile_medias = parse_metadata( $xml );
+			for my $mobile_media ( @mobile_medias ) {
+				for my $mobile_conn ( @{$mobile_media->{connections}} ) {
+					next if $mobile_conn->{supplier} =~ /$exclude_regex/;
+					$stream_key = "$mobile_media->{service}-$mobile_conn->{protocol}-$mobile_conn->{supplier}";
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					($stream_key = $mobile_conn->{href}) =~ s/\?.*//;
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					if ( $mobile_media->{kind} eq "captions" ) {
+						push @medias, $mobile_media;
+						last;
+					}
+					my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
+					if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
+						if ( $prog->{type} eq 'tv' ) {
+							$prefix = "hls";
+						} elsif ( $prog->{type} eq 'radio' ) {
+							$prefix = "hlsaac";
 						}
 					}
-				}
-				# get HLS streams from mobile data
-				for my $media_stream_mobile_prefix ( @media_stream_mobile_prefixes ) {
-					$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-					main::logger "\n$xml\n" if $opt->{debug};
-					$prog->{geoblocked} = check_geoblock( $xml );
-					return undef if $prog->{geoblocked};
-					my @mobile_medias = parse_metadata( $xml );
-					for my $mobile_media ( @mobile_medias ) {
-						for my $mobile_conn ( @{$mobile_media->{connections}} ) {
-							next if $mobile_conn->{supplier} =~ /$exclude_regex/;
-							$stream_key = "$mobile_media->{service}-$mobile_conn->{protocol}-$mobile_conn->{supplier}";
+					if ( $prog->{type} eq 'radio' ) {
+						# for HLS 320k and 96k
+						$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+					}
+					my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
+					for my $hls_media ( @hls_medias ) {
+						for my $hls_conn ( @{$hls_media->{connections}} ) {
+							$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
 							next if $seen{$stream_key};
 							$seen{$stream_key}++;
-							($stream_key = $mobile_conn->{href}) =~ s/\?.*//;
+							($stream_key = $hls_conn->{href}) =~ s/\?.*//;
 							next if $seen{$stream_key};
 							$seen{$stream_key}++;
-							if ( $mobile_media->{kind} eq "captions" ) {
-								push @medias, $mobile_media;
-								last;
-							}
-							my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
-							if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
-								if ( $prog->{type} eq 'tv' ) {
-									$prefix = "hls";
-								} elsif ( $prog->{type} eq 'radio' ) {
-									$prefix = "hlsaac";
-								}
-							}
-							if ( $prog->{type} eq 'radio' ) {
-								# for HLS 320k and 96k
-								$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
-							}
-							my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
-							for my $hls_media ( @hls_medias ) {
-								for my $hls_conn ( @{$hls_media->{connections}} ) {
-									$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
-									next if $seen{$stream_key};
-									$seen{$stream_key}++;
-									($stream_key = $hls_conn->{href}) =~ s/\?.*//;
-									next if $seen{$stream_key};
-									$seen{$stream_key}++;
-									push @medias, $hls_media;
-									last;
-								}
-							}
+							push @medias, $hls_media;
+							last;
 						}
 					}
 				}
@@ -7025,8 +6692,6 @@ sub get_stream_data {
 			new_stream_report($mattribs, undef) if $opt->{verbose};
 		}
 	}
-
-	$opt->{mediaselector} = $mediaselector;
 
 	# Report modes found
 	if ( $opt->{verbose} ) {
@@ -7299,59 +6964,6 @@ sub optional_list_entry_format {
 	return ', '.join ', ', @format;
 }
 
-
-# Cleans up a pid and removes url parts that might be specified
-sub clean_pid {
-	my $prog = shift;
-
-	# Extract the appended start timestamp if it exists and set options accordingly e.g. '?t=16m51s'
-	if ( $prog->{pid} =~ m{\?t=(\d+)m(\d+)s$} ) {
-		# calculate the start offset
-		$opt->{start} = $1*60.0 + $2;
-	}
-
-	# Expand Short iplayer URL redirects
-	# e.g. http://bbc.co.uk/i/lnc8s/
-	if ( $prog->{pid} =~ m{bbc\.co\.uk\/i\/[a-z0-9]{5}\/.*$}i ) {
-		# Do a recursive redirect lookup to get the final URL
-		my $ua = main::create_ua( 'desktop' );
-		main::proxy_disable($ua) if $opt->{partialproxy};
-		my $res;
-		do {
-			# send request (use simple_request here because that will not allow redirects)
-			$res = $ua->simple_request( HTTP::Request->new( 'GET', $prog->{pid} ) );
-			if ( $res->is_redirect ) {
-				$prog->{pid} = $res->header("location");
-				$prog->{pid} = 'http://bbc.co.uk'.$prog->{pid} if $prog->{pid} !~ /^http/;
-				main::logger "DEBUG: got short url redirect to '$prog->{pid}' from iplayer site\n" if $opt->{debug};
-			}
-		} while ( $res->is_redirect );
-		main::proxy_enable($ua) if $opt->{partialproxy};
-		main::logger "DEBUG: Final expanded short URL is '$prog->{pid}'\n" if $opt->{debug};
-	}
-
-	# If this is an iPlayer pid
-	if ( $prog->{pid} =~ m{^([pb]0[a-z0-9]{6})$} ) {
-		# extract b??????? format from any URL containing it
-		$prog->{pid} = $1;
-
-	# If this an URL containing a PID (except for BBC programmes URLs)
-	} elsif ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} ) { #&& $prog->{pid} !~ m{/programmes/} ) {
-		# extract b??????? format from any URL containing it
-		$prog->{pid} = $1;
-
-	# If this is a BBC *iPlayer* Live channel
-	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
-	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
-		# Remove trailing path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_fourfm/listenlive'
-		$prog->{pid} =~ s/\/\w+live\/?$//;
-		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_one_london/' or 'http://www.bbc.co.uk/iplayer/tv/bbc_one'
-		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
-	# Else this is an embedded media player URL (live or otherwise)
-	} elsif ($prog->{pid} =~ m{^http}i ) {
-		# Just leave the URL as the pid
-	}
-}
 
 sub get_links_aod {
 	my $self = shift;
@@ -8582,43 +8194,6 @@ sub optional_list_entry_format {
 sub min_download_size {
 	return 102400;
 }
-
-
-sub clean_pid {
-	my $prog = shift;
-
-	## extract [bpw]??????? format - remove surrounding url
-	#$prog->{pid} =~ s/^.+\/([bpw]\w{7})(\..+)?$/$1/g;
-	## Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_one'
-	#$prog->{pid} =~ s/^.+\/(.+?)\/?$/$1/g;
-
-	# If this is an iPlayer pid
-	if ( $prog->{pid} =~ m{^([bpw]0[a-z0-9]{6})$} ) {
-		# extract b??????? format from any URL containing it
-		$prog->{pid} = $1;
-
-	# If this is an iPlayer programme pid URL (and not on BBC programmes site)
-	} elsif ( $prog->{pid} =~ m{^http.+\/([bpw]0[a-z0-9]{6})\/?.*$} ) { #&& $prog->{pid} !~ m{/programmes/} ) {
-		# extract b??????? format from any URL containing it
-		$prog->{pid} = $1;
-
-	# If this is a BBC *iPlayer* Live channel
-	#} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer/console/}i ) {
-	#	# Just leave the URL as the pid
-
-	# e.g. http://www.bbc.co.uk/iplayer/playlive/bbc_radio_fourfm/
-	} elsif ( $prog->{pid} =~ m{http.+bbc\.co\.uk/iplayer}i ) {
-		# Remove trailing path for URLs like 'http://www.bbc.co.uk/iplayer/radio/bbc_radio_fourfm/listenlive'
-		$prog->{pid} =~ s/\/\w+live\/?$//;
-		# Remove extra URL path for URLs like 'http://www.bbc.co.uk/iplayer/playlive/bbc_radio_one/'
-		$prog->{pid} =~ s/^http.+\/(.+?)\/?$/$1/g;
-
-	# Else this is an embedded media player URL (live or otherwise)
-	} elsif ($prog->{pid} =~ m{^http}i ) {
-		# Just leave the URL as the pid
-	}
-}
-
 
 
 sub get_links {
