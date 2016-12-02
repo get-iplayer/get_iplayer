@@ -175,22 +175,17 @@ my $opt_format = {
 	mp3vbr		=> [ 1, "mp3vbr=n", 'Deprecated', '--mp3vbr', "Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires --aactomp3). Applied only to radio programmes."],
 	avi			=> [ 1, "avi", 'Deprecated', '--avi', "Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output."],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
-	fatfilename	=> [ 1, "fatfilenames|fatfilename!", 'Deprecated', '--fatfilename', "Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides --punctuation."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
-	hfsfilename	=> [ 1, "hfsfilenames|hfsfilename!", 'Deprecated', '--hfsfilename', "Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides --punctuation."],
-	isodate		=> [ 1, "isodate!",  'Deprecated', '--isodate', "Use ISO8601 dates (YYYY-MM-DD) in filenames and subdirectory paths. Default: true"],
-	keepall		=> [ 1, "keepall|keep-all!", 'Deprecated', '--keep-all', "Keep whitespace, all possible punctuation and non-ASCII characters in file and directory names. Shortcut for: --whitespace --non-ascii --punctuation."],
+	nosanitise		=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid punctuation characters for FAT and HFS will still be removed for Windows and macOS respectively."],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: generic"],
 	mkv			=> [ 1, "mkv", 'Deprecated', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
-	nonascii	=> [ 1, "na|nonascii|non-ascii!", 'Deprecated', '--non-ascii, --na', "Keep non-ASCII characters in file and directory names. Default behaviour is to remove all non-ASCII characters."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
-	punctuation	=> [ 1, "symbols|pu|punct|punctuation!", 'Deprecated', '--punctuation, --pu', "Keep punctuation characters and symbols in file and directory names, with ellipsis always replaced by underscore. Default behaviour is to remove all punctuation and symbols except underscore, hyphen and full stop. Overridden by --fatfilename and --hfsfilename."],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Deprecated', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Output', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
-	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores."],
+	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores unless --no-sanitise specified."],
 
 	# Config
 	cachereset	=> [ 1, "resetcache|reset-cache|cachereset|cache-reset!", 'Config', '--cache-reset', "Reset cache to retain only latest update and discard previous contents."],
@@ -433,21 +428,6 @@ for my $plugin_dir ( ( $plugin_dir_user, $plugin_dir_system ) ) {
 	}
 }
 
-
-# Set the personal options according to the specified preset
-my $optfile_default = "${profile_dir}/options";
-my $optfile_preset;
-if ( $opt_pre->{preset} ) {
-	# create dir if it does not exist
-	mkpath "${profile_dir}/presets/" if ! -d "${profile_dir}/presets/";
-	# Sanitize preset file name
-	my $presetname = StringUtils::sanitize_path( $opt_pre->{preset}, 0, 1 );
-	$optfile_preset = "${profile_dir}/presets/${presetname}";
-	logger "INFO: Using user options preset '${presetname}'\n";
-}
-logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_preset && $opt->{debug};
-
-
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr Tagger );
 Options->get_class_options( progclass($_) ) for progclass();
@@ -463,6 +443,19 @@ foreach ('start', 'stop') {
 		$opt_cmdline->{$_} = $1 * 3600 +  $2 * 60 + $4;
 	}
 }
+
+# Set the personal options according to the specified preset
+my $optfile_default = "${profile_dir}/options";
+my $optfile_preset;
+if ( $opt_cmdline->{preset} ) {
+	# create dir if it does not exist
+	mkpath "${profile_dir}/presets/" if ! -d "${profile_dir}/presets/";
+	# Sanitize preset file name
+	my $presetname = StringUtils::sanitize_path( $opt_cmdline->{preset}, 0, 1 );
+	$optfile_preset = "${profile_dir}/presets/${presetname}";
+	logger "INFO: Using user options preset '${presetname}'\n";
+}
+logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_preset && $opt->{debug};
 
 # Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
 if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
@@ -730,14 +723,9 @@ exit $retcode;
 
 
 sub init_search {
-	if ( $opt->{keepall} ) {
+	if ( $opt->{nosanitise} ) {
 		$opt->{whitespace} = 1;
-		$opt->{nonascii} = 1;
-		$opt->{punctuation} = 1;
 	}
-
-	# make ISO date format the default
-	$opt->{isodate} = 1 unless defined $opt->{isodate};
 
 	# Set --subtitles if --subsonly is used
 	if ( $opt->{subsonly} ) {
@@ -2187,7 +2175,6 @@ sub StringUtils::sanitize_path {
 	my $string = shift;
 	my $is_path = shift || 0;
 	my $force_default = shift || 0;
-	my $default_bad = '[^a-zA-Z0-9_\-\.\/\s]';
 	my $punct_bad = '[!"#$%&\'()*+,:;<=>?@[\]^`{|}~]';
 	my $fat_bad = '["*:<>?|]';
 	my $hfs_bad = '[:]';
@@ -2195,37 +2182,34 @@ sub StringUtils::sanitize_path {
 	$string =~ s/\//_/g unless $is_path;
 	# Replace backslashes with _ if not Windows path
 	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
-	# ASCII-fy some punctuation
-	$string = StringUtils::convert_punctuation($string);
-	# Replace ellipsis with _
-	$string =~ s/\.{3}/_/g;
-	# Truncate duplicate colon/semi-colon/comma
-	$string =~ s/([:;,])(\1)+/$1/g;
-	# Add whitespace behind colon/semi-colon/comma if not present
-	$string =~ s/([:;,])(\S)/$1 $2/g;
-	# Remove extra/leading/trailing whitespace
-	$string =~ s/\s+/ /g;
-	$string =~ s/(^\s+|\s+$)//g;
-	# Replace whitespace with _ unless --whitespace
-	$string =~ s/\s/_/g unless $opt->{whitespace};
-	# Truncate multiple replacement chars
-	$string =~ s/_+/_/g;
-	# Remove non-ASCII chars unless --nonascii or force default
-	if ( $force_default || ! $opt->{nonascii} ) {
+	# Do not sanitise if specified
+	if ( $opt->{nosanitise} && ! $force_default ) {
+		# Remove invalid chars for FAT on Windows
+		$string =~ s/$fat_bad//g if $^O eq "MSWin32";
+		# Remove invalid chars for HFS on macOS
+		$string =~ s/$hfs_bad//g if $^O eq "darwin";
+	} else {
+		# ASCII-fy some punctuation
+		$string = StringUtils::convert_punctuation($string);
+		# Replace ellipsis with _
+		$string =~ s/\.{3}/_/g;
+		# Truncate duplicate colon/semi-colon/comma
+		$string =~ s/([:;,])(\1)+/$1/g;
+		# Add whitespace behind colon/semi-colon/comma if not present
+		$string =~ s/([:;,])(\S)/$1 $2/g;
+		# Remove extra/leading/trailing whitespace
+		$string =~ s/\s+/ /g;
+		$string =~ s/(^\s+|\s+$)//g;
+		# Replace whitespace with _ unless --whitespace
+		$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
+		# Truncate multiple replacement chars
+		$string =~ s/_+/_/g;
+		# Remove non-ASCII chars
 		$string = StringUtils::remove_marks($string);
 		$string =~ s/[^\x{20}-\x{7e}]//g;
-	}
-	# Remove most punctuation chars unless --punctuation or force default
-	if ( $force_default || ! $opt->{punctuation} ) {
+		# Remove most punctuation chars
+		# Includes invalid chars for FAT and HFS
 		$string =~ s/$punct_bad//g
-	}
-	# Remove FAT-unfriendly chars if --fatfilename or Windows and not force default
-	if ( ! $force_default && ( $opt->{fatfilename} || $^O eq "MSWin32" ) ) {
-		$string =~ s/$fat_bad//g;
-	}
-	# Remove HFS-unfriendly chars if --hfsfilename or OS X and not force default
-	if ( ! $force_default && ( $opt->{hfsfilename} || $^O eq "darwin" ) ) {
-		$string =~ s/$hfs_bad//g;
 	}
 	return $string;
 }
@@ -4058,8 +4042,8 @@ sub generate_filenames {
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, 240 );
 
-	# Change the date in the filename to ISO8601 format if required
-	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g if $opt->{isodate};
+	# Change the date in the filename to ISO8601 format
+	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
@@ -4078,11 +4062,7 @@ sub generate_filenames {
 	# Create a subdir for programme sorting option
 	elsif ( $opt->{subdir} ) {
 		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>', 1 );
-		if ( $opt->{isodate} ) {
-			$subdir =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
-		} else {
-			$subdir =~ s|(\d\d)[/](\d\d)[/](20\d\d)|$1_$2_$3|g;
-		}
+		$subdir =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		$prog->{dir} = main::encode_fs($prog->{dir});
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
