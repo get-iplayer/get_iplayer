@@ -205,7 +205,6 @@ my %cols_names = ();
 my %prog_types = (
 	tv	=> 'BBC TV',
 	radio	=> 'BBC Radio',
-	podcast	=> 'BBC Podcast',
 	livetv	=> 'Live BBC TV',
 	liveradio => 'Live BBC Radio',
 );
@@ -213,7 +212,6 @@ my %prog_types = (
 my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio',
-	3	=> 'podcast',
 	4	=> 'livetv',
 	5	=> 'liveradio',
 );
@@ -560,7 +558,7 @@ sub run_cgi {
 			my $notranscode = 0;
 
 			# flv audio
-			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio|podcast)$};
+			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio)$};
 
 			# Output headers to stream
 			# This will enable seekable: -Accept_Ranges=>'bytes',
