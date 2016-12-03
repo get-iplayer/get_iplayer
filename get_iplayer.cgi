@@ -204,16 +204,12 @@ my %cols_names = ();
 
 my %prog_types = (
 	tv	=> 'BBC TV',
-	radio	=> 'BBC Radio',
-	livetv	=> 'Live BBC TV',
-	liveradio => 'Live BBC Radio',
+	radio	=> 'BBC Radio'
 );
 
 my %prog_types_order = (
 	1	=> 'tv',
-	2	=> 'radio',
-	4	=> 'livetv',
-	5	=> 'liveradio',
+	2	=> 'radio'
 );
 
 # Get list of currently valid and prune %prog types and add new entry
@@ -558,7 +554,7 @@ sub run_cgi {
 			my $notranscode = 0;
 
 			# flv audio
-			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^(radio|liveradio)$};
+			$mimetypes{flv} = 'audio/x-flv' if $opt->{PROGTYPES}->{current} =~ m{^radio$};
 
 			# Output headers to stream
 			# This will enable seekable: -Accept_Ranges=>'bytes',
@@ -570,11 +566,6 @@ sub run_cgi {
 
 			# Default Recipies
 			# Need to determine --type and then set the default --modes and default outtype for conversion if required
-			if ( $opt->{PROGTYPES}->{current} eq 'livetv' ) {
-				print $se "INFO: Transcoding disabled for livetv\n";
-				$notranscode = 1;
-				$ext = 'ts';
-			}
 			# No conversion for iphone radio as mp3
 			$ext = undef if $opt->{MODES}->{current} eq 'iphone' && $ext eq 'mp3';
 			# No conversion for realaudio radio as rm
@@ -988,7 +979,7 @@ sub build_ffmpeg_args {
 			if ( lc( $ext ) eq 'flv' ) {
 				push @cmd_aopts, ( '-ar', '44100' );
 			}
-			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox liveradio flashaac)
+			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox flashaac)
 			#push @cmd_aopts, ( '-acodec', 'copy' );
 		}
 
@@ -1238,8 +1229,6 @@ sub get_opml {
 	# Top-level Menu
 	} elsif ( lc($list) eq 'menu' ) {
 		my %menu = (
-			'BBC Live Radio (National)' 	=> "${request_host}?ACTION=opml&PROGTYPES=liveradio&SEARCH=%20\\d&OUTTYPE=wav",
-			'BBC Live Radio (All)' 		=> "${request_host}?ACTION=opml&PROGTYPES=liveradio&OUTTYPE=wav",
 			'BBC iPlayer Radio Listen Again'=> "${request_host}?ACTION=opml&PROGTYPES=radio&LIST=channel",
 		);
 
@@ -1437,7 +1426,6 @@ sub run_cmd {
 	my $direct = grep(/$opt_cmdline->{ffmpeg}/, @cmd);
 	my $stream = grep(/stream%3D1/, @cmd);
 	my $is_hls = grep(/modes%3Dhl(s|x)/, @cmd);
-	my $is_live = grep(/type%3Dlive/, @cmd);
 	my $stdout_raw = ($direct || $stream);
 	my $rtn;
 
@@ -1526,7 +1514,7 @@ sub run_cmd {
 			my $bytes;
 			# Assume that we don't want to buffer STDERR output of the command
 			$size = 1;
-			if ( ( $is_hls || $is_live ) && ! $stream ) {
+			if ( ( $is_hls ) && ! $stream ) {
 				my ($count, $buf);
 				while ( $bytes = read( $err, $char, $size ) ) {
 					if ( $bytes <= 0 ) {
@@ -2912,8 +2900,6 @@ sub search_progs {
 		my %streamopts = (
 			radio		=> '&MODES=iphone&OUTTYPE=mp3',
 			tv		=> '&MODES=iphone&OUTTYPE=mov',
-			livetv		=> '&MODES=flash&OUTTYPE=flv',
-			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
 			itv		=> '&OUTTYPE=asf',
 		);
 
