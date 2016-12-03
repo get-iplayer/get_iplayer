@@ -2917,7 +2917,6 @@ sub search_progs {
 			livetv		=> '&MODES=flash&OUTTYPE=flv',
 			liveradio	=> '&MODES=flash&BITRATE=320&OUTTYPE=mp3',
 			itv		=> '&OUTTYPE=asf',
-			localfiles	=> '&OUTTYPE=mp3',
 		);
 
 		my $links;
