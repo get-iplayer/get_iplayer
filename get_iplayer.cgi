@@ -3732,9 +3732,9 @@ sub process_params {
 		save	=> 1,
 	};
 
-	my %metadata_labels = ( ''=>'Off', xbmc=>'XBMC Episode nfo format', xbmc_movie=>'XBMC Movie nfo format', generic=>'Generic XML', freevo=>'Freevo FXD' );
+	my %metadata_labels = ( ''=>'Off', generic=>'Generic XML' );
 	$opt->{METADATA} = {
-		title	=> 'Download Meta-data', # Title
+		title	=> 'Download Metadata', # Title
 		tooltip	=> 'Format of metadata file to create when recording', # Tooltip
 		webvar	=> 'METADATA', # webvar
 		optkey	=> 'metadata', # option
@@ -3742,7 +3742,7 @@ sub process_params {
 		#label	=> \%fieldname, # labels
 		label	=> \%metadata_labels, # labels
 		default	=> '', # default
-		value	=> [ ( '', 'xbmc', 'xbmc_movie', 'generic', 'freevo' ) ], # values
+		value	=> [ ( '', 'generic' ) ], # values
 		save	=> 1,
 	};
 
