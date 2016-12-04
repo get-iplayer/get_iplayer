@@ -171,14 +171,10 @@ my $opt_format = {
 	type		=> [ 2, "type=s", 'Search', '--type <type>', "Only search in these types of programmes: ".join(',', sort keys %prog_types).",all (tv is default)"],
 
 	# Output
-	aactomp3	=> [ 1, "aactomp3|mp3", 'Deprecated', '--aactomp3', "Transcode AAC audio to MP3 with ffmpeg (CBR appropriate for mode unless --mp3vbr is specified).  Applied only to radio programmes. (Synonyms: --mp3)"],
-	mp3vbr		=> [ 1, "mp3vbr=n", 'Deprecated', '--mp3vbr', "Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires --aactomp3). Applied only to radio programmes."],
-	avi			=> [ 1, "avi", 'Deprecated', '--avi', "Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output."],
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	nosanitise		=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid punctuation characters for FAT and HFS will still be removed for Windows and macOS respectively."],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <type>', "Create metadata info file after recording. Valid types are: generic"],
-	mkv			=> [ 1, "mkv", 'Deprecated', '--mkv', "Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>-<seriesnum>'"],
@@ -7684,20 +7680,7 @@ sub download {
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 
 	# Nasty hacky filename ext overrides based on non-default fallback modes
-	# Override flash ext based on raw
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
-	# Override flash ext
-	if ( ! $opt->{raw} && $prog->{type} =~ /radio/ ) {
-		if ( $opt->{aactomp3} ) {
-			$prog->{ext} = 'mp3';
-		} else {
-			$prog->{ext} = 'm4a';
-		}
-	}
-	# Override ext based on  avi option
-	$prog->{ext} = 'avi' if ! $opt->{raw} && $opt->{avi} && $prog->{type} eq 'tv';
-	# Override ext based on mkv option
-	$prog->{ext} = 'mkv' if ! $opt->{raw} && $opt->{mkv} && $prog->{type} eq 'tv';
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
 	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 
@@ -8277,58 +8260,16 @@ sub postproc {
 	}
 	push @filter_opts, 'aac_adtstoasc';
 
-	if ( $prog->{type} =~ /radio/ ) {
-		# transcode to MP3 if directed. If mp3vbr is not set then do CBR.
-		if ( $opt->{aactomp3} ) {
-			my @br_opts;
-			if ( $opt->{mp3vbr} =~ /^\d$/ ) {
-				@br_opts = ('-aq', $opt->{mp3vbr});
-			} else {
-				my $ab;
-				if ( $prog->{mode} =~ /high/ ) {
-					$ab = "320k";
-				} elsif ( $prog->{mode} =~ /std/ ) {
-					$ab = "128k";
-				} elsif ( $prog->{mode} =~ /med/ ) {
-					$ab = "96k";
-				} else {
-					$ab = "48k";
-				}
-				@br_opts = ('-ab', $ab );
-			}
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'libmp3lame', '-ac', '2', @br_opts,
-				$prog->{filepart},
-			);
-		} else {
-			@cmd = (
-				$bin->{ffmpeg},
-				@{ $binopts->{ffmpeg} },
-				@globals,
-				'-i', $file_tmp,
-				'-vn',
-				'-acodec', 'copy',
-				@filter_opts,
-				$prog->{filepart},
-			);
-		}
-	} else {
-		@cmd = (
-			$bin->{ffmpeg},
-			@{ $binopts->{ffmpeg} },
-			@globals,
-			'-i', $file_tmp,
-			'-vcodec', 'copy',
-			'-acodec', 'copy',
-			@filter_opts,
-			$prog->{filepart},
-		);
-	}
+	@cmd = (
+		$bin->{ffmpeg},
+		@{ $binopts->{ffmpeg} },
+		@globals,
+		'-i', $file_tmp,
+		'-vcodec', 'copy',
+		'-acodec', 'copy',
+		@filter_opts,
+		$prog->{filepart},
+	);
 
 	main::logger "INFO: Begin converting file: $file_tmp\n";
 
