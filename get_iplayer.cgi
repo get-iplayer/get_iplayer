@@ -3495,7 +3495,7 @@ sub process_params {
 
 	$opt->{CATEGORY} = {
 		title	=> 'Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported', # Tooltip
+		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported.  Only works in Recordings tab.', # Tooltip
 		webvar	=> 'CATEGORY', # webvar
 		optkey	=> 'category', # option
 		type	=> 'text', # type
@@ -3506,7 +3506,7 @@ sub process_params {
 
 	$opt->{EXCLUDECATEGORY} = {
 		title	=> 'Exclude Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported', # Tooltip
+		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported. Only works in Recordings tab.', # Tooltip
 		webvar	=> 'EXCLUDECATEGORY', # webvar
 		optkey	=> 'excludecategory', # option
 		type	=> 'text', # type
