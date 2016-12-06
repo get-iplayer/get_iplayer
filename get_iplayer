@@ -4383,6 +4383,7 @@ use base 'Programme';
 
 
 # Return hash of version => verpid given a PID
+# and fill in minimal metadata
 sub get_verpids {
 	my ( $prog, $ua ) = @_;
 
@@ -4394,14 +4395,11 @@ sub get_verpids {
 	return 0 if ! $rc_json || ! $rc_html;
 	main::logger "\nWARNING: No programmes are available for this PID with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 	return 1;
-
-	# Add to prog hash
-	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	return 0;
 }
 
 
-# Return hash of version => verpid given a pid
+# Return hash of version => verpid given a PID
+# and fill in minimal metadata
 # Uses JSON playlist: http://www.bbc.co.uk/programmes/<pid>/playlist.json
 sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
@@ -4447,16 +4445,17 @@ sub get_verpids_json {
 		}
 		$thumbnail =~ s/\$recipe/$recipe/;
 		$prog->{thumbnail} = $thumbnail if $thumbnail;
+		$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
 	}
 	unless ( $prog->{title} ) {
 		my $title = $1 if $default =~ /"title":"(.*?)"/;
 		$title =~ s/\\\//\//g;
 		$prog->{title} = decode_entities($title) if $title;
 	}
- 	unless ( $prog->{type} ) {
+	$prog->{type} = 'radio' if $default =~ /"kind":"radioProgramme"/ && $prog->{type} ne 'radio';
+	unless ( $prog->{type} ) {
 		$prog->{type} = 'tv' if $default =~ /"kind":"programme"/;
-		$prog->{type} = 'radio' if $default =~ /"kind":"radioProgramme"/;
- 	}
+	}
 	my @versions = split /"markers"/, $versions;
 	pop @versions;
 	for ( @versions ) {
@@ -4468,7 +4467,7 @@ sub get_verpids_json {
 		} elsif ($type =~ /sign/i ) {
 			$version = "signed";
 		} else {
-			$version = "default";
+			($version = lc($type)) =~ s/\s+.*$//;
 		}
 		next if $prog->{verpids}->{$version};
 		$verpid = $1 if /{"vpid":"(\w+)","kind":"(programme|radioProgramme)"/i;
@@ -4478,7 +4477,7 @@ sub get_verpids_json {
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
-	my $version_list = $opt->{versionlist} || 'default';
+	my $version_list = $opt->{versionlist} || $prog->{versions};
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
@@ -4503,7 +4502,8 @@ sub get_verpids_json {
 }
 
 
-# Return hash of version => verpid given a pid
+# Return hash of version => verpid given a PID
+# and fill in minimal metadata
 # Scrapes HTML from episode page: http://www.bbc.co.uk/iplayer/episode/<pid>
 # Only works for TV programmes
 sub get_verpids_html {
@@ -4576,6 +4576,7 @@ sub get_verpids_html {
 			}
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
+			$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
 		}
 		unless ( $prog->{title} ) {
 			my $title = $1 if $config =~ /"title":"(.*?)"/;
@@ -4779,7 +4780,7 @@ sub get_metadata {
 								$type = "audiodescribed";
 							} elsif ( $ver_type =~ /sign/i ) {
 								$type = "signed";
-							} elsif ( $type =~ /open subtitles/i ) {
+							} elsif ( $ver_type =~ /open subtitles/i ) {
 								$type = "opensubtitles";
 							} else {
 								($type = lc($ver_type)) =~ s/\s+.*$//;
@@ -4796,7 +4797,7 @@ sub get_metadata {
 					}
 					$got_metadata = 1 if $pid;
 				} else {
-					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode. Download may fail and metadata may be inaccurate.\n";
+					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode or clip. Download may fail and metadata may be inaccurate.\n";
 				}
 			} else {
 				main::logger "WARNING: Could not parse programme metadata from $url ($@)\n";
