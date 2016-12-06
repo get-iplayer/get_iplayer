@@ -1821,39 +1821,6 @@ sub create_ua {
 
 
 # Generic
-# Converts a string of chars to it's HEX representation
-sub get_hex {
-	my $buf = shift || '';
-	my $ret = '';
-	for (my $i=0; $i<length($buf); $i++) {
-		$ret .= " ".sprintf("%02lx", ord substr($buf, $i, 1) );
-	}
-	logger "DEBUG: HEX string value = $ret\n" if $opt->{verbose};
-	return $ret;
-}
-
-
-
-# Generic
-# Usage: $fh = open_file_append($filename);
-sub open_file_append {
-	local *FH;
-	my $file = shift;
-	# Just in case we actually write to the file - make this /dev/null
-	$file = File::Spec->devnull() if $opt->{nowrite};
-	if ($file) {
-		if ( ! open(FH, ">>:raw", $file) ) {
-			logger "ERROR: Cannot write or append to $file\n\n";
-			exit 1;
-		}
-	}
-	# Fix for binary - needed for Windows
-	binmode FH;
-	return *FH;
-}
-
-
-# Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>], <1=mustproxy>, [<fail_content>] );
 sub request_url_retry {
@@ -6269,11 +6236,6 @@ sub get_stream_data {
 		$data->{$media}->{exists} = 0 if not defined $data->{$media};
 		return $data->{$media};
 	}
-}
-
-# map pid to HLS pid
-sub hls_pid_map {
-	return {}
 }
 
 sub modelist {
