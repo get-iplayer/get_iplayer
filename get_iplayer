@@ -7766,6 +7766,7 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
+		logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force download progress display when screen output is redirected to file. Progress display is normally omitted unless writing to terminal. Not used for RTMP streams."],
 	};
 }
 
@@ -8082,6 +8083,15 @@ sub get_builtin {
 	my $retries = 3;
 	my %seen;
 	my $proxy_prefix;
+	my $hide_progress = 0;
+
+	unless ( $opt->{logprogress} || $opt->{debug} ) {
+		if ( $opt->{pvr} || $opt->{stderr} ) {
+			$hide_progress = ! -t STDERR;
+		} else {
+			$hide_progress = ! -t STDOUT;
+		}
+	}
 
 	my $min_download_size = main::progclass($prog_type)->min_download_size();
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
@@ -8116,6 +8126,11 @@ sub get_builtin {
 		return if $opt->{quiet} || $opt->{silent};
 		my $percent = 0;
 		$percent = 100.0 * $size / $file_size if $file_size;
+		# limit progress display to 99.9%
+		if ( $percent > 99.9 ) {
+			$percent = 99.9;
+			$size = int($file_size * 0.999);
+		}
 		if ( $opt->{hash} ) {
 			return if ($percent - $last_percent) < 1;
 		} else {
@@ -8129,23 +8144,23 @@ sub get_builtin {
 				main::logger "\n";
 			}
 		} else {
+			return if $hide_progress;
 			my $rate_bps;
 			my $rate;
 			my $time;
 			my $time_called = time();
 			if ($time_called - $begin_time < 1) {
-				$rate = '-----kbps';
-				$time = '--:--:--';
+				$rate = '-----.-- Mb/s';
+				$time = '--:--:-- remaining';
 			} else {
 				$rate_bps = ($size - $begin_size) / ($time_called - $begin_time);
-				$rate = sprintf("%5.0fkbps", (8.0 / 1024.0) * $rate_bps);
-				$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
+				$rate = sprintf("%8.2f Mb/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
+				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
 			}
-			main::logger sprintf ( "Recording: %8.2fMB / %.2fMB %s %5.1f%% %s remaining\r",
+			main::logger sprintf ( "Recording: %8.2f MB %5.1f%% %s %s\r",
 				$size / 1024.0 / 1024.0,
-				$file_size / 1024.0 / 1024.0,
-				$rate,
 				$percent,
+				$rate,
 				$time,
 			);
 		}
@@ -8235,10 +8250,10 @@ sub get_builtin {
 	if ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
 		my $end_time = time() + 0.0001;
 		my $end_size = stat($file_tmp)->size;
-		main::logger sprintf("\rINFO: Recorded: %.2fMB in %s at %5.0fkbps to %s\n",
+		main::logger sprintf("\rINFO: Recorded: %.2f MB in %s at %.2f Mb/s to %s\n",
 			($end_size - $begin_size) / (1024.0 * 1024.0),
 			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $begin_time))[2,1,0] ),
-			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 * 8.0,
+			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
 			$file_tmp );
 	}
 
