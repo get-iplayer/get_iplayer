@@ -108,34 +108,8 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
 	exit 2;
 }
-if ( ! $opt_cmdline->{encodinglocalefs} ) {
-	chomp(my @encodinglocalefs = map { s/^\s*encodinglocalefs\s*=\s*// ? $_ : () }
-		get_cmd_output(
-			$opt_cmdline->{getiplayer},
-			'--encoding-locale=UTF-8',
-			'--encoding-console-out=UTF-8',
-			'--nopurge',
-			'--nocopyright',
-			'--showoptions'
-		)
-	);
-	$opt_cmdline->{encodinglocalefs} = pop @encodinglocalefs;
-}
-$opt_cmdline->{encodinglocalefs} = (IS_WIN32 ? 'cp1252' : 'utf8') if ! $opt_cmdline->{encodinglocalefs};
-if ( ! $opt_cmdline->{ffmpeg} ) {
-	chomp(my @ffmpeg = map { s/^\s*ffmpeg\s*=\s*// ? $_ : () }
-		get_cmd_output(
-			$opt_cmdline->{getiplayer},
-			'--encoding-locale=UTF-8',
-			'--encoding-console-out=UTF-8',
-			'--nopurge',
-			'--nocopyright',
-			'--showoptions'
-		)
-	);
-	$opt_cmdline->{ffmpeg} = pop @ffmpeg;
-}
-$opt_cmdline->{ffmpeg} = 'ffmpeg' if ! $opt_cmdline->{ffmpeg};
+$opt_cmdline->{encodinglocalefs} ||= (IS_WIN32 ? 'cp1252' : 'utf8');
+$opt_cmdline->{ffmpeg} ||= 'ffmpeg';
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
@@ -211,28 +185,6 @@ my %prog_types_order = (
 	1	=> 'tv',
 	2	=> 'radio'
 );
-
-# Get list of currently valid and prune %prog types and add new entry
-chomp( my @plugins = split /,/, join "\n", get_cmd_output( $opt_cmdline->{getiplayer}, '--encoding-locale=UTF-8', '--encoding-console-out=UTF-8','--nopurge', '--nocopyright', '--listplugins' ) );
-for my $type (keys %prog_types) {
-	if ( $prog_types{$type} && not grep /$type/, @plugins ) {
-		# delete from %prog_types hash
-		delete $prog_types{$type};
-		# Delete from %prog_types_order hash
-		for ( keys %prog_types_order ) {
-			delete $prog_types_order{$_} if $prog_types_order{$_} eq $type;
-		}
-	}
-}
-for my $type ( @plugins ) {
-	if ( not $prog_types{$type} ) {
-		$prog_types{$type} = $type;
-		# Add to %prog_types_order hash
-		my $max = scalar( keys %prog_types_order ) + 1;
-		$prog_types_order{$max} = $type;
-	}
-}
-#print "DEBUG: prog_types_order: $_ => $prog_types_order{$_}\n" for sort keys %prog_types_order;
 
 my $icons_base_url = './icons/';
 
