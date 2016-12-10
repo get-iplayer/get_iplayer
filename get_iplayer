@@ -5845,9 +5845,6 @@ sub get_stream_data {
 	my @media_stream_mobile_prefixes;
 	my ( @pc_mediasets, @iptv_mediasets, @mobile_mediasets );
 	@pc_mediasets = ( 'pc' );
-	if ( $prog->{type} eq "tv" ) {
-		push @pc_mediasets, 'apple-ipad-hls';
-	}
 	@iptv_mediasets = ( 'iptv-all' );
 	@mobile_mediasets = ( 'apple-ipad-hls' );
 	if ( $prog->{type} eq "radio" ) {
@@ -6164,37 +6161,13 @@ sub get_stream_data {
 
 			# flashhigh modes
 			} elsif ( $mattribs->{bitrate} > 700 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashhigh', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
 
 			# flashstd modes
 			} elsif ( $mattribs->{bitrate} > 400 && $mattribs->{width} >= 500 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
+				get_stream_data_cdn( $data, $mattribs, 'flashxstd', 'rtmp', 'mp4' );
 
-			# flashlow modes
-			} elsif ( $mattribs->{bitrate} > 300 && $mattribs->{width} >= 380 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashlow', 'rtmp', 'mp4' );
 			}
-
-		# flashnormal modes (also live and EMP modes)
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/x-flv' &&
-				$mattribs->{encoding} eq 'vp6'
-		) {
-			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
-
-		# flashlow modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/x-flv' &&
-				$mattribs->{encoding} eq 'spark'
-		) {
-			get_stream_data_cdn( $data, $mattribs, 'flashlow', 'rtmp', 'avi' );
-
-		# flashnormal modes without encoding specifed - assume vp6
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/x-flv'
-		) {
-			$mattribs->{encoding} = 'vp6';
-			get_stream_data_cdn( $data, $mattribs, 'flashnormal', 'rtmp', 'avi' );
 
 		# flashaac modes
 		} elsif (	$mattribs->{kind} eq 'audio' &&
@@ -6264,6 +6237,8 @@ sub modelist {
 		$mlist =~ s/hvfxvhigh/hvfhigh/g;
 		$mlist =~ s/hvfstd/hvflow/g;
 		$mlist =~ s/hvfxstd/hvflow/g;
+		$mlist =~ s/flashhigh/flashstd/g;
+		$mlist =~ s/flashlow/flashxstd/g;
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/hvf/haf/g;
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
@@ -6296,9 +6271,9 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'flashbest', 'flashhd,flashbetter');
 		$mlist = main::expand_list($mlist, 'flashbetter', 'flashvgood');
 		$mlist = main::expand_list($mlist, 'flashvgood', 'flashvhigh,flashgood');
-		$mlist = main::expand_list($mlist, 'flashgood', 'flashhigh,flashworse');
-		$mlist = main::expand_list($mlist, 'flashworse', 'flashstd,flashnormal,flashworst');
-		$mlist = main::expand_list($mlist, 'flashworst', 'flashlow');
+		$mlist = main::expand_list($mlist, 'flashgood', 'flashworse');
+		$mlist = main::expand_list($mlist, 'flashworse', 'flashstd,flashworst');
+		$mlist = main::expand_list($mlist, 'flashworst', 'flashxstd');
 	}
 	# RTMP on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /flashaac/ ) {
