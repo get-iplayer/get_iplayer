@@ -6223,6 +6223,7 @@ sub modelist {
 	if ( ! $mlist ) {
 		$mlist = 'default';
 	}
+	my $mlist_orig = $mlist;
 	$mlist =~ s/rtmp/flash/g;
 	if ( $prog->{type} eq "tv" ) {
 		$mlist =~ s/haf/hvf/g;
@@ -6240,6 +6241,9 @@ sub modelist {
 		$mlist =~ s/hvf/haf/g;
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
+	}
+	if ( $mlist ne $mlist_orig ) {
+		main::logger "INFO: mode list remapped from '$mlist_orig' to '$mlist'\n";
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
