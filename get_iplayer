@@ -7770,7 +7770,6 @@ sub opt_format {
 	return {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
-		logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force download progress display when screen output is redirected to file. Progress display is normally omitted unless writing to terminal. Not used for RTMP streams."],
 	};
 }
 
@@ -8018,10 +8017,21 @@ use base 'Streamer';
 
 use File::Copy;
 use File::Path;
+use File::Spec;
 use File::stat;
 use List::Util qw(max);
-use Text::ParseWords;
 use strict;
+use Text::ParseWords;
+use URI;
+
+sub opt_format {
+	return {
+		hlsfallback		=> [ 1, "dash-fallback|dashfallback|hls-fallback|hlsfallback!", 'Recording', '--hls-fallback', "Fall back to pre-2.98 HLS/DASH downloader."],
+		logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal."],
+		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
+		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
+	};
+}
 
 sub parse_playlist {
 	my (undef, $ua, $url) = @_;
@@ -8065,9 +8075,442 @@ sub get {
 		$file_tmp = $prog->{filepart};
 	}
 	my $rc;
-	$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
+	if ( $opt->{hlsfallback} ) {
+		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
+	} else {
+		$rc = $self->get_resume( $ua, $url, $file_tmp, $prog, %streamdata );
+	}
 	return $rc if $rc;
 	return $self->postproc($file_tmp, $prog, %streamdata);
+}
+
+
+sub get_resume {
+	my ( $self, $ua, $url, $file_tmp, $prog, %streamdata ) = @_;
+	my $file_size = $streamdata{size};
+	my $media = $streamdata{media};
+	my $prog_type = $streamdata{prog_type} || $prog->{type};
+	my $return;
+	my $fh;
+	my $rh;
+	my $begin_time = time();
+	my $begin_size = 0;
+	my $percent = 0;
+	my $size = 0;
+	my $elapsed = 0;
+	my $hash_count = 0;
+	my $prev_percent = 0;
+	my $prev_sequence = 0;
+	my $prev_size = 0;
+	my $prev_elapsed = 0;
+	my $start_sequence = 0;
+	my $start_elapsed = 0;
+	my $stop_sequence = 0;
+	my $stop_elapsed = 0;
+	my $resume_sequence = 0;
+	my $resume_size = 0;
+	my $resume_elapsed = 0;
+	my $resume_begin = 0;
+	my $curr_percent = 0;
+	my $curr_sequence = 0;
+	my $curr_size = 0;
+	my $curr_elapsed = 0;
+	my $curr_segment_url;
+	my $total_duration = 0;
+	my $file_duration = 0;
+	my $file_duration_str = "--:--:--";
+	my $hide_progress = 0;
+	my $proxy_prefix;
+	my $resuming = 0;
+	my $retries = 3;
+	my $rate_bps;
+
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
+		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
+	}
+
+	unless ( $opt->{logprogress} || $opt->{debug} ) {
+		if ( $opt->{pvr} || $opt->{stderr} ) {
+			$hide_progress = ! -t STDERR;
+		} else {
+			$hide_progress = ! -t STDOUT;
+		}
+	}
+
+	# LWP download callback
+	my $callback = sub {
+		my ($data, $res, undef) = @_;
+		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
+		if ( ! print $fh $data ) {
+			main::logger "ERROR: Cannot write to $file_tmp\n";
+			exit 1;
+		}
+		$size = tell $fh;
+		return if $opt->{quiet} || $opt->{silent};
+		$percent = $file_size ? 100.0 * $curr_size / $file_size : 0;
+		# limit progress display to 99.9%
+		if ( $percent > 99.9 ) {
+			$curr_percent = 99.9;
+			$curr_size = int($file_size * 0.999);
+			$curr_elapsed = int($file_duration * 0.999);
+		} else {
+			$curr_percent = $percent;	
+			$curr_size = $size;
+			$curr_elapsed = $elapsed;
+		}
+		if ( $opt->{hash} || $rate_bps >= 3932160 ) {
+			return if ($curr_percent - $prev_percent) < 1;
+		} elsif ( $rate_bps >= 2621440 ) {
+			return if ($curr_percent - $prev_percent) < 0.75;
+		} elsif ( $rate_bps >= 1310720 ) {
+			return if ($curr_percent - $prev_percent) < 0.5;
+		} elsif ( $rate_bps >= 655360 ) {
+			return if ($curr_percent - $prev_percent) < 0.25;
+		} else {
+			return if ($curr_percent - $prev_percent) < 0.1;
+		}
+		$prev_percent = $curr_percent;
+		if ( $opt->{hash} ) {
+			main::logger '#';
+			$hash_count++;
+			if ( ! ($hash_count % 100) ) {
+				main::logger "\n";
+			}
+		} else {
+			return if $hide_progress;
+			my $rate;
+			my $time;
+			my $time_called = time();
+			if ($time_called - $begin_time < 1) {
+				$rate = '-----.-- Mb/s';
+				$time = '--:--:-- remaining';
+			} else {
+				$rate_bps = ($curr_size - $begin_size) / ($time_called - $begin_time);
+				$rate = sprintf("%8.2f Mb/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
+				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
+			}
+			if ( $opt->{verbose} ) {
+				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s\r",
+					$curr_size / 1024.0 / 1024.0,
+					$file_size / 1024.0 / 1024.0,
+					(gmtime($curr_elapsed))[2,1,0],
+					$file_duration_str,
+					$curr_sequence,
+					$stop_sequence,
+					$curr_percent,
+					$rate,
+					$time,
+				);
+			} else {
+				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB %5.1f%% %s %s\r",
+					$curr_size / 1024.0 / 1024.0,
+					$file_size / 1024.0 / 1024.0,
+					$curr_percent,
+					$rate,
+					$time,
+				);
+			}
+		}
+	};
+
+	# get resume file name
+	my $start = $opt->{start} || 0;
+	my $stop = $opt->{stop} || 0;
+	my $nosanitise = $opt->{nosanitise} if defined $opt->{nosanitise};
+	delete $opt->{nosanitise};
+	my $resume_prefix = main::encode_fs($prog->substitute("<name> - <episode> <pid> <version> <modeshort> $start $stop"));
+	$opt->{nosanitise} = $nosanitise if defined $nosanitise;
+	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.".resume.txt");
+	# clean up any leftover resume files for other versions/modes
+	my $resume_glob = File::Spec->catfile($prog->{dir},"*".$prog->{pid}."*.resume.txt");
+	my @leftovers = grep !/$resume_file/, glob qq($resume_glob);
+	unlink @leftovers;
+
+	# parse stream playlist
+	main::logger "DEBUG: Parsing playlist $url\n" if $opt->{debug};
+	my $segments = $self->parse_playlist($ua, $url, $media);
+	my @sequences = sort { $a <=> $b } keys %{$segments};
+	unless ( @sequences ) {
+		main::logger "ERROR: No segments in playlist\n";
+		main::logger "ERROR: Playlist URL: $url\n";
+		return 'next';
+	}
+	my $min_sequence = $sequences[0];
+	my $max_sequence = $sequences[$#sequences];
+	my $init_sequence;
+	if ( $segments->{$min_sequence}->{initialization} ) {
+		if ( $#sequences < 1 ) {
+			main::logger "ERROR: No media segments in DASH playlist\n";
+			main::logger "ERROR: Playlist URL: $url\n";
+			return 'next';
+		}
+		# capture DASH init segment
+		$init_sequence = $min_sequence;
+		$min_sequence = $sequences[1];
+	}
+
+	# last download did not hit threshold so start over
+	my $min_download_size = main::progclass($prog_type)->min_download_size();
+	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
+		unlink $file_tmp;
+		unlink $resume_file;
+	}
+
+	# remove resume file with --no-resume	
+	if ( $opt->{noresume} || ! -s $resume_file) {
+		unlink $resume_file;
+	}
+	# look for resume file and initialise
+	if ( ! $opt->{noresume} && -s $resume_file ) {
+		if ( ! open $rh, "<", $resume_file ) {
+			main::logger "ERROR: Cannot open (read): $resume_file\n";
+			exit 1;
+		}
+		my @resume_data = <$rh>;
+		close $rh;
+		chomp(my $last_data = $resume_data[$#resume_data]);
+		my ($last_sequence, $last_size, $last_elapsed) = split /,/, $last_data;
+		if ( $last_sequence > 0 && $last_size > 0 && $last_elapsed > 0 ) {
+			my $tmp_size = -s $file_tmp || 0;
+			if ( $last_sequence >= $max_sequence ) {
+				unlink $resume_file;
+				main::logger "ERROR: Unexpected resume sequence ($last_sequence >= $max_sequence)\n";		
+				main::logger "ERROR: Retrying download without resume\n";
+				return 'retry';
+			} elsif ( $last_size > $tmp_size ) {
+				unlink $resume_file;
+				main::logger "ERROR: Unexpected resume size ($last_size > $tmp_size)\n";
+				main::logger "ERROR: Retrying download without resume\n";
+				return 'retry';
+			} else {
+				$resume_sequence = $last_sequence + 1;
+				$resume_size = $last_size;
+	 			$resume_elapsed = $last_elapsed;
+				$resuming = 1;
+			}
+		}
+	}
+	$begin_size = $prev_size = $size = $resume_size;
+
+	# find duration and start/stop points
+	for my $sequence ( $min_sequence..$max_sequence ) {
+		my $segment = $segments->{$sequence};
+		my $segment_duration = $segment->{duration};
+		$total_duration += $segment_duration;
+		if ( $start_sequence < 1 && defined $opt->{start} && $total_duration > $opt->{start} ) {
+			$start_sequence = $sequence;
+			$start_elapsed = $total_duration - $segment_duration;
+		};
+		if ( $stop_sequence < 1 && defined $opt->{stop} && $total_duration >= $opt->{stop} ) {
+			$stop_sequence = $sequence;
+			$stop_elapsed = $total_duration;
+		}
+	}
+	$start_sequence ||= $min_sequence;
+	$start_elapsed ||= 0;
+	$stop_sequence ||= $max_sequence;
+	$stop_elapsed ||= $total_duration;
+	$resume_sequence ||= $start_sequence;
+	$resume_elapsed ||= $start_elapsed;
+	$prev_elapsed = $elapsed = $resume_elapsed;
+	$file_duration = $stop_elapsed - $start_elapsed;
+	$file_duration_str = sprintf("%02d:%02d:%02d", (gmtime($file_duration))[2,1,0]);
+	# estimate expected file size
+	$file_size = int($file_duration * $streamdata{bitrate} * 1024.0 / 8.0);
+
+	# open files
+	if ( $resuming ) {
+		# open output file for resume
+		if ( ! open($fh, ">>:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot open (append): $file_tmp\n";
+			exit 1;
+		}
+		binmode $fh;
+		$fh->autoflush(1);
+		my $tmp_size = -s $file_tmp || 0;
+		# remove any partial segment appended in last run
+		if ( $resume_size < $tmp_size ) {
+			main::logger "INFO: Truncating file: $file_tmp\n";
+			main::logger "INFO: Truncating from $tmp_size to $resume_size for resume\n";
+			if ( ! truncate($fh, $resume_size) || ! seek($fh, 0, 2) ) {
+				close $fh;
+				unlink $resume_file;
+				main::logger "ERROR: Unable to truncate file: $file_tmp\n";
+				main::logger "ERROR: Retrying download without resume\n";
+				return 'retry';
+			}
+			unless ( $opt->{noverify} ) {
+				my $trunc_size = tell $fh;
+				if ( $trunc_size != $resume_size ) {
+					close $fh;
+					unlink $resume_file;
+					main::logger "ERROR: Truncation incorrect for file: $file_tmp\n";
+					main::logger "ERROR: Expected: $resume_size Got: $trunc_size\n";
+					main::logger "ERROR: Retrying download without resume\n";
+					return 'retry';
+				}
+			}
+		}
+		main::logger "INFO: Resume recording file: $file_tmp\n";
+		main::logger sprintf("INFO: Resume recording: %.2f MB (%02d:%02d:%02d) [$resume_sequence]\n",
+			$resume_size / 1024.0 / 1024.0,
+			(gmtime($resume_elapsed))[2,1,0]
+		);
+	} else {
+		# start download from beginning if not resuming
+		if ( ! open($fh, ">:raw", $file_tmp) ) {
+			main::logger "ERROR: Cannot open (write): $file_tmp\n";
+			exit 1;
+		}
+		binmode $fh;
+		$fh->autoflush(1);
+		main::logger "INFO: Begin recording file: $file_tmp\n";
+	}
+	unless ( $opt->{noresume} ) {
+		# open resume data file
+		if ( ! open $rh, ">>", $resume_file ) {
+			main::logger "ERROR: Cannot open (append): $resume_file\n";
+			exit 1;
+		}
+		$rh->autoflush(1);
+	}
+
+	# process segments in playlist
+	my @file_sequences = ($resume_sequence..$stop_sequence);
+	if ( $size == 0 && defined $init_sequence ) {
+		# ensure DASH init segment downloaded for new file
+		unshift @file_sequences, $init_sequence;
+	}
+	my @warnings;
+	for my $sequence ( @file_sequences ) {
+		$curr_sequence = $sequence;
+		my $segment = $segments->{$sequence};
+		my $segment_duration = $segment->{duration};
+		$elapsed += $segment_duration;
+		my $segment_url;
+		# proxy url
+		if ( $proxy_prefix ) {
+			$segment_url = $proxy_prefix.main::url_encode( $segment->{url} );
+		} else {
+			$segment_url = $segment->{url};
+		}
+		$curr_segment_url = $segment_url;
+		main::logger "\nDEBUG: Downloading segment [$sequence]\n" if $opt->{debug};
+		main::logger "DEBUG: Segment URL: $segment_url\n" if $opt->{debug};;
+		# download segment with retries
+		my $expected = 0;
+		my $i;
+		for ($i = 0; $i < $retries; $i++) {
+			my $res = $ua->get($segment_url, ':content_cb' => $callback);
+			$expected = $res->header("Content-Length");
+			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
+				if ( $res->code == 404 ) {
+					if ( $prog->{type} eq "radio" && $sequence == $max_sequence ) {
+						# potential edge cases with incorrect DASH manifests
+						main::logger "\nWARNING: Segment not available from server [$sequence]\n";
+						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as not available due to inaccurate programme data\n";
+						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
+						if ( $opt->{verbose} ) {
+							main::logger "WARNING: Playlist URL: $url\n";
+							main::logger "WARNING: Segment URL: $curr_segment_url\n";
+						}
+					} else {
+						# don't retry if 404 received
+						@warnings = ("Segment not available from server [$sequence]");
+						$return = 2;
+					}
+					last;
+				}
+			}
+			last;
+		}
+		# bail out on download failure
+		if ( $i == $retries ) {
+			@warnings = ("Failed to download segment [$sequence]");
+			$return = 1;
+			last;
+		}
+		# verify segment size
+		unless ( $opt->{noverify} ) {
+			if ( $size - $prev_size != $expected) {
+				close $rh unless $opt->{noresume};
+				unlink $resume_file;
+				@warnings = (
+					"Unexpected size for segment [$sequence]",
+					"Expected: $expected  Downloaded: ".($size - $prev_size),
+					"Retrying download without resume"
+				);
+				$return = 1;
+				last;
+			}
+		}
+		# capture resume data
+		unless ( $opt->{noresume} ) {
+			if ( ! print $rh "$sequence,$size,$elapsed,$begin_time\n" ) {
+				close $rh unless $opt->{noresume};
+				unlink $resume_file;
+				@warnings = (
+					"Unable to save resume data for segment [$sequence]",
+					"Retrying download without resume"
+				);
+				$return = 1;
+				last;
+			}
+		}
+		$prev_sequence = $sequence;
+		$prev_size = $size;
+		$prev_elapsed = $elapsed;
+	}
+	close $fh;
+	close $rh unless $opt->{noresume};
+
+	# summary stats
+	main::logger "\r".(" " x ($opt->{verbose} ? 120 : 80));
+	my $end_time = time() + 0.0001;
+	main::logger sprintf("\rINFO: Recorded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mb/s\n",
+		($prev_size - $resume_size) / (1024.0 * 1024.0),
+		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
+		$prev_sequence,
+		(gmtime($end_time - $begin_time))[2,1,0],
+		($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
+	);
+	
+	# retry if we fail during streaming
+	if ( $return ) {
+		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
+		main::logger "WARNING: Stopped recording file: $file_tmp\n";
+		main::logger sprintf("WARNING: Stopped recording: %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$prev_size / 1024.0 / 1024.0,
+			(gmtime($prev_elapsed))[2,1,0],
+			$prev_sequence
+		);
+		if ( $opt->{verbose} ) {
+			main::logger "WARNING: Playlist URL: $url\n";
+			main::logger "WARNING: Segment URL: $curr_segment_url\n";
+		}
+		return $return > 1 ? 'next' : 'retry';
+	}
+
+	# clear resume data
+	unlink $resume_file;
+
+	# If file is too small or non-existent then delete and try next mode
+	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
+		main::logger "WARNING: Failed to stream file: $file_tmp\n";
+		unlink $file_tmp;
+		return 'next';
+	}
+
+	if ( $resuming ) {
+		# summary for file
+		main::logger sprintf("INFO: Recorded (total): %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$prev_size / (1024.0 * 1024.0),
+			(gmtime($prev_elapsed))[2,1,0],
+			$prev_sequence
+		);
+	}
+
+	return 0;
 }
 
 sub get_builtin {
@@ -8294,7 +8737,11 @@ sub get {
 	$audio_file .= ".m4a" unless $opt->{raw};
 	$streamdata{media} = $audio_media;
 	$streamdata{prog_type} = "radio";
-	$rc = $self->get_builtin( $ua, $url, $audio_file, $prog, %streamdata );
+	if ( $opt->{hlsfallback} ) {
+		$rc = $self->get_builtin( $ua, $url, $audio_file, $prog, %streamdata );
+	} else {
+		$rc = $self->get_resume( $ua, $url, $audio_file, $prog, %streamdata );
+	}
 	return $rc if $rc;
 	return $self->postproc($audio_file, $prog, %streamdata);
 }
