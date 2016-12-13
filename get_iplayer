@@ -2139,6 +2139,8 @@ sub StringUtils::sanitize_path {
 	$string =~ s/\//_/g unless $is_path;
 	# Replace backslashes with _ if not Windows path
 	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
+	# use ISO8601 dates
+	$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 	# Do not sanitise if specified
 	if ( $opt->{nosanitise} && ! $force_default ) {
 		# Remove invalid chars for FAT on Windows
@@ -4014,8 +4016,6 @@ sub generate_filenames {
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, 240 );
 
-	# Change the date in the filename to ISO8601 format
-	$prog->{fileprefix} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
 
 	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
@@ -4034,7 +4034,6 @@ sub generate_filenames {
 	# Create a subdir for programme sorting option
 	elsif ( $opt->{subdir} ) {
 		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>', 1 );
-		$subdir =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		$prog->{dir} = main::encode_fs($prog->{dir});
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
