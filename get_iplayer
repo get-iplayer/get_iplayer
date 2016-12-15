@@ -2139,8 +2139,6 @@ sub StringUtils::sanitize_path {
 	$string =~ s/\//_/g unless $is_path;
 	# Replace backslashes with _ if not Windows path
 	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
-	# use ISO8601 dates
-	$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 	# Do not sanitise if specified
 	if ( $opt->{nosanitise} && ! $force_default ) {
 		# Remove invalid chars for FAT on Windows
@@ -2148,6 +2146,8 @@ sub StringUtils::sanitize_path {
 		# Remove invalid chars for HFS on macOS
 		$string =~ s/$hfs_bad//g if $^O eq "darwin";
 	} else {
+		# use ISO8601 dates
+		$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 		# ASCII-fy some punctuation
 		$string = StringUtils::convert_punctuation($string);
 		# Replace ellipsis with _
