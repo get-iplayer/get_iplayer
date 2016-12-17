@@ -1339,7 +1339,7 @@ sub get_regex_matches {
 	my $now = time();
 	my $available_since = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablesince} * 3600))) if $opt->{availablesince};
 	my $expires_before = $now + ($opt->{expiresbefore} * 3600) if $opt->{expiresbefore};
-	
+
 	if ( $opt->{verbose} ) {
 		main::logger "DEBUG: Search download_regex = $download_regex\n";
 		main::logger "DEBUG: Search channel_regex = $channel_regex\n";
@@ -2474,7 +2474,7 @@ sub usage {
 			$name_args{$name} = "1";
 		} elsif ( $syntax =~ / (<.*)$/ ) {
 			$name_args{$name} = $1;
-		}	
+		}
 		$name_desc{$name} = $desc;
 	}
 
@@ -2772,14 +2772,14 @@ sub get {
 	unless ( $suppress_warnings ) {
 		# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
 		$opt->{stderr} = 1;
- 		if ( @ignored ) {
+		if ( @ignored ) {
 			main::logger "WARNING: Ignoring invalid option(s) in $optfile:\n";
 			for my $ignored ( @ignored ) {
 				main::logger "WARNING: $ignored\n";
 			}
 			main::logger "WARNING: Please remove invalid options from $optfile\n";
 		}
- 		if ( @deprecated ) {
+		if ( @deprecated ) {
 			main::logger "WARNING: Deprecated option(s) found in $optfile:\n";
 			for my $deprecated ( @deprecated ) {
 				main::logger "WARNING: $deprecated\n";
@@ -3724,7 +3724,7 @@ sub mode_ver_download_retry_loop {
 
 	# can only resume on retries
 	delete $opt->{streamresume};
-	
+
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
@@ -4780,7 +4780,7 @@ sub get_metadata {
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
 		}
 	}
-	
+
 	# last-chance fallback in case streams found without complete metadata
 	$prog->{name} ||= "get_iplayer";
 	$prog->{episode} ||= $prog->{pid};
@@ -5505,7 +5505,7 @@ sub parse_dash_connection {
 	my $max_bitrate = shift;
 	my $prefix = shift || "dash";
 	my $now = time();
- 	my @dash_medias;
+	my @dash_medias;
 	decode_entities($conn->{href});
 	my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
 	if ( ! $xml ) {
@@ -5644,7 +5644,7 @@ sub parse_dash_connection {
 			push @dash_medias, $dash_media;
 		}
 	}
- 	return @dash_medias;
+	return @dash_medias;
 }
 
 sub get_stream_data_cdn {
@@ -5674,7 +5674,7 @@ sub get_stream_data_cdn {
 			expires		=> $mattribs->{expires},
 			size		=> $mattribs->{media_file_size},
 		};
-				
+
 		if ( $streamer =~ /rtmp/ ) {
 			%$conn = (%$conn,
 				swfurl		=> $opt->{swfurl} || "http://emp.bbci.co.uk/emp/SMPf/1.16.6/StandardMediaPlayerChromelessFlash.swf",
@@ -5683,7 +5683,7 @@ sub get_stream_data_cdn {
 				authstring	=> $cattribs->{authString}
 			);
 		}
-		
+
 		# Akamai CDN
 		if ( $cattribs->{kind} eq 'akamai' ) {
 			# Default appication is 'ondemand'
@@ -7781,7 +7781,7 @@ sub postproc {
 
 	# do nothing if no file
 	return 0 unless ( -f $file_tmp );
-	
+
 	# Retain raw format if required
 	if ( $opt->{raw} ) {
 		if ( $file_tmp ne $prog->{filename} ) {
@@ -7840,7 +7840,7 @@ sub postproc {
 		# remove the failed converted file
 		main::logger "WARNING: Conversion failed - retaining $file_tmp\n";
 		unlink $prog->{filepart};
-		$failed = 1;		
+		$failed = 1;
 	}
 	# Moving file into place as complete
 	if ( ! $failed && $prog->{filepart} ne $prog->{filename} ) {
@@ -8147,7 +8147,7 @@ sub get_resume {
 			$curr_size = int($file_size * 0.999);
 			$curr_elapsed = int($file_duration * 0.999);
 		} else {
-			$curr_percent = $percent;	
+			$curr_percent = $percent;
 			$curr_size = $size;
 			$curr_elapsed = $elapsed;
 		}
@@ -8249,7 +8249,7 @@ sub get_resume {
 		unlink $resume_file;
 	}
 
-	# remove resume file with --no-resume	
+	# remove resume file with --no-resume
 	if ( $opt->{noresume} || ! -s $resume_file) {
 		unlink $resume_file;
 	}
@@ -8267,7 +8267,7 @@ sub get_resume {
 			my $tmp_size = -s $file_tmp || 0;
 			if ( $last_sequence >= $max_sequence ) {
 				unlink $resume_file;
-				main::logger "ERROR: Unexpected resume sequence ($last_sequence >= $max_sequence)\n";		
+				main::logger "ERROR: Unexpected resume sequence ($last_sequence >= $max_sequence)\n";
 				main::logger "ERROR: Retrying download without resume\n";
 				return 'retry';
 			} elsif ( $last_size > $tmp_size ) {
@@ -8467,7 +8467,7 @@ sub get_resume {
 		(gmtime($end_time - $begin_time))[2,1,0],
 		($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
 	);
-	
+
 	# retry if we fail during streaming
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
@@ -8612,7 +8612,7 @@ sub get_builtin {
 	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
 	}
-	
+
 	my $segment_duration;
 	my $segments = $self->parse_playlist($ua, $url, $media, $last_sequence);
 	my @sequences = sort { $a <=> $b } keys %{$segments};
