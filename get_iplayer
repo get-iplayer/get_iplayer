@@ -7792,32 +7792,36 @@ sub postproc {
 		return 0;
 	}
 
-	my @globals = ( '-y' );
+	my @global_opts = ( '-y' );
+	my @codec_opts;
 	if ( ! $opt->{ffmpegobsolete} ) {
 		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
-			push @globals, ( '-loglevel', 'error' );
+			push @global_opts, ( '-loglevel', 'error' );
 		}
-		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}}) ) {
-			push @globals, ( '-stats' );
+		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}} ) && ! grep( /quiet/i, @{$binopts->{ffmpeg}} ) ) {
+			push @global_opts, ( '-stats' );
 		}
+		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' )
+	} else {
+		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' )
 	}
 
-	# use backwards-compatible option for ffmpeg
 	my @filter_opts;
-	if ( $bin->{ffmpeg} =~ /avconv/ ) {
-		push @filter_opts, '-bsf:a';
-	} else {
-		push @filter_opts, '-absf';
+	if ( ! $opt->{raw} && $prog->{mode} !~ /(dash|flash)/ ) {
+		# need filter for HLS
+		if ( ! $opt->{ffmpegobsolete} ) {
+			push @filter_opts, ( '-bsf:a', 'aac_adtstoasc' );
+		} else {
+			push @filter_opts, ( '-absf', 'aac_adtstoasc' );
+		}
 	}
-	push @filter_opts, 'aac_adtstoasc';
 
 	@cmd = (
 		$bin->{ffmpeg},
 		@{ $binopts->{ffmpeg} },
-		@globals,
+		@global_opts,
 		'-i', $file_tmp,
-		'-vcodec', 'copy',
-		'-acodec', 'copy',
+		@codec_opts,
 		@filter_opts,
 		$prog->{filepart},
 	);
@@ -7827,19 +7831,19 @@ sub postproc {
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
 
+	my $failed = 0;
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
-			unlink( $file_tmp );
-			main::logger "INFO: Converted file: $prog->{filepart}\n";
-	# If the ffmpeg conversion failed, remove the failed converted file attempt - move the file as done anyway
+		unlink( $file_tmp );
+		main::logger "INFO: Converted file: $prog->{filepart}\n";
 	} else {
+		# remove the failed converted file
 		main::logger "WARNING: Conversion failed - retaining $file_tmp\n";
 		unlink $prog->{filepart};
-		$prog->{filepart} = $file_tmp;
-		$prog->{filename} = $file_tmp;
+		$failed = 1;		
 	}
 	# Moving file into place as complete
-	if ( $prog->{filepart} ne $prog->{filename} ) {
+	if ( ! $failed && $prog->{filepart} ne $prog->{filename} ) {
 		move($prog->{filepart}, $prog->{filename});
 		$prog->check_duration() if $opt->{checkduration};
 		main::logger "INFO: Recorded file: $prog->{filename}\n";
@@ -7876,8 +7880,6 @@ use URI;
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
 		rtmpport	=> [ 1, "rtmpport=n", 'Deprecated', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
 		rtmpdump	=> [ 0, "rtmpdump|flvstreamer=s", 'Deprecated', '--rtmpdump <path>', "Location of rtmpdump binary. Synonyms: --flvstreamer"],
 		swfurl	=> [ 1, "swfurl=s", 'Deprecated', '--swfurl <URL>', "URL of Flash player used by rtmpdump for verification.  Only use if default Flash player URL is not working."],
@@ -7904,15 +7906,9 @@ sub get {
 	my $mode	= $prog->{mode};
 	push @cmdopts, shellwords( $streamdata{extraopts} ) if $streamdata{extraopts};
 
-	my $file_tmp;
 	my @cmd;
+	my $file_tmp = $prog->{filepart}.'.flv';
 	my $swfarg = "--swfUrl";
-
-	if ( $opt->{raw} ) {
-		$file_tmp = $prog->{filepart};
-	} else {
-		$file_tmp = $prog->{filepart}.'.flv'
-	}
 
 	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
@@ -8071,9 +8067,6 @@ sub parse_playlist {
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $file_tmp = $prog->{filepart}.".ts";
-	if ( $opt->{raw} ) {
-		$file_tmp = $prog->{filepart};
-	}
 	my $rc;
 	if ( $opt->{hlsfallback} ) {
 		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
@@ -8734,7 +8727,7 @@ sub get {
 	my $rc;
 	my $audio_media = $streamdata{audio_media};
 	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
-	$audio_file .= ".m4a" unless $opt->{raw};
+	$audio_file .= ".m4a";
 	$streamdata{media} = $audio_media;
 	$streamdata{prog_type} = "radio";
 	if ( $opt->{hlsfallback} ) {
