@@ -6225,11 +6225,8 @@ sub modelist {
 	my $mlist_orig = $mlist;
 	$mlist =~ s/rtmp/flash/g;
 	if ( $prog->{type} eq "tv" ) {
-		$mlist =~ s/haf/hvf/g;
 		# backcompat
-		if ( $mlist =~ /tv25fps/ ) {
-			undef $opt->{fps50};
-		}
+		$mlist =~ s/tv25fps/tvdefault/g;
 		$mlist =~ s/hlshigh/hlsstd/g;
 		$mlist =~ s/hlslow/hlsxstd/g;
 		$mlist =~ s/hvfvhigh/hvfhigh/g;
@@ -6237,12 +6234,14 @@ sub modelist {
 		$mlist =~ s/flashhigh/flashstd/g;
 		$mlist =~ s/flashlow/flashxstd/g;
 	} elsif ( $prog->{type} eq "radio" ) {
-		$mlist =~ s/hvf/haf/g;
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
 	}
-	if ( $mlist ne $mlist_orig ) {
-		main::logger "INFO: mode list remapped from '$mlist_orig' to '$mlist'\n";
+	if ( $mlist ne $mlist_orig && ! $opt->{modewarn} ) {
+		main::logger "WARNING: Some recording modes were remapped to new values\n";
+		main::logger "WARNING: Input mode list remapped from '$mlist_orig' to '$mlist'\n";
+		main::logger "WARNING: Please update your preferences\n";
+		$opt->{modewarn} = 1;
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -6351,7 +6350,6 @@ sub modelist {
 	# default on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /tv/ ) {
 		$mlist = main::expand_list($mlist, 'tv', 'tvdefault');
-		$mlist = main::expand_list($mlist, 'tv25fps', 'tvdefault');
 		$mlist = main::expand_list($mlist, 'tvdefault', 'tvbest');
 		if ( $opt->{fps50} ) {
 			$mlist = main::expand_list($mlist, 'tvbest', 'hvfhd,hlshd,tvbetter');
