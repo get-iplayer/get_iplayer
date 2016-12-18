@@ -128,6 +128,7 @@ my $opt_format = {
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
+	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults. Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
@@ -817,6 +818,13 @@ sub init_search {
 			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'verbose');
 		} elsif ( $opt->{quiet} || $opt->{silent}  ) {
 			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
+		} else {
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'error');
+		}
+		if ( main::hide_progress() ) {
+			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
+		} elsif ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
+			push @{ $binopts->{ffmpeg} }, ( '-stats' );
 		}
 	}
 
@@ -2009,9 +2017,15 @@ sub run_cmd {
 	} elsif ( $mode eq 'STDERR' ) {
 		$fh_child_out = $fh_child_err = ">&STDERR";
 		#$system_suffix = '1>&2';
-	} elsif ( $mode eq 'QUIET' ) {
+	} elsif ( $mode =~ /^QUIET/ ) {
 		open(DEVNULL, ">", File::Spec->devnull()) || die "ERROR: Cannot open null device\n";
-		$fh_child_out = $fh_child_err = ">&DEVNULL";
+		if ( $mode eq 'QUIET_STDOUT' ) {
+			$fh_child_out = ">&DEVNULL";
+		} elsif ( $mode eq 'QUIET_STDERR' ) {
+			$fh_child_err = ">&DEVNULL";
+		} else {
+			$fh_child_out = $fh_child_err = ">&DEVNULL";
+		}
 	}
 
 	# Check if we have IPC::Open3 otherwise fallback on system()
@@ -2324,6 +2338,16 @@ sub encode_fs {
 	return encode($opt->{encodinglocalefs}, $string, FB_EMPTY);
 }
 
+sub hide_progress {
+	unless ( $opt->{logprogress} || $opt->{debug} ) {
+		if ( $opt->{pvr} || $opt->{stderr} ) {
+			return ! -t STDERR;
+		} else {
+			return ! -t STDOUT;
+		}
+	}
+	return 0;
+}
 
 ############## OO ################
 
@@ -7793,12 +7817,6 @@ sub postproc {
 	my @global_opts = ( '-y' );
 	my @codec_opts;
 	if ( ! $opt->{ffmpegobsolete} ) {
-		if ( ! grep( /-loglevel/i, @{$binopts->{ffmpeg}}) ) {
-			push @global_opts, ( '-loglevel', 'error' );
-		}
-		if ( ! grep( /-stats/i, @{$binopts->{ffmpeg}} ) && ! grep( /quiet/i, @{$binopts->{ffmpeg}} ) ) {
-			push @global_opts, ( '-stats' );
-		}
 		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' )
 	} else {
 		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' )
@@ -8021,7 +8039,6 @@ use URI;
 sub opt_format {
 	return {
 		hlsfallback		=> [ 1, "dash-fallback|dashfallback|hls-fallback|hlsfallback!", 'Recording', '--hls-fallback', "Fall back to pre-2.98 HLS/DASH downloader."],
-		logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal."],
 		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
 		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
 	};
@@ -8110,22 +8127,15 @@ sub get_resume {
 	my $total_duration = 0;
 	my $file_duration = 0;
 	my $file_duration_str = "--:--:--";
-	my $hide_progress = 0;
 	my $proxy_prefix;
 	my $resuming = 0;
 	my $retries = 3;
 	my $rate_bps;
+	my $hide_progress = main::hide_progress();
+	my $crlf = ( $hide_progress || $opt->{logprogress} ) ? "\n" : "\r";
 
 	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
-	}
-
-	unless ( $opt->{logprogress} || $opt->{debug} ) {
-		if ( $opt->{pvr} || $opt->{stderr} ) {
-			$hide_progress = ! -t STDERR;
-		} else {
-			$hide_progress = ! -t STDOUT;
-		}
 	}
 
 	# LWP download callback
@@ -8181,7 +8191,7 @@ sub get_resume {
 				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
 			}
 			if ( $opt->{verbose} ) {
-				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s\r",
+				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
 					$curr_size / 1024.0 / 1024.0,
 					$file_size / 1024.0 / 1024.0,
 					(gmtime($curr_elapsed))[2,1,0],
@@ -8193,7 +8203,7 @@ sub get_resume {
 					$time,
 				);
 			} else {
-				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB %5.1f%% %s %s\r",
+				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB %5.1f%% %s %s${crlf}",
 					$curr_size / 1024.0 / 1024.0,
 					$file_size / 1024.0 / 1024.0,
 					$curr_percent,
@@ -8456,9 +8466,11 @@ sub get_resume {
 	close $rh unless $opt->{noresume};
 
 	# summary stats
-	main::logger "\r".(" " x ($opt->{verbose} ? 120 : 80));
+	unless ( $hide_progress || $opt->{logprogress} ) {
+		main::logger "${crlf}".(" " x ($opt->{verbose} ? 120 : 80));
+	}
 	my $end_time = time() + 0.0001;
-	main::logger sprintf("\rINFO: Recorded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mb/s\n",
+	main::logger sprintf("${crlf}INFO: Recorded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mb/s\n",
 		($prev_size - $resume_size) / (1024.0 * 1024.0),
 		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
 		$prev_sequence,
@@ -8521,15 +8533,8 @@ sub get_builtin {
 	my $retries = 3;
 	my %seen;
 	my $proxy_prefix;
-	my $hide_progress = 0;
 
-	unless ( $opt->{logprogress} || $opt->{debug} ) {
-		if ( $opt->{pvr} || $opt->{stderr} ) {
-			$hide_progress = ! -t STDERR;
-		} else {
-			$hide_progress = ! -t STDOUT;
-		}
-	}
+	my $hide_progress = main::hide_progress();
 
 	my $min_download_size = main::progclass($prog_type)->min_download_size();
 	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
@@ -9469,7 +9474,8 @@ sub tag_file_mp4 {
 			push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 		}
 		# run atomicparsley command
-		if ( main::run_cmd( 'STDERR', @cmd ) ) {
+		my $run_mode = main::hide_progress() ? 'QUIET_STDOUT' : 'STDERR';
+		if ( main::run_cmd( $run_mode, @cmd ) ) {
 			main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
 			return 2;
 		}
