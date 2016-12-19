@@ -4130,8 +4130,10 @@ sub generate_filenames {
 	main::logger "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
 
 	# Check path length is < 256 chars (Windows only)
-	if ( length( $prog->{filepart} ) > 255 && $^O eq "MSWin32" ) {
-		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir and --output options to shorten it to below 256 characters ('$prog->{filepart}')\n\n");
+	# allow for additional extension on temp file during download
+	if ( length( $prog->{filepart} ) > 250 && $^O eq "MSWin32" ) {
+		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir-format, --subdir and --output options to shorten it to below 250 characters\n");
+		main::logger("ERROR: Generated file path: $prog->{filepart}\n\n");
 		return 1;
 	}
 	return 0;
