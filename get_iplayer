@@ -8133,6 +8133,7 @@ sub get_resume {
 	my $rate_bps;
 	my $hide_progress = main::hide_progress();
 	my $crlf = ( $hide_progress || $opt->{logprogress} ) ? "\n" : "\r";
+	my $noresume = $opt->{noresume};
 
 	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
 		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
@@ -8219,11 +8220,19 @@ sub get_resume {
 	my $stop = $opt->{stop} || 0;
 	my $nosanitise = $opt->{nosanitise} if defined $opt->{nosanitise};
 	delete $opt->{nosanitise};
+	my $resume_ext = ".resume.txt";
 	my $resume_prefix = main::encode_fs($prog->substitute("<name> - <episode> <pid> <version> <modeshort> $start $stop"));
 	$opt->{nosanitise} = $nosanitise if defined $nosanitise;
-	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.".resume.txt");
+	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.$resume_ext);
+	# Check path length is < 256 chars (Windows only)
+	if ( length( $resume_file ) > 255 && $^O eq "MSWin32" ) {
+		$noresume = 1;
+		main::logger "ERROR: Resume file path is too long. Use --subdir-format, --subdir and --output options to shorten it to below 256 characters\n";
+		main::logger "ERROR: Resume file path: $resume_file\n";
+		main::logger "ERROR: Downloading without resume\n";
+	}	
 	# clean up any leftover resume files for other versions/modes
-	my $resume_glob = File::Spec->catfile($prog->{dir},"*".$prog->{pid}."*.resume.txt");
+	my $resume_glob = File::Spec->catfile($prog->{dir},"*$prog->{pid}*${resume_ext}");
 	my @leftovers = grep !/$resume_file/, glob qq($resume_glob);
 	unlink @leftovers;
 
@@ -8258,11 +8267,11 @@ sub get_resume {
 	}
 
 	# remove resume file with --no-resume
-	if ( $opt->{noresume} || ! -s $resume_file) {
+	if ( $noresume || ! -s $resume_file) {
 		unlink $resume_file;
 	}
 	# look for resume file and initialise
-	if ( ! $opt->{noresume} && -s $resume_file ) {
+	if ( ! $noresume && -s $resume_file ) {
 		if ( ! open $rh, "<", $resume_file ) {
 			main::logger "ERROR: Cannot open (read): $resume_file\n";
 			exit 1;
@@ -8366,7 +8375,7 @@ sub get_resume {
 		$fh->autoflush(1);
 		main::logger "INFO: Begin recording file: $file_tmp\n";
 	}
-	unless ( $opt->{noresume} ) {
+	unless ( $noresume ) {
 		# open resume data file
 		if ( ! open $rh, ">>", $resume_file ) {
 			main::logger "ERROR: Cannot open (append): $resume_file\n";
@@ -8433,7 +8442,7 @@ sub get_resume {
 		# verify segment size
 		unless ( $opt->{noverify} ) {
 			if ( $size - $prev_size != $expected) {
-				close $rh unless $opt->{noresume};
+				close $rh unless $noresume;
 				unlink $resume_file;
 				@warnings = (
 					"Unexpected size for segment [$sequence]",
@@ -8445,9 +8454,9 @@ sub get_resume {
 			}
 		}
 		# capture resume data
-		unless ( $opt->{noresume} ) {
+		unless ( $noresume ) {
 			if ( ! print $rh "$sequence,$size,$elapsed,$begin_time\n" ) {
-				close $rh unless $opt->{noresume};
+				close $rh unless $noresume;
 				unlink $resume_file;
 				@warnings = (
 					"Unable to save resume data for segment [$sequence]",
@@ -8462,7 +8471,7 @@ sub get_resume {
 		$prev_elapsed = $elapsed;
 	}
 	close $fh;
-	close $rh unless $opt->{noresume};
+	close $rh unless $noresume;
 
 	# summary stats
 	unless ( $hide_progress || $opt->{logprogress} ) {
