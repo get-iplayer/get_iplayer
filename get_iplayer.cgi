@@ -3029,7 +3029,6 @@ sub search_progs {
 					$action_button{'Delete'},
 					$action_button{'Play'},
 					$action_button{'Play Files'},
-					$action_button{'Add Search to PVR'},
 				]),
 			),
 		);
