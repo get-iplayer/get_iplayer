@@ -3577,6 +3577,7 @@ sub cmp_modes($$) {
 		'xstd(\d?)' => 80,
 		'med(\d?)' => 90,
 		'low(\d?)' => 100,
+		'subtitles(\d?)' => 110,
 	);
 	my %ranks2 = (
 		'^dash' => 1000,
@@ -5772,7 +5773,7 @@ sub get_stream_data_cdn {
 			$conn->{streamurl} = $cattribs->{href};
 
 		# http stream
-		} elsif ( $cattribs->{kind} eq 'http' ) {
+		} elsif ( $cattribs->{kind} eq 'http' || $cattribs->{kind} eq 'https' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
 		# hls stream
@@ -5918,7 +5919,7 @@ sub get_stream_data {
 	my $unblocked;
 
 	my (%seen, $stream_key);
-	if (  $opt->{info} || $modelist =~ /flash/ ) {
+	if ( $opt->{info} || $modelist =~ /flash/ ) {
 		# get Flash streams for on-demand
 		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
@@ -5930,19 +5931,12 @@ sub get_stream_data {
 				my @pc_conns;
 				for my $pc_conn ( @{$pc_media->{connections}} ) {
 					next if $pc_conn->{supplier} =~ /$exclude_regex/;
-					$stream_key = "$pc_conn->{identifier}-$pc_conn->{protocol}-$pc_conn->{supplier}";
+					my $identifier = $pc_conn->{identifier} || $pc_media->{service};
+					$stream_key = "$identifier-$pc_conn->{protocol}-$pc_conn->{supplier}";
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
-					if ( $pc_media->{kind} eq "captions" ) {
-						$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
-						last if $seen{$stream_key};
-						$seen{$stream_key}++;
-						push @medias, $pc_media;
-						last;
-					}
 					push @pc_conns, $pc_conn;
 				}
-				next if ( $pc_media->{kind} eq "captions" );
 				@{$pc_media->{connections}} = @pc_conns;
 				push @medias, $pc_media;
 			}
@@ -5966,10 +5960,11 @@ sub get_stream_data {
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
 					if ( $pc_media->{kind} eq "captions" ) {
-						push @medias, $pc_media;
-						last;
+						my $media = dclone($pc_media);
+						@{$media->{connections}} = ( $pc_conn );
+						push @medias, $media;
+						next;
 					}
-					next if ( $pc_media->{kind} eq "captions" );
 					my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
 					for my $dash_media ( @dash_medias ) {
 						for my $dash_conn ( @{$dash_media->{connections}} ) {
@@ -6007,8 +6002,10 @@ sub get_stream_data {
 						next if $seen{$stream_key};
 						$seen{$stream_key}++;
 						if ( $iptv_media->{kind} eq "captions" ) {
-							push @medias, $iptv_media;
-							last;
+							my $media = dclone($iptv_media);
+							@{$media->{connections}} = ( $iptv_conn );
+							push @medias, $media;
+							next;
 						}
 						my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
 						my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, undef, $prefix );
@@ -6045,8 +6042,10 @@ sub get_stream_data {
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
 					if ( $mobile_media->{kind} eq "captions" ) {
-						push @medias, $mobile_media;
-						last;
+						my $media = dclone($mobile_media);
+						@{$media->{connections}} = ( $mobile_conn );
+						push @medias, $media;
+						next;
 					}
 					my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
 					if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
