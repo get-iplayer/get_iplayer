@@ -8225,7 +8225,8 @@ sub get_resume {
 	my $resume_ext = ".resume.txt";
 	my $resume_prefix = main::encode_fs($prog->substitute("<name> - <episode> <pid> <version> <modeshort> $start $stop"));
 	$opt->{nosanitise} = $nosanitise if defined $nosanitise;
-	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.$resume_ext);
+	my $resume_basename = $resume_prefix.$resume_ext;
+	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_basename);
 	# Check path length is < 256 chars (Windows only)
 	if ( length( $resume_file ) > 255 && $^O eq "MSWin32" ) {
 		$noresume = 1;
@@ -8235,7 +8236,7 @@ sub get_resume {
 	}	
 	# clean up any leftover resume files for other versions/modes
 	my $resume_glob = File::Spec->catfile($prog->{dir},"*$prog->{pid}*${resume_ext}");
-	my @leftovers = grep !/$resume_file/, glob qq($resume_glob);
+	my @leftovers = grep !/$resume_basename/, glob qq("$resume_glob");
 	unlink @leftovers;
 
 	# parse stream playlist
