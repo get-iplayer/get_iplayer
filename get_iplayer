@@ -8349,16 +8349,17 @@ sub get_resume {
 				unlink $resume_file;
 				main::logger "ERROR: Unable to truncate file: $file_tmp\n";
 				main::logger "ERROR: Downloading without resume\n";
-			}
-			unless ( $opt->{noverify} ) {
-				my $trunc_size = tell $fh;
-				if ( $trunc_size != $resume_size ) {
-					$resuming = 0;
-					close $fh;
-					unlink $resume_file;
-					main::logger "ERROR: Truncation incorrect for file: $file_tmp\n";
-					main::logger "ERROR: Expected: $resume_size Got: $trunc_size\n";
-					main::logger "ERROR: Downloading without resume\n";
+			} else {
+				unless ( $opt->{noverify} ) {
+					my $trunc_size = tell $fh;
+					if ( $trunc_size != $resume_size ) {
+						$resuming = 0;
+						close $fh;
+						unlink $resume_file;
+						main::logger "ERROR: Truncation incorrect for file: $file_tmp\n";
+						main::logger "ERROR: Expected: $resume_size Got: $trunc_size\n";
+						main::logger "ERROR: Downloading without resume\n";
+					}
 				}
 			}
 		}
