@@ -8443,14 +8443,15 @@ sub get_resume {
 			$return = 1;
 			last;
 		}
+		my $size_diff = $size - $prev_size;
 		# verify segment size
 		unless ( $opt->{noverify} ) {
-			if ( $size - $prev_size != $expected) {
+			if ( $size_diff != $expected) {
 				close $rh unless $noresume;
 				unlink $resume_file;
 				@warnings = (
 					"Unexpected size for segment [$sequence]",
-					"Expected: $expected  Downloaded: ".($size - $prev_size),
+					"Expected: $expected  Downloaded: $size_diff",
 					"Retrying download without resume"
 				);
 				$return = 1;
@@ -8459,7 +8460,7 @@ sub get_resume {
 		}
 		# capture resume data
 		unless ( $noresume ) {
-			if ( ! print $rh "$sequence,$size,$elapsed,$begin_time\n" ) {
+			if ( ! print $rh "$sequence,$size,$elapsed,$size_diff,$segment_duration,$begin_time\n" ) {
 				close $rh unless $noresume;
 				unlink $resume_file;
 				@warnings = (
