@@ -4130,9 +4130,8 @@ sub generate_filenames {
 	main::logger "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
 
 	# Check path length is < 256 chars (Windows only)
-	# allow for additional extension on temp file during download
-	if ( length( $prog->{filepart} ) > 250 && $^O eq "MSWin32" ) {
-		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir-format, --subdir and --output options to shorten it to below 250 characters\n");
+	if ( length( $prog->{filepart} ) > 255 && $^O eq "MSWin32" ) {
+		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir-format, --subdir and --output options to shorten it to below 256 characters\n");
 		main::logger("ERROR: Generated file path: $prog->{filepart}\n\n");
 		return 1;
 	}
@@ -7925,7 +7924,7 @@ sub get {
 	push @cmdopts, shellwords( $streamdata{extraopts} ) if $streamdata{extraopts};
 
 	my @cmd;
-	my $file_tmp = $prog->{filepart}.'.flv';
+	(my $file_tmp = $prog->{filepart}) =~ s/partial\.\w+$/tmp.flv/;
 	my $swfarg = "--swfUrl";
 
 	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
@@ -8083,7 +8082,7 @@ sub parse_playlist {
 
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
-	my $file_tmp = $prog->{filepart}.".ts";
+	(my $file_tmp = $prog->{filepart}) =~ s/partial\.\w+$/tmp.ts/;
 	my $rc;
 	if ( $opt->{hlsfallback} ) {
 		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
@@ -8742,8 +8741,7 @@ sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $rc;
 	my $audio_media = $streamdata{audio_media};
-	(my $audio_file = $prog->{filepart}) =~ s/\.\w+$/.m4a/;
-	$audio_file .= ".m4a";
+	(my $audio_file = $prog->{filepart}) =~ s/partial\.\w+$/tmp.m4a/;
 	$streamdata{media} = $audio_media;
 	$streamdata{prog_type} = "radio";
 	if ( $opt->{hlsfallback} ) {
