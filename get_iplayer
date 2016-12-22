@@ -8339,15 +8339,15 @@ sub get_resume {
 		binmode $fh;
 		$fh->autoflush(1);
 		my $tmp_size = -s $file_tmp || 0;
-		# remove any partial segment appended in last run
+		# overwrite any partial segment appended in last run
 		if ( $resume_size < $tmp_size ) {
-			main::logger "INFO: Truncating file: $file_tmp\n";
-			main::logger "INFO: Truncating from $tmp_size to $resume_size for resume\n";
+			main::logger "INFO: Resizing file: $file_tmp\n";
+			main::logger "INFO: Resizing from $tmp_size to $resume_size for resume\n";
 			if ( ! truncate($fh, $resume_size) || ! seek($fh, 0, 2) ) {
 				$resuming = 0;
 				close $fh;
 				unlink $resume_file;
-				main::logger "ERROR: Unable to truncate file: $file_tmp\n";
+				main::logger "ERROR: Unable to resize file: $file_tmp\n";
 				main::logger "ERROR: Downloading without resume\n";
 			} else {
 				unless ( $opt->{noverify} ) {
@@ -8356,20 +8356,21 @@ sub get_resume {
 						$resuming = 0;
 						close $fh;
 						unlink $resume_file;
-						main::logger "ERROR: Truncation incorrect for file: $file_tmp\n";
+						main::logger "ERROR: Resize incorrect for file: $file_tmp\n";
 						main::logger "ERROR: Expected: $resume_size Got: $trunc_size\n";
 						main::logger "ERROR: Downloading without resume\n";
 					}
 				}
 			}
 		}
+	}
+	if ( $resuming ) {
 		main::logger "INFO: Resume recording file: $file_tmp\n";
 		main::logger sprintf("INFO: Resume recording: %.2f MB (%02d:%02d:%02d) [$resume_sequence]\n",
 			$resume_size / 1024.0 / 1024.0,
 			(gmtime($resume_elapsed))[2,1,0]
 		);
-	}
-	if ( ! $resuming ) {
+	} else {
 		# start download from beginning if not resuming
 		if ( ! open($fh, ">:raw", $file_tmp) ) {
 			main::logger "ERROR: Cannot open (write): $file_tmp\n";
