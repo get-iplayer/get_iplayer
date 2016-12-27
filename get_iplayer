@@ -6409,7 +6409,7 @@ use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(mkfifo strftime);
+use POSIX qw(ceil mkfifo strftime);
 use strict;
 use Time::Local;
 use URI;
@@ -6787,12 +6787,12 @@ sub get_links_schedule {
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 		$limit_days = 0 if $limit_days < 0;
 		$limit_days = 30 if $limit_days > 30;
-		$limit = $now - ($limit_days * 86400) if $limit_days;
+		$limit = $now - (ceil($limit_days / 7) * 7 * 86400) if $limit_days;
 		if ( $limit ) {
 			my $limit_time = $limit;
 			my $limit_year = (gmtime($limit_time))[5];
 			my $limit_week = strftime( "%W", gmtime($limit_time) );
-			while ( $limit_week != $this_week ) {
+			while ( $limit_time < $then ) {
 				push @schedule_dates, sprintf("%04d/w%02d", $limit_year+1900, $limit_week+1);
 				$limit_time += $one_week;
 				$limit_year = (gmtime($limit_time))[5];
