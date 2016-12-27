@@ -2423,7 +2423,7 @@ Copyright (C) 2008-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use --warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use --conditions for details.
-  
+
   NOTE: A UK TV licence is required to legally access BBC iPlayer TV content
 
 EOF
@@ -3580,12 +3580,13 @@ sub cmp_modes($$) {
 		'subtitles(\d?)' => 110,
 	);
 	my %ranks2 = (
-		'^dash' => 1000,
-		'^flash' => 2000,
-		'^haf' => 3000,
-		'^hls' => 4000,
-		'^hvf' => 5000,
-		'^subtitle' => 6000,
+		'^daf' => 1000,
+		'^dvf' => 2000,
+		'^flash' => 3000,
+		'^haf' => 4000,
+		'^hls' => 5000,
+		'^hvf' => 6000,
+		'^subtitle' => 7000,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -4092,6 +4093,9 @@ sub generate_filenames {
 	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 	$prog->{filename} = main::encode_fs($prog->{filename});
 	$prog->{filepart} = main::encode_fs($prog->{filepart});
+	# DASH with --raw only
+	$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, $prog->{fileprefix}.".raw.m4a"));
+	$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, $prog->{fileprefix}.".raw.m4v"));
 
 	# overwrite/error if the file already exists and is going to be written to
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
@@ -4101,15 +4105,39 @@ sub generate_filenames {
 		&& ( ! $opt->{thumbonly} )
 		&& ( ! $opt->{subsonly} )
 		&& ( ! $opt->{tagonly} )
-		&& -f $prog->{filename}
-		&& stat($prog->{filename})->size > $min_download_size
 	) {
-		if ( $opt->{overwrite} ) {
-			main::logger("INFO: Overwriting file $prog->{filename}\n\n");
-			unlink $prog->{filename} unless $opt->{test};
-		} else {
-			main::logger("WARNING: File $prog->{filename} already exists\n\n");
-			return 1;
+		if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
+			if ( $opt->{overwrite} ) {
+				main::logger("INFO: Overwriting file: $prog->{filename}\n");
+				unlink $prog->{filename} unless $opt->{test};
+			} else {
+				main::logger("WARNING: File already exists: $prog->{filename}\n");
+				main::logger "WARNING: Use --overwrite to replace\n\n";
+				return 1;
+			}
+		}
+		# DASH with --raw only
+		if ( $opt->{raw} ) {
+			my $audio_raw = $prog->{rawaudio};
+			my $video_raw = $prog->{rawvideo};
+			if ( $opt->{overwrite} ) {
+				main::logger "INFO: Overwriting raw audio file: $audio_raw\n" if -f $audio_raw;
+				main::logger "INFO: Overwriting raw video file: $video_raw\n" if $prog->{type} eq "tv" && -f $video_raw;
+				unlink ( $audio_raw, $video_raw ) unless $opt->{test};
+			} else {
+				my $skip;
+				if ( -f $audio_raw ) {
+					main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
+					main::logger "WARNING: Use --overwrite to replace\n";
+					$skip = 1;
+				}
+				if ( $prog->{type} eq "tv" && -f $video_raw ) {
+					main::logger "WARNING: Raw video file already exists: $video_raw\n";
+					main::logger "WARNING: Use --overwrite to replace\n";
+					$skip = 1;
+				}
+				return 1 if $skip;
+			}
 		}
 	}
 
@@ -4128,7 +4156,7 @@ sub generate_filenames {
 	main::logger "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
 	main::logger "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
 	main::logger "DEBUG: Thumbnail Filename: $prog->{thumbfile}\n" if $opt->{debug};
-	main::logger "DEBUG: Raw Mode: $opt->{raw}\n" if $opt->{debug};
+	main::logger "DEBUG: Raw Mode:           $opt->{raw}\n" if $opt->{debug};
 
 	# Check path length is < 256 chars (Windows only)
 	if ( length( $prog->{filepart} ) > 255 && $^O eq "MSWin32" ) {
@@ -5449,12 +5477,12 @@ sub parse_hls_connection {
 				$hls_media->{audio_bitrate} = int($ab/1000);
 				$hls_media->{video_bitrate} = int($vb/1000);
 			}
-			$hls_media->{fps} = $stream->{"FRAME-RATE"};
 			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1024.0);
 			next if $min_bitrate && $hls_media->{bitrate} < $min_bitrate;
 			next if $max_bitrate && $hls_media->{bitrate} > $max_bitrate;
 			if ( $stream->{RESOLUTION} ) {
 				($hls_media->{width}, $hls_media->{height}) = split(/x/, $stream->{RESOLUTION});
+				$hls_media->{fps} = $stream->{"FRAME-RATE"} || 25;
 			}
 			$hls_media->{service} = "gip_${prefix}_iplayer_$hls_media->{bitrate}";
 			my $hls_conn = dclone($conn);
@@ -5619,7 +5647,7 @@ sub parse_dash_connection {
 			if ( $content_type eq "video" ) {
 				$repr_media->{width} = $repr->{width};
 				$repr_media->{height} = $repr->{height};
-				$repr_media->{frameRate} = $repr->{frameRate};
+				$repr_media->{frameRate} = $repr->{frameRate} || $set->{frameRate};
 				push @video_medias, $repr_media;
 			} else {
 				push @audio_medias, $repr_media;
@@ -5646,6 +5674,7 @@ sub parse_dash_connection {
 			$dash_media->{bitrate} = $video_media->{bitrate};
 			$dash_media->{service} = $video_media->{service};
 			$dash_media->{media_file_size} = $video_media->{file_size};
+			$dash_media->{fps} = $video_media->{frameRate};
 			$dash_media->{video_media} = $video_media;
 			$dash_media->{audio_media} = $video_audio;
 			($dash_conn->{href} = $video_media->{init_template}) =~ s/\$RepresentationID\$/$video_media->{id}/;
@@ -5938,12 +5967,14 @@ sub get_stream_data {
 					push @pc_conns, $pc_conn;
 				}
 				@{$pc_media->{connections}} = @pc_conns;
+				$pc_media->{fps} = 25 if $prog->{type} eq "tv" && $pc_media->{kind} ne "captions";
 				push @medias, $pc_media;
 			}
 		}
 	}
-	if ( $prog->{type} eq "radio" && ( $opt->{info} || $modelist =~ /dash/ ) ) {
+	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
 		# get MPEG-DASH streams for on-demand
+		push @media_stream_pc_prefixes, @media_stream_iptv_prefixes if $prog->{type} eq "tv";
 		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
@@ -5965,7 +5996,8 @@ sub get_stream_data {
 						push @medias, $media;
 						next;
 					}
-					my @dash_medias = parse_dash_connection( $pc_media, $pc_conn );
+					my $prefix = $prog->{type} eq "radio" ? "daf" : "dvf";
+					my @dash_medias = parse_dash_connection( $pc_media, $pc_conn, undef, undef, $prefix );
 					for my $dash_media ( @dash_medias ) {
 						for my $dash_conn ( @{$dash_media->{connections}} ) {
 							$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
@@ -6152,18 +6184,40 @@ sub get_stream_data {
 				}
 			}
 
-		} elsif ( $mattribs->{service} =~ /dash/ ) {
+		} elsif ( $mattribs->{service} =~ /dvf/ ) {
+			if ( $mattribs->{kind} =~ 'video' ) {
+				my $ext = "mp4";
+				if ( $mattribs->{height} > 700 ) {
+					get_stream_data_cdn( $data, $mattribs, "dvfhd", 'dash', $ext );
+				} elsif ( $mattribs->{height} > 500 ) {
+					if ( $mattribs->{bitrate} > 2500 ) {
+						get_stream_data_cdn( $data, $mattribs, "dvfsd", 'dash', $ext );
+					} else {
+						get_stream_data_cdn( $data, $mattribs, "dvfxsd", 'dash', $ext );
+					}
+				} elsif ( $mattribs->{height} > 350 ) {
+					if ( $mattribs->{bitrate} > 1500 ) {
+						get_stream_data_cdn( $data, $mattribs, "dvfhigh", 'dash', $ext );
+					} else {
+						get_stream_data_cdn( $data, $mattribs, "dvfxhigh", 'dash', $ext );
+					}
+				} elsif ( $mattribs->{height} > 250 ) {
+					get_stream_data_cdn( $data, $mattribs, "dvflow", 'dash', $ext );
+				}
+			}
+
+		} elsif ( $mattribs->{service} =~ /daf/ ) {
 			if ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
 				# use DASH 320k stream as HLS 320k stream
 				if (  $mattribs->{bitrate} >= 192 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashhigh", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "dafhigh", 'dash', $ext );
 				} elsif ( $mattribs->{bitrate} >= 120 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashstd", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "dafstd", 'dash', $ext );
 				} elsif ( $mattribs->{bitrate} >= 80 ) {
-					get_stream_data_cdn( $data, $mattribs, "dashmed", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "dafmed", 'dash', $ext );
 				} else {
-					get_stream_data_cdn( $data, $mattribs, "dashlow", 'dash', $ext );
+					get_stream_data_cdn( $data, $mattribs, "daflow", 'dash', $ext );
 				}
 			}
 
@@ -6259,6 +6313,7 @@ sub modelist {
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
+		$mlist =~ s/dash/daf/g;
 	}
 	if ( $mlist ne $mlist_orig && ! $opt->{modewarn} ) {
 		main::logger "WARNING: Some recording modes were remapped to new values\n";
@@ -6276,15 +6331,33 @@ sub modelist {
 	$mlist = main::expand_list($mlist, 'worse', "$prog->{type}worse");
 	$mlist = main::expand_list($mlist, 'worst', "$prog->{type}worst");
 	# DASH on-demand radio
-	if ( $prog->{type} eq "radio" && $mlist =~ /dash/ ) {
-		$mlist = main::expand_list($mlist, 'dash', 'dashdefault');
-		$mlist = main::expand_list($mlist, 'dashdefault', 'dashbest');
-		$mlist = main::expand_list($mlist, 'dashbest', 'dashhigh,dashbetter');
-		$mlist = main::expand_list($mlist, 'dashbetter', 'dashvgood');
-		$mlist = main::expand_list($mlist, 'dashvgood', 'dashstd,dashgood');
-		$mlist = main::expand_list($mlist, 'dashgood', 'dashmed,dashworse');
-		$mlist = main::expand_list($mlist, 'dashworse', 'dashworst');
-		$mlist = main::expand_list($mlist, 'dashworst', 'dashlow');
+	if ( $prog->{type} eq "radio" && $mlist =~ /daf/ ) {
+		$mlist = main::expand_list($mlist, 'daf', 'dafdefault');
+		$mlist = main::expand_list($mlist, 'dafdefault', 'dafbest');
+		$mlist = main::expand_list($mlist, 'dafbest', 'dafhigh,dafbetter');
+		$mlist = main::expand_list($mlist, 'dafbetter', 'dafvgood');
+		$mlist = main::expand_list($mlist, 'dafvgood', 'dafstd,dafgood');
+		$mlist = main::expand_list($mlist, 'dafgood', 'dafmed,dafworse');
+		$mlist = main::expand_list($mlist, 'dafworse', 'dafworst');
+		$mlist = main::expand_list($mlist, 'dafworst', 'daflow');
+	}
+	# DASH on-demand tv
+	if ( $prog->{type} =~ /tv/ && $mlist =~ /dvf/ ) {
+		$mlist = main::expand_list($mlist, 'dvf', 'dvfdefault');
+		$mlist = main::expand_list($mlist, 'dvfdefault', 'dvfbest');
+		if ( $opt->{fps50} ) {
+			$mlist = main::expand_list($mlist, 'dvfbest', 'dvfhd,dvfbetter');
+			$mlist = main::expand_list($mlist, 'dvfbetter', 'dvfsd,dvfxsd,dvfvgood');
+			$mlist = main::expand_list($mlist, 'dvfvgood', 'dvfgood');
+			$mlist = main::expand_list($mlist, 'dvfgood', 'dvfhigh,dvfxhigh,dvfworse');
+		} else {
+			$mlist = main::expand_list($mlist, 'dvfbest', 'dvfbetter');
+			$mlist = main::expand_list($mlist, 'dvfbetter', 'dvfxsd,dvfvgood');
+			$mlist = main::expand_list($mlist, 'dvfvgood', 'dvfgood');
+			$mlist = main::expand_list($mlist, 'dvfgood', 'dvfxhigh,dvfworse');
+		}
+		$mlist = main::expand_list($mlist, 'dvfworse', 'dvfworst');
+		$mlist = main::expand_list($mlist, 'dvfworst', 'dvflow');
 	}
 	# RTMP on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /flash/ ) {
@@ -6319,7 +6392,7 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hafworse', 'hafworst');
 		$mlist = main::expand_list($mlist, 'hafworst', 'haflow');
 	}
-	# HLS video clips
+	# HLS on-demand TV and video clips
 	if ( $prog->{type} eq "tv" && $mlist =~ /hls/ ) {
 		$mlist = main::expand_list($mlist, 'hls', 'hlsdefault');
 		$mlist = main::expand_list($mlist, 'hlsdefault', 'hlsbest');
@@ -6363,12 +6436,12 @@ sub modelist {
 	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
 		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
 		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
-		$mlist = main::expand_list($mlist, 'radiobest', 'dashhigh,hafhigh,radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobest', 'dafhigh,hafhigh,radiobetter');
 		$mlist = main::expand_list($mlist, 'radiobetter', 'radiovgood');
-		$mlist = main::expand_list($mlist, 'radiovgood', 'dashstd,hafstd,hlsaacstd,radiogood');
-		$mlist = main::expand_list($mlist, 'radiogood', 'dashmed,hafmed,radioworse');
+		$mlist = main::expand_list($mlist, 'radiovgood', 'dafstd,hafstd,hlsaacstd,radiogood');
+		$mlist = main::expand_list($mlist, 'radiogood', 'dafmed,hafmed,radioworse');
 		$mlist = main::expand_list($mlist, 'radioworse', 'radioworst');
-		$mlist = main::expand_list($mlist, 'radioworst', 'dashlow,haflow,hlsaaclow');
+		$mlist = main::expand_list($mlist, 'radioworst', 'daflow,haflow,hlsaaclow');
 	}
 	# default on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /tv/ ) {
@@ -7245,8 +7318,13 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for DASH
-	if ( $mode =~ /^dash/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
-		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .m4a file\n";
+	if ( $mode =~ /^(daf|dvf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
+		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .m4a and .m4v files\n";
+		$opt->{raw} = 1;
+	}
+	# cannot convert dvf with avconv
+	if ( $mode =~ /^dvf/ && ! $opt->{raw} && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
+		main::logger "\nWARNING: Cannot convert dvf modes with avconv (ffmpeg required) - not converting .m4a and .m4v files\n";
 		$opt->{raw} = 1;
 	}
 
@@ -7256,7 +7334,6 @@ sub download {
 	# Nasty hacky filename ext overrides based on non-default fallback modes
 	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
-	$prog->{ext} = 'm4a' if $opt->{raw} && $mode =~ /^dash/ && $prog->{type} eq 'radio';
 
 	# Determine the correct filenames for this recording
 	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
@@ -7749,6 +7826,7 @@ sub download {
 ################### Streamer class #################
 package Streamer;
 use File::stat;
+use File::Basename;
 use File::Copy;
 use strict;
 use Text::ParseWords;
@@ -7795,35 +7873,28 @@ sub opt_format {
 	};
 }
 
-sub postproc {
-	my ( $self, $file_tmp, $prog, %streamdata ) = @_;
-	my $kind = $streamdata{kind};
+sub remux {
+	my ( $self, $audio_file, $video_file, $prog, %streamdata ) = @_;
 	my @cmd;
 	my $return;
 
-	# do nothing if no file
-	return 0 unless ( -f $file_tmp );
-
-	# Retain raw format if required
-	if ( $opt->{raw} ) {
-		if ( $file_tmp ne $prog->{filename} ) {
-			move($file_tmp, $prog->{filename});
-			$prog->check_duration() if $opt->{checkduration};
-			main::logger "INFO: Recorded file: $prog->{filename}\n";
-		}
-		return 0;
-	}
+	# do nothing if no files
+	my $audio_ok = $audio_file && -f $audio_file;
+	my $video_ok = $video_file && -f $video_file;
+	return 0 unless ( $audio_ok || $video_ok);
 
 	my @global_opts = ( '-y' );
+	my @input_opts;
+	push @input_opts, ( '-i', $audio_file ) if $audio_ok;
+	push @input_opts, ( '-i', $video_file ) if $video_ok;
 	my @codec_opts;
 	if ( ! $opt->{ffmpegobsolete} ) {
 		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' )
 	} else {
 		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' )
 	}
-
 	my @filter_opts;
-	if ( ! $opt->{raw} && $prog->{mode} !~ /(dash|flash)/ ) {
+	if ( $prog->{mode} =~ /(haf|hvf|hls)/ ) {
 		# need filter for HLS
 		if ( ! $opt->{ffmpegobsolete} ) {
 			push @filter_opts, ( '-bsf:a', 'aac_adtstoasc' );
@@ -7836,34 +7907,44 @@ sub postproc {
 		$bin->{ffmpeg},
 		@{ $binopts->{ffmpeg} },
 		@global_opts,
-		'-i', $file_tmp,
+		@input_opts,
 		@codec_opts,
 		@filter_opts,
 		$prog->{filepart},
 	);
 
-	main::logger "INFO: Begin converting file: $file_tmp\n";
+	if ( $audio_ok && $video_ok ) {
+		main::logger "INFO: Begin converting files:\n";
+		main::logger "INFO: Audio file: $audio_file\n";
+		main::logger "INFO: Video file: $video_file\n";
+	} else {
+		main::logger "INFO: Begin converting audio file: $audio_file\n" if $audio_ok;
+		main::logger "INFO: Begin converting video file: $video_file\n" if $video_ok;
+	}
 
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
 
-	my $failed = 0;
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
-		unlink( $file_tmp );
-		main::logger "INFO: Converted file: $prog->{filepart}\n";
+		unlink( $audio_file, $video_file );
+		main::logger "INFO: Converted to file: $prog->{filepart}\n";
 	} else {
 		# remove the failed converted file
-		main::logger "WARNING: Conversion failed - retaining $file_tmp\n";
 		unlink $prog->{filepart};
-		$failed = 1;
+		main::logger "WARNING: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
+		main::logger "WARNING: Conversion failed - retaining video file: $video_file\n" if $video_ok;
+		return 0;
 	}
 	# Moving file into place as complete
-	if ( ! $failed && $prog->{filepart} ne $prog->{filename} ) {
-		move($prog->{filepart}, $prog->{filename});
-		$prog->check_duration() if $opt->{checkduration};
-		main::logger "INFO: Recorded file: $prog->{filename}\n";
+	if ( ! move($prog->{filepart}, $prog->{filename}) ) {
+		main::logger "ERROR: Could not rename file: $prog->{filepart}\n";
+		main::logger "ERROR: Destination file name: $prog->{filename}\n";
+		return 'skip';
 	}
+	$prog->check_duration() if $opt->{checkduration};
+	main::logger "INFO: Recorded file: $prog->{filename}\n";
 
 	return 0;
 }
@@ -7923,101 +8004,144 @@ sub get {
 	push @cmdopts, shellwords( $streamdata{extraopts} ) if $streamdata{extraopts};
 
 	my @cmd;
-	(my $file_tmp = $prog->{filepart}) =~ s/partial\.\w+$/tmp.flv/;
 	my $swfarg = "--swfUrl";
 
-	# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
-	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
-		unlink( $file_tmp );
-	}
+	# media file
+	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
+	my $media_prefix = $prog->{fileprefix};
+	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".${media_type}.flv"));
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".rtmp.flv"));
+	my $media_raw = $prog->{filename};
 
-	# rtmpdump version detection e.g. 'RTMPDump v2.4'
-	my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
-	if ( $opt->{verbose} ) {
-		(my $rtmpver2 = $rtmpver) =~ s/^/INFO: /gm;
-		main::logger "INFO: rtmpver: \n$rtmpver2";
-	}
-	if ( $rtmpver =~ /swfVfy/ ) {
-		$swfarg = "--swfVfy";
+	if ( $opt->{overwrite} ) {
+		main::logger "INFO: Overwriting RTMP $media_type file: $media_file\n" if -f $media_file;
+		main::logger "INFO: Overwriting raw $media_type file: $media_raw\n" if $opt->{raw} && -f $media_raw;
+		unlink ( $media_file, $media_raw );
 	} else {
-		main::logger "WARNING: Your version of rtmpdump/flvstreamer does not support SWF Verification\n";
-		main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
-		main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
-	}
-	$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
-	main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
-	main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
-
-	# Save the effort and don't support < v1.8
-	if ( $rtmpver < 1.8 ) {
-		main::logger "WARNING: rtmpdump/flvstreamer 1.8 or later is required - please upgrade\n";
-		main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
-		main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
-		return 'next';
+		if ( $opt->{raw} && -f $media_raw ) {
+			main::logger "INFO: Raw $media_type file already exists: $media_raw\n";
+			main::logger "INFO: Use --overwrite to replace\n";
+			return 'skip';
+		}
+		if ( -f $media_file ) {
+			main::logger "INFO: Using existing RTMP $media_type file: $media_file\n";
+			main::logger "INFO: Use --overwrite to re-download\n";
+		}
 	}
 
-	# Add start stop options if defined
-	if ( $opt->{start} || $opt->{stop} ) {
-		push @cmdopts, ( '--start', $opt->{start} ) if $opt->{start};
-		push @cmdopts, ( '--stop', $opt->{stop} ) if $opt->{stop};
+	unless ( -f $media_file ) {	
+		# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
+		my $min_download_size = main::progclass($prog->{type})->min_download_size();
+		if ( -f $media_tmp && stat($media_tmp)->size < $min_download_size ) {
+			unlink( $media_tmp );
+		}
+
+		# rtmpdump version detection e.g. 'RTMPDump v2.4'
+		my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
+		if ( $opt->{verbose} ) {
+			(my $rtmpver2 = $rtmpver) =~ s/^/INFO: /gm;
+			main::logger "INFO: rtmpver: \n$rtmpver2";
+		}
+		if ( $rtmpver =~ /swfVfy/ ) {
+			$swfarg = "--swfVfy";
+		} else {
+			main::logger "WARNING: Your version of rtmpdump/flvstreamer does not support SWF Verification\n";
+			main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
+			main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
+		}
+		$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
+		main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
+		main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
+
+		# Save the effort and don't support < v1.8
+		if ( $rtmpver < 1.8 ) {
+			main::logger "WARNING: rtmpdump/flvstreamer 1.8 or later is required - please upgrade\n";
+			main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
+			main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
+			return 'next';
+		}
+
+		# Add start stop options if defined
+		if ( $opt->{start} || $opt->{stop} ) {
+			push @cmdopts, ( '--start', $opt->{start} ) if $opt->{start};
+			push @cmdopts, ( '--stop', $opt->{stop} ) if $opt->{stop};
+		}
+
+		# Add hashes option if required
+		push @cmdopts, '--hashes' if $opt->{hash};
+
+		push @cmdopts, ( '--resume', '-o', $media_tmp );
+		push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
+
+		# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
+		if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
+			push @cmdopts, shellwords( $opt->{'rtmp'.$prog->{type}.'opts'} );
+		}
+
+		my $return;
+		# Different invocation depending on version
+		# if playpath is defined
+		if ( $playpath ) {
+			@cmd = (
+				$bin->{rtmpdump},
+				'--port', $port,
+				'--protocol', $protocol,
+				'--playpath', $playpath,
+				'--host', $server,
+				$swfarg, $swfurl,
+				'--tcUrl', $tcurl,
+				'--app', $application,
+				'--pageUrl', $pageurl,
+				@cmdopts,
+			);
+		# Using just streamurl (i.e. no playpath defined)
+		} else {
+			@cmd = (
+				$bin->{rtmpdump},
+				'--port', $port,
+				'--protocol', $protocol,
+				'--rtmp', $streamdata{streamurl},
+				@cmdopts,
+			);
+		}
+
+		main::logger "INFO: Begin recording file: $media_tmp\n";
+
+		$return = main::run_cmd( 'normal', @cmd );
+
+		# rtmpdump returns 2 with --stop
+		unless ( $return == 2 && $opt->{stop} ) {
+			return 'retry' if $return && -f $media_tmp && stat($media_tmp)->size > $min_download_size;
+		}
+
+		# If file is too small or non-existent then delete and try next mode
+		if ( (! -f $media_tmp) || ( -f $media_tmp && stat($media_tmp)->size < $min_download_size) ) {
+			main::logger "WARNING: Failed to stream file $media_tmp\n";
+			unlink $media_tmp;
+			return 'next';
+		}
+
+		if ( ! move($media_tmp, $media_file) ) {
+			main::logger "ERROR: Could not rename file: $media_tmp\n";
+			main::logger "ERROR: Destination file name: $media_file\n";
+			return 'skip';
+		}
+		main::logger "INFO: Saved RTMP $media_type file: $media_file\n";
 	}
 
-	# Add hashes option if required
-	push @cmdopts, '--hashes' if $opt->{hash};
-
-	push @cmdopts, ( '--resume', '-o', $file_tmp );
-	push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
-
-	# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
-	if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
-		push @cmdopts, shellwords( $opt->{'rtmp'.$prog->{type}.'opts'} );
+	if ( $opt->{raw} ) {
+		if ( ! move($media_file, $media_raw) ) {
+			main::logger "ERROR: Could not rename file: $media_file\n";
+			main::logger "ERROR: Destination file name: $media_raw\n";
+			return 'skip';
+		}
+		$prog->check_duration() if $opt->{checkduration};
+		main::logger "INFO: Recorded raw $media_type file: $media_raw\n";
+		return 0;
 	}
 
-	my $return;
-	# Different invocation depending on version
-	# if playpath is defined
-	if ( $playpath ) {
-		@cmd = (
-			$bin->{rtmpdump},
-			'--port', $port,
-			'--protocol', $protocol,
-			'--playpath', $playpath,
-			'--host', $server,
-			$swfarg, $swfurl,
-			'--tcUrl', $tcurl,
-			'--app', $application,
-			'--pageUrl', $pageurl,
-			@cmdopts,
-		);
-	# Using just streamurl (i.e. no playpath defined)
-	} else {
-		@cmd = (
-			$bin->{rtmpdump},
-			'--port', $port,
-			'--protocol', $protocol,
-			'--rtmp', $streamdata{streamurl},
-			@cmdopts,
-		);
-	}
-
-	main::logger "INFO: Begin recording file: $file_tmp\n";
-
-	$return = main::run_cmd( 'normal', @cmd );
-
-	# rtmpdump returns 2 with --stop
-	unless ( $return == 2 && $opt->{stop} ) {
-		return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
-	}
-
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-
-	return $self->postproc($file_tmp, $prog, %streamdata);
+	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? (undef, $media_file) : ($media_file, undef);
+	return $self->remux($audio_file, $video_file, $prog, %streamdata);
 }
 
 
@@ -8027,6 +8151,7 @@ package Streamer::hls;
 # Inherit from Streamer class
 use base 'Streamer';
 
+use File::Basename;
 use File::Copy;
 use File::Path;
 use File::Spec;
@@ -8038,7 +8163,7 @@ use URI;
 
 sub opt_format {
 	return {
-		hlsfallback		=> [ 1, "dash-fallback|dashfallback|hls-fallback|hlsfallback!", 'Recording', '--hls-fallback', "Fall back to pre-2.98 HLS/DASH downloader."],
+		hlsfallback		=> [ 1, "dash-fallback|dashfallback|hls-fallback|hlsfallback!", 'Deprecated', '--hls-fallback', "Fall back to pre-2.98 HLS/DASH downloader."],
 		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
 		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
 	};
@@ -8046,8 +8171,8 @@ sub opt_format {
 
 sub parse_playlist {
 	my (undef, $ua, $url) = @_;
-	main::logger "DEBUG: HLS playlist = $url\n" if $opt->{verbose};
-	my $data = main::request_url_retry($ua, $url, 3, undef, "\nWARNING: Failed to download HLS segment list $url\n", 1);
+	main::logger "DEBUG: HLS playlist URL: $url\n" if $opt->{verbose};
+	my $data = main::request_url_retry($ua, $url, 3, undef, "\nWARNING: Failed to download HLS playlist: $url\n", 1);
 	return undef if ! $data;
 	my @lines = split(/\r?\n/, $data);
 	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
@@ -8080,27 +8205,73 @@ sub parse_playlist {
 }
 
 sub get {
-	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
-	(my $file_tmp = $prog->{filepart}) =~ s/partial\.\w+$/tmp.ts/;
+	my ( $self, $ua, $url, $prog, %streamdata ) = @_;	
 	my $rc;
-	if ( $opt->{hlsfallback} ) {
-		$rc = $self->get_builtin( $ua, $url, $file_tmp, $prog, %streamdata );
+	
+	# media file
+	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
+	my $media_prefix = $prog->{fileprefix};
+	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".${media_type}.ts"));
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".hls.ts"));
+	my $media_raw = $prog->{filename};
+
+	if ( $opt->{overwrite} ) {
+		main::logger "INFO: Overwriting HLS $media_type file: $media_file\n" if -f $media_file;
+		main::logger "INFO: Overwriting raw $media_type file: $media_raw\n" if $opt->{raw} && -f $media_raw;
+		unlink ( $media_file, $media_raw );
 	} else {
-		$rc = $self->get_resume( $ua, $url, $file_tmp, $prog, %streamdata );
+		if ( $opt->{raw} && -f $media_raw ) {
+			main::logger "INFO: Raw $media_type file already exists: $media_raw\n";
+			main::logger "INFO: Use --overwrite to replace\n";
+			return 'skip';
+		}
+		if ( -f $media_file ) {
+			main::logger "INFO: Using existing HLS $media_type file: $media_file\n";
+			main::logger "INFO: Use --overwrite to re-download\n";
+		}
 	}
-	return $rc if $rc;
-	return $self->postproc($file_tmp, $prog, %streamdata);
+
+	unless ( -f $media_file ) {
+		if ( $opt->{hlsfallback} ) {
+			$rc = $self->get_builtin( $ua, $url, $media_tmp, $prog, %streamdata );
+		} else {
+			my $segments = $self->parse_playlist($ua, $url);
+			if ( keys %{$segments} == 0 ) {
+				main::logger "ERROR: No segments in HLS playlist\n";
+				main::logger "ERROR: Playlist URL: $url\n";
+				return 'next';
+			}
+			$rc = $self->get_resume( $ua, $segments, $media_tmp, $prog, %streamdata );
+		}
+		return $rc if $rc;
+		if ( ! move($media_tmp, $media_file) ) {
+			main::logger "ERROR: Could not rename file: $media_tmp\n";
+			main::logger "ERROR: Destination file name: $media_file\n";
+			return 'skip';
+		}
+		main::logger "INFO: Saved HLS $media_type file: $media_file\n";
+	}
+	if ( $opt->{raw} ) {
+		if ( ! move($media_file, $media_raw) ) {
+			main::logger "ERROR: Could not rename file: $media_file\n";
+			main::logger "ERROR: Destination file name: $media_raw\n";
+			return 'skip';
+		}
+		main::logger "INFO: Recorded raw $media_type file: $media_raw\n";
+		return 0;
+	}
+
+	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? (undef, $media_file) : ($media_file, undef);
+	return $self->remux($audio_file, $video_file, $prog, %streamdata);
 }
 
-
 sub get_resume {
-	my ( $self, $ua, $url, $file_tmp, $prog, %streamdata ) = @_;
-	my $file_size = $streamdata{size};
-	my $media = $streamdata{media};
-	my $prog_type = $streamdata{prog_type} || $prog->{type};
+	my ( $self, $ua, $segments, $file_tmp, $prog, %streamdata ) = @_;
 	my $return;
 	my $fh;
 	my $rh;
+	my $media_size = $streamdata{file_size};
+	my $media_bitrate = $streamdata{media_bitrate} || $streamdata{bitrate};
 	my $begin_time = time();
 	my $begin_size = 0;
 	my $percent = 0;
@@ -8115,6 +8286,7 @@ sub get_resume {
 	my $start_elapsed = 0;
 	my $stop_sequence = 0;
 	my $stop_elapsed = 0;
+	my $stop_elapsed_str = "--:--:--";
 	my $resume_sequence = 0;
 	my $resume_size = 0;
 	my $resume_elapsed = 0;
@@ -8126,7 +8298,7 @@ sub get_resume {
 	my $curr_segment_url;
 	my $total_duration = 0;
 	my $file_duration = 0;
-	my $file_duration_str = "--:--:--";
+	my $file_size = 0;
 	my $proxy_prefix;
 	my $resuming = 0;
 	my $retries = 3;
@@ -8134,10 +8306,6 @@ sub get_resume {
 	my $hide_progress = main::hide_progress();
 	my $crlf = ( $hide_progress || $opt->{logprogress} ) ? "\n" : "\r";
 	my $noresume = $opt->{noresume};
-
-	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
-		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
-	}
 
 	# LWP download callback
 	my $callback = sub {
@@ -8154,20 +8322,14 @@ sub get_resume {
 		if ( $percent > 99.9 ) {
 			$curr_percent = 99.9;
 			$curr_size = int($file_size * 0.999);
-			$curr_elapsed = int($file_duration * 0.999);
+			$curr_elapsed = int($stop_elapsed * 0.999);
 		} else {
 			$curr_percent = $percent;
 			$curr_size = $size;
 			$curr_elapsed = $elapsed;
 		}
-		if ( $opt->{hash} || $rate_bps >= 3932160 ) {
+		if ( $opt->{hash} || $opt->{logprogress} ) {
 			return if ($curr_percent - $prev_percent) < 1;
-		} elsif ( $rate_bps >= 2621440 ) {
-			return if ($curr_percent - $prev_percent) < 0.75;
-		} elsif ( $rate_bps >= 1310720 ) {
-			return if ($curr_percent - $prev_percent) < 0.5;
-		} elsif ( $rate_bps >= 655360 ) {
-			return if ($curr_percent - $prev_percent) < 0.25;
 		} else {
 			return if ($curr_percent - $prev_percent) < 0.1;
 		}
@@ -8196,7 +8358,7 @@ sub get_resume {
 					$curr_size / 1024.0 / 1024.0,
 					$file_size / 1024.0 / 1024.0,
 					(gmtime($curr_elapsed))[2,1,0],
-					$file_duration_str,
+					$stop_elapsed_str,
 					$curr_sequence,
 					$stop_sequence,
 					$curr_percent,
@@ -8215,90 +8377,77 @@ sub get_resume {
 		}
 	};
 
-	# get resume file name
-	my $start = $opt->{start} || 0;
-	my $stop = $opt->{stop} || 0;
-	my $nosanitise = $opt->{nosanitise} if defined $opt->{nosanitise};
-	delete $opt->{nosanitise};
-	my $resume_ext = ".resume.txt";
-	my $resume_prefix = main::encode_fs($prog->substitute("<name> - <episode> <pid> <version> <modeshort> $start $stop"));
-	$opt->{nosanitise} = $nosanitise if defined $nosanitise;
-	my $resume_basename = $resume_prefix.$resume_ext;
-	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_basename);
-	# Check path length is < 256 chars (Windows only)
-	if ( length( $resume_file ) > 255 && $^O eq "MSWin32" ) {
-		$noresume = 1;
-		main::logger "ERROR: Resume file path is too long. Use --subdir-format, --subdir and --output options to shorten it to below 256 characters\n";
-		main::logger "ERROR: Resume file path: $resume_file\n";
-		main::logger "ERROR: Downloading without resume\n";
-	}	
-	# clean up any leftover resume files for other versions/modes
-	my $resume_glob = File::Spec->catfile($prog->{dir},"*_$prog->{pid}_*${resume_ext}");
-	my @leftovers = grep !/$resume_basename/, glob qq("$resume_glob");
-	unlink @leftovers;
-
-	# parse stream playlist
-	main::logger "DEBUG: Parsing playlist $url\n" if $opt->{debug};
-	my $segments = $self->parse_playlist($ua, $url, $media);
+	# set up sequence list	
 	my @sequences = sort { $a <=> $b } keys %{$segments};
-	unless ( @sequences ) {
-		main::logger "ERROR: No segments in playlist\n";
-		main::logger "ERROR: Playlist URL: $url\n";
-		return 'next';
-	}
 	my $min_sequence = $sequences[0];
 	my $max_sequence = $sequences[$#sequences];
 	my $init_sequence;
 	if ( $segments->{$min_sequence}->{initialization} ) {
-		if ( $#sequences < 1 ) {
-			main::logger "ERROR: No media segments in DASH playlist\n";
-			main::logger "ERROR: Playlist URL: $url\n";
-			return 'next';
-		}
 		# capture DASH init segment
 		$init_sequence = $min_sequence;
 		$min_sequence = $sequences[1];
 	}
 
-	# last download did not hit threshold so start over
-	my $min_download_size = main::progclass($prog_type)->min_download_size();
-	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
-		unlink $file_tmp;
-		unlink $resume_file;
-	}
-
+	# resume file
+	my $resume_params = "$prog->{pid},$prog->{version},$prog->{modeshort},".($opt->{start} || 0).",".($opt->{stop} || 0);
+	my $resume_prefix = fileparse($file_tmp, qr/\.[^.]+/);
+	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.".txt");
+	
 	# remove resume file with --no-resume
-	if ( $noresume || ! -s $resume_file) {
+	if ( $noresume || ! -f $resume_file) {
 		unlink $resume_file;
 	}
 	# look for resume file and initialise
-	if ( ! $noresume && -s $resume_file ) {
+	if ( ! $noresume && -f $resume_file ) {
 		if ( ! open $rh, "<", $resume_file ) {
 			main::logger "ERROR: Cannot open (read): $resume_file\n";
 			exit 1;
 		}
 		my @resume_data = <$rh>;
 		close $rh;
-		chomp(my $last_data = $resume_data[$#resume_data]);
-		my ($last_sequence, $last_size, $last_elapsed) = split /,/, $last_data;
-		if ( $last_sequence > 0 && $last_size > 0 && $last_elapsed > 0 ) {
-			my $tmp_size = -s $file_tmp || 0;
-			if ( $last_sequence >= $max_sequence ) {
-				unlink $resume_file;
-				main::logger "ERROR: Unexpected resume sequence ($last_sequence >= $max_sequence)\n";
-				main::logger "ERROR: Downloading without resume\n";
-			} elsif ( $last_size > $tmp_size ) {
-				unlink $resume_file;
-				main::logger "ERROR: Unexpected resume size ($last_size > $tmp_size)\n";
-				main::logger "ERROR: Downloading without resume\n";
+		if ( $#resume_data > 0 ) {
+			chomp(my $last_params = $resume_data[0]);
+			if ( $last_params =~ /^#(\w+,){3}\d+,\d+/ ) {
+				$last_params =~ s/^#//;
+				if ( $last_params eq $resume_params ) {
+					chomp(my $last_data = $resume_data[$#resume_data]);
+					if ( $last_data =~ /^(\d+,){2}[\.\d]+,\d+,[\.\d]+,\d+/ ) {
+						my ($last_sequence, $last_size, $last_elapsed) = split /,/, $last_data;
+						if ( $last_sequence > 0 && $last_size > 0 && $last_elapsed > 0 ) {
+							my $tmp_size = -s $file_tmp || 0;
+							if ( $last_sequence >= $max_sequence ) {
+								main::logger "WARNING: Unexpected resume sequence ($last_sequence >= $max_sequence)\n";
+								main::logger "WARNING: Restarting download\n";
+							} elsif ( $last_size > $tmp_size ) {
+								main::logger "WARNING: Unexpected resume size ($last_size > $tmp_size)\n";
+								main::logger "WARNING: Restarting download\n";
+							} else {
+								$resume_sequence = $last_sequence + 1;
+								$resume_size = $last_size;
+								$resume_elapsed = $last_elapsed;
+								$resuming = 1;
+							}
+						} else {
+							main::logger "WARNING: Unexpected resume data: $last_data\n";
+							main::logger "WARNING: Restarting download\n";
+						}
+					} else {
+						main::logger "WARNING: Invalid resume data: $last_data\n";
+						main::logger "WARNING: Restarting download\n";
+					}
+				} else {
+					if ( $opt->{verbose} ) {
+						main::logger "INFO: Resume parameters changed: $last_params != $resume_params\n";
+						main::logger "INFO: Restarting download\n";
+					}
+				}
 			} else {
-				$resume_sequence = $last_sequence + 1;
-				$resume_size = $last_size;
-	 			$resume_elapsed = $last_elapsed;
-				$resuming = 1;
+				main::logger "WARNING: Invalid resume parameters: $last_params\n";
+				main::logger "WARNING: Restarting download\n";
 			}
 		}
 	}
+	unlink $resume_file unless $resuming;
 	$begin_size = $prev_size = $size = $resume_size;
 
 	# find duration and start/stop points
@@ -8319,13 +8468,14 @@ sub get_resume {
 	$start_elapsed ||= 0;
 	$stop_sequence ||= $max_sequence;
 	$stop_elapsed ||= $total_duration;
+	$stop_elapsed_str = sprintf("%02d:%02d:%02d", (gmtime($stop_elapsed))[2,1,0]);
 	$resume_sequence ||= $start_sequence;
 	$resume_elapsed ||= $start_elapsed;
 	$prev_elapsed = $elapsed = $resume_elapsed;
-	$file_duration = $stop_elapsed - $start_elapsed;
-	$file_duration_str = sprintf("%02d:%02d:%02d", (gmtime($file_duration))[2,1,0]);
 	# estimate expected file size
-	$file_size = int($file_duration * $streamdata{bitrate} * 1024.0 / 8.0);
+	$media_size ||= int($total_duration * $media_bitrate * 1024.0 / 8.0);
+	$file_duration = $stop_elapsed - $start_elapsed;
+	$file_size = int($file_duration / $total_duration * $media_size);
 
 	# open files
 	if ( $resuming ) {
@@ -8345,8 +8495,8 @@ sub get_resume {
 				$resuming = 0;
 				close $fh;
 				unlink $resume_file;
-				main::logger "ERROR: Unable to resize file: $file_tmp\n";
-				main::logger "ERROR: Downloading without resume\n";
+				main::logger "WARNING: Unable to resize file: $file_tmp\n";
+				main::logger "WARNING: Restarting download\n";
 			} else {
 				unless ( $opt->{noverify} ) {
 					my $trunc_size = tell $fh;
@@ -8354,19 +8504,21 @@ sub get_resume {
 						$resuming = 0;
 						close $fh;
 						unlink $resume_file;
-						main::logger "ERROR: Resize incorrect for file: $file_tmp\n";
-						main::logger "ERROR: Expected: $resume_size Got: $trunc_size\n";
-						main::logger "ERROR: Downloading without resume\n";
+						main::logger "WARNING: Resize incorrect for file: $file_tmp\n";
+						main::logger "WARNING: Expected: $resume_size Got: $trunc_size\n";
+						main::logger "WARNING: Restarting download\n";
 					}
 				}
 			}
 		}
 	}
+	unlink $resume_file unless $resuming;
 	if ( $resuming ) {
 		main::logger "INFO: Resume recording file: $file_tmp\n";
-		main::logger sprintf("INFO: Resume recording: %.2f MB (%02d:%02d:%02d) [$resume_sequence]\n",
+		main::logger sprintf("INFO: Resume recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
 			$resume_size / 1024.0 / 1024.0,
-			(gmtime($resume_elapsed))[2,1,0]
+			(gmtime($resume_elapsed))[2,1,0],
+			$resume_sequence
 		);
 	} else {
 		# start download from beginning if not resuming
@@ -8377,14 +8529,27 @@ sub get_resume {
 		binmode $fh;
 		$fh->autoflush(1);
 		main::logger "INFO: Begin recording file: $file_tmp\n";
+		main::logger sprintf("INFO: Begin recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$size / 1024.0 / 1024.0,
+			(gmtime($start_elapsed))[2,1,0],
+			$start_sequence
+		);
 	}
 	unless ( $noresume ) {
+		my $open_mode = $resuming ? ">>" : ">";
 		# open resume data file
-		if ( ! open $rh, ">>", $resume_file ) {
-			main::logger "ERROR: Cannot open (append): $resume_file\n";
+		if ( ! open $rh, $open_mode, $resume_file ) {
+			main::logger "ERROR: Cannot open (".($resuming ? "append" : "write")."): $resume_file\n";
 			exit 1;
 		}
 		$rh->autoflush(1);
+		unless ( $resuming ) {
+			print $rh "#$resume_params\n";
+		}
+	}
+
+	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
+		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
 	}
 
 	# process segments in playlist
@@ -8417,13 +8582,12 @@ sub get_resume {
 			$expected = $res->header("Content-Length");
 			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
 				if ( $res->code == 404 ) {
-					if ( $prog->{type} eq "radio" && $sequence == $max_sequence ) {
+					if ( $prog->{mode} =~ /(daf|dvf)/ && $sequence == $max_sequence ) {
 						# potential edge cases with incorrect DASH manifests
 						main::logger "\nWARNING: Segment not available from server [$sequence]\n";
 						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as not available due to inaccurate programme data\n";
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 						if ( $opt->{verbose} ) {
-							main::logger "WARNING: Playlist URL: $url\n";
 							main::logger "WARNING: Segment URL: $curr_segment_url\n";
 						}
 					} else {
@@ -8451,7 +8615,7 @@ sub get_resume {
 				@warnings = (
 					"Unexpected size for segment [$sequence]",
 					"Expected: $expected  Downloaded: $size_diff",
-					"Retrying download without resume"
+					"Restarting download"
 				);
 				$return = 1;
 				last;
@@ -8464,7 +8628,7 @@ sub get_resume {
 				unlink $resume_file;
 				@warnings = (
 					"Unable to save resume data for segment [$sequence]",
-					"Retrying download without resume"
+					"Restarting download"
 				);
 				$return = 1;
 				last;
@@ -8485,7 +8649,7 @@ sub get_resume {
 	main::logger sprintf("${crlf}INFO: Recorded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mb/s\n",
 		($prev_size - $resume_size) / (1024.0 * 1024.0),
 		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
-		$prev_sequence,
+		$prev_sequence - $resume_sequence + 1,
 		(gmtime($end_time - $begin_time))[2,1,0],
 		($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
 	);
@@ -8494,13 +8658,12 @@ sub get_resume {
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
 		main::logger "WARNING: Stopped recording file: $file_tmp\n";
-		main::logger sprintf("WARNING: Stopped recording: %.2f MB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("WARNING: Stopped recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
 			$prev_size / 1024.0 / 1024.0,
 			(gmtime($prev_elapsed))[2,1,0],
 			$prev_sequence
 		);
 		if ( $opt->{verbose} ) {
-			main::logger "WARNING: Playlist URL: $url\n";
 			main::logger "WARNING: Segment URL: $curr_segment_url\n";
 		}
 		return $return > 1 ? 'next' : 'retry';
@@ -8509,19 +8672,12 @@ sub get_resume {
 	# clear resume data
 	unlink $resume_file;
 
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
-		main::logger "WARNING: Failed to stream file: $file_tmp\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-
 	if ( $resuming ) {
 		# summary for file
 		main::logger sprintf("INFO: Recorded (total): %.2f MB (%02d:%02d:%02d) [%d]\n",
 			$prev_size / (1024.0 * 1024.0),
-			(gmtime($prev_elapsed))[2,1,0],
-			$prev_sequence
+			(gmtime($prev_elapsed - $start_elapsed))[2,1,0],
+			$prev_sequence - $start_sequence + 1
 		);
 	}
 
@@ -8530,8 +8686,9 @@ sub get_resume {
 
 sub get_builtin {
 	my ( $self, $ua, $url, $file_tmp, $prog, %streamdata ) = @_;
-	my $file_size = $streamdata{size};
 	my $media = $streamdata{media};
+	my $file_size = $streamdata{file_size};
+	my $media_bitrate = $streamdata{media_bitrate} || $streamdata{bitrate};
 	my $prog_type = $streamdata{prog_type} || $prog->{type};
 	my $return;
 	my $fh;
@@ -8641,7 +8798,7 @@ sub get_builtin {
 		for my $sequence ( @sequences ) {
 			$total_duration += $segments->{$sequence}->{duration};
 		}
-		$file_size = int($total_duration * $streamdata{bitrate} * 1024.0 / 8.0);
+		$file_size = int($total_duration * $media_bitrate * 1024.0 / 8.0);
 	}
 	# process segments in current playlist
 	for my $sequence ( @sequences ) {
@@ -8734,27 +8891,137 @@ sub get_builtin {
 package Streamer::dash;
 
 use base 'Streamer::hls';
+use File::Basename;
+use File::Copy;
+use File::stat;
 use List::Util qw(max);
 use strict;
+
+sub generate_segments {
+	my ($self, $media ) = @_;
+	return undef if ! $media;
+	my $segments;
+	for my $sequence ( $media->{start_number} .. $media->{stop_number} ) {
+		my $segment_url;
+		if ( $sequence == $media->{start_number} ) {
+			($segment_url = $media->{init_template}) =~ s/\$RepresentationID\$/$media->{id}/;
+			$segments->{$sequence - 1} = { 'url' => $segment_url, 'duration' => 0, 'initialization' => 1 };
+		}
+		($segment_url = $media->{media_template}) =~ s/\$RepresentationID\$/$media->{id}/;
+		$segment_url =~ s/\$Number\$/$sequence/;
+		$segments->{$sequence} = { 'url' => $segment_url, 'duration' => $media->{segment_duration} };
+	}
+	return $segments;
+}
 
 sub get {
 	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $rc;
-	my $audio_media = $streamdata{audio_media};
-	(my $audio_file = $prog->{filepart}) =~ s/partial\.\w+$/tmp.m4a/;
-	$streamdata{media} = $audio_media;
-	$streamdata{prog_type} = "radio";
-	if ( $opt->{hlsfallback} ) {
-		$rc = $self->get_builtin( $ua, $url, $audio_file, $prog, %streamdata );
+
+	# audio files
+	my $audio_prefix = $prog->{fileprefix};
+	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $audio_prefix.".audio.m4a"));
+	my $audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $audio_prefix.".dash.m4a"));
+	my $audio_raw = $prog->{rawaudio};
+
+	# video files
+	my $video_prefix = $prog->{fileprefix};
+	my $video_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $video_prefix.".video.m4v"));
+	my $video_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $video_prefix.".dash.m4v"));
+	my $video_raw = $prog->{rawvideo};
+
+	if ( $opt->{overwrite} ) {
+		main::logger "INFO: Overwriting DASH audio file: $audio_file\n" if -f $audio_file;
+		main::logger "INFO: Overwriting DASH video file: $audio_file\n" if $prog->{type} eq "tv" && -f $audio_file;
+		unlink ( $audio_file, $video_file );
 	} else {
-		$rc = $self->get_resume( $ua, $url, $audio_file, $prog, %streamdata );
+		if ( -f $audio_file ) {
+			main::logger "WARNING: Using existing DASH audio file: $audio_file\n";
+			main::logger "WARNING: Use --overwrite to re-download\n";
+		}
+		if ( $prog->{type} eq "tv" && -f $video_file ) {
+			main::logger "WARNING: Using existing DASH video file: $video_file\n";
+			main::logger "WARNING: Use --overwrite to re-download\n";
+		}
 	}
-	return $rc if $rc;
-	return $self->postproc($audio_file, $prog, %streamdata);
+
+	unless ( -f $audio_file ) {
+		my $audio_media = $streamdata{audio_media};
+		$streamdata{media} = $audio_media;
+		$streamdata{file_size} = $audio_media->{file_size};
+		$streamdata{media_bitrate} = $audio_media->{bitrate};
+		$streamdata{prog_type} = "radio";		
+		if ( $opt->{hlsfallback} ) {
+			$rc = $self->get_builtin( $ua, $url, $audio_tmp, $prog, %streamdata );
+		} else {
+			my $segments = $self->generate_segments($audio_media);
+			if ( keys %{$segments} <= 1 ) {
+				main::logger "ERROR: No segments generated from DASH audio media\n";
+				return 'next';
+			}
+			$rc = $self->get_resume( $ua, $segments, $audio_tmp, $prog, %streamdata );
+		}
+		return $rc if $rc;
+		if ( ! move($audio_tmp, $audio_file) ) {
+			main::logger "ERROR: Could not rename file: $audio_tmp\n";
+			main::logger "ERROR: Destination file name: $audio_file\n";
+			return 'skip';
+		}
+		main::logger "INFO: Saved DASH audio file: $audio_file\n";
+	}
+
+	if ( $prog->{type} eq "tv" ) {
+		unless ( -f $video_file ) {
+			my $video_media = $streamdata{video_media};
+			$streamdata{media} = $video_media;
+			$streamdata{file_size} = $video_media->{file_size};
+			$streamdata{media_bitrate} = $video_media->{bitrate};
+			$streamdata{prog_type} = "tv";
+			if ( $opt->{hlsfallback} ) {
+				$rc = $self->get_builtin( $ua, $url, $video_tmp, $prog, %streamdata );
+			} else {
+				my $segments = $self->generate_segments($video_media);
+				if ( keys %{$segments} <= 1 ) {
+					main::logger "ERROR: No segments generated from DASH video media\n";
+					return 'next';
+				}
+				$rc = $self->get_resume( $ua, $segments, $video_tmp, $prog, %streamdata );
+			}
+			return $rc if $rc;
+			if ( ! move($video_tmp, $video_file) ) {
+				main::logger "ERROR: Could not rename file: $video_tmp\n";
+				main::logger "ERROR: Destination file name: $video_file\n";
+				return 'skip';
+			}
+			main::logger "INFO: Saved DASH video file: $video_file\n";
+		}
+	} else {
+		unlink ( $video_tmp, $video_file );
+	}
+
+	if ( $opt->{raw} ) {
+		if ( ! move($audio_file, $audio_raw) ) {
+			main::logger "ERROR: Could not rename file: $audio_file\n";
+			main::logger "ERROR: Destination file name: $audio_raw\n";
+			return 'skip';
+		}
+		if ( $prog->{type} eq "tv" ) {
+			if ( ! move($video_file, $video_raw) ) {
+				main::logger "ERROR: Could not rename file: $video_file\n";
+				main::logger "ERROR: Destination file name: $video_raw\n";
+				return 'skip';
+			}
+		}
+		main::logger "INFO: Recorded raw audio file: $audio_raw\n";
+		main::logger "INFO: Recorded raw video file: $video_raw\n" if $prog->{type} eq "tv";
+		return 0;
+	}
+
+	return $self->remux($audio_file, $video_file, $prog, %streamdata);
 }
 
 sub parse_playlist {
-	my (undef, $ua, $url, $media, $last_sequence) = @_;
+	my ($self, $ua, $url, $media, $last_sequence) = @_;
 	return undef if ! $media;
 	my $now = time();
 	my $segments;
