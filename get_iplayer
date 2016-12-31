@@ -3722,10 +3722,12 @@ sub download_retry_loop {
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
-				# quit if successful or skip
-				last if ( $retcode == 0 || $retcode == 2 );
+				# quit if successful or skip or stop
+				last if ( $retcode == 0 || $retcode == 2 || $retcode == 3 );
 			}
 		}
+		# stop condition
+		last if $retcode == 3;
 		# Break out of loop if we have a successful recording for this version and mode
 		return 0 if not $retcode;
 	}
@@ -3762,6 +3764,11 @@ sub mode_ver_download_retry_loop {
 		if ( $retcode eq 'abort' ) {
 			main::logger "ERROR: aborting get_iplayer\n";
 			exit 1;
+
+		# don't try any more prog versions
+		} elsif ( $retcode eq 'stop' ) {
+			main::logger "INFO: skipping all versions of this programme\n";
+			return 3;
 
 		# Try Next prog
 		} elsif ( $retcode eq 'skip' ) {
@@ -4113,7 +4120,7 @@ sub generate_filenames {
 			} else {
 				main::logger("WARNING: File already exists: $prog->{filename}\n");
 				main::logger "WARNING: Use --overwrite to replace\n\n";
-				return 1;
+				return 3;
 			}
 		}
 		# DASH with --raw only
@@ -4136,7 +4143,7 @@ sub generate_filenames {
 					main::logger "WARNING: Use --overwrite to replace\n";
 					$skip = 1;
 				}
-				return 1 if $skip;
+				return 3 if $skip;
 			}
 		}
 	}
@@ -7336,7 +7343,8 @@ sub download {
 	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
 
 	# Determine the correct filenames for this recording
-	if ( $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
+	if ( my $rc = $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
+		return 'stop' if $rc == 3;
 		return 'skip';
 	}
 
