@@ -809,6 +809,34 @@ sub init_search {
 	if (! main::exists_in_path('ffmpeg') ) {
 		$bin->{ffmpeg} = 'ffmpeg';
 	}
+	# ffmpeg checks
+	if ( $opt->{ffmpegforce} ) {
+		$opt->{ffmpeg25} = 1;
+		$opt->{ffmpeg30} = 1;
+		delete $opt->{ffmpegav};
+		delete $opt->{ffmpegxx};
+	} else {
+		my $ffcmd = "\"$bin->{ffmpeg}\" -version 2>&1";
+		$ffcmd = main::encode_fs($ffcmd);
+		my $ffout = `$ffcmd`;
+		if ( $ffout =~ /ffmpeg version (\d+\.\d+)/i ) {
+			my $ffver = $1;
+			main::logger "INFO: ffmpeg version = $ffver\n" if $opt->{verbose};
+			if ( $ffver >= 3.0 ) {
+				$opt->{ffmpeg30} = 1;
+				$opt->{ffmpeg25} = 1;
+			} elsif ( $ffver >= 2.5 ) {
+				$opt->{ffmpeg25} = 1;
+			} elsif ( $ffver < 1.0 ) {
+				$opt->{ffmpegobsolete} = 1;
+			}
+		} else {
+			$opt->{ffmpegxx} = 1;
+			if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/i ) {
+				$opt->{ffmpegav} = 1;
+			}
+		}
+	}
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} },  ();
 	if ( ! $opt->{ffmpegobsolete} ) {
@@ -7313,26 +7341,48 @@ sub download {
 		$opt->{raw} = 1;
 	}
 	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hvf|haf)/ && ! main::exists_in_path('ffmpeg') ) {
-		if ( ! $opt->{raw} ) {
-			main::logger "\nWARNING: Required ffmpeg utility not found - not converting .ts file\n";
+	if ( $mode =~ /^(hls|hvf|haf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
+		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .ts file\n";
+		$opt->{raw} = 1;
+	}
+	# cannot convert hvf with avconv or ffmpeg < 2.5
+	if ( $mode =~ /^hvf/ && ! $opt->{raw} ) {
+		if ( $opt->{ffmpegav} ) {
+			main::logger "WARNING: avconv does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
+			main::logger "WARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4\n";
+			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+			$opt->{raw} = 1;
+		} elsif ( $opt->{ffmpegxx} ) {
+			main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for hvf downloads may fail\n";
+			main::logger "WARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4\n";
+			main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .ts file\n";
+		} elsif ( ! $opt->{ffmpeg25} ) {
+			main::logger "\nWARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4 - not converting .ts file\n";
+			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
 			$opt->{raw} = 1;
 		}
-	}
-	# cannot convert hvf with avconv
-	if ( $mode =~ /^hvf/ && ! $opt->{raw} && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
-		main::logger "\nWARNING: Cannot convert hvf modes with avconv (ffmpeg required) - not converting .ts file\n";
-		$opt->{raw} = 1;
 	}
 	# require ffmpeg for DASH
 	if ( $mode =~ /^(daf|dvf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
 		main::logger "\nWARNING: Required ffmpeg utility not found - not converting .m4a and .m4v files\n";
 		$opt->{raw} = 1;
 	}
-	# cannot convert dvf with avconv
-	if ( $mode =~ /^dvf/ && ! $opt->{raw} && main::exists_in_path('ffmpeg') && $bin->{ffmpeg} =~ /avconv/ ) {
-		main::logger "\nWARNING: Cannot convert dvf modes with avconv (ffmpeg required) - not converting .m4a and .m4v files\n";
-		$opt->{raw} = 1;
+	# cannot convert dvf with avconv or ffmpeg < 3.0
+	if ( $mode =~ /^dvf/ && ! $opt->{raw} ) {
+		if ( $opt->{ffmpegav} ) {
+			main::logger "WARNING: avconv does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+			main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
+			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+			$opt->{raw} = 1;
+		} elsif ( $opt->{ffmpegxx} ) {
+			main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for dvf downloads may fail\n";
+			main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
+			main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .m4a and .m4v files\n";
+		} elsif ( ! $opt->{ffmpeg30} ) {
+			main::logger "\nWARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+			$opt->{raw} = 1;
+		}
 	}
 
 	# Get extension from streamdata if defined and raw not specified
@@ -7876,8 +7926,9 @@ sub opt {
 
 sub opt_format {
 	return {
-		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary."],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the -loglevel or -stats options, so  --quiet, --verbose and --debug will not be applied to ffmpeg."],
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary. Assumed to be ffmpeg 3.0 or higher unless --ffmpeg-obsolete is specified."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<1.0) that may not support certain options. Without this option, MP4 conversion may fail with obsolete versions of ffmpeg."],
+		ffmpegforce		=> [ 1, "ffmpeg-force|ffmpegforce!", 'External Program', '--ffmpeg-force', "Bypass version checks and assume ffmpeg is version 3.0 or higher"],
 	};
 }
 
