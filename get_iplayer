@@ -175,7 +175,6 @@ my $opt_format = {
 	# Output
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording using args such as <pid>, <name> etc"],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
-	nosanitise		=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid punctuation characters for FAT and HFS will still be removed for Windows and macOS respectively."],
 	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <format>', "Create metadata info file after recording. Valid formats are: 'generic'"],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Put Recorded files into Programme name subdirectory"],
@@ -714,10 +713,6 @@ exit $retcode;
 
 
 sub init_search {
-	if ( $opt->{nosanitise} ) {
-		$opt->{whitespace} = 1;
-	}
-
 	# Set --subtitles if --subsonly is used
 	if ( $opt->{subsonly} ) {
 		$opt->{subtitles} = 1;
@@ -2177,43 +2172,33 @@ sub StringUtils::sanitize_path {
 	my $is_path = shift || 0;
 	my $force_default = shift || 0;
 	my $punct_bad = '[!"#$%&\'()*+,:;<=>?@[\]^`{|}~]';
-	my $fat_bad = '["*:<>?|]';
-	my $hfs_bad = '[:]';
 	# Replace forward slashes with _ if not path
 	$string =~ s/\//_/g unless $is_path;
 	# Replace backslashes with _ if not Windows path
 	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
-	# Do not sanitise if specified
-	if ( $opt->{nosanitise} && ! $force_default ) {
-		# Remove invalid chars for FAT on Windows
-		$string =~ s/$fat_bad//g if $^O eq "MSWin32";
-		# Remove invalid chars for HFS on macOS
-		$string =~ s/$hfs_bad//g if $^O eq "darwin";
-	} else {
-		# use ISO8601 dates
-		$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
-		# ASCII-fy some punctuation
-		$string = StringUtils::convert_punctuation($string);
-		# Replace ellipsis with _
-		$string =~ s/\.{3}/_/g;
-		# Truncate duplicate colon/semi-colon/comma
-		$string =~ s/([:;,])(\1)+/$1/g;
-		# Add whitespace behind colon/semi-colon/comma if not present
-		$string =~ s/([:;,])(\S)/$1 $2/g;
-		# Remove extra/leading/trailing whitespace
-		$string =~ s/\s+/ /g;
-		$string =~ s/(^\s+|\s+$)//g;
-		# Replace whitespace with _ unless --whitespace
-		$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
-		# Truncate multiple replacement chars
-		$string =~ s/_+/_/g;
-		# Remove non-ASCII chars
-		$string = StringUtils::remove_marks($string);
-		$string =~ s/[^\x{20}-\x{7e}]//g;
-		# Remove most punctuation chars
-		# Includes invalid chars for FAT and HFS
-		$string =~ s/$punct_bad//g
-	}
+	# use ISO8601 dates
+	$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
+	# ASCII-fy some punctuation
+	$string = StringUtils::convert_punctuation($string);
+	# Remove non-ASCII chars
+	$string = StringUtils::remove_marks($string);
+	$string =~ s/[^\x{20}-\x{7e}]//g;
+	# Truncate duplicate colon/semi-colon/comma
+	$string =~ s/([:;,])(\1)+/$1/g;
+	# Add whitespace behind colon/semi-colon/comma if not present
+	$string =~ s/([:;,])(\S)/$1 $2/g;
+	# Remove most punctuation chars
+	# Includes invalid chars for FAT and HFS
+	$string =~ s/$punct_bad//g;
+	# Replace ellipsis
+	$string =~ s/\.{3}/_/g;
+	# Remove extra/leading/trailing whitespace
+	$string =~ s/\s+/ /g;
+	$string =~ s/(^\s+|\s+$)//g;
+	# Replace whitespace with _ unless --whitespace
+	$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
+	# Truncate multiple replacement chars
+	$string =~ s/_+/_/g;
 	return $string;
 }
 
