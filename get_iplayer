@@ -8869,12 +8869,13 @@ sub get_builtin {
 			$segment_url = $segments->{$sequence}->{url};
 		}
 		main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
+		my $got404 = 0;
 		my $i;
 		for ($i = 0; $i < $retries; $i++) {
 			my $res = $ua->get($segment_url, ':content_cb' => $callback);
 			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
 				if ( $res->code == 404 ) {
-					if ( $prog->{type} eq "radio" && $sequence == $sequences[$#sequences] ) {
+					if ( $prog->{mode} =~ /(daf|dvf)/ && $sequence == $sequences[$#sequences] ) {
 						# potential edge cases with incorrect DASH manifests
 						main::logger "\nWARNING: Segment not available from server ($sequence)\n";
 						main::logger "WARNING: Segment URL: $segment_url\n";
@@ -8889,12 +8890,16 @@ sub get_builtin {
 						unlink $file_tmp;
 						return 'next';
 					}
+					$got404 = 1;
 					last;
 				}
 			} else {
 				last;
 			}
 		}
+		# bail out if not available
+		last if $got404;
+		# bail out on download failure
 		if ( $i == $retries ) {
 			main::logger "\nERROR: Failed to download segment ($sequence)\n";
 			main::logger "ERROR: Segment URL: $segment_url\n";
