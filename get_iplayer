@@ -8622,6 +8622,7 @@ sub get_resume {
 		main::logger "DEBUG: Segment URL: $segment_url\n" if $opt->{debug};;
 		# download segment with retries
 		my $expected = 0;
+		my $got404 = 0;
 		my $i;
 		for ($i = 0; $i < $retries; $i++) {
 			my $res = $ua->get($segment_url, ':content_cb' => $callback);
@@ -8631,7 +8632,8 @@ sub get_resume {
 					if ( $prog->{mode} =~ /(daf|dvf)/ && $sequence == $max_sequence ) {
 						# potential edge cases with incorrect DASH manifests
 						main::logger "\nWARNING: Segment not available from server [$sequence]\n";
-						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as not available due to inaccurate programme data\n";
+						main::logger "WARNING: This is the final segment of the programme\n";
+						main::logger "WARNING: It may be incorrectly flagged as unavailable due to inaccurate programme data\n";
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 						if ( $opt->{verbose} ) {
 							main::logger "WARNING: Segment URL: $curr_segment_url\n";
@@ -8641,11 +8643,15 @@ sub get_resume {
 						@warnings = ("Segment not available from server [$sequence]");
 						$return = 2;
 					}
+					$got404 = 1;
 					last;
 				}
+			} else {
+				last;
 			}
-			last;
 		}
+		# bail out if not available
+		last if $got404;
 		# bail out on download failure
 		if ( $i == $retries ) {
 			@warnings = ("Failed to download segment [$sequence]");
