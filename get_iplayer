@@ -4923,12 +4923,12 @@ sub get_metadata {
 				$size = $prog->{streams}->{$version}->{$mode}->{size};
 			} else {
 				next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
-				$size = $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 * 1024.0;
+				$size = $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 * 1000.0;
 			}
 			if ( $size < 1048576 ) {
-				push @sizes, sprintf( "%s=%.0fKB", $mode, $size / 1024.0 );
+				push @sizes, sprintf( "%s=%.0fKiB", $mode, $size / 1024.0 );
 			} else {
-				push @sizes, sprintf( "%s=%.0fMB", $mode, $size / 1048576.0 );
+				push @sizes, sprintf( "%s=%.0fMiB", $mode, $size / 1048576.0 );
 			}
 		}
 		$mode_sizes->{$version} = join ',', sort Programme::cmp_modes @sizes;
@@ -5499,7 +5499,7 @@ sub parse_hls_connection {
 				$hls_media->{audio_bitrate} = int($ab/1000);
 				$hls_media->{video_bitrate} = int($vb/1000);
 			}
-			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1024.0);
+			$hls_media->{bitrate} = int($stream->{BANDWIDTH}/1000.0);
 			next if $min_bitrate && $hls_media->{bitrate} < $min_bitrate;
 			next if $max_bitrate && $hls_media->{bitrate} > $max_bitrate;
 			if ( $stream->{RESOLUTION} ) {
@@ -8392,15 +8392,15 @@ sub get_resume {
 			my $time;
 			my $time_called = time();
 			if ($time_called - $begin_time < 1) {
-				$rate = '-----.-- Mb/s';
+				$rate = '-----.-- Mibit/s';
 				$time = '--:--:-- remaining';
 			} else {
 				$rate_bps = ($curr_size - $begin_size) / ($time_called - $begin_time);
-				$rate = sprintf("%8.2f Mb/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
+				$rate = sprintf("%8.2f Mibit/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
 				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
 			}
 			if ( $opt->{verbose} ) {
-				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
+				main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
 					$curr_size / 1024.0 / 1024.0,
 					$file_size / 1024.0 / 1024.0,
 					(gmtime($curr_elapsed))[2,1,0],
@@ -8412,7 +8412,7 @@ sub get_resume {
 					$time,
 				);
 			} else {
-				main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB %5.1f%% %s %s${crlf}",
+				main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s${crlf}",
 					$curr_size / 1024.0 / 1024.0,
 					$file_size / 1024.0 / 1024.0,
 					$curr_percent,
@@ -8561,7 +8561,7 @@ sub get_resume {
 	unlink $resume_file unless $resuming;
 	if ( $resuming ) {
 		main::logger "INFO: Resume recording file: $file_tmp\n";
-		main::logger sprintf("INFO: Resume recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Resume recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$resume_size / 1024.0 / 1024.0,
 			(gmtime($resume_elapsed))[2,1,0],
 			$resume_sequence
@@ -8575,7 +8575,7 @@ sub get_resume {
 		binmode $fh;
 		$fh->autoflush(1);
 		main::logger "INFO: Begin recording file: $file_tmp\n";
-		main::logger sprintf("INFO: Begin recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Begin recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$size / 1024.0 / 1024.0,
 			(gmtime($start_elapsed))[2,1,0],
 			$start_sequence
@@ -8698,7 +8698,7 @@ sub get_resume {
 		main::logger "${crlf}".(" " x ($opt->{verbose} ? 120 : 80));
 	}
 	my $end_time = time() + 0.0001;
-	main::logger sprintf("${crlf}INFO: Recorded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mb/s\n",
+	main::logger sprintf("${crlf}INFO: Recorded: %.2f MiB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mibit/s\n",
 		($prev_size - $resume_size) / (1024.0 * 1024.0),
 		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
 		$prev_sequence - $resume_sequence + 1,
@@ -8710,7 +8710,7 @@ sub get_resume {
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
 		main::logger "WARNING: Stopped recording file: $file_tmp\n";
-		main::logger sprintf("WARNING: Stopped recording at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("WARNING: Stopped recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$prev_size / 1024.0 / 1024.0,
 			(gmtime($prev_elapsed))[2,1,0],
 			$prev_sequence
@@ -8726,7 +8726,7 @@ sub get_resume {
 
 	if ( $resuming ) {
 		# summary for file
-		main::logger sprintf("INFO: Recorded (total): %.2f MB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Recorded (total): %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$prev_size / (1024.0 * 1024.0),
 			(gmtime($prev_elapsed - $start_elapsed))[2,1,0],
 			$prev_sequence - $start_sequence + 1
@@ -8814,14 +8814,14 @@ sub get_builtin {
 			my $time;
 			my $time_called = time();
 			if ($time_called - $begin_time < 1) {
-				$rate = '-----.-- Mb/s';
+				$rate = '-----.-- Mibit/s';
 				$time = '--:--:-- remaining';
 			} else {
 				$rate_bps = ($size - $begin_size) / ($time_called - $begin_time);
-				$rate = sprintf("%8.2f Mb/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
+				$rate = sprintf("%8.2f Mibit/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
 				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
 			}
-			main::logger sprintf ( "Recording: %8.2f MB / ~%.2f MB %5.1f%% %s %s\r",
+			main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s\r",
 				$size / 1024.0 / 1024.0,
 				$file_size / 1024.0 / 1024.0,
 				$percent,
@@ -8915,7 +8915,7 @@ sub get_builtin {
 	if ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
 		my $end_time = time() + 0.0001;
 		my $end_size = stat($file_tmp)->size;
-		main::logger sprintf("\rINFO: Recorded: %.2f MB in %s at %.2f Mb/s to %s\n",
+		main::logger sprintf("\rINFO: Recorded: %.2f MiB in %s at %.2f Mibit/s to %s\n",
 			($end_size - $begin_size) / (1024.0 * 1024.0),
 			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $begin_time))[2,1,0] ),
 			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
