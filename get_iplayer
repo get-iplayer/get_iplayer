@@ -805,34 +805,41 @@ sub init_search {
 		$bin->{ffmpeg} = 'ffmpeg';
 	}
 	# ffmpeg checks
-	if ( $opt->{ffmpegforce} ) {
-		$opt->{ffmpeg25} = 1;
-		$opt->{ffmpeg30} = 1;
-		delete $opt->{ffmpegav};
-		delete $opt->{ffmpegxx};
-	} else {
-		my $ffcmd = "\"$bin->{ffmpeg}\" -version 2>&1";
-		$ffcmd = main::encode_fs($ffcmd);
-		my $ffout = `$ffcmd`;
-		if ( $ffout =~ /ffmpeg version (\d+\.\d+)/i ) {
-			my $ffver = $1;
-			$opt->{ffmpegversion} = $ffver;
-			main::logger "INFO: ffmpeg version = $ffver\n" if $opt->{verbose};
-			if ( $ffver >= 3.0 ) {
+	my ($ffvs, $ffvn);
+	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
+	my $ffout = `$ffcmd`;
+	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
+		$ffvs = $1;
+		if ( $ffvs =~ /(\d+\.\d+)/i ) {
+			$ffvn = $1;
+			if ( $ffvn >= 3.0 ) {
 				$opt->{ffmpeg30} = 1;
 				$opt->{ffmpeg25} = 1;
-			} elsif ( $ffver >= 2.5 ) {
+			} elsif ( $ffvn >= 2.5 ) {
 				$opt->{ffmpeg25} = 1;
-			} elsif ( $ffver < 1.0 ) {
+			} elsif ( $ffvn < 1.0 ) {
 				$opt->{ffmpegobsolete} = 1;
 			}
-		} else {
-			if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
-				delete $opt->{ffmpegobsolete};
-				$opt->{ffmpegav} = 1;
-			}
-			$opt->{ffmpegxx} = 1;
 		}
+	}
+	if ( $opt->{verbose} ) {
+		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
+		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
+	}
+	$opt->{ffmpegversion} = $ffvn;
+	unless ( $opt->{ffmpegversion} ) {
+		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
+			delete $opt->{ffmpegobsolete};
+			$opt->{ffmpegav} = 1;
+		}
+		$opt->{ffmpegxx} = 1;
+	}
+	# override ffmpeg checks
+	if ( $opt->{ffmpegforce} ) {
+		$opt->{ffmpeg30} = 1;
+		$opt->{ffmpeg25} = 1;
+		delete $opt->{ffmpegav};
+		delete $opt->{ffmpegxx};
 	}
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} },  ();
