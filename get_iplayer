@@ -3423,7 +3423,8 @@ sub create_dir {
 sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
-	$prog->{modes}->{default} = $prog->modelist();
+	my $modelist = shift || $prog->modelist();
+	$prog->{modes}->{default} = $modelist;
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version pid metadata\n" if $opt->{verbose};
@@ -3633,12 +3634,16 @@ sub download_retry_loop {
 		return 1;
 	}
 
+	# Get all possible (or user overridden) modes for this prog recording
+	my $modelist = $prog->modelist();
+	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
+
 	# Setup user-agent
 	my $ua = main::create_ua( 'desktop' );
 
 	# This pre-gets all the metadata - necessary to avoid get_verpids() below if possible
 	$prog->get_metadata_general();
-	if ( $prog->get_metadata( $ua ) ) {
+	if ( $prog->get_metadata( $ua, $modelist ) ) {
 		main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
 		return 1;
 	}
@@ -3664,10 +3669,6 @@ sub download_retry_loop {
 	my @version_search_list = $prog->generate_version_list;
 	return 1 if $#version_search_list < 0;
 
-	# Get all possible (or user overridden) modes for this prog recording
-	my $modelist = $prog->modelist(1);
-	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
-
 	######## version loop #######
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
@@ -3680,7 +3681,7 @@ sub download_retry_loop {
 
 			# Try to get stream data for this version if not already populated
 			if ( not defined $prog->{streams}->{$version} ) {
-				$prog->{streams}->{$version} = $prog->get_stream_data( $prog->{verpids}->{$version}, undef, $version );
+				$prog->{streams}->{$version} = $prog->get_stream_data( $prog->{verpids}->{$version}, undef, $version, $modelist );
 			}
 
 			########## mode loop ########
@@ -3734,7 +3735,7 @@ sub download_retry_loop {
 				main::logger "INFO: Trying $mode mode to record $prog->{type}: $prog->{name} - $prog->{episode}\n";
 
 				# try the recording for this mode (rtn==0 -> success, rtn==1 -> next mode, rtn==2 -> next prog)
-				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
+				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version}, $modelist );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
 				# quit if successful or skip or stop
@@ -3757,7 +3758,7 @@ sub download_retry_loop {
 
 # returns 1 on fail, 0 on success
 sub mode_ver_download_retry_loop {
-	my ( $prog, $hist, $ua, $mode, $version, $version_pid ) = ( @_ );
+	my ( $prog, $hist, $ua, $mode, $version, $version_pid, $modelist ) = ( @_ );
 	my $retries = $opt->{attempts} || 3;
 	my $count = 0;
 	my $retcode;
@@ -3823,7 +3824,7 @@ sub mode_ver_download_retry_loop {
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
 			main::logger "WARNING: Retry recording for '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
-			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version );
+			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version, $modelist );
 		}
 	}
 	return 1;
@@ -4665,6 +4666,7 @@ sub get_verpids_html {
 sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
+	my $modelist = shift || $prog->modelist();
 	my $prog_data_url = 'http://www.bbc.co.uk/programmes/'; # $pid
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 
@@ -4904,7 +4906,7 @@ sub get_metadata {
 		# Try to get stream data for this version if it isn't already populated
 		if ( not defined $prog->{streams}->{$version} ) {
 			# Add streamdata to object
-			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version}, undef, $version );
+			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version}, undef, $version, $modelist );
 		}
 		if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
 			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping RDF\n" if $opt->{verbose};
@@ -5911,9 +5913,8 @@ sub check_geoblock {
 # Gets media streams data for this version pid
 # $media = undef|<modename>
 sub get_stream_data {
-	my ( $prog, $verpid, $media, $version ) = @_;
-	my $mode;
-	my $modelist = $prog->modelist();
+	my ( $prog, $verpid, $media, $version, $modelist ) = @_;
+	$modelist ||= $prog->modelist();
 	my $data = {};
 	my $media_stream_data_prefix;
 	my @media_stream_pc_prefixes;
@@ -6316,7 +6317,6 @@ sub get_stream_data {
 
 sub modelist {
 	my $prog = shift;
-	my $showwarn = shift;
 	my $mlist = $opt->{$prog->{type}."mode"} || $opt->{modes};
 	# Defaults
 	if ( ! $mlist ) {
