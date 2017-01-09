@@ -6107,7 +6107,7 @@ sub get_stream_data {
 						push @medias, $media;
 						next;
 					}
-					my $prefix = $prog->{type} =~ /radio/ ? "haf" : "hvf";
+					my $prefix = $prog->{type} eq "radio" ? "haf" : "hvf";
 					if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
 						if ( $prog->{type} eq 'tv' ) {
 							$prefix = "hls";
@@ -6370,7 +6370,7 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'dafworst', 'daflow');
 	}
 	# DASH on-demand tv
-	if ( $prog->{type} =~ /tv/ && $mlist =~ /dvf/ ) {
+	if ( $prog->{type} eq "tv" && $mlist =~ /dvf/ ) {
 		$mlist = main::expand_list($mlist, 'dvf', 'dvfdefault');
 		$mlist = main::expand_list($mlist, 'dvfdefault', 'dvfbest');
 		if ( $opt->{fps50} ) {
@@ -6410,7 +6410,7 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'flashaacworst', 'flashaaclow');
 	}
 	# HLS Audio Factory on-demand radio
-	if ( $prog->{type} =~ /radio/ && $mlist =~ /haf/ ) {
+	if ( $prog->{type} eq "radio" && $mlist =~ /haf/ ) {
 		$mlist = main::expand_list($mlist, 'haf', 'hafdefault');
 		$mlist = main::expand_list($mlist, 'hafdefault', 'hafbest');
 		$mlist = main::expand_list($mlist, 'hafbest', 'hafhigh,hafbetter');
@@ -6443,7 +6443,7 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hlsaacworst', 'hlsaaclow');
 	}
 	# HLS Video Factory on-demand tv
-	if ( $prog->{type} =~ /tv/ && $mlist =~ /hvf/ ) {
+	if ( $prog->{type} eq "tv" && $mlist =~ /hvf/ ) {
 		$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
 		$mlist = main::expand_list($mlist, 'hvfdefault', 'hvfbest');
 		if ( $opt->{fps50} ) {
