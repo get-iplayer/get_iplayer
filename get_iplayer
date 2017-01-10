@@ -4027,7 +4027,7 @@ sub substitute {
 # Returns 0 on success, 1 on failure (i.e. if the <filename> already exists)
 #
 sub generate_filenames {
-	my ($prog, $ua, $format) = (@_);
+	my ($prog, $ua, $format, $mode, $version) = (@_);
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
 	if ( ! $prog->{name} ) {
@@ -4098,8 +4098,18 @@ sub generate_filenames {
 		main::logger("INFO: File name prefix = $prog->{fileprefix}                 \n");
 	}
 
+	# Get extension from streamdata if defined and raw not specified
+	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
+	# output files with --raw
+	if ( $opt->{raw} && $mode ) {
+		if ( $mode =~ /^flash/ ) {
+			$prog->{ext} = "flv";
+		} else {
+			$prog->{ext} = "ts";
+		}
+	}
 
 	# check if file extension has changed as a result of failed attempt with different mode
 	my $ext_changed = 0;
@@ -4115,9 +4125,14 @@ sub generate_filenames {
 	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 	$prog->{filename} = main::encode_fs($prog->{filename});
 	$prog->{filepart} = main::encode_fs($prog->{filepart});
-	# DASH with --raw only
-	$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, $prog->{fileprefix}.".raw.m4a"));
-	$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, $prog->{fileprefix}.".raw.m4v"));
+	# DASH output files with --raw
+	if ( $opt->{raw} && $mode ) {
+		if ( $mode =~ /(dvf|daf)/ ) {
+			# DASH output files with --raw
+			$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4a"));
+			$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v"));
+		}
+	}
 
 	# overwrite/error if the file already exists and is going to be written to
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
@@ -4128,9 +4143,51 @@ sub generate_filenames {
 		&& ( ! $opt->{subsonly} )
 		&& ( ! $opt->{tagonly} )
 	) {
-		if ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
+		if ( $opt->{raw} && $mode ) {
+			my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
+			my $media_raw = $prog->{filename};
+			my $audio_raw = $prog->{rawaudio};
+			my $video_raw = $prog->{rawvideo};
 			if ( $opt->{overwrite} ) {
-				main::logger("INFO: Overwriting file: $prog->{filename}\n");
+				# DASH output files with --raw
+				if ( $mode =~ /(dvf|daf)/ ) {
+					if ( -f $audio_raw ) {
+						main::logger "WARNING: Overwriting raw audio file: $audio_raw\n";
+					}
+					if ( $prog->{type} eq "tv" && -f $video_raw ) {
+	 					main::logger "WARNING: Overwriting raw video file: $video_raw\n";
+	 				}
+					unlink ( $audio_raw, $video_raw ) unless $opt->{test};
+				} else {
+					if ( -f $media_raw ) {
+						main::logger "WARNING: Overwriting raw $media_type file: $media_raw\n";
+					}
+					unlink ( $media_raw ) unless $opt->{test};
+				}
+			} else {
+				my $skip;
+				# DASH output files with --raw
+				if ( $mode =~ /(dvf|daf)/ ) {
+					if ( -f $audio_raw ) {
+						main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
+						$skip = 1;
+					}
+					if ( $prog->{type} eq "tv" && -f $video_raw ) {
+						main::logger "WARNING: Raw video file already exists: $video_raw\n";
+						$skip = 1;
+					}
+				} elsif ( -f $media_raw ) {
+					main::logger "WARNING: Raw $media_type file already exists: $media_raw\n";
+					$skip = 1;
+				}
+				if ( $skip ) {
+					main::logger "WARNING: Use --overwrite to replace\n";
+					return 3;
+				}
+			}
+		} elsif ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
+			if ( $opt->{overwrite} ) {
+				main::logger("WARNING: Overwriting file: $prog->{filename}\n");
 				unlink $prog->{filename} unless $opt->{test};
 			} else {
 				main::logger("WARNING: File already exists: $prog->{filename}\n");
@@ -4138,29 +4195,7 @@ sub generate_filenames {
 				return 3;
 			}
 		}
-		# DASH with --raw only
-		if ( $opt->{raw} ) {
-			my $audio_raw = $prog->{rawaudio};
-			my $video_raw = $prog->{rawvideo};
-			if ( $opt->{overwrite} ) {
-				main::logger "INFO: Overwriting raw audio file: $audio_raw\n" if -f $audio_raw;
-				main::logger "INFO: Overwriting raw video file: $video_raw\n" if $prog->{type} eq "tv" && -f $video_raw;
-				unlink ( $audio_raw, $video_raw ) unless $opt->{test};
-			} else {
-				my $skip;
-				if ( -f $audio_raw ) {
-					main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
-					main::logger "WARNING: Use --overwrite to replace\n";
-					$skip = 1;
-				}
-				if ( $prog->{type} eq "tv" && -f $video_raw ) {
-					main::logger "WARNING: Raw video file already exists: $video_raw\n";
-					main::logger "WARNING: Use --overwrite to replace\n";
-					$skip = 1;
-				}
-				return 3 if $skip;
-			}
-		}
+
 	}
 
 	# Determine thumbnail filename
@@ -7349,15 +7384,8 @@ sub download {
 		}
 	}
 
-	# Get extension from streamdata if defined and raw not specified
-	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
-
-	# Nasty hacky filename ext overrides based on non-default fallback modes
-	$prog->{ext} = 'flv' if $opt->{raw} && $mode =~ /^flash/;
-	$prog->{ext} = 'ts' if $opt->{raw} && $mode =~ /^(hls|hvf|haf)/;
-
 	# Determine the correct filenames for this recording
-	if ( my $rc = $prog->generate_filenames( $ua, $prog->file_prefix_format() ) ) {
+	if ( my $rc = $prog->generate_filenames( $ua, $prog->file_prefix_format(), $mode, $version ) ) {
 		return 'stop' if $rc == 3;
 		return 'skip';
 	}
@@ -8032,27 +8060,21 @@ sub get {
 	# media file
 	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
 	my $media_prefix = $prog->{fileprefix};
-	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".${media_type}.flv"));
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".rtmp.flv"));
+	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.${media_type}.flv"));
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.rtmp.flv"));
 	my $media_raw = $prog->{filename};
 
 	if ( $opt->{overwrite} ) {
 		main::logger "INFO: Overwriting RTMP $media_type file: $media_file\n" if -f $media_file;
-		main::logger "INFO: Overwriting raw $media_type file: $media_raw\n" if $opt->{raw} && -f $media_raw;
-		unlink ( $media_file, $media_raw );
+		unlink $media_file;
 	} else {
-		if ( $opt->{raw} && -f $media_raw ) {
-			main::logger "INFO: Raw $media_type file already exists: $media_raw\n";
-			main::logger "INFO: Use --overwrite to replace\n";
-			return 'skip';
-		}
 		if ( -f $media_file ) {
 			main::logger "INFO: Using existing RTMP $media_type file: $media_file\n";
 			main::logger "INFO: Use --overwrite to re-download\n";
 		}
 	}
 
-	unless ( -f $media_file ) {	
+	unless ( -f $media_file ) {
 		# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
 		my $min_download_size = main::progclass($prog->{type})->min_download_size();
 		if ( -f $media_tmp && stat($media_tmp)->size < $min_download_size ) {
@@ -8228,26 +8250,20 @@ sub parse_playlist {
 }
 
 sub get {
-	my ( $self, $ua, $url, $prog, %streamdata ) = @_;	
+	my ( $self, $ua, $url, $prog, %streamdata ) = @_;
 	my $rc;
-	
+
 	# media file
 	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
 	my $media_prefix = $prog->{fileprefix};
-	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".${media_type}.ts"));
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $media_prefix.".hls.ts"));
+	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.${media_type}.ts"));
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.hls.ts"));
 	my $media_raw = $prog->{filename};
 
 	if ( $opt->{overwrite} ) {
 		main::logger "INFO: Overwriting HLS $media_type file: $media_file\n" if -f $media_file;
-		main::logger "INFO: Overwriting raw $media_type file: $media_raw\n" if $opt->{raw} && -f $media_raw;
-		unlink ( $media_file, $media_raw );
+		unlink $media_file;
 	} else {
-		if ( $opt->{raw} && -f $media_raw ) {
-			main::logger "INFO: Raw $media_type file already exists: $media_raw\n";
-			main::logger "INFO: Use --overwrite to replace\n";
-			return 'skip';
-		}
 		if ( -f $media_file ) {
 			main::logger "INFO: Using existing HLS $media_type file: $media_file\n";
 			main::logger "INFO: Use --overwrite to re-download\n";
@@ -8400,7 +8416,7 @@ sub get_resume {
 		}
 	};
 
-	# set up sequence list	
+	# set up sequence list
 	my @sequences = sort { $a <=> $b } keys %{$segments};
 	my $min_sequence = $sequences[0];
 	my $max_sequence = $sequences[$#sequences];
@@ -8415,7 +8431,7 @@ sub get_resume {
 	my $resume_params = "$prog->{pid},$prog->{version},$prog->{modeshort},".($opt->{start} || 0).",".($opt->{stop} || 0);
 	my $resume_prefix = fileparse($file_tmp, qr/\.[^.]+/);
 	my $resume_file = File::Spec->catfile($prog->{dir}, $resume_prefix.".txt");
-	
+
 	# remove resume file with --no-resume
 	if ( $noresume || ! -f $resume_file) {
 		unlink $resume_file;
@@ -8954,27 +8970,31 @@ sub get {
 
 	# audio files
 	my $audio_prefix = $prog->{fileprefix};
-	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $audio_prefix.".audio.m4a"));
-	my $audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $audio_prefix.".dash.m4a"));
+	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.m4a"));
+	my $audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.dash.m4a"));
 	my $audio_raw = $prog->{rawaudio};
 
 	# video files
 	my $video_prefix = $prog->{fileprefix};
-	my $video_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, $video_prefix.".video.m4v"));
-	my $video_file = main::encode_fs(File::Spec->catfile($prog->{dir}, $video_prefix.".dash.m4v"));
+	my $video_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${video_prefix}.video.m4v"));
+	my $video_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${video_prefix}.dash.m4v"));
 	my $video_raw = $prog->{rawvideo};
 
 	if ( $opt->{overwrite} ) {
-		main::logger "INFO: Overwriting DASH audio file: $audio_file\n" if -f $audio_file;
-		main::logger "INFO: Overwriting DASH video file: $audio_file\n" if $prog->{type} eq "tv" && -f $audio_file;
+		main::logger "WARNING: Overwriting DASH audio file: $audio_file\n" if -f $audio_file;
+		main::logger "WARNING: Overwriting DASH video file: $video_file\n" if $prog->{type} eq "tv" && -f $video_file;
 		unlink ( $audio_file, $video_file );
 	} else {
+		my $skip;
 		if ( -f $audio_file ) {
 			main::logger "WARNING: Using existing DASH audio file: $audio_file\n";
-			main::logger "WARNING: Use --overwrite to re-download\n";
+			$skip = 1;
 		}
 		if ( $prog->{type} eq "tv" && -f $video_file ) {
 			main::logger "WARNING: Using existing DASH video file: $video_file\n";
+			$skip = 1;
+		}
+		if ( $skip ) {
 			main::logger "WARNING: Use --overwrite to re-download\n";
 		}
 	}
@@ -8984,7 +9004,7 @@ sub get {
 		$streamdata{media} = $audio_media;
 		$streamdata{file_size} = $audio_media->{file_size};
 		$streamdata{media_bitrate} = $audio_media->{bitrate};
-		$streamdata{prog_type} = "radio";		
+		$streamdata{prog_type} = "radio";
 		if ( $opt->{hlsfallback} ) {
 			$rc = $self->get_builtin( $ua, $url, $audio_tmp, $prog, %streamdata );
 		} else {
