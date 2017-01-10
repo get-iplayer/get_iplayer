@@ -3672,7 +3672,7 @@ sub download_retry_loop {
 	return 1 if $#version_search_list < 0;
 
 	# Get all possible (or user overridden) modes for this prog recording
-	my $modelist = $prog->modelist(1);
+	my $modelist = $prog->modelist();
 	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
 
 	######## version loop #######
@@ -4027,7 +4027,7 @@ sub substitute {
 # Returns 0 on success, 1 on failure (i.e. if the <filename> already exists)
 #
 sub generate_filenames {
-	my ($prog, $ua, $format, $multipart) = (@_);
+	my ($prog, $ua, $format) = (@_);
 
 	# Get and set more meta data - Set the %prog values from metadata if they aren't already set (i.e. with --pid option)
 	if ( ! $prog->{name} ) {
@@ -4092,13 +4092,6 @@ sub generate_filenames {
 		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		$prog->{dir} = main::encode_fs($prog->{dir});
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
-	}
-
-	# Create a subdir if there are multiple parts
-	if ( $multipart ) {
-		$prog->{dir} = File::Spec->catdir($prog->{dir}, $prog->{fileprefix});
-		$prog->{dir} = main::encode_fs($prog->{dir});
-		main::logger("INFO: Creating multi-part subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
 	if ( ! $opt->{nowrite} ) {
@@ -5538,31 +5531,6 @@ sub parse_hls_connection {
 	return @hls_medias;
 }
 
-sub parse_pls_connection {
-	my $media = shift;
-	my $conn = shift;
-	my @pls_medias;
-	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
-	my @lines = split(/\r*\n|\r\n*/, $data);
-	if ( @lines < 1 || $lines[0] ne '[playlist]' ) {
-		main::logger "WARNING: Invalid PLS playlist, no header ($conn->{href})\n";
-		return;
-	}
-	foreach my $line (@lines) {
-		my ($idx, $href)  = ( $1, $2 ) if $line =~ /File(\d+)=(.*)$/i;
-		if ( $href ) {
-			my $pls_media = dclone($media);
-			$pls_media->{service} .= "_$idx";
-			my $pls_conn = dclone($conn);
-			$pls_conn->{priority} = $idx;
-			$pls_conn->{href} = $href;
-			$pls_media->{connections} = [ $pls_conn ];
-			push @pls_medias, $pls_media;
-		}
-	}
-	return @pls_medias;
-}
-
 # from https://github.com/osklil/hls-fetch
 sub parse_m3u_attribs {
 	my ($url, $attr_str) = @_;
@@ -6321,7 +6289,6 @@ sub get_stream_data {
 
 sub modelist {
 	my $prog = shift;
-	my $showwarn = shift;
 	my $mlist = $opt->{$prog->{type}."mode"} || $opt->{modes};
 	# Defaults
 	if ( ! $mlist ) {
