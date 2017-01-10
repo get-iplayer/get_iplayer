@@ -5941,6 +5941,7 @@ sub get_stream_data {
 	my $xml;
 	my @medias;
 	my $unblocked;
+	my $checked_geoblock;
 
 	my (%seen, $stream_key);
 	if ( $opt->{info} || $modelist =~ /flash/ ) {
@@ -5948,6 +5949,7 @@ sub get_stream_data {
 		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
+			$checked_geoblock = 1;
 			next if check_geoblock( $xml );
 			$unblocked = 1;
 			my @pc_medias = parse_metadata( $xml );
@@ -5973,6 +5975,7 @@ sub get_stream_data {
 		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
+			$checked_geoblock = 1;
 			next if check_geoblock( $xml );
 			$unblocked = 1;
 			my @pc_medias = parse_metadata( $xml );
@@ -6015,6 +6018,7 @@ sub get_stream_data {
 			for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
 				$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 				main::logger "\n$xml\n" if $opt->{debug};
+				$checked_geoblock = 1;
 				next if check_geoblock( $xml );
 				$unblocked = 1;
 				my @iptv_medias = parse_metadata( $xml );
@@ -6056,6 +6060,7 @@ sub get_stream_data {
 		for my $media_stream_mobile_prefix ( @media_stream_mobile_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
+			$checked_geoblock = 1;
 			next if check_geoblock( $xml );
 			$unblocked = 1;
 			my @mobile_medias = parse_metadata( $xml );
@@ -6105,7 +6110,7 @@ sub get_stream_data {
 	}
 
 	unless ( $unblocked ) {
-		$prog->{geoblocked} = 1;
+		$prog->{geoblocked} = 1 if $checked_geoblock;
 		return undef;
 	}
 
