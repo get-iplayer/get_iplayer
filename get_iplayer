@@ -8461,6 +8461,7 @@ sub get_resume {
 								main::logger "WARNING: Unexpected resume size ($last_size > $tmp_size)\n";
 								main::logger "WARNING: Restarting download\n";
 							} else {
+								$prev_sequence = $last_sequence;
 								$resume_sequence = $last_sequence + 1;
 								$resume_size = $last_size;
 								$resume_elapsed = $last_elapsed;
@@ -8694,7 +8695,7 @@ sub get_resume {
 	main::logger sprintf("${crlf}INFO: Recorded: %.2f MiB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mibit/s\n",
 		($prev_size - $resume_size) / (1024.0 * 1024.0),
 		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
-		$prev_sequence - $resume_sequence + 1,
+		max($prev_sequence - $resume_sequence + 1, 0),
 		(gmtime($end_time - $begin_time))[2,1,0],
 		($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
 	);
