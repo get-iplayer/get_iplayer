@@ -3772,9 +3772,6 @@ sub mode_ver_download_retry_loop {
 	# Use different number of retries for flash modes
 	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
-	# can only resume on retries
-	delete $opt->{streamresume};
-
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
 		main::logger "INFO: Attempt number: $count / $retries\n" if $opt->{verbose};
@@ -8208,7 +8205,6 @@ use URI;
 
 sub opt_format {
 	return {
-		hlsfallback		=> [ 1, "dash-fallback|dashfallback|hls-fallback|hlsfallback!", 'Deprecated', '--hls-fallback', "Fall back to pre-2.98 HLS/DASH downloader."],
 		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
 		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
 	};
@@ -8271,17 +8267,13 @@ sub get {
 	}
 
 	unless ( -f $media_file ) {
-		if ( $opt->{hlsfallback} ) {
-			$rc = $self->get_builtin( $ua, $url, $media_tmp, $prog, %streamdata );
-		} else {
-			my $segments = $self->parse_playlist($ua, $url);
-			if ( keys %{$segments} == 0 ) {
-				main::logger "ERROR: No segments in HLS playlist\n";
-				main::logger "ERROR: Playlist URL: $url\n";
-				return 'next';
-			}
-			$rc = $self->get_resume( $ua, $segments, $media_tmp, $prog, %streamdata );
+		my $segments = $self->parse_playlist($ua, $url);
+		if ( keys %{$segments} == 0 ) {
+			main::logger "ERROR: No segments in HLS playlist\n";
+			main::logger "ERROR: Playlist URL: $url\n";
+			return 'next';
 		}
+		$rc = $self->fetch( $ua, $segments, $media_tmp, $prog, %streamdata );
 		return $rc if $rc;
 		if ( ! move($media_tmp, $media_file) ) {
 			main::logger "ERROR: Could not rename file: $media_tmp\n";
@@ -8304,7 +8296,7 @@ sub get {
 	return $self->remux($audio_file, $video_file, $prog, %streamdata);
 }
 
-sub get_resume {
+sub fetch {
 	my ( $self, $ua, $segments, $file_tmp, $prog, %streamdata ) = @_;
 	my $return;
 	my $fh;
@@ -8730,213 +8722,6 @@ sub get_resume {
 	return 0;
 }
 
-sub get_builtin {
-	my ( $self, $ua, $url, $file_tmp, $prog, %streamdata ) = @_;
-	my $media = $streamdata{media};
-	my $file_size = $streamdata{file_size};
-	my $media_bitrate = $streamdata{media_bitrate} || $streamdata{bitrate};
-	my $prog_type = $streamdata{prog_type} || $prog->{type};
-	my $return;
-	my $fh;
-	my $last_sequence = 0;
-	my $begin_time = time();
-	my $begin_size = 0;
-	my $size = 0;
-	my $last_percent = 0;
-	my $hash_count = 0;
-	my $elapsed = 0;
-	my $retries = 3;
-	my %seen;
-	my $proxy_prefix;
-
-	my $hide_progress = main::hide_progress();
-
-	my $min_download_size = main::progclass($prog_type)->min_download_size();
-	if ( -f $file_tmp && stat($file_tmp)->size < $min_download_size ) {
-		unlink( $file_tmp );
-	}
-
-	if ( $opt->{streamresume} ) {
-		($last_sequence, $size, $elapsed, $begin_time) = split /,/, $opt->{streamresume};
-		if ( ! open($fh, ">>:raw", $file_tmp) ) {
-			main::logger "ERROR: Cannot append to $file_tmp\n";
-			exit 1;
-		}
-		binmode $fh;
-		my $tmp_size = stat($file_tmp)->size;
-		if ( $size < $tmp_size ) {
-			main::logger "INFO: Truncating file $file_tmp from $tmp_size bytes to $size bytes for resume.\n" if $opt->{verbose};
-			truncate($fh, $size);
-		}
-	} else {
-		if ( ! open($fh, ">:raw", $file_tmp) ) {
-			main::logger "ERROR: Cannot write to $file_tmp\n";
-			exit 1;
-		}
-		binmode $fh;
-	}
-
-	my $callback = sub {
-		my ($data, $res, undef) = @_;
-		return 0 if ( ! $res->is_success || ! $res->header("Content-Length") );
-		print $fh $data;
-		$size = tell $fh;
-		return if $opt->{quiet} || $opt->{silent};
-		my $percent = 0;
-		$percent = 100.0 * $size / $file_size if $file_size;
-		# limit progress display to 99.9%
-		if ( $percent > 99.9 ) {
-			$percent = 99.9;
-			$size = int($file_size * 0.999);
-		}
-		if ( $opt->{hash} ) {
-			return if ($percent - $last_percent) < 1;
-		} else {
-			return if ($percent - $last_percent) < 0.1;
-		}
-		$last_percent = $percent;
-		if ( $opt->{hash} ) {
-			main::logger '#';
-			$hash_count++;
-			if ( ! ($hash_count % 100) ) {
-				main::logger "\n";
-			}
-		} else {
-			return if $hide_progress;
-			my $rate_bps;
-			my $rate;
-			my $time;
-			my $time_called = time();
-			if ($time_called - $begin_time < 1) {
-				$rate = '-----.-- Mibit/s';
-				$time = '--:--:-- remaining';
-			} else {
-				$rate_bps = ($size - $begin_size) / ($time_called - $begin_time);
-				$rate = sprintf("%8.2f Mibit/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
-				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $size)) / $rate_bps ) )[2,1,0] );
-			}
-			main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s\r",
-				$size / 1024.0 / 1024.0,
-				$file_size / 1024.0 / 1024.0,
-				$percent,
-				$rate,
-				$time,
-			);
-		}
-	};
-
-	main::logger "INFO: ".( $opt->{streamresume} ? "Resume" : "Begin" )." recording file: $file_tmp\n";
-
-	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
-		($proxy_prefix = $opt->{proxy}) =~ s/^prepend://g;
-	}
-
-	my $segment_duration;
-	my $segments = $self->parse_playlist($ua, $url, $media, $last_sequence);
-	my @sequences = sort { $a <=> $b } keys %{$segments};
-	unless ( @sequences ) {
-		main::logger "ERROR: no segments in playlist $url\n";
-		return 6;
-	}
-	# estimate expected file size for on-demand if necessary
-	if ( ! $file_size) {
-		my $total_duration = 0;
-		for my $sequence ( @sequences ) {
-			$total_duration += $segments->{$sequence}->{duration};
-		}
-		$file_size = int($total_duration * $media_bitrate * 1024.0 / 8.0);
-	}
-	# process segments in current playlist
-	for my $sequence ( @sequences ) {
-		# skip overlapping segments
-		next if $seen{$sequence};
-		# skip segments already downloaded
-		next if $sequence > 0 && $sequence <= $last_sequence;
-		$segment_duration = $segments->{$sequence}->{duration};
-		$elapsed += $segment_duration;
-		# check --start
-		next if ! $segments->{$sequence}->{initialization} && defined $opt->{start} && $elapsed <= $opt->{start};
-		my $segment_url;
-		if ( $proxy_prefix ) {
-			$segment_url = $proxy_prefix.main::url_encode( $segments->{$sequence}->{url} );
-		} else {
-			$segment_url = $segments->{$sequence}->{url};
-		}
-		main::logger "\nDEBUG: Getting segment ($sequence) $segment_url\n" if $opt->{debug};
-		my $got404 = 0;
-		my $i;
-		for ($i = 0; $i < $retries; $i++) {
-			my $res = $ua->get($segment_url, ':content_cb' => $callback);
-			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
-				if ( $res->code == 404 ) {
-					if ( $prog->{mode} =~ /(daf|dvf)/ && $sequence == $sequences[$#sequences] ) {
-						# potential edge cases with incorrect DASH manifests
-						main::logger "\nWARNING: Segment not available from server ($sequence)\n";
-						main::logger "WARNING: Segment URL: $segment_url\n";
-						main::logger "WARNING: This is the final segment of the programme and may be incorrectly flagged as not available due to inaccurate programme data\n";
-						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
-					} else {
-						# don't retry if 404 received
-						main::logger "\nERROR: Segment not available from server ($sequence)\n";
-						main::logger "ERROR: Segment URL: $segment_url\n";
-						main::logger "ERROR: Download aborted at ".(int($elapsed - $segment_duration))." secs in programme\n";
-						close $fh;
-						unlink $file_tmp;
-						return 'next';
-					}
-					$got404 = 1;
-					last;
-				}
-			} else {
-				last;
-			}
-		}
-		# bail out if not available
-		last if $got404;
-		# bail out on download failure
-		if ( $i == $retries ) {
-			main::logger "\nERROR: Failed to download segment ($sequence)\n";
-			main::logger "ERROR: Segment URL: $segment_url\n";
-			$return = 5;
-			last;
-		}
-		$seen{$sequence}++;
-		# capture for resuming
-		$last_sequence = $sequence;
-		$opt->{streamresume} = "$last_sequence,$size,$elapsed,$begin_time";
-		# check --stop
-		if ( defined $opt->{stop} && $elapsed >= $opt->{stop} ) {
-			last;
-		}
-	}
-	close $fh;
-	# summary stats if downloading
-	if ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
-		my $end_time = time() + 0.0001;
-		my $end_size = stat($file_tmp)->size;
-		main::logger sprintf("\rINFO: Recorded: %.2f MiB in %s at %.2f Mibit/s to %s\n",
-			($end_size - $begin_size) / (1024.0 * 1024.0),
-			sprintf("%02d:%02d:%02d", ( gmtime($end_time - $begin_time))[2,1,0] ),
-			( $end_size - $begin_size ) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
-			$file_tmp );
-	}
-
-	# if we fail during the streaming, try again
-	return 'retry' if $return && -f $file_tmp && stat($file_tmp)->size > $min_download_size;
-
-	# clear resume data
-	delete $opt->{streamresume};
-
-	# If file is too small or non-existent then delete and try next mode
-	if ( (! -f $file_tmp) || ( -f $file_tmp && stat($file_tmp)->size < $min_download_size) ) {
-		main::logger "WARNING: Failed to stream file $file_tmp\n";
-		unlink $file_tmp;
-		return 'next';
-	}
-
-	return 0;
-}
-
 
 ################### Streamer::dash class #################
 package Streamer::dash;
@@ -9002,20 +8787,14 @@ sub get {
 
 	unless ( -f $audio_file ) {
 		my $audio_media = $streamdata{audio_media};
-		$streamdata{media} = $audio_media;
 		$streamdata{file_size} = $audio_media->{file_size};
 		$streamdata{media_bitrate} = $audio_media->{bitrate};
-		$streamdata{prog_type} = "radio";
-		if ( $opt->{hlsfallback} ) {
-			$rc = $self->get_builtin( $ua, $url, $audio_tmp, $prog, %streamdata );
-		} else {
-			my $segments = $self->generate_segments($audio_media);
-			if ( keys %{$segments} <= 1 ) {
-				main::logger "ERROR: No segments generated from DASH audio media\n";
-				return 'next';
-			}
-			$rc = $self->get_resume( $ua, $segments, $audio_tmp, $prog, %streamdata );
+		my $segments = $self->generate_segments($audio_media);
+		if ( keys %{$segments} <= 1 ) {
+			main::logger "ERROR: No segments generated from DASH audio media\n";
+			return 'next';
 		}
+		$rc = $self->fetch( $ua, $segments, $audio_tmp, $prog, %streamdata );
 		return $rc if $rc;
 		if ( ! move($audio_tmp, $audio_file) ) {
 			main::logger "ERROR: Could not rename file: $audio_tmp\n";
@@ -9028,20 +8807,14 @@ sub get {
 	if ( $prog->{type} eq "tv" ) {
 		unless ( -f $video_file ) {
 			my $video_media = $streamdata{video_media};
-			$streamdata{media} = $video_media;
 			$streamdata{file_size} = $video_media->{file_size};
 			$streamdata{media_bitrate} = $video_media->{bitrate};
-			$streamdata{prog_type} = "tv";
-			if ( $opt->{hlsfallback} ) {
-				$rc = $self->get_builtin( $ua, $url, $video_tmp, $prog, %streamdata );
-			} else {
-				my $segments = $self->generate_segments($video_media);
-				if ( keys %{$segments} <= 1 ) {
-					main::logger "ERROR: No segments generated from DASH video media\n";
-					return 'next';
-				}
-				$rc = $self->get_resume( $ua, $segments, $video_tmp, $prog, %streamdata );
+			my $segments = $self->generate_segments($video_media);
+			if ( keys %{$segments} <= 1 ) {
+				main::logger "ERROR: No segments generated from DASH video media\n";
+				return 'next';
 			}
+			$rc = $self->fetch( $ua, $segments, $video_tmp, $prog, %streamdata );
 			return $rc if $rc;
 			if ( ! move($video_tmp, $video_file) ) {
 				main::logger "ERROR: Could not rename file: $video_tmp\n";
@@ -9073,31 +8846,6 @@ sub get {
 	}
 
 	return $self->remux($audio_file, $video_file, $prog, %streamdata);
-}
-
-sub parse_playlist {
-	my ($self, $ua, $url, $media, $last_sequence) = @_;
-	return undef if ! $media;
-	my $now = time();
-	my $segments;
-	my ($start_number, $stop_number);
-	if ( $last_sequence ) {
-		$start_number = $last_sequence + 1;
-	} else {
-		$start_number = $media->{start_number};
-	}
-	$stop_number = $media->{stop_number};
-	for my $sequence ( $start_number .. $stop_number ) {
-		my $segment_url;
-		if ( $sequence == $start_number && ! $last_sequence ) {
-			($segment_url = $media->{init_template}) =~ s/\$RepresentationID\$/$media->{id}/;
-			$segments->{$sequence - 1} = { 'url' => $segment_url, 'duration' => 0, 'initialization' => 1 };
-		}
-		($segment_url = $media->{media_template}) =~ s/\$RepresentationID\$/$media->{id}/;
-		$segment_url =~ s/\$Number\$/$sequence/;
-		$segments->{$sequence} = { 'url' => $segment_url, 'duration' => $media->{segment_duration} };
-	}
-	return $segments;
 }
 
 
