@@ -4101,10 +4101,15 @@ sub generate_filenames {
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	# output files with --raw
 	if ( $opt->{raw} && $mode ) {
-		if ( $mode =~ /^flash/ ) {
+		if ( $mode =~ /flash/ ) {
 			$prog->{ext} = "flv";
-		} else {
+		} elsif ( $mode =~ /(haf|hvf|hls)/ ) {
 			$prog->{ext} = "ts";
+		} elsif ( $mode =~ /daf/ ) {
+			$prog->{ext} = "raw.m4a";
+		} elsif ( $mode =~ /dvf/ ) {
+			$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4a"));
+			$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v"));
 		}
 	}
 
@@ -4122,14 +4127,6 @@ sub generate_filenames {
 	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
 	$prog->{filename} = main::encode_fs($prog->{filename});
 	$prog->{filepart} = main::encode_fs($prog->{filepart});
-	# DASH output files with --raw
-	if ( $opt->{raw} && $mode ) {
-		if ( $mode =~ /(dvf|daf)/ ) {
-			# DASH output files with --raw
-			$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4a"));
-			$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v"));
-		}
-	}
 
 	# overwrite/error if the file already exists and is going to be written to
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
@@ -4146,12 +4143,12 @@ sub generate_filenames {
 			my $audio_raw = $prog->{rawaudio};
 			my $video_raw = $prog->{rawvideo};
 			if ( $opt->{overwrite} ) {
-				# DASH output files with --raw
-				if ( $mode =~ /(dvf|daf)/ ) {
+				# DASH tv output files with --raw
+				if ( $mode =~ /dvf/ ) {
 					if ( -f $audio_raw ) {
 						main::logger "WARNING: Overwriting raw audio file: $audio_raw\n";
 					}
-					if ( $prog->{type} eq "tv" && -f $video_raw ) {
+					if ( -f $video_raw ) {
 	 					main::logger "WARNING: Overwriting raw video file: $video_raw\n";
 	 				}
 					unlink ( $audio_raw, $video_raw ) unless $opt->{test};
@@ -4163,13 +4160,13 @@ sub generate_filenames {
 				}
 			} else {
 				my $skip;
-				# DASH output files with --raw
-				if ( $mode =~ /(dvf|daf)/ ) {
+				# DASH tv output files with --raw
+				if ( $mode =~ /dvf/ ) {
 					if ( -f $audio_raw ) {
 						main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
 						$skip = 1;
 					}
-					if ( $prog->{type} eq "tv" && -f $video_raw ) {
+					if ( -f $video_raw ) {
 						main::logger "WARNING: Raw video file already exists: $video_raw\n";
 						$skip = 1;
 					}
@@ -8758,7 +8755,7 @@ sub get {
 	my $audio_prefix = $prog->{fileprefix};
 	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.m4a"));
 	my $audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.dash.m4a"));
-	my $audio_raw = $prog->{rawaudio};
+	my $audio_raw = $prog->{type} eq "tv" ? $prog->{rawaudio} : $prog->{filename};
 
 	# video files
 	my $video_prefix = $prog->{fileprefix};
