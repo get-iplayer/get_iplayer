@@ -9061,10 +9061,13 @@ sub queue {
 
 	# PID and TYPE specified
 	if ( $opt_cmdline->{pid} ) {
-		# ensure we only have one prog type defined
-		if ( $opt->{type} && $opt->{type} !~ /,/ ) {
+		# ensure we only have one prog type defined (or none)
+		if ( $opt_cmdline->{type} !~ /,/ ) {
 			# Add to PVR if not already in history
 			$pvr->add( "ONCE_$opt_cmdline->{pid}" ) if ( ! $hist->check( $opt_cmdline->{pid} ) );
+		} else {
+			main::logger "ERROR: Cannot add a pid to the PVR queue without a single --type specified\n";
+			return 1;
 		}
 
 	# Search specified
