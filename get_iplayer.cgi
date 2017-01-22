@@ -3435,7 +3435,7 @@ sub process_params {
 
 	$opt->{EXCLUDE} = {
 		title	=> 'Exclude Programmes', # Title
-		tooltip	=> 'Comma separated list of programmes to exclude. Partial word matches are supported', # Tooltip
+		tooltip	=> 'Comma separated list of programmes to exclude. Partial word matches and regular expressions are supported', # Tooltip
 		webvar	=> 'EXCLUDE', # webvar
 		optkey	=> 'exclude', # option
 		type	=> 'text', # type
@@ -3446,7 +3446,7 @@ sub process_params {
 
 	$opt->{CATEGORY} = {
 		title	=> 'Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to match. Partial word matches are supported.  Only works in Recordings tab.', # Tooltip
+		tooltip	=> 'Comma separated list of categories to match. Partial word matches and regular expressions are supported.  Only works in Recordings tab.', # Tooltip
 		webvar	=> 'CATEGORY', # webvar
 		optkey	=> 'category', # option
 		type	=> 'text', # type
@@ -3457,7 +3457,7 @@ sub process_params {
 
 	$opt->{EXCLUDECATEGORY} = {
 		title	=> 'Exclude Categories Containing', # Title
-		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches are supported. Only works in Recordings tab.', # Tooltip
+		tooltip	=> 'Comma separated list of categories to exclude. Partial word matches and regular expressions are supported. Only works in Recordings tab.', # Tooltip
 		webvar	=> 'EXCLUDECATEGORY', # webvar
 		optkey	=> 'excludecategory', # option
 		type	=> 'text', # type
@@ -3468,7 +3468,7 @@ sub process_params {
 
 	$opt->{CHANNEL} = {
 		title	=> 'Channels Containing', # Title
-		tooltip	=> 'Comma separated list of channels to match. Partial word matches are supported', # Tooltip
+		tooltip	=> 'Comma separated list of channels to match. Partial word matches and regular expressions are supported', # Tooltip
 		webvar	=> 'CHANNEL', # webvar
 		optkey	=> 'channel', # option
 		type	=> 'text', # type
@@ -3479,7 +3479,7 @@ sub process_params {
 
 	$opt->{EXCLUDECHANNEL} = {
 		title	=> 'Exclude Channels Containing', # Title
-		tooltip	=> 'Comma separated list of channels to exclude. Partial word matches are supported', # Tooltip
+		tooltip	=> 'Comma separated list of channels to exclude. Partial word matches and regular expressions are supported', # Tooltip
 		webvar	=> 'EXCLUDECHANNEL', # webvar
 		optkey	=> 'excludechannel', # option
 		type	=> 'text', # type
