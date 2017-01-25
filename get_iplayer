@@ -81,9 +81,6 @@ STDERR->autoflush(1);
 # Save proxy env var
 my $ENV_HTTP_PROXY = $ENV{HTTP_PROXY} || $ENV{http_proxy};
 
-# Hash of where plugin files were found so that the correct ones can be updated
-my %plugin_files;
-
 # Hash of all prog types => Programme class
 # Add an entry here if another Programme class is added
 my %prog_types = (
@@ -389,38 +386,6 @@ if ( ! $ENV{IPLAYER_OUTDIR} && $^O eq "MSWin32" ) {
 	eval 'use Win32 qw(CSIDL_DESKTOPDIRECTORY); $desktop = Win32::GetFolderPath(CSIDL_DESKTOPDIRECTORY);';
 	if ( ! $@ && $desktop ) {
 		$ENV{IPLAYER_OUTDIR} = File::Spec->catfile($desktop, "iPlayer Recordings");
-	}
-}
-
-# get list of additional user plugins and load plugin
-my $plugin_dir_system;
-if ( defined $ENV{ALLUSERSPROFILE} && $^O eq "MSWin32" ) {
-	$plugin_dir_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/plugins';
-} else {
-	$plugin_dir_system = '/usr/share/get_iplayer/plugins';
-}
-my $plugin_dir_user = "$profile_dir/plugins";
-for my $plugin_dir ( ( $plugin_dir_user, $plugin_dir_system ) ) {
-	if ( opendir( DIR, $plugin_dir ) ) {
-		#logger "INFO: Checking for plugins in $plugin_dir\n";
-		my @plugin_file_list = grep /^.+\.plugin$/, readdir DIR;
-		closedir DIR;
-		for ( @plugin_file_list ) {
-			#logger "INFO: Got $_\n";
-			chomp();
-			$_ = "$plugin_dir/$_";
-			m{^.*\/(.+?).plugin$};
-			# keep in a hash for update
-			$plugin_files{$_} = $1.'.plugin';
-			# Skip if we have this plugin already
-			next if (! $1) || $prog_types{$1};
-			# Register the plugin
-			$prog_types{$1} = "Programme::$1";
-			#logger "INFO: Loading $_\n";
-			require $_;
-			# Kludge: Create dummy instance (without a single instance, none of the bound options work)
-			$prog_types{$1}->new();
-		}
 	}
 }
 
