@@ -5,16 +5,21 @@
 * Downloads TV and radio programmes from BBC iPlayer
 * Allows multiple programmes to be downloaded using a single command
 * Indexing of most available iPlayer catch-up programmes (not iPlayer Exclusive, Red Button or BBC Three)
-* Caching of index (default 4h)
+* Caching of index with automatic updating (default 4h)
 * Regex search on programme name 
 * Regex search on programme description and episode title
 * Filter search results by channel
+* Direct download via programme ID or URL
 * PVR capability (may be used with cron or Task Scheduler)
 * HTTP proxy support
-* Perl 5.8.8+ required, plus LWP, XML::Simple and XML::LibXML modules
-* Runs on Linux/Unix (Ubuntu, Fedora, OpenBSD and others), OS X, Windows (7/8/10 supported, known to run on XP/Vista)
+* Perl 5.8.8+ required, plus LWP, LWP::Protocol::https, XML::Simple and XML::LibXML modules
+* Requires ffmpeg for conversion to MP4 and AtomicParsley for metadata tagging
+* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS, Windows (7/8/10 supported)
 
-**NOTE: get_iplayer can only search programmes broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer web site. Other programmes must be downloaded directly.**
+**NOTE:** 
+
+- **get_iplayer can only search for programmes that were broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. Old programmes that are still available after 30 days must be located on the iPlayer site and downloaded directly.**
+- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content directly, but such use is not supported.**
 
 ## Documentation
 
@@ -22,7 +27,7 @@
 	
 ## Support
 
-<https://github.com/get-iplayer/get_iplayer/wiki/help>
+<https://squarepenguin.co.uk/forums/>
 
 ## Installation
 
@@ -86,15 +91,19 @@
 	
 	OR	
 
-	`get_iplayer --get 208 --modes=best`
+	`get_iplayer --get 208 --tvmode=best`
 
 * Record TV programme number 208 in lower resolution (640x360):
 
-	`get_iplayer --get 208 --modes=good`
+	`get_iplayer --get 208 --tvmode=good`
 
 * Record TV programme number 208 and download subtitles in SubRip (SRT) format:
 
 	`get_iplayer --get 208 --subtitles`
+
+* Record multiple TV programmes (using index numbers from search results): 
+
+	`get_iplayer --get 208 209 210`
 
 * Record a TV programme using its iPlayer URL:
 
@@ -107,9 +116,24 @@
 * Record a radio programme using its iPlayer URL:
 
     `get_iplayer http://www.bbc.co.uk/programmes/b07gcv34`	
-* Record a radio programme using the PID (b07gcv34) from its iPlayer URL:
+* Record a radio programme using the PID (b07gcv34) from its iPlayer URL in highest quality (320k), with fallback to lower quality if not available:
 
-	`get_iplayer --pid=b07gcv34`
-  
+	`get_iplayer --pid=b07gcv34` [default is to download best available]
+	
+	OR	
+
+	`get_iplayer --pid=b07gcv34 --radiomode=best`
+
+* Record a radio programme using the PID (b07gcv34) from its iPlayer URL in lower quality (96k):
+
+	`get_iplayer --pid=b07gcv34 --radiomode=good`
+
+* Record multiple radio programmes (using PIDs from iPlayer URLs): 
+
+	`get_iplayer --pid=b07gcv34,b07h60ld` [comma-separated list]
+
+	OR	
+
+	`get_iplayer --pid=b07gcv34 --pid=b07h60ld` [multiple arguments]
 
 NOTE: Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC programmes may not be available from iPlayer.
