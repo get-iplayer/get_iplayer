@@ -134,7 +134,6 @@ my $opt_format = {
 	_url		=> [ 2, "", 'Recording', '--url <url>,<url>,...', "Record the embedded media in the specified iPlayer episode URLs. Use with --type."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>,<pid>,...', "Record arbitrary PIDs that do not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID. Requires --pid."],
-	pidrecursivenoclips	=> [ 1, "pidrecursivenoclips|pid-recursive-noclips!", 'Deprecated', '--pid-recursive-noclips', "When used with --pid and --pid-recursive, skip all associated programme clips if the value of --pid is a brand PID. Requires --pid and --pid-recursive."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless --partial-proxy is specified."],
 	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't remux or change the recording in any way. Saves output file in native container format (RTMP->FLV, HLS->MPEG-TS, DASH->MP4)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
@@ -5127,31 +5126,6 @@ sub parse_rdf_episode {
 
 
 
-# Gets the clip data from a given clip pid
-sub parse_rdf_clip {
-	my $ua = shift;
-	my $uri = shift;
-	my $rdf = get_rdf_data( $ua, $uri );
-	if ( ! $rdf ) {
-		main::logger "WARNING: Clip PID rdf URL contained no RDF data.\n";
-		return '';
-	}
-	my $pid = extract_pid( $uri );
-	main::logger "INFO:      Clip '".$rdf->{'po:Clip'}->{'dc:title'}."' ($pid)\n";
-	# We don't really need the ver pids from here
-	if ( ref$rdf->{'po:Clip'}->{'po:version'} eq 'ARRAY' ) {
-		for my $verpid_element ( @{ $rdf->{'po:Clip'}->{'po:version'} } ) {
-			main::logger "INFO:        With Version PID '".extract_pid( $verpid_element->{'rdf:resource'} )."'\n" if $opt->{debug};
-		}
-	} else {
-		main::logger "INFO:        With Version PID '".extract_pid( $rdf->{'po:Clip'}->{'po:version'}->{'rdf:resource'} )."'\n" if $opt->{debug};
-	}
-	#main::logger "INFO:        From Series PID '".extract_pid( $rdf->{'po:Series'}->{'rdf:about'} )."'\n" if $opt->{debug};
-	main::logger "INFO:        From Brand PID '".extract_pid( $rdf->{'po:Brand'}->{'rdf:about'} )."'\n" if $opt->{debug};
-}
-
-
-
 sub parse_rdf_series {
 	my $ua = shift;
 	my $uri = shift;
@@ -5197,14 +5171,6 @@ sub parse_rdf_brand {
 		main::logger "INFO:      Episode pid: ".$episode_element->{'rdf:resource'}."\n" if $opt->{debug};
 		push @pids, extract_pid( $episode_element->{'rdf:resource'} );
 		parse_rdf_episode( $ua, $episode_element->{'rdf:resource'} );
-	}
-	unless ( $opt->{pidrecursivenoclips} ) {
-		my @clips = ensure_array($rdf->{'po:Brand'}->{'po:clip'});
-		for my $clip_element ( @clips ) {
-			main::logger "INFO:      Clip pid: ".$clip_element->{'rdf:resource'}."\n" if $opt->{debug};
-			push @pids, extract_pid( $clip_element->{'rdf:resource'} );
-			parse_rdf_clip( $ua, $clip_element->{'rdf:resource'} );
-		}
 	}
 	return @pids;
 }
