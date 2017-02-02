@@ -4,7 +4,7 @@
 
 * Downloads TV and radio programmes from BBC iPlayer
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer catch-up programmes (not iPlayer Exclusive, Red Button or BBC Three)
+* Indexing of most available iPlayer catch-up programmes (not BBC Three, Red Button or iPlayer Exclusive)
 * Caching of index with automatic updating (default 4h)
 * Regex search on programme name 
 * Regex search on programme description and episode title
@@ -18,8 +18,8 @@
 
 **NOTE:** 
 
-- **get_iplayer can only search for programmes that were broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. Old programmes that are still available after 30 days must be located on the iPlayer site and downloaded directly.**
-- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content directly, but such use is not supported.**
+- **get_iplayer can only search for programmes that were broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. Any programmes that are still available after 30 days must be located on the iPlayer site and downloaded directly via PID or URL.**
+- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content directly via PID or URL, but such use is not supported.**
 
 ## Documentation
 
