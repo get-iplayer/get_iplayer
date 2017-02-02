@@ -1,56 +1,54 @@
-.TH GET_IPLAYER "1" "September 2016" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "February 2017" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
-get_iplayer \- Stream Recording tool and PVR for BBC iPlayer, BBC Podcasts and more
+get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
 \fBget_iplayer\fR [<options>] [<regex|index> ...]
 .PP
 \fBget_iplayer\fR \fB\-\-get\fR [<options>] <regex|index> ...
 .br
-\fBget_iplayer\fR <url> \fB\-\-type\fR=<type> [<options>]
+\fBget_iplayer\fR <url> [\fB\-\-type\fR=<type> <options>]
 .PP
-\fBget_iplayer\fR <pid|url> [\fB\-\-type\fR=<type> <options>]
+\fBget_iplayer\fR <pid> [\fB\-\-type\fR=<type> <options>]
 .PP
-\fBget_iplayer\fR \fB\-\-stream\fR [<options>] <regex|index> | mplayer \fB\-cache\fR 3072 \-
-.PP
-\fBget_iplayer\fR \fB\-\-stream\fR [<options>] \fB\-\-type\fR=<type> <pid|url> | mplayer \fB\-cache\fR 3072 \-
-.PP
-\fBget_iplayer\fR \fB\-\-stream\fR [<options>] \fB\-\-type\fR=livetv,liveradio <regex|index> \fB\-\-player\fR="mplayer \-cache 128 \-"
-.PP
-\fBget_iplayer\fR \fB\-\-refresh\fR
+\fBget_iplayer\fR \fB\-\-refresh\fR [\fB\-\-type\fR=<type> <options>]
 .SH DESCRIPTION
-\fBget_iplayer\fR lists, searches and records BBC iPlayer TV/Radio, BBC Podcast programmes. Other 3rd\-Party plugins may be available.
+\fBget_iplayer\fR lists, searches and records BBC iPlayer TV and radio programmes.
 .PP
-\fBget_iplayer\fR has three modes: recording a complete programme for later playback, streaming a programme
-directly to a playback application, such as mplayer; and as a Personal Video Recorder (PVR), subscribing to
-search terms and recording programmes automatically. It can also stream or record live BBC iPlayer output
+\fBget_iplayer\fR has two modes: recording a complete programme for later playback, and as a Personal Video Recorder (PVR), subscribing to
+search terms and recording programmes automatically.
 .PP
-If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available programmes.
-Each available programme has a numerical identifier, \fBpid\fR.
-\fBget_iplayer\fR utilises the \fBrtmpdump\fR tool to record BBC iPlayer programmes from RTMP flash streams at various qualities.
+If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available TV programmes.
+Use \-\-type=radio for radio programmes Each available programme has an alphanumeric identifier (\fBPID\fR).
 .PP
-In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes to a schedule.
+In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes on a schedule.
 .SH "OPTIONS"
 .SS "Search Options:"
 .TP
 \fB\-\-available\-since <hours>
-Limit search to programmes that have become available in the last N hours
+Limit search to programmes that have become available in the last <hours> hours
 .TP
 \fB\-\-before <hours>
-Limit search to programmes added to the cache before N hours ago
+Limit search to programmes added to the cache before <hours> hours ago
+.TP
+\fB\-\-category <string>
+Narrow search to matched categories (comma\-separated regex list). Defaults to substring match. Only works with \-\-history.
 .TP
 \fB\-\-channel <string>
-Narrow search to matched channel(s) (regex or comma separated values)
+Narrow search to matched channel(s) (comma\-separated regex list). Defaults to substring match.
 .TP
 \fB\-\-exclude <string>
-Narrow search to exclude matched programme names (regex or comma separated values)
+Narrow search to exclude matched programme names (comma\-separated regex list). Defaults to substring match.
+.TP
+\fB\-\-exclude\-category <string>
+Narrow search to exclude matched categories (comma\-separated regex list). Defaults to substring match. Only works with \-\-history.
 .TP
 \fB\-\-exclude\-channel <string>
-Narrow search to exclude matched channel(s) (regex or comma separated values)
+Narrow search to exclude matched channel(s) (comma\-separated regex list). Defaults to substring match.
 .TP
 \fB\-\-expires\-before <hours>
-Limit search to programmes that will expire in the next N hours
+Limit search to programmes that will expire in the next <hours> hours
 .TP
-\fB\-\-fields <field1>,<field2>,..
+\fB\-\-fields <field1>,<field2>,...
 Searches only in the specified comma separated fields
 .TP
 \fB\-\-future
@@ -66,10 +64,10 @@ Additionally search in programme descriptions and episode names (same as \-\-fie
 GetOpt compliant way of specifying search args
 .TP
 \fB\-\-since <hours>
-Limit search to programmes added to the cache in the last N hours
+Limit search to programmes added to the cache in the last <hours> hours
 .TP
-\fB\-\-type <type>
-Only search in these types of programmes: liveradio,livetv,localfiles,podcast,radio,tv,all (tv is default)
+\fB\-\-type <type>,<type>,...
+Only search in these types of programmes: radio,tv,all (tv is default)
 .SS "Display Options:"
 .TP
 \fB\-\-conditions
@@ -96,11 +94,14 @@ Hide previously recorded programmes
 \fB\-\-info, \-i
 Show full programme metadata and availability of modes and subtitles (max 40 matches)
 .TP
+\fB\-\-list <element>
+Show a list of distinct element values (with counts) for the selected programme type(s) and exit. Valid elements are: 'channel'
+.TP
 \fB\-\-listformat <format>
-Display programme data based on a user\-defined format string (such as <pid>, <name> etc)
+Display programme data based on a user\-defined format string containing substitution parameters (such as <pid>, <name>, <episode>, etc.)
 .TP
 \fB\-\-long, \-l
-Show long programme info
+Show extended programme info
 .TP
 \fB\-\-manpage <file>
 Create man page based on current help text
@@ -116,6 +117,9 @@ Number of matches displayed on a page for multipage output
 .TP
 \fB\-\-quiet, \-q
 Reduce logging output
+.TP
+\fB\-\-series
+Display programme series names only with number of episodes
 .TP
 \fB\-\-show\-cache\-age
 Displays the age of the selected programme caches then exit
@@ -135,8 +139,14 @@ Reverse order of sorted matches
 \fB\-\-streaminfo
 Returns all of the media stream urls of the programme(s)
 .TP
+\fB\-\-terse
+Only show terse programme info (does not affect searching)
+.TP
+\fB\-\-tree
+Display programme listings in a tree view
+.TP
 \fB\-\-verbose, \-v
-Verbose
+Show additional output (useful for diagnosing problems)
 .TP
 \fB\-\-warranty
 Displays warranty section of GPLv3
@@ -146,13 +156,16 @@ Show get_iplayer version and exit.
 .SS "Recording Options:"
 .TP
 \fB\-\-attempts <number>
-Number of attempts to make or resume a failed connection.  \-\-attempts is applied per\-stream, per\-mode.  TV modes typically have two streams available.
+Number of attempts to make or resume a failed connection.  \-\-attempts is applied per\-stream, per\-mode.  Many modes have two or more streams available.
 .TP
-\fB\-\-exclude\-supplier <suppliers>
-Comma\-delimited list of media stream suppliers to skip.  Possible values: level3,akamai,limelight,bidi
+\fB\-\-exclude\-supplier <supplier>,<supplier>,...
+Comma\-delimited list of media stream suppliers to skip.  Possible values: akamai,limelight
 .TP
 \fB\-\-force
 Ignore programme history (unsets \-\-hide option also). Forces a script update if used with \-u
+.TP
+\fB\-\-fps50
+Prefer 50 fps streams for TV programmes (not available for all video sizes).
 .TP
 \fB\-\-get, \-g
 Start recording matching programmes. Search terms required unless \-\-pid specified. Use  \-\-search=.* to force download of all available programmes.
@@ -160,8 +173,11 @@ Start recording matching programmes. Search terms required unless \-\-pid specif
 \fB\-\-hash
 Show recording progress as hashes
 .TP
-\fB\-\-include\-supplier <suppliers>
+\fB\-\-include\-supplier <supplier>,<supplier>,...
 Comma\-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi
+.TP
+\fB\-\-log\-progress
+Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal.
 .TP
 \fB\-\-metadata\-only
 Create specified metadata info file without any recording or streaming (can also be used with thumbnail option).
@@ -172,29 +188,32 @@ Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for ava
 \fB\-\-no\-proxy
 Ignore \-\-proxy setting in preferences
 .TP
+\fB\-\-no\-resume
+Do not resume partial HLS/DASH downloads.
+.TP
+\fB\-\-no\-verify
+Do not verify size of downloaded HLS/DASH segments or file resize upon resume.
+.TP
 \fB\-\-overwrite
 Overwrite recordings if they already exist
 .TP
 \fB\-\-partial\-proxy
 Only uses web proxy where absolutely required (try this extra option if your proxy fails). If specified, value of http_proxy environment variable (if any) in parent process is retained and passed to child processes.
 .TP
-\fB\-\-pid <pid>
-Record an arbitrary PID that does not necessarily appear in the index.
+\fB\-\-pid <pid>,<pid>,...
+Record arbitrary PIDs that do not necessarily appear in the index.
 .TP
 \fB\-\-pid\-recursive
 Record all related episodes if value of \-\-pid is a series or brand PID. Requires \-\-pid.
-.TP
-\fB\-\-pid\-recursive\-noclips
-When used with \-\-pid and \-\-pid\-recursive, skip all associated programme clips if the value of \-\-pid is a brand PID. Requires \-\-pid and \-\-pid\-recursive.
 .TP
 \fB\-\-proxy, \-p <url>
 Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless \-\-partial\-proxy is specified.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dashhigh,dashstd,dashmed,dashlow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,dash,flashaac,haf,hlsaac (default=dashhigh,hafhigh,dashstd,hafstd,hlsaacstd,dashmed,hafmed,dashlow,haflow,hlsaaclow).
+Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,flashaac,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow).
 .TP
 \fB\-\-raw
-Don't transcode or change the recording/stream in any way (i.e. RTMP\->FLV, HLS\->MPEG\-TS)
+Don't remux or change the recording in any way. Saves output file in native container format (RTMP\->FLV, HLS\->MPEG\-TS, DASH\->MP4)
 .TP
 \fB\-\-start <secs|hh:mm:ss>
 Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
@@ -236,23 +255,29 @@ Download Thumbnail image if available
 Only Download Thumbnail image if available, not the programme
 .TP
 \fB\-\-tvmode <mode>,<mode>,...
-TV recording modes (overrides \-\-modes): flashhd,flashvhigh,flashhigh,flashstd,flashnormal,flashlow,hlshd,hlsvhigh,hlshigh,hlsstd,hlslow,hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,vgood,better,best,flash,hls,hvf (default=hvfhd,hlshd,hvfsd,hvfvhigh,hlsvhigh,hvfhigh,hlshigh,hvfstd,hlsstd,hvflow,hlslow).
+TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,flashhd,flashvhigh,flashstd,flashxstd,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,flash,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow).
 .TP
-\fB\-\-url "<url>"
-Record the embedded media player in the specified URL. Use with \-\-type=<type>.
+\fB\-\-url <url>,<url>,...
+Record the embedded media in the specified iPlayer episode URLs. Use with \-\-type.
 .TP
 \fB\-\-versions <versions>
 Version of programme to record. List is processed from left to right and first version found is downloaded. Example: '\-\-versions=audiodescribed,default' will prefer audiodescribed programmes if available.
 .SS "Output Options:"
 .TP
 \fB\-\-command, \-c <command>
-Run user command after successful recording using args such as <pid>, <name> etc
+Run user command after successful recording of programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc.
+.TP
+\fB\-\-command\-radio <command>
+Run user command after successful recording of radio programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides \-\-command.
+.TP
+\fB\-\-command\-tv <command>
+Run user command after successful recording of tv programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides \-\-command.
 .TP
 \fB\-\-file\-prefix <format>
 The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>\-<episode>\-<pid>'
 .TP
-\fB\-\-metadata <type>
-Create metadata info file after recording. Valid types are: xbmc (or kodi), xbmc_movie (or kodi_movie), freevo, generic
+\fB\-\-metadata <format>
+Create metadata info file after recording. Valid formats are: 'generic'
 .TP
 \fB\-\-output, \-o <dir>
 Recording output directory
@@ -264,10 +289,13 @@ Output directory for radio recordings (overrides \-\-output)
 Output directory for tv recordings (overrides \-\-output)
 .TP
 \fB\-\-subdir, \-s
-Put Recorded files into Programme name subdirectory
+Save recorded files into subdirectory. Default: same name as programme.
 .TP
 \fB\-\-subdir\-format <format>
-The format to be used for the subdirectory naming using formatting fields. e.g. '<nameshort>\-<seriesnum>'
+The format to be used for subdirectory naming. Use substitution parameters, e.g., '<nameshort>\-<seriesnum>'
+.TP
+\fB\-\-thumb\-ext <ext>
+Thumbnail filename extension to use
 .TP
 \fB\-\-thumbsize <index|width>
 Default thumbnail size/index to use for the current recording and metadata. index: 1\-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920
@@ -276,7 +304,7 @@ Default thumbnail size/index to use for the current recording and metadata. inde
 Default thumbnail size/index to use when building cache. index: 1\-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920
 .TP
 \fB\-\-whitespace, \-w
-Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores.
+Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores unless \-\-no\-sanitise specified.
 .SS "PVR Options:"
 .TP
 \fB\-\-comment <string>
@@ -286,7 +314,7 @@ Adds a comment to a PVR search
 Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command. Synonyms: \-\-pvrrun, \-\-pvr\-run
 .TP
 \fB\-\-pvr\-add <search name>
-Save the named PVR search with the specified search terms.  Search terms required. Use \-\-search=.* to force download of all available programmes. Synonyms: \-\-pvradd
+Save the named PVR search with the specified search terms. Search terms required unless \-\-pid specified. Synonyms: \-\-pvradd
 .TP
 \fB\-\-pvr\-del <search name>
 Remove the named search from the PVR searches. Synonyms: \-\-pvrdel
@@ -298,7 +326,7 @@ Disable (not delete) a named PVR search. Synonyms: \-\-pvrdisable
 Enable a previously disabled named PVR search. Synonyms: \-\-pvrenable
 .TP
 \fB\-\-pvr\-exclude <string>
-Exclude the PVR searches to run by search name (regex or comma separated values). Synonyms: \-\-pvrexclude
+Exclude the PVR searches to run by search name (comma\-separated regex list). Defaults to substring match. Synonyms: \-\-pvrexclude
 .TP
 \fB\-\-pvr\-list
 Show the PVR search list. Synonyms: \-\-pvrlist
@@ -344,37 +372,49 @@ Use specified user options preset
 Show all valid presets
 .TP
 \fB\-\-profile\-dir <dir>
-Override the user profile directory/folder
+Override the user profile directory
 .TP
 \fB\-\-refresh, \-\-flush, \-f
 Refresh cache
 .TP
-\fB\-\-refresh\-exclude <string>
-Exclude matched channel(s) when refreshing cache (regex or comma separated values). Overrides \-\-refresh\-include\-groups[\-{tv,radio}] status for specified channel(s)
+\fB\-\-refresh\-abortonerror
+Abort cache refresh for programme type if data for any channel fails to download. Use \-\-refresh\-exclude to temporarily skip failing channels.
 .TP
-\fB\-\-refresh\-exclude\-groups
+\fB\-\-refresh\-exclude <channel>,<channel>,...
+Exclude matched channel(s) when refreshing cache (comma\-separated regex list). Defaults to substring match. Overrides \-\-refresh\-include\-groups[\-{tv,radio}] status for specified channel(s)
+.TP
+\fB\-\-refresh\-exclude\-groups <group>,<group>,...
 Exclude channel groups when refreshing radio or tv cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
-\fB\-\-refresh\-exclude\-groups\-radio
+\fB\-\-refresh\-exclude\-groups\-radio <group>,<group>,...
 Exclude channel groups when refreshing radio cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
-\fB\-\-refresh\-exclude\-groups\-tv
+\fB\-\-refresh\-exclude\-groups\-tv <group>,<group>,...
 Exclude channel groups when refreshing tv cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
 \fB\-\-refresh\-future
 Obtain future programme schedule when refreshing cache
 .TP
-\fB\-\-refresh\-include <string>
-Include matched channel(s) when refreshing cache (regex or comma separated values). Overrides \-\-refresh\-exclude\-groups[\-{tv,radio}] status for specified channel(s)
+\fB\-\-refresh\-include <channel>,<channel>,...
+Include matched channel(s) when refreshing cache (comma\-separated regex list). Defaults to substring match. Overrides \-\-refresh\-exclude\-groups[\-{tv,radio}] status for specified channel(s)
 .TP
-\fB\-\-refresh\-include\-groups
+\fB\-\-refresh\-include\-groups <group>,<group>,...
 Include channel groups when refreshing radio or tv cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
-\fB\-\-refresh\-include\-groups\-radio
+\fB\-\-refresh\-include\-groups\-radio <group>,<group>,...
 Include channel groups when refreshing radio cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
-\fB\-\-refresh\-include\-groups\-tv
+\fB\-\-refresh\-include\-groups\-tv <group>,<group>,...
 Include channel groups when refreshing tv cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
+.TP
+\fB\-\-refresh\-limit <days>
+Minimum number of days of programmes to cache. Makes cache updates slow. Default: 7 Min: 1 Max: 30
+.TP
+\fB\-\-refresh\-limit\-radio <days>
+Number of days of radio programmes to cache. Makes cache updates slow. Default: 7 Min: 1 Max: 30
+.TP
+\fB\-\-refresh\-limit\-tv <days>
+Number of days of TV programmes to cache. Makes cache updates slow. Default: 7 Min: 1 Max: 30
 .TP
 \fB\-\-skipdeleted
 Skip the download of metadata/thumbs/subs if the media file no longer exists. Use with \-\-history & \-\-metadataonly/subsonly/thumbonly.
@@ -387,38 +427,41 @@ Specify all options as a urlencoded string of "name=val&name=val&..."
 Location of AtomicParsley binary
 .TP
 \fB\-\-ffmpeg <path>
-Location of ffmpeg binary.
+Location of ffmpeg binary. Assumed to be ffmpeg 3.0 or higher unless \-\-ffmpeg\-obsolete is specified.
+.TP
+\fB\-\-ffmpeg\-force
+Bypass version checks and assume ffmpeg is version 3.0 or higher
 .TP
 \fB\-\-ffmpeg\-obsolete
-Indicates you are using an obsolete version of ffmpeg (<0.7) that does not support the \-loglevel or \-stats options, so  \-\-quiet, \-\-verbose and \-\-debug will not be applied to ffmpeg.
+Indicates you are using an obsolete version of ffmpeg (<1.0) that may not support certain options. Without this option, MP4 conversion may fail with obsolete versions of ffmpeg.
 .SS "Tagging Options:"
 .TP
 \fB\-\-no\-artwork
 Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written.
 .TP
 \fB\-\-no\-tag
-Do not tag downloaded programmes
+Do not tag downloaded programmes. Note that moov atom will be at end of output file if \-\-no\-tag used. Remuxing would be necessary to stream file.
 .TP
 \fB\-\-tag\-format\-show
-Format template for programme name in metadata (use substitution parameters). Default: none
+Format template for programme name in tag metadata (use substitution parameters). Default: <name>
 .TP
 \fB\-\-tag\-format\-title
-Format template for episode title in metadata (use substitution parameters). Default: none
+Format template for episode title in tag metadata (use substitution parameters). Default: <episodeshort>
 .TP
 \fB\-\-tag\-isodate
 Use ISO8601 dates (YYYY\-MM\-DD) in album/show names and track titles
 .TP
 \fB\-\-tag\-podcast
-Tag downloaded radio and tv programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)
+Tag downloaded radio and tv programmes as iTunes podcasts
 .TP
 \fB\-\-tag\-podcast\-radio
-Tag only downloaded radio programmes as iTunes podcasts (requires MP3::Tag module for AAC/MP3 files)
+Tag only downloaded radio programmes as iTunes podcasts
 .TP
 \fB\-\-tag\-podcast\-tv
 Tag only downloaded tv programmes as iTunes podcasts
 .TP
 \fB\-\-tag\-utf8
-Use UTF\-8 encoding for non\-ASCII characters in AtomicParsley parameter values (Linux/Unix/OS X only). Use only if auto\-detect fails.
+Use UTF\-8 encoding for non\-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto\-detect fails.
 .SS "Misc Options:"
 .TP
 \fB\-\-encoding\-console\-in <name>
@@ -449,164 +492,8 @@ Remove download history entries older than number of days specified in option va
 Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect.
 .SS "Deprecated Options:"
 .TP
-\fB\-\-aactomp3
-Transcode AAC audio to MP3 with ffmpeg (CBR appropriate for mode unless \-\-mp3vbr is specified).  Applied only to radio programmes. (Synonyms: \-\-mp3)
-.TP
-\fB\-\-avi
-Output video in AVI container instead of MP4. There is no metadata tagging support for AVI output.
-.TP
-\fB\-\-category <string>
-Narrow search to matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes).
-.TP
 \fB\-\-check\-duration
-Print message showing recorded duration, expected duration and difference between them. Ignored when recording live streams.
-.TP
-\fB\-\-email <address>
-Email HTML index of matching programmes to specified address
-.TP
-\fB\-\-email\-password <password>
-Email password
-.TP
-\fB\-\-email\-port <port number>
-Email port number (default: appropriate port for \-\-email\-security)
-.TP
-\fB\-\-email\-security <TLS|SSL>
-Email security TLS, SSL (default: none)
-.TP
-\fB\-\-email\-sender <address>
-Optional email sender address
-.TP
-\fB\-\-email\-smtp <hostname>
-SMTP server IP address to use to send email (default: localhost)
-.TP
-\fB\-\-email\-user <username>
-Email username
-.TP
-\fB\-\-exclude\-category <string>
-Narrow search to exclude matched categories (regex or comma separated values). Supported only for podcasts (not tv or radio programmes).
-.TP
-\fB\-\-fatfilename
-Remove FAT forbidden characters in file and directory names.  Always applied on Windows. Overrides \-\-punctuation.
-.TP
-\fB\-\-ffmpeg\-liveradio\-opts <options>
-Add custom options to ffmpeg re\-muxing for liveradio
-.TP
-\fB\-\-ffmpeg\-livetv\-opts <options>
-Add custom options to ffmpeg re\-muxing for livetv
-.TP
-\fB\-\-ffmpeg\-radio\-opts <options>
-Add custom options to ffmpeg re\-muxing for radio
-.TP
-\fB\-\-ffmpeg\-tv\-opts <options>
-Add custom options to ffmpeg re\-muxing for tv
-.TP
-\fB\-\-fxd <file>
-Create Freevo FXD XML of matching programmes in specified file
-.TP
-\fB\-\-hfsfilename
-Remove colons in file and directory names. Prevents OS X Finder displaying colon as forward slash. Always applied on OS X. Overrides \-\-punctuation.
-.TP
-\fB\-\-hls\-ffmpeg
-Use ffmpeg instead of built\-in HLS downloader. Ignored for downloading on\-demand radio programmes, which use DASH downloader. 320k on\-demand radio programmes cannot be streamed with \-\-hls\-ffmpeg.
-.TP
-\fB\-\-hls\-ffmpeg\-encode
-Make ffmpeg HLS downloader re\-encode streams. For old versions of ffmpeg (<2.5). May record slower than real time and may not be able to stream higher\-quality media.
-.TP
-\fB\-\-hls\-liveradio\-opts <options>
-Add custom options to ffmpeg HLS download re\-muxing for liveradio
-.TP
-\fB\-\-hls\-livetv\-opts <options>
-Add custom options to ffmpeg HLS download encoding for livetv
-.TP
-\fB\-\-hls\-radio\-opts <options>
-Add custom options to ffmpeg HLS download re\-muxing for radio
-.TP
-\fB\-\-hls\-tv\-opts <options>
-Add custom options to ffmpeg HLS download re\-muxing for tv
-.TP
-\fB\-\-html <file>
-Create basic HTML index of matching programmes in specified file
-.TP
-\fB\-\-id3v2 <path>
-Location of id3v2 or id3tag binary
-.TP
-\fB\-\-isodate
-Use ISO8601 dates (YYYY\-MM\-DD) in filenames and subdirectory paths. Default: true
-.TP
-\fB\-\-keep\-all
-Keep whitespace, all possible punctuation and non\-ASCII characters in file and directory names. Shortcut for: \-\-whitespace \-\-non\-ascii \-\-punctuation.
-.TP
-\fB\-\-list <categories|channel>
-Show a list of available categories/channels for the selected type and exit
-.TP
-\fB\-\-listplugins
-Display a list of currently available plugins or programme types
-.TP
-\fB\-\-liveradio\-intl
-Force use of hard\-coded international streams for HLS live radio.  Ignored for World Service
-.TP
-\fB\-\-liveradio\-uk
-Force use of hard\-coded UK streams for HLS live radio (overrides \-\-liveradio\-intl). Ignored for World Service
-.TP
-\fB\-\-liveradiomode <mode>,<mode>,..
-Live Radio recording modes (overrides \-\-modes): hafhigh,hafstd,hafmed,haflow,shoutcastmp3std,shoutcastaachigh (R3 only, UK only). Shortcuts: worst,worse,good,vgood,better,best,haf,shoutcast. (default=hafhigh,hafstd,hafmed,haflow)
-.TP
-\fB\-\-livetvmode <mode>,<mode>,...
-Live TV recording modes (overrides \-\-modes): hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow. Shortcuts: worst,worse,good,vgood,better,best,hvf. (default=hvfhd,hvfsd,hvfvhigh,hvfhigh,hvfstd,hvflow)
-.TP
-\fB\-\-localfilesdirs <dir>[,dir,]
-Directories/Folders to scan for new files
-.TP
-\fB\-\-mediaselector <identifier>
-Identifier of mediaselector API to use when searching for media streams. One of: 4,5 Default: 5
-.TP
-\fB\-\-mkv
-Output video in MKV container instead of MP4. There is no metadata tagging support for MKV output.
-.TP
-\fB\-\-mp3vbr
-Set LAME VBR mode to N (0 to 9) for AAC transcoding. 0 = target bitrate 245 Kbit/s, 9 = target bitrate 65 Kbit/s (requires \-\-aactomp3). Applied only to radio programmes.
-.TP
-\fB\-\-multimode
-Allow the recording of more than one mode for the same programme \- WARNING: will record all specified/default modes!!
-.TP
-\fB\-\-mythtv <file>
-Create Mythtv streams XML of matching programmes in specified file
-.TP
-\fB\-\-non\-ascii, \-\-na
-Keep non\-ASCII characters in file and directory names. Default behaviour is to remove all non\-ASCII characters.
-.TP
-\fB\-\-nowrite, \-n
-No writing of file to disk (use with \-x to prevent a copy being stored on disk)
-.TP
-\fB\-\-outputliveradio <dir>
-Output directory for live radio recordings (overrides \-\-output)
-.TP
-\fB\-\-outputlivetv <dir>
-Output directory for live tv recordings (overrides \-\-output)
-.TP
-\fB\-\-outputlocalfiles <dir>
-Output directory for localfiles recordings (overrides \-\-output)
-.TP
-\fB\-\-outputpodcast <dir>
-Output directory for podcast recordings (overrides \-\-output)
-.TP
-\fB\-\-player '<command> <options>'
-Use specified command to directly play the stream
-.TP
-\fB\-\-punctuation, \-\-pu
-Keep punctuation characters and symbols in file and directory names, with ellipsis always replaced by underscore. Default behaviour is to remove all punctuation and symbols except underscore, hyphen and full stop. Overridden by \-\-fatfilename and \-\-hfsfilename.
-.TP
-\fB\-\-refresh\-abortonerror
-Abort cache refresh for programme type if data for any channel fails to download. Use \-\-refresh\-exclude to temporarily skip failing channels.
-.TP
-\fB\-\-refresh\-limit <days>
-Minimum number of days of programmes to cache (max: 30)
-.TP
-\fB\-\-refresh\-limit\-radio <integer>
-Number of days of radio programmes to cache. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30
-.TP
-\fB\-\-refresh\-limit\-tv <days>
-Number of days of TV programmes to cache. Makes cache updates VERY slow. Default: 7 Min: 1 Max: 30
+Print message showing recorded duration, expected duration and difference between them.
 .TP
 \fB\-\-rtmp\-radio\-opts <options>
 Add custom options to rtmpdump for radio
@@ -620,77 +507,19 @@ Location of rtmpdump binary. Synonyms: \-\-flvstreamer
 \fB\-\-rtmpport <port>
 Override the RTMP port (e.g. 443)
 .TP
-\fB\-\-series
-Display programme series names only with number of episodes
-.TP
-\fB\-\-shoutcast\-liveradio\-opts <options>
-Add custom options to ffmpeg Shoutcast download re\-muxing for liveradio
-.TP
-\fB\-\-stdout, \-x
-Additionally stream to STDOUT (so you can pipe output to a player)
-.TP
-\fB\-\-stream
-Stream to STDOUT (so you can pipe output to a player)
-.TP
 \fB\-\-swfurl <URL>
 URL of Flash player used by rtmpdump for verification.  Only use if default Flash player URL is not working.
-.TP
-\fB\-\-symlink <file>
-Create symlink to <file> once we have the header of the recording
-.TP
-\fB\-\-tag\-cnid
-Use AtomicParsley \-\-cnID argument (if supported) to add catalog ID used for combining HD and SD versions in iTunes
-.TP
-\fB\-\-tag\-fulltitle
-Prepend album/show title to track title
-.TP
-\fB\-\-tag\-hdvideo
-AtomicParsley accepts \-\-hdvideo argument for HD video flag
-.TP
-\fB\-\-tag\-id3sync
-Save ID3 tags for MP3 files in synchronised form. Provides workaround for corruption of thumbnail images in Windows. Has no effect unless using MP3::Tag Perl module.
-.TP
-\fB\-\-tag\-longdesc
-AtomicParsley accepts \-\-longdesc argument for long description text
-.TP
-\fB\-\-tag\-longdescription
-AtomicParsley accepts \-\-longDescription argument for long description text
-.TP
-\fB\-\-tag\-longepisode
-Use <episode> (incl. episode number) instead of <episodeshort> for track title
-.TP
-\fB\-\-tag\-longtitle
-Prepend <series> (if available) to track title. Ignored with \-\-tag\-fulltitle.
-.TP
-\fB\-\-tag\-shortname
-Use <nameshort> instead of <name> for album/show title
-.TP
-\fB\-\-terse
-Only show terse programme info (does not affect searching)
-.TP
-\fB\-\-thumb\-ext <ext>
-Thumbnail filename extension to use
-.TP
-\fB\-\-tree
-Display Programme listings in a tree view
-.TP
-\fB\-\-xml\-alpha
-Create freevo/Mythtv menu sorted alphabetically by programme name
-.TP
-\fB\-\-xml\-channels
-Create freevo/Mythtv menu of channels \-> programme names \-> episodes
-.TP
-\fB\-\-xml\-names
-Create freevo/Mythtv menu of programme names \-> episodes
 .SH AUTHOR
 get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and is now maintained by the contributors at http://www.infradead.org/get_iplayer/html/get_iplayer.html
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v2.97, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v2.98, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
+
+  NOTE: A UK TV licence is required to legally access BBC iPlayer TV content
 
 
 
