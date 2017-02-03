@@ -135,7 +135,7 @@ my $opt_format = {
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>,<pid>,...', "Record arbitrary PIDs that do not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID. Requires --pid."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless --partial-proxy is specified."],
-	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't remux or change the recording in any way. Saves output file in native container format (RTMP->FLV, HLS->MPEG-TS, DASH->MP4)"],
+	raw		=> [ 0, "raw!", 'Recording', '--raw', "Don't remux or change the recording in any way. Saves output file in native container format (HLS->MPEG-TS, DASH->MP4)"],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
@@ -391,7 +391,7 @@ if ( ! $ENV{IPLAYER_OUTDIR} && $^O eq "MSWin32" ) {
 # Parse cmdline opts definitions from each Programme class/subclass
 Options->get_class_options( $_ ) for qw( Streamer Programme Pvr Tagger );
 Options->get_class_options( progclass($_) ) for progclass();
-Options->get_class_options( "Streamer::$_" ) for qw( rtmp hls );
+Options->get_class_options( "Streamer::$_" ) for qw( hls );
 
 
 # Parse the cmdline using the opt_format hash
@@ -824,23 +824,7 @@ sub init_search {
 		}
 	}
 
-
 	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
-
-	$bin->{rtmpdump}	= $opt->{rtmpdump} || 'rtmpdump';
-	if (! main::exists_in_path('rtmpdump') ) {
-		$bin->{rtmpdump} = 'rtmpdump';
-	}
-
-	delete $binopts->{rtmpdump};
-	push @{ $binopts->{rtmpdump} }, ( '--timeout', 10 );
-	if ( $opt->{debug} ) {
-		push @{ $binopts->{rtmpdump}	}, '--debug';
-	} elsif ( $opt->{verbose} ) {
-		push @{ $binopts->{rtmpdump}	}, '--verbose';
-	} elsif ( $opt->{quiet} || $opt->{silent} ) {
-		push @{ $binopts->{rtmpdump}	}, '--quiet';
-	}
 
 	return ( $type, $prog, $index_prog );
 }
@@ -3568,7 +3552,6 @@ sub cmp_modes($$) {
 	my %ranks2 = (
 		'^daf' => 1000,
 		'^dvf' => 2000,
-		'^flash' => 3000,
 		'^haf' => 4000,
 		'^hls' => 5000,
 		'^hvf' => 6000,
@@ -3732,9 +3715,6 @@ sub mode_ver_download_retry_loop {
 	my $retries = $opt->{attempts} || 3;
 	my $count = 0;
 	my $retcode;
-
-	# Use different number of retries for flash modes
-	$retries = $opt->{attempts} || 50 if $mode =~ /^flash/;
 
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
@@ -4065,9 +4045,7 @@ sub generate_filenames {
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	# output files with --raw
 	if ( $opt->{raw} && $mode ) {
-		if ( $mode =~ /flash/ ) {
-			$prog->{ext} = "flv";
-		} elsif ( $mode =~ /(haf|hvf|hls)/ ) {
+		if ( $mode =~ /(haf|hvf|hls)/ ) {
 			$prog->{ext} = "ts";
 		} elsif ( $mode =~ /daf/ ) {
 			$prog->{ext} = "raw.m4a";
@@ -4361,32 +4339,6 @@ sub get_duration {
 		$duration = ($2 * 3600) + ($3 * 60) + $4;
 	}
 	return $duration;
-}
-
-sub check_duration {
-	my $prog = shift;
-	my $filename = shift || $prog->{filename};
-	my $recorded_s = $prog->get_duration($filename);
-	if ( $recorded_s >= 0 ) {
-		my $expected_s = $prog->{duration};
-		if ( $opt->{start} && ! $opt->{stop} ) {
-			$expected_s -= $opt->{start};
-		} elsif ( $opt->{stop} ) {
-			$expected_s = $opt->{stop} - $opt->{start};
-		}
-		if ( $expected_s >= 0 ) {
-			my $expected = sprintf("%02d:%02d:%02d", ( gmtime($expected_s))[2,1,0] );
-			my $recorded = sprintf("%02d:%02d:%02d", ( gmtime($recorded_s))[2,1,0] );
-			my $diff_s = abs($recorded_s - $expected_s);
-			my $diff_sign = $recorded_s < $expected_s ? "-" : "";
-			my $diff = sprintf("$diff_sign%02d:%02d:%02d", ( gmtime($diff_s))[2,1,0] );
-			main::logger "INFO: Duration check: recorded: $recorded expected: $expected difference: $diff file: $filename\n";
-		} else {
-			main::logger "WARNING: Could not determine expected duration of file: $filename\n";
-		}
-	} else {
-		main::logger "WARNING: Could not determine recorded duration of file: $filename\n";
-	}
 }
 
 
@@ -5687,75 +5639,8 @@ sub get_stream_data_cdn {
 			size		=> $mattribs->{media_file_size},
 		};
 
-		if ( $streamer =~ /rtmp/ ) {
-			%$conn = (%$conn,
-				swfurl		=> $opt->{swfurl} || "http://emp.bbci.co.uk/emp/SMPf/1.17.15/StandardMediaPlayerChromelessFlash.swf",
-				server		=> $cattribs->{server},
-				identifier	=> $cattribs->{identifier},
-				authstring	=> $cattribs->{authString}
-			);
-		}
-
-		# Akamai CDN
-		if ( $cattribs->{kind} eq 'akamai' ) {
-			# Default appication is 'ondemand'
-			$cattribs->{application} = 'ondemand' if ! $cattribs->{application};
-
-			$conn->{playpath} = $cattribs->{identifier};
-			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
-			$conn->{application} = "$cattribs->{application}?_fcs_vhost=$cattribs->{server}&undefined";
-
-			if ( $cattribs->{authString} ) {
-				if ( $cattribs->{authString} !~ /&aifp=/ ) {
-					$cattribs->{authString} .= '&aifp=v001';
-				}
-
-				if ( $cattribs->{authString} !~ /&slist=/ ) {
-					$cattribs->{identifier} =~ s/^mp[34]://;
-					$cattribs->{authString} .= "&slist=$cattribs->{identifier}";
-				}
-
-				### ??? live and Live TV, Live EMP Video or Non-public EMP video:
-				$conn->{playpath} .= "?$cattribs->{authString}";
-				$conn->{streamurl} .= "&$cattribs->{authString}";
-				$conn->{application} .= "&$cattribs->{authString}";
-			} else {
-				$conn->{streamurl} .= "&undefined";
-				$conn->{application} .= "&undefined";
-			}
-
-			# Port 1935? for live?
-			$conn->{tcurl} = "rtmp://$cattribs->{server}:80/$conn->{application}";
-
-		# Limelight CDN
-		} elsif ( $cattribs->{kind} eq 'limelight' ) {
-			decode_entities( $cattribs->{authString} );
-			$conn->{playpath} = $cattribs->{identifier};
-			# Remove offending mp3/mp4: at the start of the identifier (don't remove in stream url)
-			### Not entirely sure if this is even required for video modes either??? - not reqd for aac and low
-			# $conn->{playpath} =~ s/^mp[34]://g;
-			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
-			$conn->{application} = "$cattribs->{application}?$cattribs->{authString}";
-			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
-
-		# Level3 CDN
-		} elsif ( $cattribs->{kind} eq 'level3' ) {
-			$conn->{playpath} = $cattribs->{identifier};
-			$conn->{application} = "$cattribs->{application}?$cattribs->{authString}";
-			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
-			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
-
-		# iplayertok CDN
-		} elsif ( $cattribs->{kind} eq 'iplayertok' ) {
-			$conn->{application} = $cattribs->{application};
-			decode_entities($cattribs->{authString});
-			$conn->{playpath} = "$cattribs->{identifier}?$cattribs->{authString}";
-			$conn->{playpath} =~ s/^mp[34]://g;
-			$conn->{streamurl} = "rtmp://$cattribs->{server}:1935/ondemand?_fcs_vhost=$cattribs->{server}&auth=$cattribs->{authString}&aifp=v001&slist=$cattribs->{identifier}";
-			$conn->{tcurl} = "rtmp://$cattribs->{server}:1935/$conn->{application}";
-
 		# sis/edgesuite/sislive streams
-		} elsif ( $cattribs->{kind} eq 'sis' || $cattribs->{kind} eq 'edgesuite' || $cattribs->{kind} eq 'sislive' ) {
+		if ( $cattribs->{kind} eq 'sis' || $cattribs->{kind} eq 'edgesuite' || $cattribs->{kind} eq 'sislive' ) {
 			$conn->{streamurl} = $cattribs->{href};
 
 		# http stream
@@ -5904,31 +5789,6 @@ sub get_stream_data {
 	my $checked_geoblock;
 
 	my (%seen, $stream_key);
-	if ( $opt->{info} || $modelist =~ /flash/ ) {
-		# get Flash streams for on-demand
-		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/proto/rtmp?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			$checked_geoblock = 1;
-			next if check_geoblock( $xml );
-			$unblocked = 1;
-			my @pc_medias = parse_metadata( $xml );
-			for my $pc_media ( @pc_medias ) {
-				my @pc_conns;
-				for my $pc_conn ( @{$pc_media->{connections}} ) {
-					next if $pc_conn->{supplier} =~ /$exclude_regex/;
-					my $identifier = $pc_conn->{identifier} || $pc_media->{service};
-					$stream_key = "$identifier-$pc_conn->{protocol}-$pc_conn->{supplier}";
-					next if $seen{$stream_key};
-					$seen{$stream_key}++;
-					push @pc_conns, $pc_conn;
-				}
-				@{$pc_media->{connections}} = @pc_conns;
-				$pc_media->{fps} = 25 if $prog->{type} eq "tv" && $pc_media->{kind} ne "captions";
-				push @medias, $pc_media;
-			}
-		}
-	}
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
 		# get MPEG-DASH streams for on-demand
 		push @media_stream_pc_prefixes, @media_stream_iptv_prefixes if $prog->{type} eq "tv";
@@ -6181,50 +6041,6 @@ sub get_stream_data {
 				}
 			}
 
-		# flashhd modes
-		} elsif (	$mattribs->{kind} eq 'video' &&
-				$mattribs->{type} eq 'video/mp4' &&
-				$mattribs->{encoding} eq 'h264'
-		) {
-			# Determine classifications of modes based mainly on bitrate
-
-			# flashhd modes
-			if ( $mattribs->{bitrate} > 2000 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashhd', 'rtmp', 'mp4' );
-
-			# flashvhigh modes
-			} elsif ( $mattribs->{bitrate} > 1200 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashvhigh', 'rtmp', 'mp4' );
-
-			# flashhigh modes
-			} elsif ( $mattribs->{bitrate} > 700 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashstd', 'rtmp', 'mp4' );
-
-			# flashstd modes
-			} elsif ( $mattribs->{bitrate} > 400 && $mattribs->{width} >= 500 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashxstd', 'rtmp', 'mp4' );
-
-			}
-
-		# flashaac modes
-		} elsif (	$mattribs->{kind} eq 'audio' &&
-				$mattribs->{type} eq 'audio/mp4'
-				# This also catches worldservice who happen not to set the encoding type
-				# && $mattribs->{encoding} eq 'aac'
-		) {
-			# flashaachigh
-			if (  $mattribs->{bitrate} >= 192 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashaachigh', 'rtmp', 'm4a' );
-
-			# flashaacstd
-			} elsif ( $mattribs->{bitrate} >= 96 ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashaacstd', 'rtmp', 'm4a' );
-
-			# flashaaclow
-			} elsif ( $mattribs->{service} !~ /3gp/ ) {
-				get_stream_data_cdn( $data, $mattribs, 'flashaaclow', 'rtmp', 'm4a' );
-			}
-
 		# Subtitles modes
 		} elsif (	$mattribs->{kind} eq 'captions' &&
 				$mattribs->{type} eq 'application/ttaf+xml'
@@ -6260,7 +6076,9 @@ sub modelist {
 		$mlist = 'default';
 	}
 	my $mlist_orig = $mlist;
+	$mlist =~ s/flashaac/daf/g;
 	$mlist =~ s/rtmp/flash/g;
+	$mlist =~ s/flash/hls/g;
 	if ( $prog->{type} eq "tv" ) {
 		# backcompat
 		$mlist =~ s/tv25fps/tvdefault/g;
@@ -6268,11 +6086,8 @@ sub modelist {
 		$mlist =~ s/hlslow/hlsxstd/g;
 		$mlist =~ s/hvfvhigh/hvfhigh/g;
 		$mlist =~ s/hvfstd/hvflow/g;
-		$mlist =~ s/flashhigh/flashstd/g;
-		$mlist =~ s/flashlow/flashxstd/g;
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
-		$mlist =~ s/\bflash\b/flashaac/g if $mlist !~ /flashaac/;
 		$mlist =~ s/dash/daf/g;
 	}
 	if ( $mlist ne $mlist_orig && ! $opt->{modewarn} ) {
@@ -6318,28 +6133,6 @@ sub modelist {
 		}
 		$mlist = main::expand_list($mlist, 'dvfworse', 'dvfworst');
 		$mlist = main::expand_list($mlist, 'dvfworst', 'dvflow');
-	}
-	# RTMP on-demand tv
-	if ( $prog->{type} eq "tv" && $mlist =~ /flash/ ) {
-		$mlist = main::expand_list($mlist, 'flash', 'flashdefault');
-		$mlist = main::expand_list($mlist, 'flashdefault', 'flashbest');
-		$mlist = main::expand_list($mlist, 'flashbest', 'flashhd,flashbetter');
-		$mlist = main::expand_list($mlist, 'flashbetter', 'flashvgood');
-		$mlist = main::expand_list($mlist, 'flashvgood', 'flashvhigh,flashgood');
-		$mlist = main::expand_list($mlist, 'flashgood', 'flashworse');
-		$mlist = main::expand_list($mlist, 'flashworse', 'flashstd,flashworst');
-		$mlist = main::expand_list($mlist, 'flashworst', 'flashxstd');
-	}
-	# RTMP on-demand radio
-	if ( $prog->{type} eq "radio" && $mlist =~ /flashaac/ ) {
-		$mlist = main::expand_list($mlist, 'flashaac', 'flashaacdefault');
-		$mlist = main::expand_list($mlist, 'flashaacdefault', 'flashaacbest');
-		$mlist = main::expand_list($mlist, 'flashaacbest', 'flashaachigh,flashaacbetter');
-		$mlist = main::expand_list($mlist, 'flashaacbetter', 'flashaacvgood');
-		$mlist = main::expand_list($mlist, 'flashaacvgood', 'flashaacstd,flashaacgood');
-		$mlist = main::expand_list($mlist, 'flashaacgood', 'flashaacworse');
-		$mlist = main::expand_list($mlist, 'flashaacworse', 'flashaacworst');
-		$mlist = main::expand_list($mlist, 'flashaacworst', 'flashaaclow');
 	}
 	# HLS Audio Factory on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /haf/ ) {
@@ -6523,10 +6316,9 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,flashhd,flashvhigh,flashstd,flashxstd,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,flash,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow)."],
+		tvmode		=> [ 1, "tvmode|vmode=s", 'Recording', '--tvmode <mode>,<mode>,...', "TV recording modes (overrides --modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow)."],
 		commandtv	=> [ 1, "commandtv|command-tv=s", 'Output', '--command-tv <command>', "Run user command after successful recording of tv programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides --command."],
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
-		rtmptvopts	=> [ 1, "rtmp-tv-opts|rtmptvopts=s", 'Deprecated', '--rtmp-tv-opts <options>', "Add custom options to rtmpdump for tv"],
 	};
 }
 
@@ -7254,16 +7046,6 @@ sub get_links_schedule_page {
 sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
-	# if rtmpdump does not exist
-	if ( $mode =~ /^(rtmp|flash)/ && ! main::exists_in_path('rtmpdump') ) {
-		main::logger "WARNING: Required rtmpdump utility not found - cannot download Flash audio/video\n";
-		return 'next';
-	}
-	# Force raw mode if ffmpeg is not installed
-	if ( $mode =~ /^(rtmp|flash)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
-		main::logger "WARNING: Required ffmpeg utility not found - not converting .flv file\n";
-		$opt->{raw} = 1;
-	}
 	# require ffmpeg for HLS
 	if ( $mode =~ /^(hls|hvf|haf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
 		main::logger "WARNING: Required ffmpeg utility not found - not converting .ts file\n";
@@ -7751,10 +7533,9 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,flashaac,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow)."],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow)."],
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "Run user command after successful recording of radio programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
-		rtmpradioopts	=> [ 1, "rtmp-radio-opts|rtmpradioopts=s", 'Deprecated', '--rtmp-radio-opts <options>', "Add custom options to rtmpdump for radio"],
 	};
 }
 
@@ -7919,199 +7700,9 @@ sub remux {
 		main::logger "ERROR: Destination file name: $prog->{filename}\n";
 		return 'skip';
 	}
-	$prog->check_duration() if $opt->{checkduration};
 	main::logger "INFO: Recorded file: $prog->{filename}\n";
 
 	return 0;
-}
-
-################### Streamer::rtmp class #################
-package Streamer::rtmp;
-
-# Inherit from Streamer class
-use base 'Streamer';
-
-use Env qw[@PATH];
-use Fcntl;
-use File::Copy;
-use File::Path;
-use File::Spec;
-use File::stat;
-use HTML::Entities;
-use HTTP::Cookies;
-use HTTP::Headers;
-use IO::Seekable;
-use IO::Socket;
-use LWP::ConnCache;
-use LWP::UserAgent;
-use POSIX qw(mkfifo);
-use strict;
-use Text::ParseWords;
-use Time::Local;
-use URI;
-
-
-sub opt_format {
-	return {
-		rtmpport	=> [ 1, "rtmpport=n", 'Deprecated', '--rtmpport <port>', "Override the RTMP port (e.g. 443)"],
-		rtmpdump	=> [ 0, "rtmpdump|flvstreamer=s", 'Deprecated', '--rtmpdump <path>', "Location of rtmpdump binary. Synonyms: --flvstreamer"],
-		swfurl	=> [ 1, "swfurl=s", 'Deprecated', '--swfurl <URL>', "URL of Flash player used by rtmpdump for verification.  Only use if default Flash player URL is not working."],
-	};
-}
-
-
-# %prog (only for {ext} and {mode})
-# Actually do the RTMP streaming
-sub get {
-	my ( $self, undef, undef, $prog, %streamdata ) = @_;
-	my @cmdopts;
-
-	my $url_2 	= $streamdata{streamurl};
-	my $server	= $streamdata{server};
-	my $application = $streamdata{application};
-	my $tcurl 	= $streamdata{tcurl};
-	my $authstring 	= $streamdata{authstring};
-	my $swfurl 	= $streamdata{swfurl};
-	my $playpath 	= $streamdata{playpath};
-	my $port 	= $streamdata{port} || $opt->{rtmpport} || 1935;
-	my $protocol	= $streamdata{protocol} || 0;
-	my $pageurl	= $prog->{player};
-	my $mode	= $prog->{mode};
-	push @cmdopts, shellwords( $streamdata{extraopts} ) if $streamdata{extraopts};
-
-	my @cmd;
-	my $swfarg = "--swfUrl";
-
-	# media file
-	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
-	my $media_prefix = $prog->{fileprefix};
-	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.${media_type}.flv"));
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.rtmp.flv"));
-	my $media_raw = $prog->{filename};
-
-	if ( $opt->{overwrite} ) {
-		main::logger "INFO: Overwriting RTMP $media_type file: $media_file\n" if -f $media_file;
-		unlink $media_file;
-	} else {
-		if ( -f $media_file ) {
-			main::logger "INFO: Using existing RTMP $media_type file: $media_file\n";
-			main::logger "INFO: Use --overwrite to re-download\n";
-		}
-	}
-
-	unless ( -f $media_file ) {
-		# Remove failed file recording (below a certain size) - hack to get around rtmpdump not returning correct exit code
-		my $min_download_size = main::progclass($prog->{type})->min_download_size();
-		if ( -f $media_tmp && stat($media_tmp)->size < $min_download_size ) {
-			unlink( $media_tmp );
-		}
-
-		# rtmpdump version detection e.g. 'RTMPDump v2.4'
-		my $rtmpver = `"$bin->{rtmpdump}" --help 2>&1`;
-		if ( $opt->{verbose} ) {
-			(my $rtmpver2 = $rtmpver) =~ s/^/INFO: /gm;
-			main::logger "INFO: rtmpver: \n$rtmpver2";
-		}
-		if ( $rtmpver =~ /swfVfy/ ) {
-			$swfarg = "--swfVfy";
-		} else {
-			main::logger "WARNING: Your version of rtmpdump/flvstreamer does not support SWF Verification\n";
-			main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
-			main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
-		}
-		$rtmpver =~ s/^\w+\s+v?([\.\d]+)(.*\n)*$/$1/g;
-		main::logger "INFO: $bin->{rtmpdump} version $rtmpver\n" if $opt->{verbose};
-		main::logger "INFO: RTMP_URL: $url_2, tcUrl: $tcurl, application: $application, authString: $authstring, swfUrl: $swfurl, file: $prog->{filepart}, file_done: $prog->{filename}\n" if $opt->{verbose};
-
-		# Save the effort and don't support < v1.8
-		if ( $rtmpver < 1.8 ) {
-			main::logger "WARNING: rtmpdump/flvstreamer 1.8 or later is required - please upgrade\n";
-			main::logger "WARNING: You may see this warning if rtmpdump has malfunctioned\n";
-			main::logger "WARNING: Use --verbose to print the output from rtmpdump\n" unless $opt->{verbose};
-			return 'next';
-		}
-
-		# Add start stop options if defined
-		if ( $opt->{start} || $opt->{stop} ) {
-			push @cmdopts, ( '--start', $opt->{start} ) if $opt->{start};
-			push @cmdopts, ( '--stop', $opt->{stop} ) if $opt->{stop};
-		}
-
-		# Add hashes option if required
-		push @cmdopts, '--hashes' if $opt->{hash};
-
-		push @cmdopts, ( '--resume', '-o', $media_tmp );
-		push @cmdopts, @{ $binopts->{rtmpdump} } if $binopts->{rtmpdump};
-
-		# Add custom options to rtmpdump for this type if specified with --rtmp-<type>-opts
-		if ( defined $opt->{'rtmp'.$prog->{type}.'opts'} ) {
-			push @cmdopts, shellwords( $opt->{'rtmp'.$prog->{type}.'opts'} );
-		}
-
-		my $return;
-		# Different invocation depending on version
-		# if playpath is defined
-		if ( $playpath ) {
-			@cmd = (
-				$bin->{rtmpdump},
-				'--port', $port,
-				'--protocol', $protocol,
-				'--playpath', $playpath,
-				'--host', $server,
-				$swfarg, $swfurl,
-				'--tcUrl', $tcurl,
-				'--app', $application,
-				'--pageUrl', $pageurl,
-				@cmdopts,
-			);
-		# Using just streamurl (i.e. no playpath defined)
-		} else {
-			@cmd = (
-				$bin->{rtmpdump},
-				'--port', $port,
-				'--protocol', $protocol,
-				'--rtmp', $streamdata{streamurl},
-				@cmdopts,
-			);
-		}
-
-		main::logger "INFO: Begin recording file: $media_tmp\n";
-
-		$return = main::run_cmd( 'normal', @cmd );
-
-		# rtmpdump returns 2 with --stop
-		unless ( $return == 2 && $opt->{stop} ) {
-			return 'retry' if $return && -f $media_tmp && stat($media_tmp)->size > $min_download_size;
-		}
-
-		# If file is too small or non-existent then delete and try next mode
-		if ( (! -f $media_tmp) || ( -f $media_tmp && stat($media_tmp)->size < $min_download_size) ) {
-			main::logger "WARNING: Failed to stream file $media_tmp\n";
-			unlink $media_tmp;
-			return 'next';
-		}
-
-		if ( ! move($media_tmp, $media_file) ) {
-			main::logger "ERROR: Could not rename file: $media_tmp\n";
-			main::logger "ERROR: Destination file name: $media_file\n";
-			return 'skip';
-		}
-		main::logger "INFO: Saved RTMP $media_type file: $media_file\n";
-	}
-
-	if ( $opt->{raw} ) {
-		if ( ! move($media_file, $media_raw) ) {
-			main::logger "ERROR: Could not rename file: $media_file\n";
-			main::logger "ERROR: Destination file name: $media_raw\n";
-			return 'skip';
-		}
-		$prog->check_duration() if $opt->{checkduration};
-		main::logger "INFO: Recorded raw $media_type file: $media_raw\n";
-		return 0;
-	}
-
-	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? (undef, $media_file) : ($media_file, undef);
-	return $self->remux($audio_file, $video_file, $prog, %streamdata);
 }
 
 
