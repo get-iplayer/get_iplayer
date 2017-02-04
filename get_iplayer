@@ -118,7 +118,6 @@ my %prog_types = (
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
-	checkduration		=> [ 1, "checkduration|check-duration!", 'Deprecated', '--check-duration', "Print message showing recorded duration, expected duration and difference between them."],
 	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to skip.  Possible values: akamai,limelight"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	fps50		=> [ 1, "fps50", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
@@ -5615,21 +5614,12 @@ sub get_stream_data_cdn {
 	my ( $data, $mattribs, $mode, $streamer, $ext ) = ( @_ );
 	my $data_pri = {};
 
-	# Public Non-Live EMP Video without auth
-	#if ( $cattribs->{kind} eq 'akamai' && $cattribs->{identifier} =~ /^public\// ) {
-	#	$data->{$mode}->{bitrate} = 480; # ??
-	#	$data->{$mode}->{swfurl} = "http://news.bbc.co.uk/player/emp/2.11.7978_8433/9player.swf";
-	# Live TV, Live EMP Video or Non-public EMP video
-	#} elsif ( $cattribs->{kind} eq 'akamai' ) {
-	#	$data->{$mode}->{bitrate} = 480; # ??
-
 	my $count = 1;
 	for my $cattribs ( @{ $mattribs->{connections} } ) {
 
 		decode_entities($cattribs->{authString});
 
 		# Common attributes
-		# swfurl = Default iPlayer swf version
 		my $conn = {
 			ext			=> $ext,
 			streamer	=> $streamer,
