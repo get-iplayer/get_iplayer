@@ -122,7 +122,7 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also). Forces a script update if used with -u"],
 	fps50		=> [ 1, "fps50", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required unless --pid specified. Use  --search=.* to force download of all available programmes."],
-	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi"],
+	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-delimited list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
@@ -5736,16 +5736,8 @@ sub get_stream_data {
 
 	# filter CDN suppliers
 	my @exclude_supplier = split(/,/, $opt->{excludesupplier});
-	# exclude bidi until supported
-	if ( ! grep /^bidi/, @exclude_supplier ) {
-		push @exclude_supplier, 'bidi';
-	}
-	# level3 is gone, but exclude just in case
-	if ( ! grep /^level3/, @exclude_supplier ) {
-		push @exclude_supplier, 'level3';
-	}
 	if ( $opt->{includesupplier} ) {
-			@exclude_supplier = grep { $opt->{includesupplier} !~ /\b$_\b/ } @exclude_supplier;
+		@exclude_supplier = grep { $opt->{includesupplier} !~ /\b$_\b/ } @exclude_supplier;
 	}
 	if ( grep /^akamai/, @exclude_supplier ) {
 		push @exclude_supplier, 'ak';
@@ -7706,19 +7698,32 @@ use URI;
 
 sub opt_format {
 	return {
-		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
-		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
+		noresume	=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
+		noverify	=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
 	};
 }
 
 sub parse_playlist {
 	my (undef, $ua, $url) = @_;
-	main::logger "DEBUG: HLS playlist URL: $url\n" if $opt->{verbose};
-	my $data = main::request_url_retry($ua, $url, 3, undef, "\nWARNING: Failed to download HLS playlist: $url\n", 1);
+	my $playlist_url = $url;
+	main::logger "DEBUG: HLS playlist URL: $playlist_url\n" if $opt->{verbose};
+	# resolve playlist redirect
+	for (my $i = 0; $i < 3; $i++) {
+		my $request = HTTP::Request->new( HEAD => $playlist_url );
+		my $response = $ua->request($request);
+		if ( $response->is_success ) {
+			if ( $response->previous ) {
+				$playlist_url = $response->request->uri;
+				main::logger "DEBUG: HLS playlist URL (actual): $playlist_url\n" if $opt->{verbose};
+			}
+			last;
+		}
+	}
+	my $data = main::request_url_retry($ua, $playlist_url, 3, undef, "\nWARNING: Failed to download HLS playlist: $playlist_url\n", 1);
 	return undef if ! $data;
 	my @lines = split(/\r?\n/, $data);
 	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
-		main::logger "WARNING: Invalid HLS playlist (no header) $url\n";
+		main::logger "WARNING: Invalid HLS playlist (no header): $playlist_url\n";
 		return undef;
 	}
 	my $sequence = 0;
@@ -7734,7 +7739,7 @@ sub parse_playlist {
 		} elsif ($line !~ /^#/) {
 			my $segment_url = $line;
 			if ( $segment_url !~ /^http/ ) {
-				($segment_url = $url) =~ s/[^\/]+\.m3u8/$line/;
+				($segment_url = $playlist_url) =~ s/[^\/]+\.m3u8/$line/;
 			}
 			$segments->{$sequence} = { 'url' => $segment_url, 'duration' => $segment_duration };
 			$segment_duration = 0;
