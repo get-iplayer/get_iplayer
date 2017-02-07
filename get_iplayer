@@ -851,6 +851,10 @@ sub find_pid_matches {
 	} else {
 		$pid = $opt->{pid};
 		@try_types = (keys %{ $type });
+		# ensure tv tried first if subtitles requested and both tv and radio configured
+		if ( ( $opt->{subtitles} || $opt->{subsonly} ) && $#try_types > 0 ) {
+			@try_types = reverse sort @try_types;
+		}
 	}
 	logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
 	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $pid );
@@ -7140,6 +7144,9 @@ sub download_subtitles {
 	my $suburl;
 	my $subs;
 
+	# in case --subtitles used with --pid for radio programme
+	return unless $prog->{type} eq "tv";
+	
 	# Don't redownload subs if the file already exists
 	if ( ( -f $file || -f "$prog->{dir}/$prog->{fileprefix}.partial.srt" ) && ! $opt->{overwrite} ) {
 		main::logger "INFO: Skipping subtitles download - file already exists: $file\n" if $opt->{verbose};
@@ -7152,7 +7159,7 @@ sub download_subtitles {
 		last if $suburl;
 	}
 	# Return if we have no url
-	if (! $suburl) {
+	if (! $suburl ) {
 		my $vermsg = " for version(s): ".(join ',', @$versions) if @$versions;
 		main::logger "INFO: Subtitles not available${vermsg}\n";
 		return 2;
