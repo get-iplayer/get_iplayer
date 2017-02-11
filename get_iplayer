@@ -7711,8 +7711,8 @@ use URI;
 
 sub opt_format {
 	return {
-		noresume	=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
-		noverify	=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
+		noresume		=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
+		noverify		=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
 	};
 }
 
@@ -7721,16 +7721,11 @@ sub parse_playlist {
 	my $playlist_url = $url;
 	main::logger "DEBUG: HLS playlist URL: $playlist_url\n" if $opt->{verbose};
 	# resolve playlist redirect
-	for (my $i = 0; $i < 3; $i++) {
-		my $request = HTTP::Request->new( HEAD => $playlist_url );
-		my $response = $ua->request($request);
-		if ( $response->is_success ) {
-			if ( $response->previous ) {
-				$playlist_url = $response->request->uri;
-				main::logger "DEBUG: HLS playlist URL (actual): $playlist_url\n" if $opt->{verbose};
-			}
-			last;
-		}
+	my $request  = HTTP::Request->new( HEAD => $playlist_url );
+	my $response = $ua->request($request);
+	if ( $response->is_success and $response->previous ) {
+		$playlist_url = $response->request->uri;
+		main::logger "DEBUG: HLS playlist URL (actual): $playlist_url\n" if $opt->{verbose};
 	}
 	my $data = main::request_url_retry($ua, $playlist_url, 3, undef, "\nWARNING: Failed to download HLS playlist: $playlist_url\n", 1);
 	return undef if ! $data;
