@@ -139,8 +139,9 @@ my $opt_format = {
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	suboffset	=> [ 1, "suboffset=n", 'Recording', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
 	subtitles	=> [ 2, "subtitles|subs!", 'Recording', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
-	subsfmt		=> [ 1, "subsfmt=s", 'Recording', '--subsfmt <format>', "Subtitles format.  One of: default, compact.  Default: 'default'"],
+	subsfmt		=> [ 1, "subsfmt=s", 'Deprecated', '--subsfmt <format>', "Subtitles format.  One of: default, compact.  Default: 'default'"],
 	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Recording', '--subtitles-only', "Only download the subtitles, not the programme"],
+	subsmono	=> [ 1, "subsmono|subs-mono!", 'Recording', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker."],
 	subsraw		=> [ 1, "subsraw!", 'Recording', '--subsraw', "Additionally save the raw subtitles file"],
 	subsrequired		=> [ 1, "subsrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
 	tagonly		=> [ 1, "tagonly|tag-only!", 'Recording', '--tag-only', "Only update the programme metadata tag and not download the programme (can also be used with --history)"],
@@ -7146,7 +7147,7 @@ sub download_subtitles {
 		last if $suburl;
 	}
 	# Return if we have no url
-	if (! $suburl ) {
+	if (! $suburl) {
 		my $vermsg = " for version(s): ".(join ',', @$versions) if @$versions;
 		main::logger "INFO: Subtitles not available${vermsg}\n";
 		return 2;
@@ -7154,16 +7155,10 @@ sub download_subtitles {
 
 	main::logger "INFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
 
-	# Open subs file
-	unlink($file);
-	open( my $fh, "> $file" );
-
 	# Download subs
 	$subs = main::request_url_retry($ua, $suburl, 3);
 	if (! $subs ) {
 		main::logger "ERROR: Subtitle Download failed\n";
-		close $fh;
-		unlink($file) if -f $file;
 		return 1;
 	} else {
 		# Dump raw subs into a file if required
@@ -7198,71 +7193,238 @@ sub download_subtitles {
 	# And a form with explicit namespace:
 	#<tt:p xml:id="C80" begin="00:08:45.440" end="00:08:49.240" style="s2">It was in 2000. At the beginning,<tt:br />it was different.</tt:p>
 
-	my @subsfmts = qw/compact default/;
-	if ( $opt->{subsfmt} && ! grep /^$opt->{subsfmt}$/i, @subsfmts ) {
-		main::logger "WARNING: Invalid value specified for --subsfmt: $opt->{subsfmt}. Must be one of: @subsfmts. Using default subtitles format.\n";
-		$opt->{subsfmt} = "default";
-	}
-	my ($ns) = $subs =~ m{<(\w+:)p\b};
-	my $p = $ns.'p';
-	my $span = $ns.'span';
-	my $br = $ns.'br';
-	my $count = 0;
-	for ( $subs =~ m{<$p\b.+?</$p>}gis ) {
-		my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</$p>}is );
-		if ( $begin && $end && $sub ) {
-			($begin = sprintf( '%02d:%02d:%06.3f', split /:/, $begin )) =~ s/\./,/;
-			($end = sprintf( '%02d:%02d:%06.3f', split /:/, $end )) =~ s/\./,/;
-			if ($opt->{suboffset}) {
-				$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
-				$end = main::subtitle_offset( $end, $opt->{suboffset} );
-			}
-			# remove line breaks, squeeze whitespace, fix up <br> and <span>
-			$sub =~ s|\n+||g;
-			$sub =~ s/(^\s+|\s+$)//g;
-			$sub =~ s|\s+| |g;
-			$sub =~ s|(\s?<$br.*?>\s?)+|<br/>|gi;
-			$sub =~ s!(^<br/>|<br/>$)!!g;
-			$sub =~ s|<br/>(</$span>)$|$1|i;
-			$sub =~ s|(<$span.*?>)\s|$1|i;
-			# separate individual lines based on <span>s
-			$sub =~ s|<$span.*?>(.*?)</$span>|\n$1\n|gi;
-			if ($sub =~ m{\n}) {
-				# fix up line breaks
-				$sub =~ s/(^\n|\n$)//g;
-				# add leading hyphens
-				$sub =~ s|\n+|\n- |g;
-				if ( $sub =~ m{\n-} ) {
-					$sub =~ s|^|- |;
-				}
-			}
-			if ( $opt->{subsfmt} eq 'compact' ) {
-				$sub =~ s|\n+||g;
-				# embed line breaks
-				$sub =~ s|<br/>|\n|g;
-			} else {
-				# remove <br/> elements
-				$sub =~ s|\n- <br/>\n|\n|g;
-				$sub =~ s|\n- <br/>|\n- |g;
-				$sub =~ s|<br/>| |g;
-			}
-			decode_entities($sub);
-			# Write to file
-			print $fh ++$count, "\n";
-			print $fh "$begin --> $end\n";
-			print $fh "$sub\n\n";
+	if ( $opt->{subsfmt} ) {
+		my @subsfmts = qw/compact default original/;
+		if ( ! grep /^$opt->{subsfmt}$/i, @subsfmts ) {
+			main::logger "WARNING: Invalid value specified for --subsfmt: $opt->{subsfmt}. Must be one of: @subsfmts. Using default subtitles format.\n";
+			$opt->{subsfmt} = "default";
 		}
-	}
-	close $fh;
+		# Open subs file
+		open( my $fh, "> $file" );
 
-	if ( ! $count ) {
-		main::logger "WARNING: Subtitles empty\n";
-		return 3;
-	}
+		my ($ns) = $subs =~ m{<(\w+:)p\b};
+		my $p = $ns.'p';
+		my $span = $ns.'span';
+		my $br = $ns.'br';
+		my $count = 0;
+		for ( $subs =~ m{<$p\b.+?</$p>}gis ) {
+			my ( $begin, $end, $sub ) = ( m{\bbegin="(.+?)".*?\bend="(.+?)".*?>(.+?)</$p>}is );
+			if ( $begin && $end && $sub ) {
+				($begin = sprintf( '%02d:%02d:%06.3f', split /:/, $begin )) =~ s/\./,/;
+				($end = sprintf( '%02d:%02d:%06.3f', split /:/, $end )) =~ s/\./,/;
+				if ($opt->{suboffset}) {
+					$begin = main::subtitle_offset( $begin, $opt->{suboffset} );
+					$end = main::subtitle_offset( $end, $opt->{suboffset} );
+				}
+				# remove line breaks, squeeze whitespace, fix up <br> and <span>
+				$sub =~ s|\n+||g;
+				$sub =~ s/(^\s+|\s+$)//g;
+				$sub =~ s|\s+| |g;
+				$sub =~ s|(\s?<$br.*?>\s?)+|<br/>|gi;
+				$sub =~ s!(^<br/>|<br/>$)!!g;
+				$sub =~ s|<br/>(</$span>)$|$1|i;
+				$sub =~ s|(<$span.*?>)\s|$1|i;
+				# separate individual lines based on <span>s
+				$sub =~ s|<$span.*?>(.*?)</$span>|\n$1\n|gi;
+				if ($sub =~ m{\n}) {
+					# fix up line breaks
+					$sub =~ s/(^\n|\n$)//g;
+					# add leading hyphens
+					$sub =~ s|\n+|\n- |g;
+					if ( $sub =~ m{\n-} ) {
+						$sub =~ s|^|- |;
+					}
+				}
+				if ( $opt->{subsfmt} eq 'compact' ) {
+					$sub =~ s|\n+||g;
+					# embed line breaks
+					$sub =~ s|<br/>|\n|g;
+				} else {
+					# remove <br/> elements
+					$sub =~ s|\n- <br/>\n|\n|g;
+					$sub =~ s|\n- <br/>|\n- |g;
+					$sub =~ s|<br/>| |g;
+				}
+				decode_entities($sub);
+				# Write to file
+				print $fh ++$count, "\n";
+				print $fh "$begin --> $end\n";
+				print $fh "$sub\n\n";
+			}
+		}
+		close $fh;
+
+		if ( ! $count ) {
+			main::logger "WARNING: Subtitles empty\n";
+			return 3;
+		}
+	} else {
+		return ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
+	} 
 
 	return 0;
 }
 
+sub ttml_to_srt {
+	my $ttml = shift;
+	my $srt = shift;
+	my $mono = shift;
+	my $offset = shift;
+	my $prefix = "\n- ";
+	my $index = 0;
+	my %hex_colors = (
+		'black'   => '#000000',
+		'blue'    => '#0000ff',
+		'green'   => '#00ff00',
+		'lime'    => '#00ff00',
+		'aqua'    => '#00ffff',
+		'cyan'    => '#00ffff',
+		'red'     => '#ff0000',
+		'fuchsia' => '#ff00ff',
+		'magenta' => '#ff00ff',
+		'yellow'  => '#ffff00',
+		'white'   => '#ffffff'
+	);
+
+	eval "use XML::LibXML '1.70'";
+	if ( $@ ) {
+		print "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to convert subtitles.\n";
+		return 1;
+	}
+
+	use Text::Wrap qw(fill $columns $huge);
+	$columns = 37;
+	$huge = 'overflow';
+
+	use XML::LibXML::XPathContext;
+	my $dom = XML::LibXML->load_xml(string => $ttml);
+	my $xpc = XML::LibXML::XPathContext->new($dom);
+	my ($doc) = $xpc->findnodes('/*');
+	$xpc->registerNs('tt', $doc->namespaceURI());		
+	my @ns = $xpc->findnodes("/*/namespace::*");
+	for my $ns (@ns) {
+		if ( $ns->getNamespaceURI() ) {
+			$xpc->registerNs($ns->getName(), $ns->getNamespaceURI());
+		}
+	}
+
+	my $fps = $xpc->findvalue('/*/@ttp:frameRate');
+	my %style_colors;
+	foreach my $style ($xpc->findnodes('//tt:styling/tt:style')) {
+		my $style_id = $style->findvalue('@id');
+		if ($style_id) {
+			my $style_color = $style->findvalue('@tts:color');
+			if ($style_color) {
+				my $style_hex = $hex_colors{$style_color};
+				if ($style_hex) {
+					$style_colors{$style_id} = $style_hex;
+				}
+			}
+		}
+	}
+	my ($body) = $xpc->findnodes('//tt:body');
+	my $body_style = $body->findvalue('@style');
+	my $body_color = $style_colors{$body_style} || $hex_colors{'white'};
+	my $curr_color = $body_color;
+
+	open( my $fh, "> $srt" );
+	for my $div ($xpc->findnodes('tt:div', $body)) {
+		my $div_style = $div->findvalue('@style');
+		my $div_color = $style_colors{$div_style} || $body_color;
+		$curr_color = $div_color;
+		for my $p ($xpc->findnodes('tt:p', $div)) {
+			my @times;
+			for my $key ('begin', 'end') {
+				my $val = $p->findvalue("\@$key");
+				my @parts = split /:/, $val;
+				if ( $#parts == 3 ) {
+					my $frames = pop @parts;
+					if ( $fps ) {
+						my $fraction = $frames / $fps;
+						$parts[$#parts] += $fraction;
+					}
+				}
+				(my $time = sprintf( '%02d:%02d:%06.3f', @parts )) =~ s/\./,/;
+				push @times, $time;
+			}
+			my ($begin, $end) = @times;
+			next unless $begin && $end;
+			if ( $offset ) {
+				$begin = main::subtitle_offset( $begin, $offset );
+				$end = main::subtitle_offset( $end, $offset );
+			}
+			my $text;
+			my $p_color;
+			my $p_style = $p->findvalue('@style');
+			if ($p_style) {
+				$p_color = $style_colors{$p_style};
+			} else {
+				$p_color = $hex_colors{$p->findvalue('@tts:color')};
+			}
+			$p_color ||= $div_color;
+			for my $p_child ($p->childNodes) {
+				if ($p_child->nodeName eq "br") {
+					$text .= "\n";
+				} elsif ($p_child->nodeName eq "#text") {
+					my $p_text = $p_child->to_literal();
+					if ($p_text) {
+						if ($mono) {
+							if ($p_color ne $curr_color) {
+								$curr_color = $p_color;
+								$text .= $prefix;
+							}
+							$text .= $p_text;
+						} else {
+							$text .= "<font color=\"$p_color\">$p_text</font>";
+						}
+					}
+				} elsif ($p_child->nodeName eq "span") {
+					my $span = $p_child;
+					my $span_color;
+					my $span_style = $span->findvalue('@style');
+					if ($span_style) {
+						$span_color = $style_colors{$span_style};
+					} else {
+						$span_color = $hex_colors{$span->findvalue('@tts:color')};
+					}
+					$span_color ||= $p_color;
+					for my $span_child ($span->childNodes) {
+						if ($span_child->nodeName eq "br") {
+							$text .= "\n";
+						} elsif ($span_child->nodeName eq "#text") {
+							my $span_text = $span_child->to_literal();
+							if ($span_text) {
+								if ($mono) {
+									if ($span_color ne $curr_color) {
+										$curr_color = $span_color;
+										$text .= $prefix;
+									}
+									$text .= $span_text;
+								} else {
+									$text .= "<font color=\"$span_color\">$span_text</font>";
+								}
+							}
+						}
+					}
+				}
+			}
+			if ($mono) {
+				$text =~ s/\n([^-])/ $1/g;
+				$text =~ s/\n-/\n\n-/g;
+				$text = join("", fill('', '', $text));
+			}
+			$text =~ s/(^\s+|\s+$)//g;
+			$text =~ s/\n{2,}/\n/g;
+			print $fh ++$index."\n$begin --> $end\n$text\n\n";
+		}	
+	}
+	close $fh;
+	if ( ! $index ) {
+		main::logger "WARNING: Subtitles empty\n";
+		return 3;
+	}
+	return 0;
+}
 
 
 ################### Radio class #################
