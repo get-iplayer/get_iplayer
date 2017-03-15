@@ -4368,6 +4368,8 @@ sub get_verpids {
 	if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
 		$rc_html = $prog->get_verpids_html( $ua );
 	}
+	# ensure title info extracted
+	$prog->parse_title();
 	return 0 if ! $rc_json || ! $rc_html;
 	main::logger "\nWARNING: No programmes are available for this PID with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 	return 1;
@@ -4553,7 +4555,10 @@ sub get_verpids_html {
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
 			$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
-		}
+		}		
+		unless ( $prog->{episodenum} ) {
+			$prog->{episodenum} = $1 if $config =~ /"parent_position":(\d+)/;
+		}		
 		unless ( $prog->{title} ) {
 			my $title = $1 if $config =~ /"title":"(.*?)"/;
 			$title =~ s/\\\//\//g;
@@ -4596,6 +4601,46 @@ sub get_verpids_html {
 	return 0;
 }
 
+sub parse_title {
+	my $prog = shift;
+	return unless $prog->{title};
+	my ( $name, $episode );
+	$prog->{title} =~ s/,\s+(Series.+?),/: $1:/;
+	$prog->{title} =~ s/,\s+(Episode.+?)/: $1/;
+	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: Series/;
+	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: Episode/;
+	if ( $prog->{title} =~ m{^(.+?Series.*?):\s+(.+?)$} ) {
+		( $name, $episode ) = ( $1, $2 );
+	} elsif ( $prog->{title} =~ m{^(.+):\s+(.+)$} ) {
+		( $name, $episode ) = ( $1, $2 );
+	} else {
+		( $name, $episode ) = ( $prog->{title}, '-' );
+	}
+	my ($seriesnum, $episodenum);
+	# Extract the seriesnum
+	my $regex = 'Series\s+'.main::regex_numbers();
+	if ( "$name $episode" =~ m{$regex}i ) {
+		$seriesnum = main::convert_words_to_number( $1 );
+	}
+	# Extract the episode num
+	my $regex_1 = 'Episode\s+'.main::regex_numbers();
+	my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+	if ( "$name $episode" =~ m{$regex_1}i ) {
+		$episodenum = main::convert_words_to_number( $1 );
+	} elsif ( $episode =~ m{$regex_2}i ) {
+		$episodenum = main::convert_words_to_number( $1 );
+	}
+	# insert episode number in $episode
+	$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
+	# minimum episode number = 1 if not a film and series number == 0
+	$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog->{type} eq 'tv' );
+	# minimum series number = 1 if episode number != 0
+	$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
+	$prog->{name} ||= $name;
+	$prog->{episode} ||= $episode;
+	$prog->{seriesnum} ||= $seriesnum;
+	$prog->{episodenum} ||= $episodenum;
+}
 
 # get full episode metadata given pid and ua. Uses two different urls to get data
 sub get_metadata {
