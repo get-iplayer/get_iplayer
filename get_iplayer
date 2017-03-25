@@ -7132,8 +7132,8 @@ sub download {
 sub download_subtitles {
 	my $prog = shift;
 	my ( $ua, $file, $versions ) = @_;
-	my $suburl;
 	my $subs;
+	my $found;
 
 	# in case --subtitles used with --pid for radio programme
 	return unless $prog->{type} eq "tv";
@@ -7145,34 +7145,38 @@ sub download_subtitles {
 	}
 
 	# Find subtitles stream
-	for ( @$versions ) {
-		$suburl = $prog->{streams}->{$_}->{subtitles1}->{streamurl};
-		last if $suburl;
+	for my $version ( @$versions ) {
+		my @subkeys = grep /subtitles/, sort keys %{$prog->{streams}->{$version}};
+		for my $subkey ( @subkeys ) {
+			my $suburl = $prog->{streams}->{$version}->{$subkey}->{streamurl};
+			if ( $suburl ) {
+				$found = 1;
+				main::logger "INFO: Getting subtitles from $suburl\n" if $opt->{verbose};
+				$subs = main::request_url_retry($ua, $suburl, 3);
+				last if $subs;
+			}
+		}
+		last if $subs;
 	}
 	# Return if we have no url
-	if (! $suburl) {
+	if (! $found) {
 		my $vermsg = " for version(s): ".(join ',', @$versions) if @$versions;
 		main::logger "INFO: Subtitles not available${vermsg}\n";
 		return 2;
 	}
-
-	main::logger "INFO: Getting Subtitles from $suburl\n" if $opt->{verbose};
-
-	# Download subs
-	$subs = main::request_url_retry($ua, $suburl, 3);
 	if (! $subs ) {
-		main::logger "ERROR: Subtitle Download failed\n";
+		main::logger "ERROR: Subtitle download failed\n";
 		return 1;
 	} else {
 		# Dump raw subs into a file if required
 		if ( $opt->{subsraw} ) {
 			unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
-			main::logger "INFO: 'Downloading Raw Subtitles to $prog->{dir}/$prog->{fileprefix}.ttxt'\n";
+			main::logger "INFO: Downloading raw subtitles to: $prog->{dir}/$prog->{fileprefix}.ttxt\n";
 			open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
 			print $fhraw $subs;
 			close $fhraw;
 		}
-		main::logger "INFO: Downloading Subtitles to '$prog->{dir}/$prog->{fileprefix}.srt'\n";
+		main::logger "INFO: Downloading subtitles to: $prog->{dir}/$prog->{fileprefix}.srt\n";
 	}
 
 	# Convert the format to srt
