@@ -4649,50 +4649,45 @@ sub get_metadata {
 	my $prog_data_url = 'http://www.bbc.co.uk/programmes/'; # $pid
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 
-	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart );
+	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart, $firstbcast );
 
 	# This URL works for tv/radio prog types:
-	# http://www.bbc.co.uk/programmes/{pid}.xml
+	# http://www.bbc.co.uk/programmes/{pid}.json
 
-	# This URL works for tv/radio prog types (has long synopsis and categories):
-	# http://www.bbc.co.uk/programmes/{pid}.rdf
-
-	# Works for all Verison PIDs to get the last/first broadcast dates
-	# http://www.bbc.co.uk/programmes/<verpid>.rdf
-
-	main::logger "DEBUG: Getting Metadata for $prog->{pid}:\n" if $opt->{debug};
+	main::logger "DEBUG: Getting metadata for $prog->{pid}:\n" if $opt->{debug};
 
 	my $got_metadata;
-	eval "use XML::Simple";
+	eval "use JSON::PP";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for more accurate programme metadata.\n";
-	} elsif ( ! $opt->{ybbcy} && $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
-		my $url = $prog_data_url.$prog->{pid}.".xml";
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module for more accurate programme metadata.\n";
+	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
+		my $url = $prog_data_url.$prog->{pid}.".json";
 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
-		my $xml = main::request_url_retry($ua, $url, 3, '', '');
-		if ( $xml ) {
-			my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
+		my $json = main::request_url_retry($ua, $url, 3, '', '');
+		if ( $json ) {
+			my $dec =	eval { decode_json($json) };
 			if ( ! $@ ) {
+				my $doc = $dec->{programme};
 				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
-					my $parent = $doc->{parent}->[0]->{programme}->[0];
-					my $grandparent = $parent->{parent}->[0]->{programme}->[0];
-					my $greatgrandparent = $grandparent->{parent}->[0]->{programme}->[0];
-					my $pid = $doc->{pid}->[0];
-					my $parentpid = $parent->{pid}->[0];
-					$prog_type = $doc->{media_type}->[0];
+					my $parent = $doc->{parent}->{programme};
+					my $grandparent = $parent->{parent}->{programme};
+					my $greatgrandparent = $grandparent->{parent}->{programme};
+					my $pid = $doc->{pid};
+					my $parentpid = $parent->{pid};
+					$prog_type = $doc->{media_type};
 					$prog_type = 'tv' if $prog_type =~ m{video}s;
 					$prog_type = 'radio' if $prog_type eq 'audio';
-					$longdesc = $doc->{long_synopsis}->[0];
-					$meddesc = $doc->{medium_synopsis}->[0];
-					$summary = $doc->{short_synopsis}->[0];
-					$channel = $doc->{ownership}->[0]->{service}->[0]->{title}->[0];
-					my $image_pid = $doc->{image}->[0]->{pid}->[0];
-					my $series_image_pid = $doc->{parent}->[0]->{programme}->[0]->{image}->[0]->{pid}->[0];
-					my $brand_image_pid = $doc->{parent}->[0]->{programme}->[0]->{parent}->[0]->{programme}->[0]->{image}->[0]->{pid}->[0];
-					if ( $brand_image_pid ) {
-						$image_pid = $brand_image_pid;
-					} elsif ( $series_image_pid ) {
+					$longdesc = $doc->{long_synopsis};
+					$meddesc = $doc->{medium_synopsis};
+					$summary = $doc->{short_synopsis};
+					$channel = $doc->{ownership}->{service}->{title};
+					my $image_pid = $doc->{image}->{pid};
+					my $series_image_pid = $doc->{parent}->{programme}->{image}->{pid};
+					my $brand_image_pid = $doc->{parent}->{programme}->{parent}->{programme}->{image}->{pid};
+					if ( $series_image_pid ) {
 						$image_pid = $series_image_pid;
+					} elsif ( $brand_image_pid ) {
+						$image_pid = $brand_image_pid;
 					}
 					my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
 					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
@@ -4706,19 +4701,19 @@ sub get_metadata {
 					}
 					# title strings
 					my ($series_position, $subseries_position);
-					$episode = $doc->{title}->[0];
+					$episode = $doc->{title};
 					for my $ancestor ($parent, $grandparent, $greatgrandparent) {
-						if ( $ancestor->{type} && $ancestor->{title}->[0] ) {
+						if ( $ancestor->{type} && $ancestor->{title} ) {
 							if ( $ancestor->{type} eq "brand" ) {
-								$brand = $ancestor->{title}->[0];
+								$brand = $ancestor->{title};
 							} elsif ( $ancestor->{type} eq "series" ) {
 								# handle rare subseries
 								if ( $series ) {
 									$episode = "$series $episode";
 									$subseries_position = $series_position;
 								}
-								$series = $ancestor->{title}->[0];
-								$series_position = $ancestor->{position}->[0];
+								$series = $ancestor->{title};
+								$series_position = $ancestor->{position};
 							}
 						}
 					}
@@ -4738,16 +4733,16 @@ sub get_metadata {
 					} else {
 						$title = "$name: $episode";
 					}
+					# first broadcast date
+					$firstbcast = $doc->{first_broadcast_date};
 					# categories
 					my (@cats1, @cats2, @cats3);
-					for my $cat1 ( @{$doc->{categories}->[0]->{category}} ) {
-						unshift @cats1, $cat1->{title}->[0];
-						for my $cat2 ( @{$cat1->{broader}->[0]->{category}} ) {
-							unshift @cats2, $cat2->{title}->[0];
-							for my $cat3 ( @{$cat2->{broader}->[0]->{category}} ) {
-								unshift @cats3, $cat3->{title}->[0];
-							}
-						}
+					for my $cat1 ( @{$doc->{categories}} ) {
+						unshift @cats1, $cat1->{title};
+						my $cat2 = $cat1->{broader}->{category};
+						unshift @cats2, $cat2->{title} if $cat2;
+						my $cat3 = $cat2->{broader}->{category};
+						unshift @cats3, $cat3->{title} if $cat3;
 					}
 					my %seen;
 					my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
@@ -4763,10 +4758,10 @@ sub get_metadata {
 					# series/episode numbers
 					if ( $subseries_position ) {
 						my @parts = ("a".."z");
-						$episodepart = $parts[$doc->{position}->[0] - 1];
+						$episodepart = $parts[$doc->{position} - 1];
 					}
-					$episodenum = $subseries_position || $doc->{position}->[0];
-					$seriesnum = $series_position || $parent->{position}->[0];
+					$episodenum = $subseries_position || $doc->{position};
+					$seriesnum = $series_position || $parent->{position};
 					# the Doctor Who fudge
 					my ($seriesnum2, $episodenum2);
 					# Extract the seriesnum
@@ -4793,8 +4788,8 @@ sub get_metadata {
 					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 					# programme versions
 					my %found;
-					for my $ver ( @{$doc->{versions}->[0]->{version}} ) {
-						for my $ver_type ( @{$ver->{types}->[0]->{type}} ) {
+					for my $ver ( @{$doc->{versions}} ) {
+						for my $ver_type ( @{$ver->{types}} ) {
 							my $type;
 							# check for audiodescribed and signed first
 							if ( $ver_type =~ /(described|description)/i ) {
@@ -4811,8 +4806,8 @@ sub get_metadata {
 							if ( $type ) {
 								my $version = $type;
 								$version .= $found{$type} if ++$found{$type} > 1;
-								$prog->{verpids}->{$version} = $ver->{pid}->[0];
-								$prog->{durations}->{$version} = $ver->{duration}->[0];
+								$prog->{verpids}->{$version} = $ver->{pid};
+								$prog->{durations}->{$version} = $ver->{duration};
 							}
 						}
 					}
@@ -4875,6 +4870,9 @@ sub get_metadata {
 	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{brand};
 	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i;
+	$prog->{firstbcast} = $firstbcast;
+	$prog->{firstbcastrel} = Programme::get_time_string( $firstbcast, time() );
+	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
 
 	my $modes;
 	my $mode_sizes;
@@ -4896,8 +4894,8 @@ sub get_metadata {
 		my @sizes;
 		for my $mode ( sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} } ) {
 			# get expiry from stream data
-			if ( ! $expires && $prog->{streams}->{$version}->{$mode}->{expires} ) {
-				$expires = Programme::get_time_string( $prog->{streams}->{$version}->{$mode}->{expires} );
+			if ( ! $prog->{expires} && $prog->{streams}->{$version}->{$mode}->{expires} ) {
+				$prog->{expires} = Programme::get_time_string( $prog->{streams}->{$version}->{$mode}->{expires} );
 			}
 			my $size;
 			if ( $prog->{streams}->{$version}->{$mode}->{size} ) {
@@ -4915,58 +4913,11 @@ sub get_metadata {
 		$mode_sizes->{$version} = join ',', sort Programme::cmp_modes @sizes;
 		# Set duration for this version if it is not defined
 		$prog->{durations}->{$version} = $prog->{duration} if $prog->{duration} =~ /\d+/ && ! $prog->{durations}->{$version};
-		next unless $prog->{verpids}->{$version} =~ /^[bp]0[a-z0-9]{6}$/;
-		# assume RDF unavailable with --ybbcy
-		next if $opt->{ybbcy};
-		# get the last/first broadcast dates from the RDF for this verpid
-		# rdf url: http://www.bbc.co.uk/programmes/<verpid>.rdf
-		# Date in this format 'CCYY-MM-DDTHH:MM:SS+01:00'
-		# Don't get this feed if the verpid starts with '?'
-		my $rdf_url = 'http://www.bbc.co.uk/programmes/'.$prog->{verpids}->{$version}.'.rdf';
-		my $rdf;
-		$rdf = main::request_url_retry($ua, $rdf_url, 3, '', '') if $prog->{verpids}->{$version} !~ m{^\?};
-		decode_entities($rdf);
-		main::logger "DEBUG: $rdf_url:\n$rdf\n\n" if $opt->{debug};
-		# Flatten
-		$rdf =~ s|\n| |g;
-		# Get min/max bcast dates from rdf
-		my ( $now, $first, $last, $first_string, $last_string ) = ( time(), 9999999999, 0, 'Never', 'Never' );
-		# <po:(First|Repeat)Broadcast>
-		#  <po:schedule_date rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2009-06-06</po:schedule_date>
-		#    <event:time>
-		#        <timeline:Interval>
-		#              <timeline:start rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2009-06-06T21:30:00+01:00</timeline:start>
-		for ( split /<po:(First|Repeat)?Broadcast/, $rdf ) {
-			my $timestring;
-			my $epoch;
-			$timestring = $1 if m{<timeline:start\s+rdf:datatype=".+?">(20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d([+-]\d\d:\d\d|Z))<};
-			next if ! $timestring;
-			$epoch = Programme::get_time_string( $timestring );
-			main::logger "DEBUG: $version: $timestring -> $epoch\n" if $opt->{debug};
-			if ( $epoch < $first ) {
-				$first = $epoch;
-				$first_string = $timestring;
-			}
-			if ( $now > $epoch && $epoch > $last ) {
-				$last = $epoch;
-				$last_string = $timestring;
-			}
-		}
-		# Only set these attribs if required
-		if ( $first < 9999999999 && $last > 0 ) {
-			$prog->{firstbcast}->{$version} = $first_string;
-			$prog->{lastbcast}->{$version} = $last_string;
-			$prog->{firstbcastrel}->{$version} = Programme::get_time_string( $first_string, time() );
-			$prog->{lastbcastrel}->{$version} = Programme::get_time_string( $last_string, time() );
-			($prog->{firstbcastdate}->{$version} = $first_string) =~ s/T.*$//;
-			($prog->{lastbcastdate}->{$version} = $last_string) =~ s/T.*$//;
-		}
 	}
 	$prog->{modes}		= $modes;
 	$prog->{modesizes}	= $mode_sizes;
 
 	my @fields1 = qw(verpids streams durations);
-	my @fields2 = qw(firstbcast lastbcast firstbcastrel lastbcastrel firstbcastdate lastbcastdate);
 
 	# remove versions with no streams
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
@@ -4974,7 +4925,7 @@ sub get_metadata {
 			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
 			delete $modes->{$version};
 			delete $mode_sizes->{$version};
-			for my $key ( @fields1, @fields2 ) {
+			for my $key ( @fields1 ) {
 				delete $prog->{$key}->{$version};
 			}
 		}
@@ -4992,14 +4943,9 @@ sub get_metadata {
 			for my $key ( @fields1 ) {
 				$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
 			}
-			if ( $prog->{firstbcast}->{$version} ) {
-				for my $key ( @fields2 ) {
-					$prog->{$key}->{$base_version} = $prog->{$key}->{$version};
-				}
-			}
 			delete $modes->{$version};
 			delete $mode_sizes->{$version};
-			for my $key ( @fields1, @fields2 ) {
+			for my $key ( @fields1 ) {
 				delete $prog->{$key}->{$version};
 			}
 		}
