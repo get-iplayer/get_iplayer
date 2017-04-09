@@ -5037,7 +5037,11 @@ sub get_pids_recursive {
 	}
 
 	if ( $opt->{ybbcy} ) {
-		main::logger "WARNING: --ybbcy specified - trying to record PID directly.\n";
+		if ( $opt->{pidrecursive} ) {
+			main::logger "ERROR: --pid-recursive not supported with --ybbcy.\n";
+			return ();
+		}
+		main::logger "WARNING: --ybbcy specified - trying to record episode PID directly.\n" if $opt->{verbose};
 		return $prog->{pid};
 	}
 
