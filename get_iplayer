@@ -755,6 +755,18 @@ sub init_search {
 		exit 0;
 	}
 
+	# force -ybbcy
+	#$opt->{ybbcy} = 1 unless defined $opt->{ybbcy};
+	# exclude local channels with --ybbcy
+	if ( $opt->{ybbcy} && ! defined $opt->{refreshexcludegroups} ) {
+		#if ( ! defined $opt->{refreshexcludegroupsradio} ) {
+		#	$opt->{refreshexcludegroupsradio} = "local";
+		#}
+		if ( ! defined $opt->{refreshexcludegroupstv} ) {
+			$opt->{refreshexcludegroupstv} = "local";
+		}
+	}
+	
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
 	# $prog->{pid}->object hash
@@ -3234,9 +3246,6 @@ sub channels_filtered {
 	(my $prog_type = $prog) =~ s/Programme:://;
 	my $exclude_groups = $opt->{'refreshexcludegroups'.$prog_type} || $opt->{'refreshexcludegroups'};
 	my $include_groups = $opt->{'refreshincludegroups'.$prog_type} || $opt->{'refreshincludegroups'};
-	if ( $opt->{ybbcy} && $prog_type eq "tv" && ! $exclude_groups ) {
-		$exclude_groups = "local";
-	}
 	my %channels;
 	my %group_channels;
 	# include/exclude matching channels as required
@@ -6519,12 +6528,8 @@ sub get_links {
 	$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
 	return 1 if $rc && $opt->{refreshabortonerror};
 	if ( $opt->{refreshfuture} ) {
-		if ( $opt->{ybbcy} ) {
-			main::logger "\nWARNING: --refresh-future is ignored with --ybbcy.\n";
-		} else {
-			$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
-			return 1 if $rc && $opt->{refreshabortonerror};
-		}
+		$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
+		return 1 if $rc && $opt->{refreshabortonerror};
 	}
 	main::logger "\n";
 	return 0;
@@ -6540,13 +6545,81 @@ sub get_links_schedule {
 	my $now = shift || time();
 	my $pm;
 	my $rc_pm;
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
+	my @channel_list = sort keys %channels;
+	my @schedule_dates;
+	my $limit = 0;
+	my $one_week = 7 * 86400;
+	my $then = $now - $one_week;
+	my $this_year = (gmtime($now))[5];
+	my $that_year = (gmtime($then))[5];
+	my $this_week = strftime( "%W", gmtime($now) );
+	my $that_week = strftime( "%W", gmtime($then) );
+	my $cache_file = "${profile_dir}/${prog_type}.cache";
+	my ($cache_this_week, $cache_last_week);
+	if ( ! $opt->{refresh} && ! $opt->{cachereset} && -f $cache_file ) {
+		my $cache_time = stat($cache_file)->mtime;
+		my $cache_year = (gmtime($cache_time))[5];
+		my $cache_week = strftime( "%W", gmtime($cache_time) );
+		$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
+		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
+	}
+	if ( $future ) {
+		if ( $opt->{ybbcy} ) {
+			push @schedule_dates, "this_week" unless $cache_this_week;
+		} else {
+			push @schedule_dates, "this_week";
+		}
+		push @schedule_dates, "next_week";
+	} else {
+		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
+		$limit_days = 0 if $limit_days < 0;
+		$limit_days = 30 if $limit_days > 30;
+		$limit = $now - (ceil($limit_days / 7) * 7 * 86400) if $limit_days;
+		if ( $limit ) {
+			my $limit_time = $limit;
+			my $limit_year = (gmtime($limit_time))[5];
+			my $limit_week = strftime( "%W", gmtime($limit_time) );
+			while ( $limit_time < $then ) {
+				push @schedule_dates, sprintf("%04d/w%02d", $limit_year+1900, $limit_week+1);
+				$limit_time += $one_week;
+				$limit_year = (gmtime($limit_time))[5];
+				$limit_week = strftime( "%W", gmtime($limit_time) );
+			}
+			push @schedule_dates, "this_week";
+		} else {
+			if ( $opt->{ybbcy} ) {
+				push @schedule_dates, "last_week" unless $cache_last_week || $cache_this_week;
+				push @schedule_dates, "this_week" unless $cache_this_week;
+			} else {
+				push @schedule_dates, "last_week" unless $cache_this_week;
+				push @schedule_dates, "this_week";
+			}
+		}
+	}
+	return unless @schedule_dates;
+	my (%aod_channels, %aod_channel_ids);
+	if ( $prog_type eq "radio" ) {
+		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
+		if ( $opt->{ybbcy} ) {
+			while ( my ($k1, $v1) = each %channels ) {
+				keys %aod_channels;
+				while ( my ($k2, $v2) = each %aod_channels ) {
+					if ( $v1 eq $v2 ) {
+						$aod_channel_ids{$k1} = $k2;
+						last;
+					}
+				}
+			}
+		}
+	}
 	if ( $opt->{ybbcy} ) {
 		eval "use XML::LibXML '1.70'";
 		if ( $@ ) {
 			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
 			return;
 		}
-		if ( $opt->{indexconcurrent} && $prog_type eq "tv" ) {
+		if ( $opt->{indexconcurrent} ) {
 			if ( $^O eq "MSWin32" ) {
 				main::logger "WARNING: Concurrent indexing is not supported on Windows. Normal indexing will be performed.\n";
 			} else {
@@ -6583,69 +6656,6 @@ sub get_links_schedule {
 			}
 		}
 	}
-	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
-	my (%aod_channels, %aod_channel_ids);
-	if ( $prog_type eq "radio" ) {
-		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
-		if ( $opt->{ybbcy} ) {
-			while ( my ($k1, $v1) = each %channels ) {
-				keys %aod_channels;
-				while ( my ($k2, $v2) = each %aod_channels ) {
-					if ( $v1 eq $v2 ) {
-						$aod_channel_ids{$k1} = $k2;
-						last;
-					}
-				}
-			}
-		}
-	}
-	my @channel_list = sort keys %channels;
-	my @schedule_dates;
-	my $limit = 0;
-	my $one_week = 7 * 86400;
-	my $then = $now - $one_week;
-	my $this_year = (gmtime($now))[5];
-	my $that_year = (gmtime($then))[5];
-	my $this_week = strftime( "%W", gmtime($now) );
-	my $that_week = strftime( "%W", gmtime($then) );
-	my $cache_file = "${profile_dir}/${prog_type}.cache";
-	my ($cache_this_week, $cache_last_week);
-	if ( ! $opt->{refresh} && ! $opt->{cachereset} && -f $cache_file ) {
-		my $cache_time = stat($cache_file)->mtime;
-		my $cache_year = (gmtime($cache_time))[5];
-		my $cache_week = strftime( "%W", gmtime($cache_time) );
-		$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
-		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
-	}
-	if ( $future ) {
-		push @schedule_dates, "this_week", "next_week";
-	} else {
-		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
-		$limit_days = 0 if $limit_days < 0;
-		$limit_days = 30 if $limit_days > 30;
-		$limit = $now - (ceil($limit_days / 7) * 7 * 86400) if $limit_days;
-		if ( $limit ) {
-			my $limit_time = $limit;
-			my $limit_year = (gmtime($limit_time))[5];
-			my $limit_week = strftime( "%W", gmtime($limit_time) );
-			while ( $limit_time < $then ) {
-				push @schedule_dates, sprintf("%04d/w%02d", $limit_year+1900, $limit_week+1);
-				$limit_time += $one_week;
-				$limit_year = (gmtime($limit_time))[5];
-				$limit_week = strftime( "%W", gmtime($limit_time) );
-			}
-			push @schedule_dates, "this_week";
-		} else {
-			if ( $opt->{ybbcy} ) {
-				push @schedule_dates, "last_week" unless $cache_last_week || $cache_this_week;
-				push @schedule_dates, "this_week" unless $cache_this_week;
-			} else {
-				push @schedule_dates, "last_week" unless $cache_this_week;
-				push @schedule_dates, "this_week";
-			}
-		}
-	}
-	return unless @schedule_dates;
 	my $ua = main::create_ua( 'desktop', 1 );
 	$ua->timeout(60) if $opt->{ybbcy};
 	my $known_bad = "radiosolent";
@@ -6658,22 +6668,16 @@ sub get_links_schedule {
 			last if $opt->{refreshabortonerror} && $rc_pm;
 			my ($url, $rc);
 			if ( $opt->{ybbcy} ) {
-				if ( $prog_type eq "radio" ) {
-					my $aod_channel_id = $aod_channel_ids{$channel_id};
-					$aod_seen{$channel_id}++;
-					$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
+				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+				if ($pm) {
+					$pm->start($url) and next SCHEDULES;
+					my ($rc2, $prog2);
+					$prog2 = {};
+					$rc2 = $self->get_links_schedule_html($ua, $prog2, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+					$pm->finish($rc2, $prog2)
 				} else {
-					$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
-					if ($pm) {
-						$pm->start($url) and next SCHEDULES;
-						my ($rc2, $prog2);
-						$prog2 = {};
-						$rc2 = $self->get_links_schedule_html($ua, $prog2, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-						$pm->finish($rc2, $prog2)
-					} else {
-						$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-					};
-				}
+					$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
+				};
 			} else {
 				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
 				$rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
