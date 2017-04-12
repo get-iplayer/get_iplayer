@@ -4967,6 +4967,47 @@ sub get_metadata {
 	return 0;
 }
 
+sub fetch_episode_pids {
+	my $ua = shift;
+	my $parent_pid = shift;
+	my @pids = ();
+	my %seen;
+	my $max_page = 1;
+	my $curr_page = 1;
+	eval "use XML::LibXML '1.70'";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to recursively extract episode PIDs.\n";
+		return ();
+	}
+	do {
+		my $url = "http://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
+		my $html = main::request_url_retry($ua, $url, 3, '', "\nWARNING: Failed to fetch episode PIDs from $url\n");
+		last unless $html;
+		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
+		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/*/text()');
+		$max_page = $last_page if $last_page > $max_page;
+		unless ( $seen{'title'} ) {
+			my $title = $dom->findvalue('//title');
+			$title =~ s/(^\s+|\s+$)//g;
+			main::logger "INFO: $title\n";
+			$seen{'title'} = 1;
+		}
+		main::logger "INFO: Page $curr_page of $max_page\n";
+		my @episodes = $dom->findnodes('//div[contains(@typeof,"Episode")]');
+		for my $episode ( @episodes ) {
+			my $pid = $episode->findvalue('@data-pid');
+			next if ( $seen{$pid} );
+			$seen{$pid} = 1;
+			my $name = $episode->findvalue('.//span[contains(@class,"programme__title")]/span/text()');
+			my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]/span/span/text()');
+			$name = "$name2, $name" if $name2;
+			main::logger "INFO:     $name ($pid)\n";
+			push @pids, $pid;
+		}
+		$curr_page++;
+ 	} while ( $curr_page <= $max_page );
+	return \@pids;
+}
 
 sub get_pids_recursive {
 	my $prog = shift;
@@ -4984,11 +5025,13 @@ sub get_pids_recursive {
 
 	if ( $opt->{ybbcy} ) {
 		if ( $opt->{pidrecursive} ) {
-			main::logger "ERROR: --pid-recursive not supported with --ybbcy.\n";
-			return ();
-		}
-		main::logger "WARNING: --ybbcy specified - trying to record episode PID directly.\n" if $opt->{verbose};
-		return $prog->{pid};
+			my $epids = fetch_episode_pids($ua, $prog->{pid});
+			push @pids, @$epids;
+			@pids = main::make_array_unique_ordered( @pids );
+			return @pids;
+		} else {
+ 			return $prog->{pid};
+ 		}
 	}
 
 	eval "use XML::Simple";
