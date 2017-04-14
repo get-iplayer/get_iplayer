@@ -246,11 +246,12 @@ my $opt_format = {
 	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	indexconcurrent	=> [ 1, "indexconcurrent|index-concurrent!", 'Misc', '--index-concurrent', "Perform fork()-based concurrent (i.e., faster) indexing when web scraping TV schedules only. Requires --ybbcy and Parallel::ForkManager Perl module. Not supported on Windows."],
-	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of forks (connections) to use for concurrent indexing. Requires --index-concurrent. Default: 4 Max: 10"],
+	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing. Requires --ybbcy. Default: 4 Max: 10"],
+	nomojo	=> [ 1, "nomojo|no-mojo!", 'Misc', '--no-mojo', "Do not use Mojolicious (if installed) for concurrent (i.e., faster) programme indexing. Without this option, Mojolicious will be preferred to Parallel::ForkManager if both are installed. Requires --ybbcy"],
+	nopfm	=> [ 1, "nopfm|no-pfm!", 'Misc', '--no-pfm', "Do not use Parallel::ForkManager (if installed) for concurrent (i.e., faster) programme indexing. By default, Parallel::ForkManager will only be used if Mojolicious is not installed. Parallel::ForkManager is not supported on Windows. Requires --ybbcy."],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Misc', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
-	ybbcy	=> [ 1, "ybbcy!", 'Misc', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect."],
+	ybbcy	=> [ 1, "ybbcy!", 'Misc', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. Programme indexing may be extremely slow. Some metadata will be missing or incorrect."],
 
 };
 
@@ -755,17 +756,8 @@ sub init_search {
 		exit 0;
 	}
 
-	# force -ybbcy
+	# force --ybbcy
 	#$opt->{ybbcy} = 1 unless defined $opt->{ybbcy};
-	# exclude local channels with --ybbcy
-	if ( $opt->{ybbcy} && ! defined $opt->{refreshexcludegroups} ) {
-		#if ( ! defined $opt->{refreshexcludegroupsradio} ) {
-		#	$opt->{refreshexcludegroupsradio} = "local";
-		#}
-		if ( ! defined $opt->{refreshexcludegroupstv} ) {
-			$opt->{refreshexcludegroupstv} = "local";
-		}
-	}
 	
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
@@ -6543,10 +6535,16 @@ sub get_links_schedule {
 	my $prog_type = shift;
 	my $future = shift;
 	my $now = shift || time();
+	if ( $opt->{ybbcy} ) {
+		# check XML::LibXML here before using elsewhere
+		eval "use XML::LibXML '1.70'";
+		if ( $@ ) {
+			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
+			return;
+		}
+	}
 	my $pm;
 	my $rc_pm;
-	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
-	my @channel_list = sort keys %channels;
 	my @schedule_dates;
 	my $limit = 0;
 	my $one_week = 7 * 86400;
@@ -6598,6 +6596,69 @@ sub get_links_schedule {
 		}
 	}
 	return unless @schedule_dates;
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
+	my @channel_list = sort keys %channels;
+	# use Mojo::UserAgent if available
+	if ( $opt->{ybbcy} && ! $opt->{nomojo} ) {
+		# check Mojo::UserAgent here before using elsewhere
+		eval "use Mojo::UserAgent";
+		if ( ! $@ ) {
+			main::logger "INFO: Using Mojo::UserAgent for concurrent indexing\n";
+			my @mojo_urls;
+			my %mojo_channel_ids;
+			my %mojo_channels;
+			for my $channel_id ( @channel_list ) {
+				for my $schedule_date ( @schedule_dates ) {
+					my $mojo_url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+					push @mojo_urls, $mojo_url;
+					$mojo_channel_ids{$mojo_url} = $channel_id;
+					$mojo_channels{$mojo_url} = $channels{$channel_id};
+				}
+			}
+			my $rc = $self->get_links_schedule_mojo($prog, $prog_type, $future, $limit, $now, \@mojo_urls, \%mojo_channel_ids, \%mojo_channels);
+			if ( $rc ) {
+				return 1 if $opt->{refreshabortonerror};
+			}
+			return;
+		}
+	}
+	# use Parallel::ForkManager if available
+	if ( $opt->{ybbcy} && ! $opt->{nopfm} ) {
+		eval "use Parallel::ForkManager";
+		if ( ! $@  ) {
+			if ( $^O eq "MSWin32" ) {
+				main::logger "WARNING: Use of Parallel::ForkManager for concurrent indexing is not supported on Windows. Install Mojolicious instead. Non-concurrent indexing will be performed.\n";
+			} else {
+				main::logger "INFO: Using Parallel::ForkManager for concurrent indexing\n";
+				my $max_conn = $opt->{indexmaxconn} || 4;
+				$max_conn = 10 if $max_conn > 10;
+				$max_conn = 4 if $max_conn < 1;
+				$pm = Parallel::ForkManager->new($max_conn);
+				$pm->run_on_finish( sub {
+					my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
+					$rc_pm = $exit_code unless $rc_pm;
+					if ( defined $data ) {
+						for my $pid ( keys %{$data} ) {
+							if ( defined $prog->{$pid} ) {
+								main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $data->{$pid}->{channel} $data->{$pid}->{available})\n" if $opt->{verbose};
+								# use listing with earliest availability
+								if ( $data->{$pid}->{available} lt $prog->{$pid}->{available} ) {
+									$prog->{$pid}->{available} = $data->{$pid}->{available};
+								}
+								# use listing with latest expiry
+								if ( $data->{$pid}->{expires} > $prog->{$pid}->{expires} ) {
+									$prog->{$pid}->{expires} = $data->{$pid}->{expires};
+								}
+								next;
+							} else {
+								$prog->{$pid} = $data->{$pid};
+							}
+						}
+					}
+				} );
+			}	
+		}
+	}
 	my (%aod_channels, %aod_channel_ids);
 	if ( $prog_type eq "radio" ) {
 		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
@@ -6609,49 +6670,6 @@ sub get_links_schedule {
 						$aod_channel_ids{$k1} = $k2;
 						last;
 					}
-				}
-			}
-		}
-	}
-	if ( $opt->{ybbcy} ) {
-		eval "use XML::LibXML '1.70'";
-		if ( $@ ) {
-			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
-			return;
-		}
-		if ( $opt->{indexconcurrent} ) {
-			if ( $^O eq "MSWin32" ) {
-				main::logger "WARNING: Concurrent indexing is not supported on Windows. Normal indexing will be performed.\n";
-			} else {
-				eval "use Parallel::ForkManager";
-				if ( ! $@  ) {
-					my $max_conn = $opt->{indexmaxconn} || 4;
-					$max_conn = 10 if $max_conn > 10;
-					$pm = Parallel::ForkManager->new($max_conn);
-					$pm->run_on_finish( sub {
-						my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
-						$rc_pm = $exit_code unless $rc_pm;
-						if ( defined $data ) {
-							for my $pid ( keys %{$data} ) {
-								if ( defined $prog->{$pid} ) {
-									main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $data->{$pid}->{channel} $data->{$pid}->{available})\n" if $opt->{verbose};
-									# use listing with earliest availability
-									if ( $data->{$pid}->{available} lt $prog->{$pid}->{available} ) {
-										$prog->{$pid}->{available} = $data->{$pid}->{available};
-									}
-									# use listing with latest expiry
-									if ( $data->{$pid}->{expires} > $prog->{$pid}->{expires} ) {
-										$prog->{$pid}->{expires} = $data->{$pid}->{expires};
-									}
-									next;
-								} else {
-									$prog->{$pid} = $data->{$pid};
-								}
-							}
-						}
-					});
-				} else {
-					main::logger "WARNING: Concurrent indexing requires the Parallel::ForkManager Perl module. Normal indexing will be performed.\n";
 				}
 			}
 		}
@@ -6717,6 +6735,76 @@ sub get_links_schedule {
 	}
 }
 
+# get cache info from schedule html with Mojolicious
+sub get_links_schedule_mojo {
+	my $self = shift;
+	my $prog = shift;
+	my $prog_type = shift;
+	my $future = shift;
+	my $limit = shift;
+	my $now = shift || time();
+	my $urls = shift;
+	my $channel_ids = shift;
+	my $channels = shift;
+	return 1 unless @$urls;
+	use Mojo::UserAgent;
+	my $active = 0;
+	my %attempts;
+	my $rc_mojo;
+	my $max_conn = $opt->{indexmaxconn} || 4;
+	$max_conn = 10 if $max_conn > 10;
+	$max_conn = 4 if $max_conn < 1;
+	my $ua = Mojo::UserAgent->new(max_redirects => 5);
+	$ua->proxy->detect;
+	$ua->connect_timeout(60);
+	$ua->inactivity_timeout(60);
+	
+	my $get_callback = sub {
+		my (undef, $tx) = @_;
+		--$active;
+		my $url = $tx->req->url;
+		my $channel_id = $channel_ids->{$url};
+		my $channel = $channels->{$url};
+		my $code = $tx->res->code;
+		my $html = $tx->res->body;
+		unless ( $code >= 200 and $code < 300 and $html) {
+			if ( $attempts{$url} < 3 ) {
+				main::logger "\nDEBUG: Retrying download of schedule page: $url\n" if $opt->{verbose};
+				unshift @$urls, $url;
+			} else {
+				main::logger "\nWARNING: Failed to download schedule page: $url\n";
+				$rc_mojo = 1;
+			}
+			return;
+		}
+		my $rc = $self->get_links_schedule_html_page($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+		if ( $rc ) {
+			main::logger "\nWARNING: Failed to parse schedule page: $url\n";
+			$rc_mojo = 1;
+		}
+	};
+	
+	Mojo::IOLoop->recurring(
+		0 => sub {
+			if ( $rc_mojo && $opt->{refreshabortonerror} ) {
+				return Mojo::IOLoop->stop;
+			}
+			for ($active + 1 .. $max_conn) {
+				return ($active or Mojo::IOLoop->stop) unless my $url = shift @$urls;
+				++$active;
+				$attempts{$url}++;
+				main::logger ".";
+				main::logger "\nDEBUG: Downloading schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
+				$ua->get($url => $get_callback);
+			}
+		}
+	);
+
+	Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+	Mojo::IOLoop->reset;
+	return 1 if $rc_mojo;
+}
+
 # get cache info from schedule html
 sub get_links_schedule_html {
 	my $self = shift;
@@ -6730,6 +6818,24 @@ sub get_links_schedule_html {
 	my $limit = shift;
 	my $now = shift || time();
 	my $known_bad = shift;
+	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
+	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
+	return 1 unless $html;
+	return $self->get_links_schedule_html_page($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now)
+}
+
+sub get_links_schedule_html_page {
+	my $self = shift;
+	my $html = shift;
+	my $prog = shift;
+	my $prog_type = shift;
+	my $channel_id = shift;
+	my $channel = shift;
+	my $future = shift;
+	my $limit = shift;
+	my $now = shift || time();
+	return 1 unless $html;
+	use XML::LibXML;
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
@@ -6738,9 +6844,6 @@ sub get_links_schedule_html {
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
-	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
-	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
-	return 1 if ! $html;
 	#decode_entities($html);
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @entries = $dom->findnodes('//li[@class="week-guide__table__item"]');
@@ -6807,12 +6910,12 @@ sub get_links_schedule_html {
 		my $series_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Season")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
 		my $brand_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Series")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
 		my ($thumb_pid, $thumb_type);
-		if ( $brand_pid ) {
-			$thumb_pid = $brand_pid;
-			$thumb_type = "brand";
-		} elsif ( $series_pid ) {
+		if ( $series_pid ) {
 			$thumb_pid = $series_pid;
 			$thumb_type = "series";
+		} elsif ( $brand_pid ) {
+			$thumb_pid = $brand_pid;
+			$thumb_type = "brand";
 		}
 		if ( $thumb_pid ) {
 			my $thumbsize = $opt->{thumbsizecache} || 150;
@@ -7030,10 +7133,10 @@ sub get_links_schedule_page {
 		my $image_pid = $1 if $entry =~ m{<image><pid>(.*?)</pid>}s;
 		my $series_image_pid = $1 if $entry =~ m{<programme\s+type="series">.*?<image><pid>(.*?)</pid>};
 		my $brand_image_pid = $1 if $entry =~ m{<programme\s+type="brand">.*?<image><pid>(.*?)</pid>};
-		if ( $brand_image_pid ) {
-			$image_pid = $brand_image_pid;
-		} elsif ( $series_image_pid ) {
+		if ( $series_image_pid ) {
 			$image_pid = $series_image_pid;
+		} elsif ( $brand_image_pid ) {
+			$image_pid = $brand_image_pid;
 		}
 		my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
 		$suffix = Programme::bbciplayer->thumb_url_suffixes->{ 150 } unless $suffix;
