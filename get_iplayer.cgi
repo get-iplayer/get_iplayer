@@ -143,7 +143,7 @@ my @headings = qw(
 );
 
 # Default Displayed headings
-my @headings_default = qw( thumbnail type name episode desc channel categories timeadded );
+my @headings_default = qw( type name episode desc channel timeadded );
 
 # Lookup table for nice field name headings
 my %fieldname = (

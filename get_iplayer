@@ -6907,22 +6907,6 @@ sub get_links_schedule_html_page {
 		# Extract the seriesnum
 		my $regex = 'Series\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
-		my $series_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Season")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
-		my $brand_pid = $1 if $entry->findvalue('.//span[@property="isPartOf"][contains(@typeof,"Series")]/@resource') =~ m{([bp]0[a-z0-9]{6})$};
-		my ($thumb_pid, $thumb_type);
-		if ( $series_pid ) {
-			$thumb_pid = $series_pid;
-			$thumb_type = "series";
-		} elsif ( $brand_pid ) {
-			$thumb_pid = $brand_pid;
-			$thumb_type = "brand";
-		}
-		if ( $thumb_pid ) {
-			my $thumbsize = $opt->{thumbsizecache} || 150;
-			my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-			$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } unless $recipe;
-			$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/legacy/${thumb_type}/${thumb_pid}.jpg";
-		}
 		# only default version in schedules
 		$version = 'default';
 		# build data structure
