@@ -6844,7 +6844,6 @@ sub get_links_schedule_html_page {
 	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
-	#decode_entities($html);
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @entries = $dom->findnodes('//li[@class="week-guide__table__item"]');
 	# get list of entries within <broadcast> </broadcast> tags
@@ -6910,6 +6909,9 @@ sub get_links_schedule_html_page {
 		# only default version in schedules
 		$version = 'default';
 		# build data structure
+		decode_entities($name);
+		decode_entities($episode);
+		decode_entities($desc);
 		$prog->{$pid} = main::progclass($prog_type)->new(
 			'pid'		=> $pid,
 			'name'		=> $name,
