@@ -758,6 +758,10 @@ sub init_search {
 
 	# force --ybbcy
 	#$opt->{ybbcy} = 1 unless defined $opt->{ybbcy};
+	if ( defined $opt->{indexmaxconn} ) {
+		$opt->{indexmaxconn} = 10 if $opt->{indexmaxconn} > 10;
+		$opt->{indexmaxconn} = 4 if $opt->{indexmaxconn} < 1;
+	}
 	
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
@@ -6600,7 +6604,6 @@ sub get_links_schedule {
 	my @channel_list = sort keys %channels;
 	# use Mojo::UserAgent if available
 	if ( $opt->{ybbcy} && ! $opt->{nomojo} ) {
-		# check Mojo::UserAgent here before using elsewhere
 		eval "use Mojo::UserAgent";
 		if ( ! $@ ) {
 			main::logger "INFO: Using Mojo::UserAgent for concurrent indexing\n";
@@ -6631,8 +6634,6 @@ sub get_links_schedule {
 			} else {
 				main::logger "INFO: Using Parallel::ForkManager for concurrent indexing\n";
 				my $max_conn = $opt->{indexmaxconn} || 4;
-				$max_conn = 10 if $max_conn > 10;
-				$max_conn = 4 if $max_conn < 1;
 				$pm = Parallel::ForkManager->new($max_conn);
 				$pm->run_on_finish( sub {
 					my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
@@ -6679,6 +6680,9 @@ sub get_links_schedule {
 	my $known_bad = "radiosolent";
 	undef $known_bad if $opt->{ybbcy};
 	my %aod_seen;
+	if (! $pm) {
+		main::logger "INFO: Using non-concurrent indexing\n";
+	}
 	for my $channel_id ( @channel_list ) {
 		last if $opt->{refreshabortonerror} && $rc_pm;
 		SCHEDULES:
@@ -6756,8 +6760,6 @@ sub get_links_schedule_mojo {
 	my %attempts;
 	my $rc_mojo;
 	my $max_conn = $opt->{indexmaxconn} || 4;
-	$max_conn = 10 if $max_conn > 10;
-	$max_conn = 4 if $max_conn < 1;
 	my $ua = Mojo::UserAgent->new(max_redirects => 5);
 	$ua->proxy->detect;
 	$ua->connect_timeout(60);
