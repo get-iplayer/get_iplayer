@@ -6769,7 +6769,7 @@ sub get_links_schedule_mojo {
 	
 	my $get_callback = sub {
 		my (undef, $tx) = @_;
-		--$active;
+		$active--;
 		my $url = $tx->req->url;
 		my $channel_id = $channel_ids->{$url};
 		my $channel = $channels->{$url};
@@ -6792,24 +6792,29 @@ sub get_links_schedule_mojo {
 		}
 	};
 	
-	Mojo::IOLoop->recurring(
-		0 => sub {
-			if ( $rc_mojo && $opt->{refreshabortonerror} ) {
-				return Mojo::IOLoop->stop;
-			}
-			for ($active + 1 .. $max_conn) {
-				return ($active or Mojo::IOLoop->stop) unless my $url = shift @$urls;
-				++$active;
-				$attempts{$url}++;
-				main::logger ".";
-				main::logger "\nDEBUG: Downloading schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
-				$ua->get($url => $get_callback);
-			}
+	my $delay = Mojo::IOLoop->delay;
+	my $do_next;
+	$do_next = sub {
+		while ( $active < $max_conn and my $url = shift @$urls ) {
+			last if ( $rc_mojo && $opt->{refreshabortonerror} );
+			my $end = $delay->begin;
+			$active++;
+			$attempts{$url}++;
+			main::logger ".";
+			main::logger "\nDEBUG: Downloading schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
+			$ua->get($url => sub {
+				my ($ua, $tx) = @_;
+ 				unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
+	 				$get_callback->($ua, $tx);
+					$do_next->();
+				}
+				$end->(); 
+			});
 		}
-	);
-
-	Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
-	Mojo::IOLoop->reset;
+	};
+	
+	$do_next->();
+	$delay->wait unless $delay->ioloop->is_running;
 	return 1 if $rc_mojo;
 }
 
