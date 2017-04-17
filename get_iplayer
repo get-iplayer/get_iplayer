@@ -6747,7 +6747,11 @@ sub get_links_schedule_mojo {
 	my $channel_ids = shift;
 	my $channels = shift;
 	return 1 unless @$urls;
-	use Mojo::UserAgent;
+	eval "use Mojo::UserAgent";
+	if ( $@ ) {
+		main::logger "INFO: Mojo::UserAgent not available\n";
+		return 1;
+	}
 	my $active = 0;
 	my %attempts;
 	my $rc_mojo;
@@ -6835,7 +6839,11 @@ sub get_links_schedule_html_page {
 	my $limit = shift;
 	my $now = shift || time();
 	return 1 unless $html;
-	use XML::LibXML;
+	eval "use XML::LibXML";
+	if ( $@ ) {
+		main::logger "INFO: XML::LibXML not available\n";
+		return 1;
+	}
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
