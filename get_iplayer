@@ -248,8 +248,6 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache. Cache updates will be very slow. Requires --ybbcy."],
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing. Requires --ybbcy. Default: 5 Min: 1 Max: 10"],
-	noindexmojo	=> [ 1, "noindexmojo|no-index-mojo!", 'Deprecated', '--no-index-mojo', "Do not use Mojolicious (if installed) for concurrent (i.e., faster) programme indexing. Without this option, Mojolicious will be preferred to Parallel::ForkManager if both are installed. Requires --ybbcy"],
-	noindexpfm	=> [ 1, "noindexpfm|no-index-pfm!", 'Deprecated', '--no-index-pfm', "Do not use Parallel::ForkManager (if installed) for concurrent (i.e., faster) programme indexing. By default, Parallel::ForkManager will only be used if Mojolicious is not installed. Parallel::ForkManager is not supported on Windows. Requires --ybbcy."],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 	ybbcy	=> [ 1, "ybbcy!", 'Deprecated', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. Programme indexing may be extremely slow. Some metadata will be missing or incorrect."],
@@ -6548,8 +6546,6 @@ sub get_links_schedule {
 			return;
 		}
 	}
-	my $pm;
-	my $rc_pm;
 	my @schedule_dates;
 	my $limit = 0;
 	my $one_week = 7 * 86400;
@@ -6603,11 +6599,10 @@ sub get_links_schedule {
 	return unless @schedule_dates;
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
 	my @channel_list = sort keys %channels;
-	# use Mojo::UserAgent if available
-	if ( $opt->{ybbcy} && ! $opt->{noindexconcurrent} && ! $opt->{noindexmojo} ) {
+	if ( $opt->{ybbcy} && ! $opt->{noindexconcurrent} ) {
 		eval "use Mojo::UserAgent";
 		if ( ! $@ ) {
-			main::logger "INFO: Using Mojolicious for concurrent indexing\n";
+			main::logger "INFO: Using concurrent indexing\n";
 			my @mojo_urls;
 			my %mojo_channel_ids;
 			my %mojo_channels;
@@ -6624,41 +6619,6 @@ sub get_links_schedule {
 				return 1 if $opt->{refreshabortonerror};
 			}
 			return;
-		}
-	}
-	# use Parallel::ForkManager if available
-	if ( $opt->{ybbcy} && ! $opt->{noindexconcurrent} && ! $opt->{noindexpfm} ) {
-		eval "use Parallel::ForkManager";
-		if ( ! $@  ) {
-			if ( $^O eq "MSWin32" ) {
-				main::logger "WARNING: Use of Parallel::ForkManager for concurrent indexing is not supported on Windows. Install Mojolicious instead. Non-concurrent indexing will be performed.\n";
-			} else {
-				main::logger "INFO: Using Parallel::ForkManager for concurrent indexing\n";
-				my $max_conn = $opt->{indexmaxconn} || 5;
-				$pm = Parallel::ForkManager->new($max_conn);
-				$pm->run_on_finish( sub {
-					my ($child_pid, $exit_code, $ident, $exit_signal, $core_dump, $data) = @_;
-					$rc_pm = $exit_code unless $rc_pm;
-					if ( defined $data ) {
-						for my $pid ( keys %{$data} ) {
-							if ( defined $prog->{$pid} ) {
-								main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $data->{$pid}->{channel} $data->{$pid}->{available})\n" if $opt->{verbose};
-								# use listing with earliest availability
-								if ( $data->{$pid}->{available} lt $prog->{$pid}->{available} ) {
-									$prog->{$pid}->{available} = $data->{$pid}->{available};
-								}
-								# use listing with latest expiry
-								if ( $data->{$pid}->{expires} > $prog->{$pid}->{expires} ) {
-									$prog->{$pid}->{expires} = $data->{$pid}->{expires};
-								}
-								next;
-							} else {
-								$prog->{$pid} = $data->{$pid};
-							}
-						}
-					}
-				} );
-			}	
 		}
 	}
 	my (%aod_channels, %aod_channel_ids);
@@ -6681,26 +6641,13 @@ sub get_links_schedule {
 	my $known_bad = "radiosolent";
 	undef $known_bad if $opt->{ybbcy};
 	my %aod_seen;
-	if (! $pm) {
-		main::logger "INFO: Using non-concurrent indexing\n";
-	}
+	main::logger "INFO: Using sequential indexing\n";
 	for my $channel_id ( @channel_list ) {
-		last if $opt->{refreshabortonerror} && $rc_pm;
-		SCHEDULES:
 		for my $schedule_date ( @schedule_dates ) {
-			last if $opt->{refreshabortonerror} && $rc_pm;
 			my ($url, $rc);
 			if ( $opt->{ybbcy} ) {
 				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
-				if ($pm) {
-					$pm->start($url) and next SCHEDULES;
-					my ($rc2, $prog2);
-					$prog2 = {};
-					$rc2 = $self->get_links_schedule_html($ua, $prog2, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-					$pm->finish($rc2, $prog2)
-				} else {
-					$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-				};
+				$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
 			} else {
 				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
 				$rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
@@ -6730,12 +6677,6 @@ sub get_links_schedule {
 					next;
 				}
 			}
-		}
-	}
-	if ( $pm ) {
-		$pm->wait_all_children();
-		if ( $rc_pm ) {
-			return 1 if $opt->{refreshabortonerror};
 		}
 	}
 }
