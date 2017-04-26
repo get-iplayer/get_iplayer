@@ -7878,9 +7878,12 @@ sub remux {
 	push @input_opts, ( '-i', $video_file ) if $video_ok;
 	my @codec_opts;
 	if ( ! $opt->{ffmpegobsolete} ) {
-		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' )
+		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' );
+		if ( $opt->{notag} ) {
+			push @codec_opts, ( '-movflags', 'faststart' );
+		}
 	} else {
-		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' )
+		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' );
 	}
 	my @filter_opts;
 	if ( $prog->{mode} =~ /(haf|hvf|hls)/ ) {
