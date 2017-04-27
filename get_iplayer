@@ -246,11 +246,10 @@ my $opt_format = {
 	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache. Cache updates will be very slow. Requires --ybbcy."],
-	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing. Requires --ybbcy. Default: 5 Min: 1 Max: 10"],
+	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache. Cache updates will be very slow."],
+	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing. Default: 5 Min: 1 Max: 10"],
 	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
-	ybbcy	=> [ 1, "ybbcy!", 'Deprecated', '--ybbcy', "Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. Programme indexing may be extremely slow. Some metadata will be missing or incorrect."],
 
 };
 
@@ -756,7 +755,7 @@ sub init_search {
 	}
 
 	# force --ybbcy
-	$opt->{ybbcy} = 1 unless defined $opt->{ybbcy};
+	$opt->{ybbcy} = 1;
 	if ( defined $opt->{indexmaxconn} ) {
 		$opt->{indexmaxconn} = 10 if $opt->{indexmaxconn} > 10;
 		$opt->{indexmaxconn} = 1 if $opt->{indexmaxconn} < 1;
@@ -6544,7 +6543,7 @@ sub get_links_schedule {
 		# check XML::LibXML here before using elsewhere
 		eval "use XML::LibXML '1.70'";
 		if ( $@ ) {
-			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes with --ybbcy.\n";
+			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes.\n";
 			return;
 		}
 	}
