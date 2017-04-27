@@ -4804,8 +4804,6 @@ sub get_metadata {
 							} else {
 								($type = lc($ver_type)) =~ s/\s+.*$//;
 							}
-							# skip store only
-							next if $type =~ /store/;
 							if ( $type ) {
 								my $version = $type;
 								$version .= $found{$type} if ++$found{$type} > 1;
@@ -4889,7 +4887,7 @@ sub get_metadata {
 			$prog->{streams}->{$version} = get_stream_data($prog, $prog->{verpids}->{$version}, undef, $version );
 		}
 		if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
-			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping RDF\n" if $opt->{verbose};
+			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping\n" if $opt->{verbose};
 			next;
 		}
 		$modes->{$version} = join ',', sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
