@@ -5855,8 +5855,6 @@ sub get_stream_data {
 				$unblocked = 1;
 				decode_entities($xml);
 				my @iptv_medias = parse_metadata( $xml );
-				my $min_bitrate = 1200;
-				my $max_bitrate = 6000;
 				for my $iptv_media ( @iptv_medias ) {
 					for my $iptv_conn ( @{$iptv_media->{connections}} ) {
 						next if $iptv_conn->{supplier} =~ /$exclude_regex/;
@@ -5874,6 +5872,11 @@ sub get_stream_data {
 						}
 						my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
 						$iptv_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+						my ( $min_bitrate, $max_bitrate );
+						if ( $prefix eq "hvf" ) {
+							$min_bitrate = 1500;
+							$max_bitrate = 6500;
+						}
 						my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, $max_bitrate, $prefix );
 						for my $hls_media ( @hls_medias ) {
 							for my $hls_conn ( @{$hls_media->{connections}} ) {
