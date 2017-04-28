@@ -4978,7 +4978,7 @@ sub fetch_episode_pids {
 	eval "use XML::LibXML '1.70'";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to recursively extract episode PIDs.\n";
-		return ();
+		return \@pids;
 	}
 	do {
 		my $url = "http://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
@@ -5007,6 +5007,37 @@ sub fetch_episode_pids {
 		}
 		$curr_page++;
  	} while ( $curr_page <= $max_page );
+ 	if ( ! @pids ) {
+		main::logger "INFO: No episode PIDs found, checking for kiddie programmes...\n";
+		$seen{'title'} = 0;
+		$max_page = 1;
+		$curr_page = 1;
+		do {
+			my $url = "http://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
+			my $html = main::request_url_retry($ua, $url, 3, '', "\nWARNING: Failed to fetch episode PIDs from $url\n");
+			last unless $html;
+			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
+			my $last_page = $dom->findvalue('//div[@class="paginate"]//li[@class="page"][last()]/a/text()');
+			$max_page = $last_page if $last_page > $max_page;
+			unless ( $seen{'title'} ) {
+				my $title = $dom->findvalue('//title');
+				$title =~ s/(^\s+|\s+$)//g;
+				main::logger "INFO: $title\n";
+				$seen{'title'} = 1;
+			}
+			main::logger "INFO: Page $curr_page of $max_page\n";
+			my @episodes = $dom->findnodes('//ul[contains(@class, "iplayer-list")]/li[contains(@class,"episode")]');
+			for my $episode ( @episodes ) {
+				my $pid = $episode->findvalue('@data-ip-id');
+				next if ( $seen{$pid} );
+				$seen{$pid} = 1;
+				my $name = $episode->findvalue('.//div[@class="secondary"]/div[@class="subtitle"]/text()');
+				main::logger "INFO:     $name ($pid)\n";
+				push @pids, $pid;
+			}
+			$curr_page++;
+		} while ( $curr_page <= $max_page );
+ 	}
 	return \@pids;
 }
 
