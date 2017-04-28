@@ -5,16 +5,16 @@
 * Downloads TV and radio programmes from BBC iPlayer
 * Allows multiple programmes to be downloaded using a single command
 * Indexing of most available iPlayer catch-up programmes (not BBC Three, Red Button or iPlayer Exclusive)
-* Caching of index with automatic updating (default 4h)
+* Caching of index with automatic updating
 * Regex search on programme name 
 * Regex search on programme description and episode title
 * Filter search results by channel
 * Direct download via programme ID or URL
 * PVR capability (may be used with cron or Task Scheduler)
 * HTTP proxy support
-* Perl 5.8.8+ required, plus LWP, LWP::Protocol::https, XML::Simple and XML::LibXML modules
+* Perl 5.10.1+ required, plus LWP, LWP::Protocol::https, XML::Simple, XML::LibXML and Mojolicious modules
 * Requires ffmpeg for conversion to MP4 and AtomicParsley for metadata tagging
-* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS, Windows (7/8/10 supported)
+* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.7+), Windows (7/8/10 - XP/Vista not supported)
 
 **NOTE:** 
 
