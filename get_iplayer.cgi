@@ -2553,8 +2553,11 @@ sub build_option_html {
 
 sub refresh {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
+	my $refreshforce = $cgi->param( 'REFRESHFORCE' ) || 0;
 	my $refreshfuture = $cgi->param( 'REFRESHFUTURE' ) || 0;
-	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+	print $fh "<strong><p>The cache timestamp will be checked every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+	print $fh "<strong><p>However, the cache will actually be updated only once per calendar week, so you may not wish to leave this page open.</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+	print $fh "<strong><p>Use the Force Refresh button to force a cache update. You will generally never need to force an update, so use with care.</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	if ( IS_WIN32 ) {
 		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	}
@@ -2565,7 +2568,7 @@ sub refresh {
 		'--encoding-console-out=UTF-8',
 		'--nocopyright',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
+		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refresh=$refreshforce", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
 	);
 	print $fh '<pre>';
 	run_cmd_autorefresh( $fh, $se, 1, @cmd );
@@ -2583,7 +2586,7 @@ sub refresh {
 					{
 						-class=>'action',
 						-title => 'Refresh Cache Now',
-						-onClick  => "RefreshTab( '?NEXTPAGE=refresh&PROGTYPES=$typelist&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
+						-onClick  => "RefreshTab( '?NEXTPAGE=refresh&PROGTYPES=$typelist&REFRESHFORCE=1&AUTOWEBREFRESH=$autorefresh', ".(1000*3600*$autorefresh).", 1 );",
 					},
 					'Force Refresh'
 				),
