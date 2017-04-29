@@ -6590,11 +6590,7 @@ sub get_links_schedule {
 		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
 	}
 	if ( $future ) {
-		if ( $opt->{ybbcy} ) {
-			push @schedule_dates, "this_week" unless $cache_this_week;
-		} else {
-			push @schedule_dates, "this_week";
-		}
+		push @schedule_dates, "this_week" unless $opt->{ybbcy};
 		push @schedule_dates, "next_week";
 	} else {
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
@@ -6615,7 +6611,7 @@ sub get_links_schedule {
 		} else {
 			if ( $opt->{ybbcy} ) {
 				push @schedule_dates, "last_week" unless $cache_last_week || $cache_this_week;
-				push @schedule_dates, "this_week" unless $cache_this_week;
+				push @schedule_dates, "this_week" if $opt->{refresh} || ! $cache_this_week;
 			} else {
 				push @schedule_dates, "last_week" unless $cache_this_week;
 				push @schedule_dates, "this_week";
