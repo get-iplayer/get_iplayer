@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "February 2017" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "April 2017" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -174,7 +174,7 @@ Start recording matching programmes. Search terms required unless \-\-pid specif
 Show recording progress as hashes
 .TP
 \fB\-\-include\-supplier <supplier>,<supplier>,...
-Comma\-delimited list of media stream suppliers to use if not included by default.  Possible values: level3,akamai,limelight,bidi
+Comma\-delimited list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi
 .TP
 \fB\-\-log\-progress
 Force HLS/DASH download progress display to be captured when screen output is redirected to file. Progress display is normally omitted unless writing to terminal.
@@ -210,10 +210,10 @@ Record all related episodes if value of \-\-pid is a series or brand PID. Requir
 Web proxy URL e.g. 'http://USERNAME:PASSWORD@SERVER:PORT' or 'http://SERVER:PORT'. Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless \-\-partial\-proxy is specified.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,flashaachigh,flashaacstd,flashaaclow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,flashaac,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow).
+Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow).
 .TP
 \fB\-\-raw
-Don't remux or change the recording in any way. Saves output file in native container format (RTMP\->FLV, HLS\->MPEG\-TS, DASH\->MP4)
+Don't remux or change the recording in any way. Saves output file in native container format (HLS\->MPEG\-TS, DASH\->MP4)
 .TP
 \fB\-\-start <secs|hh:mm:ss>
 Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
@@ -224,8 +224,8 @@ Recording/streaming stop offset (actual stop may be several seconds later for HL
 \fB\-\-suboffset <offset>
 Offset the subtitle timestamps by the specified number of milliseconds
 .TP
-\fB\-\-subsfmt <format>
-Subtitles format.  One of: default, compact.  Default: 'default'
+\fB\-\-subs\-mono
+Create monochrome titles, with leading hyphen used to denote change of speaker.
 .TP
 \fB\-\-subsraw
 Additionally save the raw subtitles file
@@ -255,7 +255,7 @@ Download Thumbnail image if available
 Only Download Thumbnail image if available, not the programme
 .TP
 \fB\-\-tvmode <mode>,<mode>,...
-TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,flashhd,flashvhigh,flashstd,flashxstd,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,flash,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow).
+TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow).
 .TP
 \fB\-\-url <url>,<url>,...
 Record the embedded media in the specified iPlayer episode URLs. Use with \-\-type.
@@ -299,9 +299,6 @@ Thumbnail filename extension to use
 .TP
 \fB\-\-thumbsize <index|width>
 Default thumbnail size/index to use for the current recording and metadata. index: 1\-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920
-.TP
-\fB\-\-thumbsizecache <index|width>
-Default thumbnail size/index to use when building cache. index: 1\-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920
 .TP
 \fB\-\-whitespace, \-w
 Keep whitespace in file and directory names. Default behaviour is to replace whitespace with underscores unless \-\-no\-sanitise specified.
@@ -476,45 +473,33 @@ Character encoding used to decode command\-line arguments. Encoding name must be
 \fB\-\-encoding\-locale\-fs <name>
 Character encoding used to encode file and directory names. Encoding name must be known to Perl Encode module. Default (only if auto\-detect fails): Linux/Unix/OSX = UTF\-8, Windows = cp1252
 .TP
-\fB\-\-index\-concurrent
-Perform fork()\-based concurrent (i.e., faster) indexing when web scraping TV schedules only. Requires \-\-ybbcy and Parallel::ForkManager Perl module. Not supported on Windows.
-.TP
 \fB\-\-index\-maxconn <number>
-Maximum number of forks (connections) to use for concurrent indexing. Requires \-\-index\-concurrent. Default: 4 Max: 10
+Maximum number of connections to use for concurrent programme indexing. Default: 5 Min: 1 Max: 10
+.TP
+\fB\-\-trim\-history <# days to retain>
+Remove download history entries older than number of days specified in option value.  Cannot specify 0 \- use 'all' to completely delete download history
+.SS "Deprecated Options:"
+.TP
+\fB\-\-cache\-init
+Update cache with full two\-week programme index (ensures complete cache when updating from 2.99 and earlier)
+.TP
+\fB\-\-no\-index\-concurrent
+Do not use concurrent indexing to update programme cache. Cache updates will be very slow.
 .TP
 \fB\-\-no\-scrape\-versions
 Do not scrape episode web pages as extra measure to find audiodescribed/signed versions.
 .TP
-\fB\-\-trim\-history <# days to retain>
-Remove download history entries older than number of days specified in option value.  Cannot specify 0 \- use 'all' to completely delete download history
+\fB\-\-subsfmt <format>
+Subtitles format.  One of: default, compact.  Default: 'default'
 .TP
-\fB\-\-ybbcy
-Use alternate programme indexing and metadata retrieval if the BBC removes its XML data sources. TV programme indexing will be extremely slow. Some metadata will be missing or incorrect.
-.SS "Deprecated Options:"
-.TP
-\fB\-\-check\-duration
-Print message showing recorded duration, expected duration and difference between them.
-.TP
-\fB\-\-rtmp\-radio\-opts <options>
-Add custom options to rtmpdump for radio
-.TP
-\fB\-\-rtmp\-tv\-opts <options>
-Add custom options to rtmpdump for tv
-.TP
-\fB\-\-rtmpdump <path>
-Location of rtmpdump binary. Synonyms: \-\-flvstreamer
-.TP
-\fB\-\-rtmpport <port>
-Override the RTMP port (e.g. 443)
-.TP
-\fB\-\-swfurl <URL>
-URL of Flash player used by rtmpdump for verification.  Only use if default Flash player URL is not working.
+\fB\-\-thumbsizecache <index|width>
+Default thumbnail size/index to use when building cache. index: 1\-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920
 .SH AUTHOR
 get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and is now maintained by the contributors at http://www.infradead.org/get_iplayer/html/get_iplayer.html
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v2.99, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.00, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
