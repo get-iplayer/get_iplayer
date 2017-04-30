@@ -7424,17 +7424,18 @@ sub ttml_to_srt {
 	$xpc->registerNs('tt', $doc->namespaceURI());		
 	my @ns = $xpc->findnodes("/*/namespace::*");
 	for my $ns (@ns) {
-		if ( $ns->getNamespaceURI() ) {
-			$xpc->registerNs($ns->getName(), $ns->getNamespaceURI());
+		if ( $ns->getLocalName() && $ns->getValue() ) {
+			$xpc->registerNs($ns->getLocalName(), $ns->getValue());
 		}
 	}
-
-	my $fps = $xpc->findvalue('/*/@ttp:frameRate');
+	my $fps;
+	eval { $fps = $xpc->findvalue('/*/@ttp:frameRate') };
 	my %style_colors;
 	foreach my $style ($xpc->findnodes('//tt:styling/tt:style')) {
 		my $style_id = $style->findvalue('@id');
 		if ($style_id) {
-			my $style_color = $style->findvalue('@tts:color');
+			my $style_color;
+			eval { $style_color = $style->findvalue('@tts:color') };
 			if ($style_color) {
 				my $style_hex = $hex_colors{$style_color};
 				if ($style_hex) {
@@ -7480,7 +7481,7 @@ sub ttml_to_srt {
 			if ($p_style) {
 				$p_color = $style_colors{$p_style};
 			} else {
-				$p_color = $hex_colors{$p->findvalue('@tts:color')};
+				eval { $p_color = $hex_colors{$p->findvalue('@tts:color')} };
 			}
 			$p_color ||= $div_color;
 			for my $p_child ($p->childNodes) {
@@ -7506,7 +7507,7 @@ sub ttml_to_srt {
 					if ($span_style) {
 						$span_color = $style_colors{$span_style};
 					} else {
-						$span_color = $hex_colors{$span->findvalue('@tts:color')};
+						eval { $span_color = $hex_colors{$span->findvalue('@tts:color')} };
 					}
 					$span_color ||= $p_color;
 					for my $span_child ($span->childNodes) {
