@@ -6601,8 +6601,7 @@ sub get_links_schedule {
 		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
 	}
 	if ( $future ) {
-		push @schedule_dates, "this_week" unless $opt->{ybbcy};
-		push @schedule_dates, "next_week";
+		push @schedule_dates, "this_week", "next_week";
 	} else {
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 		$limit_days = 0 if $limit_days < 0;
@@ -6620,13 +6619,8 @@ sub get_links_schedule {
 			}
 			push @schedule_dates, "this_week";
 		} else {
-			if ( $opt->{ybbcy} ) {
-				push @schedule_dates, "last_week" unless $cache_last_week || $cache_this_week;
-				push @schedule_dates, "this_week" if $opt->{refresh} || ! $cache_this_week;
-			} else {
-				push @schedule_dates, "last_week" unless $cache_this_week;
-				push @schedule_dates, "this_week";
-			}
+			push @schedule_dates, "last_week" unless $cache_this_week;
+			push @schedule_dates, "this_week";
 		}
 	}
 	return unless @schedule_dates;
@@ -6635,7 +6629,7 @@ sub get_links_schedule {
 	if ( $opt->{ybbcy} && ! $opt->{noindexconcurrent} ) {
 		eval "use Mojo::UserAgent";
 		if ( ! $@ ) {
-			main::logger "INFO: Using concurrent indexing\n";
+			main::logger "\nINFO: Using concurrent indexing\n";
 			my @mojo_urls;
 			my %mojo_channel_ids;
 			my %mojo_channels;
@@ -6674,7 +6668,7 @@ sub get_links_schedule {
 	my $known_bad = "radiosolent";
 	undef $known_bad if $opt->{ybbcy};
 	my %aod_seen;
-	main::logger "INFO: Using sequential indexing\n";
+	main::logger "\nINFO: Using sequential indexing\n";
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
@@ -6848,6 +6842,8 @@ sub get_links_schedule_html_page {
 		next unless $available_str;
 		$available = Programme::get_time_string( $available_str );
 		next if $available < $min_available;
+		next if ! $future && $available > $now;
+		next if $future && $available <= $now;
 		$expires = $available + $thirty_days;
 		if ( defined $prog->{$pid} ) {
 			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
