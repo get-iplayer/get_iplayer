@@ -182,7 +182,6 @@ my $opt_format = {
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
 	# Config
-	cacheinit	=> [ 1, "initcache|init-cache|cacheinit|cache-init!", 'Deprecated', '--cache-init', "Update cache with full two-week programme index (ensures complete cache when updating from 2.99 and earlier)"],
 	cacherebuild	=> [ 1, "rebuildcache|rebuild-cache|cacherebuild|cache-rebuild!", 'Config', '--cache-rebuild', "Rebuild cache with full 30-day programme index. Use --refresh-limit to restrict cache window."],
 	cachereset	=> [ 1, "resetcache|reset-cache|cachereset|cache-reset!", 'Config', '--cache-reset', "Reset cache to retain only latest update and discard previous contents."],
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
@@ -1623,7 +1622,7 @@ sub get_links {
 	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
 	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{refresh};
 	if ( (! $only_load_from_cache) &&
-		( (! keys %{ $prog_old } ) || (! -f $cachefile) || $opt->{refresh} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) || $opt->{cacheinit} )
+		( (! keys %{ $prog_old } ) || (! -f $cachefile) || $opt->{refresh} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) || $opt->{cachereset} )
 	) {
 
 		# Get links for specific type of programme class into %prog
@@ -6594,7 +6593,7 @@ sub get_links_schedule {
 	my $that_week = strftime( "%W", gmtime($then) );
 	my $cache_file = "${profile_dir}/${prog_type}.cache";
 	my ($cache_this_week, $cache_last_week);
-	if ( ! $opt->{cacheinit} && ! $opt->{cachereset} && -f $cache_file ) {
+	if ( ! $opt->{cachereset} && -f $cache_file ) {
 		my $cache_time = stat($cache_file)->mtime;
 		my $cache_year = (gmtime($cache_time))[5];
 		my $cache_week = strftime( "%W", gmtime($cache_time) );
