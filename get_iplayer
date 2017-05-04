@@ -4972,6 +4972,27 @@ sub get_metadata {
 	return 0;
 }
 
+sub fetch_pid_type {
+	my $ua = shift;
+	my $pid = shift;
+	my $url = "http://www.bbc.co.uk/programmes/$pid.json";
+	my $pid_type;
+	eval "use JSON::PP";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module for more accurate programme metadata.\n";
+		return undef;
+	}
+	my $json = main::request_url_retry($ua, $url, 3, '', '');
+	if ( $json ) {
+		my $dec =	eval { decode_json($json) };
+		if ( ! $@ ) {
+			my $doc = $dec->{programme};
+			$pid_type = $doc->{type};
+		}
+	}
+	return $pid_type;
+}
+
 sub fetch_episode_pids {
 	my $ua = shift;
 	my $parent_pid = shift;
@@ -4984,9 +5005,9 @@ sub fetch_episode_pids {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to recursively extract episode PIDs.\n";
 		return \@pids;
 	}
-	do {
+	{ do {
 		my $url = "http://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
-		my $html = main::request_url_retry($ua, $url, 3, '', "\nWARNING: Failed to fetch episode PIDs from $url\n");
+		my $html = main::request_url_retry($ua, $url, 3, '', '');
 		last unless $html;
 		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/*/text()');
@@ -5010,15 +5031,15 @@ sub fetch_episode_pids {
 			push @pids, $pid;
 		}
 		$curr_page++;
- 	} while ( $curr_page <= $max_page );
- 	if ( ! @pids ) {
-		main::logger "INFO: No episode PIDs found, checking for kiddie programmes...\n";
+	} while ( $curr_page <= $max_page ) };
+	if ( ! @pids ) {
+		main::logger "INFO: No episode PIDs found, checking alternate location...\n";
 		$seen{'title'} = 0;
 		$max_page = 1;
 		$curr_page = 1;
-		do {
+		{ do {
 			my $url = "http://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
-			my $html = main::request_url_retry($ua, $url, 3, '', "\nWARNING: Failed to fetch episode PIDs from $url\n");
+			my $html = main::request_url_retry($ua, $url, 3, '', '');
 			last unless $html;
 			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 			my $last_page = $dom->findvalue('//div[@class="paginate"]//li[@class="page"][last()]/a/text()');
@@ -5040,8 +5061,9 @@ sub fetch_episode_pids {
 				push @pids, $pid;
 			}
 			$curr_page++;
-		} while ( $curr_page <= $max_page );
+		} while ( $curr_page <= $max_page ) };
  	}
+	main::logger "INFO: No episode PIDs found for parent PID: $parent_pid\n" unless @pids;
 	return \@pids;
 }
 
@@ -5060,16 +5082,32 @@ sub get_pids_recursive {
 	}
 
 	if ( $opt->{ybbcy} ) {
-		if ( $opt->{pidrecursive} ) {
+		my $pid_type = fetch_pid_type( $ua, $prog->{pid} );
+		if ( ! $pid_type ) {
+			main::logger "WARNING: Could not determine PID type. Trying to record PID directly.\n";
+			return $prog->{pid};
+		} elsif ( $pid_type eq "episode" ) {
+			main::logger "INFO: Episode PID detected\n";
+			push @pids, $prog->{pid};
+		} elsif ( $pid_type eq "clip" ) {
+			main::logger "INFO: Clip PID detected\n";
+			push @pids, $prog->{pid};
+		} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
+			main::logger "INFO: Series or Brand PID detected\n";
 			my $epids = fetch_episode_pids($ua, $prog->{pid});
 			push @pids, @$epids;
-			@pids = main::make_array_unique_ordered( @pids );
-			return @pids;
+			if ( ! $opt->{pidrecursive} ) {
+				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
+				return ();
+			}
 		} else {
- 			return $prog->{pid};
- 		}
+			main::logger "WARNING: Unknown PID type: $pid_type. Trying to record PID directly.\n";
+			return $prog->{pid};
+		}
+		@pids = main::make_array_unique_ordered( @pids );
+		return @pids;
 	}
-
+exit;
 	eval "use XML::Simple";
 	if ($@) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module to use the Series and Brand parsing functionality\n";
