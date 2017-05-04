@@ -6873,15 +6873,16 @@ sub get_links_schedule_html_page {
 		$channel = $entry->findvalue('.//span[@typeof="BroadcastService"]/meta[@property="name"]/@content');
 		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="description"]');
 		$desc =~ s/[\r\n]/ /g;
-		my @titles = $entry->findnodes('.//h4[@class="programme__titles"]//span[@property="name"]/text()');
+		my @title_nodes = $entry->findnodes('.//h4[@class="programme__titles"]//span[@property="name"]');
+		my @titles = map {$_->findvalue('.')} @title_nodes;
 		if ( $#titles == 2 ) {
 			$name = "$titles[0]: $titles[1]";
-			$episode = "$titles[2]";
+			$episode = $titles[2];
 		} elsif ( $#titles == 1 ) {
-			$name = "$titles[0]";
-			$episode = "$titles[1]";
+			$name = $titles[0];
+			$episode = $titles[1];
 		} elsif ( $#titles == 0 ) {
-			$name = "$titles[0]";
+			$name = $titles[0];
 			$episode = "-";
 		}
 		$episodenum = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="position"]');
