@@ -3557,7 +3557,7 @@ sub process_params {
 		tooltip	=> 'Automatically refresh the default caches in another browser tab (hours)', # Tooltip
 		webvar	=> 'AUTOWEBREFRESH', # webvar
 		type	=> 'text', # type
-		default	=> 1, # default
+		default	=> 4, # default
 		value	=> 3, # width values
 		save	=> 1,
 	};
