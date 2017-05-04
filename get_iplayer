@@ -7996,7 +7996,7 @@ use URI;
 sub opt_format {
 	return {
 		noresume	=> [ 1, "no-resume|noresume!", 'Recording', '--no-resume', "Do not resume partial HLS/DASH downloads."],
-		noverify	=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH segments or file resize upon resume."],
+		noverify	=> [ 1, "no-verify|noverify!", 'Recording', '--no-verify', "Do not verify size of downloaded HLS/DASH file segments or file resize upon resume."],
 	};
 }
 
@@ -8072,8 +8072,8 @@ sub get {
 	unless ( -f $media_file ) {
 		my $segments = $self->parse_playlist($ua, $url);
 		if ( keys %{$segments} == 0 ) {
-			main::logger "ERROR: No segments in HLS playlist\n";
-			main::logger "ERROR: Playlist URL: $url\n";
+			main::logger "ERROR: No file segments in HLS playlist\n";
+			main::logger "ERROR: HLS playlist URL: $url\n";
 			return 'next';
 		}
 		$rc = $self->fetch( $ua, $segments, $media_tmp, $prog, %streamdata );
@@ -8403,8 +8403,8 @@ sub fetch {
 			$segment_url = $segment->{url};
 		}
 		$curr_segment_url = $segment_url;
-		main::logger "\nDEBUG: Downloading segment [$sequence]\n" if $opt->{debug};
-		main::logger "DEBUG: Segment URL: $segment_url\n" if $opt->{debug};;
+		main::logger "\nDEBUG: Downloading file segment [$sequence]\n" if $opt->{debug};
+		main::logger "DEBUG: File segment URL: $segment_url\n" if $opt->{debug};;
 		# download segment with retries
 		my $expected = 0;
 		my $got404 = 0;
@@ -8416,16 +8416,16 @@ sub fetch {
 				if ( $res->code == 404 ) {
 					if ( $sequence == $max_sequence ) {
 						# potential edge cases with incorrect DASH manifests
-						main::logger "\nWARNING: Segment not available from server [$sequence]\n";
-						main::logger "WARNING: This is the final segment of the programme\n";
+						main::logger "\nWARNING: File segment not available from server [$sequence]\n";
+						main::logger "WARNING: This is the final file segment of the programme\n";
 						main::logger "WARNING: It may be incorrectly flagged as unavailable due to inaccurate programme data\n";
 						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
 						if ( $opt->{verbose} ) {
-							main::logger "WARNING: Segment URL: $curr_segment_url\n";
+							main::logger "WARNING: File segment URL: $curr_segment_url\n";
 						}
 					} else {
 						# don't retry if 404 received
-						@warnings = ("Segment not available from server [$sequence]");
+						@warnings = ("File segment not available from server [$sequence]");
 						$return = 2;
 					}
 					$got404 = 1;
@@ -8439,7 +8439,7 @@ sub fetch {
 		last if $got404;
 		# bail out on download failure
 		if ( $i == $retries ) {
-			@warnings = ("Failed to download segment [$sequence]");
+			@warnings = ("Failed to download file segment [$sequence]");
 			$return = 1;
 			last;
 		}
@@ -8449,7 +8449,7 @@ sub fetch {
 			if ( $size_diff != $expected) {
 				close $rh unless $noresume;
 				@warnings = (
-					"Unexpected size for segment [$sequence]",
+					"Unexpected size for file segment [$sequence]",
 					"Expected: $expected  Downloaded: $size_diff",
 					"Retrying download"
 				);
@@ -8462,7 +8462,7 @@ sub fetch {
 			if ( ! print $rh "$sequence,$size,$elapsed,$size_diff,$segment_duration,$begin_time\n" ) {
 				close $rh;
 				@warnings = (
-					"Unable to save resume data for segment [$sequence]",
+					"Unable to save resume data for file segment [$sequence]",
 					"Retrying download"
 				);
 				$return = 1;
@@ -8499,7 +8499,7 @@ sub fetch {
 			$prev_sequence
 		);
 		if ( $opt->{verbose} ) {
-			main::logger "WARNING: Segment URL: $curr_segment_url\n";
+			main::logger "WARNING: File segment URL: $curr_segment_url\n";
 		}
 		return $return > 1 ? 'next' : 'retry';
 	}
@@ -8588,7 +8588,7 @@ sub get {
 		$streamdata{media_bitrate} = $audio_media->{bitrate};
 		my $segments = $self->generate_segments($audio_media);
 		if ( keys %{$segments} <= 1 ) {
-			main::logger "ERROR: No segments generated from DASH audio media\n";
+			main::logger "ERROR: No file segments generated from DASH audio media\n";
 			return 'next';
 		}
 		$rc = $self->fetch( $ua, $segments, $audio_tmp, $prog, %streamdata );
@@ -8608,7 +8608,7 @@ sub get {
 			$streamdata{media_bitrate} = $video_media->{bitrate};
 			my $segments = $self->generate_segments($video_media);
 			if ( keys %{$segments} <= 1 ) {
-				main::logger "ERROR: No segments generated from DASH video media\n";
+				main::logger "ERROR: No file segments generated from DASH video media\n";
 				return 'next';
 			}
 			$rc = $self->fetch( $ua, $segments, $video_tmp, $prog, %streamdata );
