@@ -14,7 +14,7 @@
 * HTTP proxy support
 * Perl 5.10.1+ required, plus LWP, LWP::Protocol::https, XML::Simple, XML::LibXML and Mojolicious modules
 * Requires ffmpeg for conversion to MP4 and AtomicParsley for metadata tagging
-* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.7+), Windows (7/8/10 - XP/Vista not supported)
+* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.10+), Windows (7/8/10 - XP/Vista not supported)
 
 **NOTE:** 
 
