@@ -5479,7 +5479,8 @@ sub parse_hls_connection {
 		foreach my $line (@lines) {
 			next if ($line =~ /^#/ && $line !~ /^#EXT/) || $line =~ /^\s*$/;
 			if ($line =~ /^#EXT-X-STREAM-INF:(.*)$/) {
-				$last_stream = { parse_m3u_attribs($conn->{href}, $1) };
+				$last_stream = parse_m3u_attribs($conn->{href}, $1);
+				next unless $last_stream;
 				if ( $last_stream->{RESOLUTION} && $last_stream->{AUDIO} ) {
 					$best_audio->{$last_stream->{RESOLUTION}} = $last_stream->{AUDIO};
 				}
@@ -5551,12 +5552,15 @@ sub parse_m3u_attribs {
 	my ($url, $attr_str) = @_;
 	my %attr;
 	for (my $as = $attr_str; $as ne ''; ) {
-		$as =~ s/^?([^=]*)=([^,"]*|"[^"]*")\s*(,\s*|$)// or main::logger "WARNING: Invalid attributes in HLS playlist: $attr_str ($url)\n";
+		unless ( $as =~ s/^?([^=]*)=([^,"]*|"[^"]*")\s*(,\s*|$)// ) {
+			main::logger "WARNING: Invalid attributes in HLS playlist: $attr_str ($url)\n";
+			return undef;
+		} 
 		my ($key, $val) = ($1, $2);
 		$val =~ s/^"(.*)"$/$1/;
 		$attr{$key} = $val;
 	}
-	return %attr;
+	return \%attr;
 }
 
 sub parse_dash_connection {
