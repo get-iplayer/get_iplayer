@@ -81,6 +81,7 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps50		=> [ 1, "fps50", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes.  Search terms required unless --pid specified.  Use  --search=.* to force download of all available programmes."],
+	includehttps		=> [ 1, "includehttps|include-https!", 'Recording', '--include-https', "Allow HTTPS playlist/manifest/segment URLs for media streams."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
@@ -5620,6 +5621,7 @@ sub get_stream_data {
 					($stream_key = $pc_conn->{href}) =~ s/\?.*//;
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
+					next if ! $opt->{includehttps} && $pc_conn->{href} =~ /^https:/;
 					if ( $pc_media->{kind} eq "captions" ) {
 						my $media = dclone($pc_media);
 						@{$media->{connections}} = ( $pc_conn );
@@ -5664,6 +5666,7 @@ sub get_stream_data {
 						($stream_key = $iptv_conn->{href}) =~ s/\?.*//;
 						next if $seen{$stream_key};
 						$seen{$stream_key}++;
+						next if ! $opt->{includehttps} && $iptv_conn->{href} =~ /^https:/;
 						if ( $iptv_media->{kind} eq "captions" ) {
 							my $media = dclone($iptv_media);
 							@{$media->{connections}} = ( $iptv_conn );
@@ -5713,6 +5716,7 @@ sub get_stream_data {
 					($stream_key = $mobile_conn->{href}) =~ s/\?.*//;
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
+					next if ! $opt->{includehttps} && $mobile_conn->{href} =~ /^https:/;
 					if ( $mobile_media->{kind} eq "captions" ) {
 						my $media = dclone($mobile_media);
 						@{$media->{connections}} = ( $mobile_conn );
