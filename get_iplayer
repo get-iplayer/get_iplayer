@@ -1240,11 +1240,13 @@ sub sort_index {
 	my $prog_type = shift;
 	my $sortfield = shift || 'name';
 	my $counter = 1;
+	my $max_index = 0;
 	my @sort_key;
 
 	# Add index field based on alphabetical sorting by $sortfield
 	# Start index counter at 'min' for this prog type
 	$counter = progclass($prog_type)->index_min if defined $prog_type;
+	$max_index = progclass($prog_type)->index_max if defined $prog_type;
 
 	# Create unique array of '<$sortfield|pid>' for this prog type
 	for my $pid ( keys %{$prog} ) {
@@ -1265,6 +1267,10 @@ sub sort_index {
 
 		# Increment the index counter for this prog type
 		$counter++;
+		if ( $max_index && $counter >= $max_index ) {
+			main::logger "WARNING: $prog_type cache index numbers exceeded the maximum supported value ($max_index). Please alert the developer.\n";
+			$max_index = 0;
+		}
 	}
 	return 0;
 }
@@ -5979,7 +5985,7 @@ use base 'Programme::bbciplayer';
 
 # Class vars
 sub index_min { return 1 }
-sub index_max { return 9999 }
+sub index_max { return 29999 }
 sub channels {
 	return {
 		'national' => {
@@ -6761,8 +6767,8 @@ use URI;
 use base 'Programme::bbciplayer';
 
 # Class vars
-sub index_min { return 10001 }
-sub index_max { return 39999 };
+sub index_min { return 30001 }
+sub index_max { return 99999 };
 
 # channel ids be found on http://www.bbc.co.uk/radio/stations
 sub channels_schedule {
