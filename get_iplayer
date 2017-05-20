@@ -136,6 +136,7 @@ my $opt_format = {
 	thumb		=> [ 1, "thumb|thumbnail!", 'Output', '--thumb', "Download Thumbnail image if available"],
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Output', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
+	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
@@ -4552,10 +4553,12 @@ sub get_metadata {
 					my $image_pid = $doc->{image}->{pid};
 					my $series_image_pid = $doc->{parent}->{programme}->{image}->{pid};
 					my $brand_image_pid = $doc->{parent}->{programme}->{parent}->{programme}->{image}->{pid};
-					if ( $series_image_pid ) {
-						$image_pid = $series_image_pid;
-					} elsif ( $brand_image_pid ) {
-						$image_pid = $brand_image_pid;
+					if ( $opt->{thumbseries} || ! $image_pid ) {
+						if ( $series_image_pid ) {
+							$image_pid = $series_image_pid;
+						} elsif ( $brand_image_pid ) {
+							$image_pid = $brand_image_pid;
+						}
 					}
 					my $thumbsize = $opt->{thumbsize} || 150;
 					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
