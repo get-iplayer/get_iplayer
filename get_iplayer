@@ -756,8 +756,6 @@ sub init_search {
 		exit 0;
 	}
 
-	# force --ybbcy
-	$opt->{ybbcy} = 1;
 	if ( defined $opt->{indexmaxconn} ) {
 		$opt->{indexmaxconn} = 10 if $opt->{indexmaxconn} > 10;
 		$opt->{indexmaxconn} = 1 if $opt->{indexmaxconn} < 1;
@@ -972,7 +970,7 @@ sub download_pid_in_cache {
 		# Don't attempt to download
 		return 1;
 	}
-	logger "INFO Trying to download PID using type $this->{type}\n";
+	logger "INFO: Trying to download PID using type $this->{type}\n";
 	logger "INFO: pid found in cache\n";
 	# Display pid match for recording
 	if ( $opt->{history} ) {
@@ -1669,7 +1667,7 @@ sub get_links {
 				# Only write entries for correct prog type
 				if ( $this->{type} eq $prog_type ) {
 					# Merge old and new data to retain timestamps
-					if ( $opt->{ybbcy} && $prog_old->{ $this->{pid} }->{available} ) {
+					if ( $prog_old->{ $this->{pid} }->{available} ) {
 						$this->{available} = $prog_old->{ $this->{pid} }->{available};
 					}
 					# if the entry was in old cache then retain timestamp from old entry
@@ -4670,7 +4668,7 @@ sub get_metadata {
 	my $got_metadata;
 	eval "use JSON::PP";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module for more accurate programme metadata.\n";
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to retrieve programme metadata.\n";
 	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
 		my $url = $prog_data_url.$prog->{pid}.".json";
 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
@@ -4983,7 +4981,7 @@ sub fetch_pid_type {
 	my $pid_type;
 	eval "use JSON::PP";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module for more accurate programme metadata.\n";
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to determine PID type.\n";
 		return undef;
 	}
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
@@ -5085,189 +5083,31 @@ sub get_pids_recursive {
 		return ();
 	}
 
-	if ( $opt->{ybbcy} ) {
-		my $pid_type = fetch_pid_type( $ua, $prog->{pid} );
-		if ( ! $pid_type ) {
-			main::logger "WARNING: Could not determine PID type. Trying to record PID directly.\n";
-			return $prog->{pid};
-		} elsif ( $pid_type eq "episode" ) {
-			main::logger "INFO: Episode PID detected\n";
-			push @pids, $prog->{pid};
-		} elsif ( $pid_type eq "clip" ) {
-			main::logger "INFO: Clip PID detected\n";
-			push @pids, $prog->{pid};
-		} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
-			main::logger "INFO: Series or Brand PID detected\n";
-			my $epids = fetch_episode_pids($ua, $prog->{pid});
-			push @pids, @$epids;
-			if ( ! $opt->{pidrecursive} ) {
-				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
-				return ();
-			}
-		} else {
-			main::logger "WARNING: Unknown PID type: $pid_type. Trying to record PID directly.\n";
-			return $prog->{pid};
-		}
-		@pids = main::make_array_unique_ordered( @pids );
-		return @pids;
-	}
-exit;
-	eval "use XML::Simple";
-	if ($@) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module to use the Series and Brand parsing functionality\n";
+	my $pid_type = fetch_pid_type( $ua, $prog->{pid} );
+	if ( ! $pid_type ) {
+		main::logger "WARNING: Could not determine PID type. Trying to record PID directly.\n";
+		return $prog->{pid};
+	} elsif ( $pid_type eq "episode" ) {
+		main::logger "INFO: Episode PID detected\n";
 		push @pids, $prog->{pid};
+	} elsif ( $pid_type eq "clip" ) {
+		main::logger "INFO: Clip PID detected\n";
+		push @pids, $prog->{pid};
+	} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
+		main::logger "INFO: Series or Brand PID detected\n";
+		my $epids = fetch_episode_pids($ua, $prog->{pid});
+		push @pids, @$epids;
+		if ( ! $opt->{pidrecursive} ) {
+			main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
+			return ();
+		}
 	} else {
-		#use Data::Dumper qw(Dumper);
-		my $rdf = get_rdf_data( $ua, $prog->{pid} );
-		if ( ! $rdf ) {
-			main::logger "WARNING: PID URL contained no RDF data. Trying to record PID directly.\n";
-			return $prog->{pid};
-		}
-		# an episode-only pid page
-		if ( $rdf->{'po:Episode'} ) {
-			main::logger "INFO: Episode-only pid detected\n";
-			# No need to lookup - we already are an episode pid
-			push @pids, $prog->{pid};
-		} elsif ( $rdf->{'po:Clip'} ) {
-			main::logger "INFO: Clip-only pid detected\n";
-			# No need to lookup - we already are a clip pid
-			push @pids, $prog->{pid};
-		# a series pid page
-		} elsif ( $rdf->{'po:Series'} ) {
-			main::logger "INFO: Series pid detected\n";
-			push @pids, parse_rdf_series( $ua, $prog->{pid} );
-			if ( ! $opt->{pidrecursive} ) {
-				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
-				return ();
-			}
-		# a brand pid page
-		} elsif ( $rdf->{'po:Brand'} ) {
-			main::logger "INFO: Brand pid detected\n";
-			push @pids, parse_rdf_brand( $ua, $prog->{pid} );
-			if ( ! $opt->{pidrecursive} ) {
-				main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
-				return ();
-			}
-		}
+		main::logger "WARNING: Unknown PID type: $pid_type. Trying to record PID directly.\n";
+		return $prog->{pid};
 	}
-	# now make list unique
 	@pids = main::make_array_unique_ordered( @pids );
 	return @pids;
 }
-
-sub ensure_array {
-	my ($in) = @_;
-	return defined $in ? ref $in eq 'ARRAY' ? @$in : $in : ();
-}
-
-# Gets the episode data from a given episode pid
-sub parse_rdf_episode {
-	my $ua = shift;
-	my $uri = shift;
-	my $rdf = get_rdf_data( $ua, $uri );
-	if ( ! $rdf ) {
-		main::logger "WARNING: Episode PID rdf URL contained no RDF data.\n";
-		return '';
-	}
-	my $pid = extract_pid( $uri );
-	main::logger "INFO:      Episode '".$rdf->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
-	# We don't really need the ver pids from here
-	if ( ref$rdf->{'po:Episode'}->{'po:version'} eq 'ARRAY' ) {
-		for my $verpid_element ( @{ $rdf->{'po:Episode'}->{'po:version'} } ) {
-			main::logger "INFO:        With Version PID '".extract_pid( $verpid_element->{'rdf:resource'} )."'\n" if $opt->{debug};
-		}
-	} else {
-		main::logger "INFO:        With Version PID '".extract_pid( $rdf->{'po:Episode'}->{'po:version'}->{'rdf:resource'} )."'\n" if $opt->{debug};
-	}
-	main::logger "INFO:        From Series PID '".extract_pid( $rdf->{'po:Series'}->{'rdf:about'} )."'\n" if $opt->{debug};
-	main::logger "INFO:        From Brand PID '".extract_pid( $rdf->{'po:Brand'}->{'rdf:about'} )."'\n" if $opt->{debug};
-}
-
-
-
-sub parse_rdf_series {
-	my $ua = shift;
-	my $uri = shift;
-	my $rdf = get_rdf_data( $ua, $uri );
-	if ( ! $rdf ) {
-		main::logger "WARNING: Series PID rdf URL contained no RDF data.\n";
-		return '';
-	}
-	my @pids = ();
-	my ($series) = ensure_array($rdf->{'po:Series'});
-	my $spid = extract_pid( $series->{'rdf:about'} );
-	main::logger "INFO:    Series: '".$series->{'dc:title'}."' ($spid)\n";
-	main::logger "INFO:      From Brand PID '".$rdf->{'po:Brand'}->{'rdf:about'}."'\n" if $opt->{debug};
-	for my $episode_element (ensure_array($series->{'po:episode'})) {
-		my $pid = extract_pid( $episode_element->{'po:Episode'}->{'rdf:about'} );
-		main::logger "INFO:      Episode '".$episode_element->{'po:Episode'}->{'dc:title'}."' ($pid)\n";
-		push @pids, $pid;
-		#parse_rdf_episode( $ua, $pid );
-	}
-	return @pids;
-}
-
-
-
-sub parse_rdf_brand {
-	my $ua = shift;
-	my $uri = shift;
-	my $rdf = get_rdf_data( $ua, $uri );
-	if ( ! $rdf ) {
-		main::logger "WARNING: Brand PID rdf URL contained no RDF data.\n";
-		return '';
-	}
-	my @pids = ();
-	my $bpid = extract_pid( $uri );
-	main::logger "INFO:  Brand: '".$rdf->{'po:Brand'}->{'dc:title'}."' ($bpid)\n";
-	for my $series_element ( ensure_array($rdf->{'po:Brand'}->{'po:series'}) ) {
-		main::logger "INFO: With Series pid '".$series_element->{'rdf:resource'}."'\n" if $opt->{debug};
-		push @pids, parse_rdf_series( $ua, $series_element->{'rdf:resource'} );
-	}
-	my @episodes = ensure_array($rdf->{'po:Brand'}->{'po:episode'});
-	main::logger "INFO:    Series: <None>\n" if @episodes;
-	for my $episode_element ( @episodes ) {
-		main::logger "INFO:      Episode pid: ".$episode_element->{'rdf:resource'}."\n" if $opt->{debug};
-		push @pids, extract_pid( $episode_element->{'rdf:resource'} );
-		parse_rdf_episode( $ua, $episode_element->{'rdf:resource'} );
-	}
-	return @pids;
-}
-
-
-
-# Extracts and returns a pid from a URI/URL
-sub extract_pid {
-	return $1 if $_[0] =~ m{/?([wpb]0[a-z0-9]{6})};
-	return '';
-}
-
-
-
-# Given a pid, gets the rdf URL and returns an XML::Simple object
-sub get_rdf_data {
-	eval "use XML::Simple";
-	if ($@) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module to use the Series and Brand parsing functionality\n";
-		return;
-	}
-	#use Data::Dumper qw(Dumper);
-	my $ua = shift;
-	my $uri = shift;
-	my $pid = extract_pid( $uri );
-	my $entry = main::request_url_retry($ua, 'http://www.bbc.co.uk/programmes/'.$pid.'.rdf', 3, '', '');
-	if ( ! $entry ) {
-		main::logger "WARNING: rdf URL contained no data\n";
-		return '';
-	}
-	# Flatten
-	$entry =~ s|[\n\r]| |g;
-	my $simple = new XML::Simple();
-	my $rdf = $simple->XMLin( $entry );
-	#main::logger Dumper ( $rdf )."\n" if $opt->{debug};
-	return $rdf;
-}
-
 
 
 # Intelligently split name and episode from title string for BBC iPlayer metadata
@@ -6621,13 +6461,11 @@ sub get_links_schedule {
 	my $prog_type = shift;
 	my $future = shift;
 	my $now = shift || time();
-	if ( $opt->{ybbcy} ) {
-		# check XML::LibXML here before using elsewhere
-		eval "use XML::LibXML '1.70'";
-		if ( $@ ) {
-			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes.\n";
-			return;
-		}
+	# check XML::LibXML here before using elsewhere
+	eval "use XML::LibXML '1.70'";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes.\n";
+		return;
 	}
 	my @schedule_dates;
 	my $limit = 0;
@@ -6672,9 +6510,11 @@ sub get_links_schedule {
 	return unless @schedule_dates;
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
 	my @channel_list = sort keys %channels;
-	if ( $opt->{ybbcy} && ! $opt->{noindexconcurrent} ) {
+	if ( ! $opt->{noindexconcurrent} ) {
 		eval "use Mojo::UserAgent";
-		if ( ! $@ ) {
+		if ( $@ ) {
+			main::logger "WARNING: Please download and run latest installer or install the Mojolicious Perl module for concurrent indexing of $prog_type programmes.\n";
+		} else {
 			main::logger "\nINFO: Using concurrent indexing\n";
 			my @mojo_urls;
 			my %mojo_channel_ids;
@@ -6697,34 +6537,25 @@ sub get_links_schedule {
 	my (%aod_channels, %aod_channel_ids);
 	if ( $prog_type eq "radio" ) {
 		%aod_channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_aod() ) };
-		if ( $opt->{ybbcy} ) {
-			while ( my ($k1, $v1) = each %channels ) {
-				keys %aod_channels;
-				while ( my ($k2, $v2) = each %aod_channels ) {
-					if ( $v1 eq $v2 ) {
-						$aod_channel_ids{$k1} = $k2;
-						last;
-					}
+		while ( my ($k1, $v1) = each %channels ) {
+			keys %aod_channels;
+			while ( my ($k2, $v2) = each %aod_channels ) {
+				if ( $v1 eq $v2 ) {
+					$aod_channel_ids{$k1} = $k2;
+					last;
 				}
 			}
 		}
 	}
 	my $ua = main::create_ua( 'desktop', 1 );
-	$ua->timeout(60) if $opt->{ybbcy};
-	my $known_bad = "radiosolent";
-	undef $known_bad if $opt->{ybbcy};
+	$ua->timeout(60);
 	my %aod_seen;
 	main::logger "\nINFO: Using sequential indexing\n";
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
-			if ( $opt->{ybbcy} ) {
-				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
-				$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-			} else {
-				$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}.xml";
-				$rc = $self->get_links_schedule_page($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now, $known_bad);
-			}
+			$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+			$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
 				if ( $prog_type eq "radio" && ! $aod_seen{$channel_id} ) {
 					my $aod_channel_id;
@@ -6738,7 +6569,7 @@ sub get_links_schedule {
 					if ( $aod_channel_id ) {
 						$aod_seen{$channel_id}++;
 						if ( ! $future ) {
-							main::logger "\nWARNING: Only previous 7 days of programmes will be indexed for $aod_channels{$aod_channel_id}\n" unless $channel_id =~ /$known_bad/;
+							main::logger "\nWARNING: Only previous 7 days of programmes will be indexed for $aod_channels{$aod_channel_id}\n";
 							$rc = $self->get_links_aod($prog, $prog_type, $now, $aod_channel_id);
 						} else {
 							main::logger "WARNING: --refresh-future is not supported for $aod_channels{$aod_channel_id}\n";
@@ -6844,7 +6675,6 @@ sub get_links_schedule_html {
 	my $url = shift;
 	my $limit = shift;
 	my $now = shift || time();
-	my $known_bad = shift;
 	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
 	return 1 unless $html;
@@ -6862,9 +6692,9 @@ sub get_links_schedule_html_page {
 	my $limit = shift;
 	my $now = shift || time();
 	return 1 unless $html;
-	eval "use XML::LibXML";
+	eval "use XML::LibXML '1.70'";
 	if ( $@ ) {
-		main::logger "INFO: XML::LibXML not available\n";
+		main::logger "WARNING: XML::LibXML not available\n";
 		return 1;
 	}
 	my $cache_channel = $channel;
@@ -6957,222 +6787,6 @@ sub get_links_schedule_html_page {
 			'duration'	=> $duration,
 			'thumbnail'	=> $thumbnail,
 			'channel'	=> $cache_channel,
-			'type'		=> $prog_type,
-			'web'		=> "${bbc_prog_page_prefix}/${pid}",
-			'available' => $available_str,
-			'expires' => $expires,
-		);
-	}
-}
-
-
-# get cache info from schedule page
-sub get_links_schedule_page {
-	my $self = shift;
-	my $ua = shift;
-	my $prog = shift;
-	my $prog_type = shift;
-	my $channel_id = shift;
-	my $channel = shift;
-	my $future = shift;
-	my $url = shift;
-	my $limit = shift;
-	my $now = shift || time();
-	my $known_bad = shift;
-	my $cache_channel = $channel;
-	if ( $prog_type eq "tv" ) {
-		# collapse BBC One/Two variants
-		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
-	}
-	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
-	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
-	my $warning = "\nWARNING: Failed to download programme schedule $url\n" unless $channel_id =~ /$known_bad/;
-	my $xml = main::request_url_retry($ua, $url, 3, '.', $warning);
-	return 1 if ! $xml;
-	decode_entities($xml);
-
-	# <broadcast is_repeat="0" is_blanked="0">
-	# 	<pid>p0290kxs</pid>
-	# 	<start>2014-10-31T11:00:00Z</start>
-	# 	<end>2014-10-31T11:45:00Z</end>
-	# 	<duration>2700</duration>
-	# 	<programme type="episode">
-	# 		<pid>b04n8rx0</pid>
-	# 		<position>10</position>
-	# 		<title>Episode 10</title>
-	# 		<short_synopsis>Council officers deal with home owners living on top of deadly waste.</short_synopsis>
-	# 		<media_type>audio_video</media_type>
-	# 		<duration>2700</duration>
-	# 		<image>
-	# 			<pid>p028r5jx</pid>
-	# 		</image>
-	# 		<display_titles>
-	# 			<title>Call the Council</title>
-	# 			<subtitle>Series 2, Episode 10</subtitle>
-	# 		</display_titles>
-	# 		<first_broadcast_date>2014-10-31T11:00:00Z</first_broadcast_date>
-	# 		<ownership>
-	# 			<service type="tv" id="bbc_one" key="bbcone">
-	# 				<title>BBC One</title>
-	# 			</service>
-	# 		</ownership>
-	# 		<programme type="series">
-	# 			<pid>b04mlq1k</pid>
-	# 			<title>Series 2</title>
-	# 			<position>2</position>
-	# 			<image>
-	# 				<pid>p028r5jx</pid>
-	# 			</image>
-	# 			<expected_child_count>10</expected_child_count>
-	# 			<first_broadcast_date>2014-10-20T11:00:00+01:00</first_broadcast_date>
-	# 			<ownership>
-	# 				<service type="tv" id="bbc_one" key="bbcone">
-	# 					<title>BBC One</title>
-	# 				</service>
-	# 			</ownership>
-	# 			<programme type="brand">
-	# 				<pid>b04mlpdd</pid>
-	# 				<title>Call the Council</title>
-	# 				<position/>
-	# 				<image>
-	# 					<pid>p028r5jx</pid>
-	# 				</image>
-	# 				<expected_child_count/>
-	# 				<first_broadcast_date>2014-05-19T11:30:00+01:00</first_broadcast_date>
-	# 				<ownership>
-	# 					<service type="tv" id="bbc_one" key="bbcone">
-	# 						<title>BBC One</title>
-	# 					</service>
-	# 				</ownership>
-	# 			</programme>
-	# 		</programme>
-	# 		<available_until>2014-12-03T07:45:00Z</available_until>
-	# 		<actual_start>2014-10-31T11:45:00Z</actual_start>
-	# 		<is_available_mediaset_pc_sd>1</is_available_mediaset_pc_sd>
-	# 		<is_legacy_media>0</is_legacy_media>
-	# 		<media format="video">
-	# 			<expires>2014-12-03T07:45:00Z</expires>
-	# 			<availability>1 month left to watch</availability>
-	# 		</media>
-	# 	</programme>
-	# </broadcast>
-
-	my $thirty_days = 30 * 86400;
-	my $min_available = $limit || ( $now - $thirty_days );
-	# get list of entries within <broadcast> </broadcast> tags
-	my @entries = split /<broadcast[^s]/, $xml;
-	# Discard first element == header
-	shift @entries;
-	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
-	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort, $channel );
-		my ($available_str, $until_str);
-		$available_str = $1 if $entry =~ m{<end>\s*(.+?)\s*</end>};
-		if ( ! $available_str ) {
-			$available_str = $1 if $entry =~ m{<start>\s*(.+?)\s*</start>};
-		}
-		next if ! $available_str;
-		$available = Programme::get_time_string( $available_str );
-		next if $available < $min_available;
-		next if ! $future && $available > $now;
-		next if $future && $available <= $now;
-		$until_str = $1 if $entry =~ m{<available_until>(.*?)</available_until>};
-		if ( ! $until_str ) {
-			$until_str = $1 if $entry =~ m{<expires>(.*?)</expires>};
-		}
-		if ( ! $future ) {
-			$max_expires = $expires = $available + $thirty_days;
-			if ( $until_str ) {
-				my $until = Programme::get_time_string( $until_str );
-				$expires = $until if $until < $expires;
-			}
-			$expires = $max_expires if $expires > $max_expires;
-			next if $expires < $now;
-		}
-		$pid = $1 if $entry =~ m{<programme\s+type="episode">.*?<pid>\s*(.+?)\s*</pid>};
-		if ( defined $prog->{$pid} ) {
-			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
-			# use listing with earliest availability
-			if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
-				$prog->{$pid}->{available} = $available_str;
-			}
-			# use listing with latest expiry
-			if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
-				$prog->{$pid}->{expires} = $expires;
-			}
-			next;
-		}
-		$channel = $1 if $entry =~ m{<programme\s+type="episode">.*?<ownership>.*?<service\s+.*?>.*?<title>\s*(.*?)\s*</title>};
-		unless ( $prog_type eq "radio" && $channel eq "BBC Local Radio" ) {
-			$channel = $cache_channel;
-		}
-		$desc = $1 if $entry =~ m{<short_synopsis>\s*(.+?)\s*</short_synopsis>};
-		$duration = $1 if $entry =~ m{<duration>\s*(.+?)\s*</duration>};
-		$episode = $1 if $entry =~ m{<programme\s+type="episode">.*?<title>\s*(.*?)\s*</title>};
-		($brand_pid, $brand) = ($1, $2) if $entry =~ m{<programme\s+type="brand">.*?<pid>\s*(.*?)\s*</pid>.*?<title>\s*(.*?)\s*</title>.*?</programme>};
-		($series_pid, $series) = ($1, $2) if $entry =~ m{<programme\s+type="series">.*?<pid>\s*(.*?)\s*</pid>.*?<title>\s*(.*?)\s*</title>.*?</programme>};
-		if ( $brand ) {
-			if ( $series && $series ne $brand ) {
-				$name = "$brand: $series";
-			} else {
-				$name = $brand;
-			}
-		} else {
-			$name = $series;
-		}
-		unless ( $name ) {
-			$name = $brand = $episode;
-			$episode = "-";
-		}
-		# Extract the seriesnum
-		my $regex = 'Series\s+'.main::regex_numbers();
-		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
-		my $series_position = $1 if $entry =~ m{<programme\s+type="series">.*?<position>\s*(.+?)\s*</position>};
-		$seriesnum ||= $series_position;
-		# Extract the episode num
-		my $regex_1 = 'Episode\s+'.main::regex_numbers();
-		my $regex_2 = '^'.main::regex_numbers().'\.\s+';
-		if ( $episode =~ m{$regex_1}i ) {
-			$episodenum = main::convert_words_to_number( $1 );
-		} elsif ( $episode =~ m{$regex_2}i ) {
-			$episodenum = main::convert_words_to_number( $1 );
-		}
-		my $episode_position = $1 if $entry =~ m{<programme\s+type="episode">.*?<position>\s*(.+?)\s*</position>};
-		$episodenum ||= $episode_position;
-		# insert episode number in $episode
-		#$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum);
-		main::logger "DEBUG: '$pid, $name - $episode, $channel'\n" if $opt->{debug};
-		# Merge and Skip if this pid is a duplicate
-		# only default version in schedules
-		$version = 'default';
-		# thumbnail options
-		# http://ichef.bbci.co.uk/programmeimages/p01m1x5p/b04l8sml_640_360.jpg
-		# http://ichef.bbci.co.uk/images/ic/640x360/p01m1x5p.jpg
-		# Default to 150px width thumbnail;
-		my $thumbsize = $opt->{thumbsizecache} || 150;
-		my $image_pid = $1 if $entry =~ m{<image><pid>(.*?)</pid>}s;
-		my $series_image_pid = $1 if $entry =~ m{<programme\s+type="series">.*?<image><pid>(.*?)</pid>};
-		my $brand_image_pid = $1 if $entry =~ m{<programme\s+type="brand">.*?<image><pid>(.*?)</pid>};
-		if ( $series_image_pid ) {
-			$image_pid = $series_image_pid;
-		} elsif ( $brand_image_pid ) {
-			$image_pid = $brand_image_pid;
-		}
-		my $suffix = Programme::bbciplayer->thumb_url_suffixes->{ $thumbsize };
-		$suffix = Programme::bbciplayer->thumb_url_suffixes->{ 150 } unless $suffix;
-		my $thumbnail = "http://ichef.bbci.co.uk/programmeimages/${image_pid}/${pid}${suffix}";
-		# build data structure
-		$prog->{$pid} = main::progclass($prog_type)->new(
-			'pid'		=> $pid,
-			'name'		=> $name,
-			'versions'	=> $version,
-			'episode'	=> $episode,
-			'seriesnum'	=> $seriesnum,
-			'episodenum'	=> $episodenum,
-			'desc'		=> $desc,
-			'duration'	=> $duration,
-			'thumbnail'	=> $thumbnail,
-			'channel'	=> $channel,
 			'type'		=> $prog_type,
 			'web'		=> "${bbc_prog_page_prefix}/${pid}",
 			'available' => $available_str,
