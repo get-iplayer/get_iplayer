@@ -37,15 +37,6 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 # Usage and Examples:
 # 	https://github.com/get-iplayer/get_iplayer/wiki/documentation
 #
-# Todo:
-# ** all global vars into a class???
-# ** Cut down 'use' clauses in each class
-# * Add PVR search src to recording history
-# * Fix unicode / wide chars in rdf
-#
-# Known Issues:
-# * CAVEAT: The filenames and modes in the history are comma-separated if there was a multimode download. For now it just uses the first one.
-#
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -87,28 +78,6 @@ my %prog_types = (
 	tv		=> 'Programme::tv',
 	radio		=> 'Programme::radio'
 );
-
-
-# Programme instance data
-# $prog{$pid} = Programme->new (
-#	'index'		=> <index number>,
-#	'name'		=> <programme short name>,
-#	'episode'	=> <Episode info>,
-#	'desc'		=> <Long Description>,
-#	'available'	=> <Date/Time made available or remaining>,
-#	'duration'	=> <duration in free text form>
-#	'versions'	=> <comma separated list of versions, e.g default, signed, audiodescribed>
-#	'thumbnail'	=> <programme thumbnail url>
-#	'channel	=> <channel>
-#	'categories'	=> <Comma separated list of categories>
-# 	'type'		=> <prog_type>
-#	'timeadded'	=> <timestamp when programme was added to cache>
-#	'version'	=> <selected version e.g default, signed, audiodescribed, etc - only set before recording>
-#	'filename'	=> <Path and Filename of saved file - set only while recording>
-#	'dir'		=> <Filename Directory of saved file - set only while recording>
-#	'fileprefix'	=> <Filename Prefix of saved file - set only while recording>
-#	'ext'		=> <Filename Extension of saved file - set only while recording>
-#);
 
 
 # Define general 'option names' => ( <help mask>, <option help section>, <option cmdline format>, <usage text>, <option help> )
@@ -1525,34 +1494,10 @@ sub is_prog_type {
 
 
 # Feed Info:
-#	# aod index
-#	http://www.bbc.co.uk/radio/aod/index_noframes.shtml [ceased]
 # # schedule feeds
-#	http://www.bbc.co.uk/bbcthree/programmes/schedules.xml [ceased]
 #	http://www.bbc.co.uk/radio4/programmes/schedules/this_week
-#	# These need drill-down to get episodes:
-#	# TV schedules by date
-#	http://www.bbc.co.uk/iplayer/widget/schedule/service/cbeebies/date/20080704	[ceased]
-#	# TV schedules in JSON, Yaml or XML
-#	http://www.bbc.co.uk/<channel>/programmes/schedules.(json|yaml|xml) [ceased]
-#	# prog schedules by channel / date
-#	http://www.bbc.co.uk/iplayer/schedules/bbcone/20170429
-#	http://www.bbc.co.uk/iplayer/schedules/<channel>/programmes/schedules/<year>/<week>.(json|yaml|xml) [ceased]
-#	# TV index on programmes
-#	http://www.bbc.co.uk/iplayer/a-z/a
-#	# All TV (limit has effect of limiting to 2.? times number entries kB??)
-#	# seems that only around 50% of progs are available here compared to programmes site:
-#	http://feeds.bbc.co.uk/iplayer/categories/tv/list/limit/200 [ceased]
-#	# Search feed
-#	http://feeds.bbc.co.uk/iplayer/<channel>/<searchword>/list [ceased]
-#	# All Radio
-#	http://feeds.bbc.co.uk/iplayer/categories/radio/list/limit/999 [ceased]
-#	# New:
-#	# iCal feeds see: http://www.bbc.co.uk/blogs/radiolabs/2008/07/some_ical_views_onto_programme.shtml [ceased]
-#	http://bbc.co.uk/programmes/b0079cmw/episodes/player.ics [ceased]
-#	# Other data
-#	http://www.bbc.co.uk/cbbc/programmes/genres/childrens/player [ceased]
-#	http://www.bbc.co.uk/programmes/genres/childrens/schedules/upcoming.ics	[ceased]
+#	http://www.bbc.co.uk/radio4/programmes/schedules/next_week
+#	http://www.bbc.co.uk/radio4/programmes/schedules/w23
 #
 # Usage: get_links( \%prog, \%index_prog, <prog_type>, <only load from file flag> )
 # Globals: $memcache
