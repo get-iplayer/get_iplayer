@@ -728,12 +728,12 @@ sub init_search {
 		$opt->{indexmaxconn} = 10 if $opt->{indexmaxconn} > 10;
 		$opt->{indexmaxconn} = 1 if $opt->{indexmaxconn} < 1;
 	}
-	
+
 	if ( $opt->{cacherebuild} ) {
 		$opt->{cachereset} = 1;
 		$opt->{refreshlimit} = 30 unless defined  $opt->{refreshlimit};
 	}
-	
+
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
 	# $prog->{pid}->object hash
@@ -4043,8 +4043,8 @@ sub generate_filenames {
 						main::logger "WARNING: Overwriting raw audio file: $audio_raw\n";
 					}
 					if ( -f $video_raw ) {
-	 					main::logger "WARNING: Overwriting raw video file: $video_raw\n";
-	 				}
+						main::logger "WARNING: Overwriting raw video file: $video_raw\n";
+					}
 					unlink ( $audio_raw, $video_raw ) unless $opt->{test};
 				} else {
 					if ( -f $media_raw ) {
@@ -4503,10 +4503,10 @@ sub get_verpids_html {
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
 			$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
-		}		
+		}
 		unless ( $prog->{episodenum} ) {
 			$prog->{episodenum} = $1 if $config =~ /"parent_position":(\d+)/;
-		}		
+		}
 		unless ( $prog->{title} ) {
 			my $title = $1 if $config =~ /"title":"(.*?)"/;
 			$title =~ s/\\\//\//g;
@@ -5005,7 +5005,7 @@ sub fetch_episode_pids {
 			}
 			$curr_page++;
 		} while ( $curr_page <= $max_page ) };
- 	}
+	}
 	main::logger "INFO: No episode PIDs found for parent PID: $parent_pid\n" unless @pids;
 	return \@pids;
 }
@@ -5340,7 +5340,7 @@ sub parse_m3u_attribs {
 		unless ( $as =~ s/^?([^=]*)=([^,"]*|"[^"]*")\s*(,\s*|$)// ) {
 			main::logger "WARNING: Invalid attributes in HLS playlist: $attr_str ($url)\n";
 			return undef;
-		} 
+		}
 		my ($key, $val) = ($1, $2);
 		$val =~ s/^"(.*)"$/$1/;
 		$attr{$key} = $val;
@@ -6357,7 +6357,7 @@ sub get_links_schedule_mojo {
 	$ua->proxy->detect;
 	$ua->connect_timeout(60);
 	$ua->inactivity_timeout(60);
-	
+
 	my $get_callback = sub {
 		my (undef, $tx) = @_;
 		$active--;
@@ -6382,7 +6382,7 @@ sub get_links_schedule_mojo {
 			$rc_mojo = 1;
 		}
 	};
-	
+
 	my $delay = Mojo::IOLoop->delay;
 	my $do_next;
 	$do_next = sub {
@@ -6395,15 +6395,15 @@ sub get_links_schedule_mojo {
 			main::logger "\nDEBUG: Downloading schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
 			$ua->get($url => sub {
 				my ($ua, $tx) = @_;
- 				unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
-	 				$get_callback->($ua, $tx);
+				unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
+					$get_callback->($ua, $tx);
 					$do_next->();
 				}
 				$end->();
 			});
 		}
 	};
-	
+
 	$do_next->();
 	$delay->wait unless $delay->ioloop->is_running;
 	return 1 if $rc_mojo;
@@ -6661,7 +6661,7 @@ sub download_subtitles {
 
 	# in case --subtitles used with --pid for radio programme
 	return unless $prog->{type} eq "tv";
-	
+
 	# Don't redownload subs if the file already exists
 	if ( ( -f $file || -f "$prog->{dir}/$prog->{fileprefix}.partial.srt" ) && ! $opt->{overwrite} ) {
 		main::logger "INFO: Skipping subtitles download - file already exists: $file\n" if $opt->{verbose};
@@ -6741,7 +6741,7 @@ sub ttml_to_srt {
 	my $dom = XML::LibXML->load_xml(string => $ttml);
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
-	$xpc->registerNs('tt', $doc->namespaceURI());		
+	$xpc->registerNs('tt', $doc->namespaceURI());
 	my @ns = $xpc->findnodes("/*/namespace::*");
 	for my $ns (@ns) {
 		if ( $ns->getLocalName() && $ns->getValue() ) {
@@ -6858,7 +6858,7 @@ sub ttml_to_srt {
 			$text =~ s/(^\s+|\s+$)//g;
 			$text =~ s/\n{2,}/\n/g;
 			print $fh ++$index."\n$begin --> $end\n$text\n\n";
-		}	
+		}
 	}
 	close $fh;
 	if ( ! $index ) {
