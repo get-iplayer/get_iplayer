@@ -5349,9 +5349,9 @@ sub parse_m3u_attribs {
 }
 
 sub parse_dash_connection {
-	eval "use XML::Simple";
+	eval "use XML::LibXML '1.70'";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::Simple Perl module for MPEG-DASH streams.\n";
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to use MPEG-DASH streams.\n";
 		return;
 	}
 	my $media = shift;
@@ -5367,28 +5367,25 @@ sub parse_dash_connection {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
 	}
-	my $doc = eval { XMLin($xml, KeyAttr => [], ForceArray => 1, SuppressEmpty => 1) };
-	if ( $@ ) {
-		main::logger "WARNING: Could not parse DASH manifest ($conn->{href})\n" if $opt->{verbose};
-		return;
-	}
-	my $mpd_type = $doc->{type};
-	$doc->{mediaPresentationDuration} =~ /^(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:((\d+)(\.(\d+))?)S)?)?$/;
+	my $dom = XML::LibXML->load_xml(string => $xml);
+	use XML::LibXML::XPathContext;
+	my $xpc = XML::LibXML::XPathContext->new($dom);
+	my ($doc) = $xpc->findnodes('/*');
+	$xpc->registerNs('mpd', $doc->namespaceURI());		
+	my $mediaPresentationDuration = $doc->findvalue('@mediaPresentationDuration');
+	$mediaPresentationDuration =~ /^(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:((\d+)(\.(\d+))?)S)?)?$/;
 	my $programme_duration = int($5 * 3600 + $6 * 60 + $7);
-	my $available_start = Programme::get_time_string($doc->{availabilityStartTime});
-	my $period = $doc->{Period}->[0];
-	my $baseurl = $doc->{BaseURL}->[0]->{content};
+	my ($period) = $xpc->findnodes('mpd:Period', $doc);
+	my $baseurl = $xpc->findvalue('mpd:BaseURL/@content', $doc);
 	if ( ! $baseurl ) {
-		$baseurl = $period->{BaseURL}->[0];
+		$baseurl = $xpc->findvalue('mpd:BaseURL/text()', $period);
 	}
-	my @audio_medias;
-	my @video_medias;
-	my $template0 = $period->{AdaptationSet}->[0]->{SegmentTemplate}->[0];
+	my ($template0) = $xpc->findnodes('mpd:AdaptationSet/mpd:SegmentTemplate', $period);
 	if ( ! $template0 ) {
-		$template0 = $period->{AdaptationSet}->[0]->{Representation}->[0]->{SegmentTemplate}->[0];
+		($template0) = $xpc->findnodes('mpd:AdaptationSet/mpd:Representation/mpd:SegmentTemplate', $period);
 	}
-	my $xinit = $template0->{initialization};
-	my $xmedia = $template0->{media};
+	my $xinit = $template0->findvalue('@initialization');
+	my $xmedia = $template0->findvalue('@media');
 	my $dash_conn = dclone($conn);
 	my $uri0 = URI->new($baseurl);
 	my $uri1 = URI->new($dash_conn->{href});
@@ -5418,21 +5415,23 @@ sub parse_dash_connection {
 	$qs1 .= "&" if $qs1 && $qs3;
 	$uri3->query($qs1.$qs3);
 	my $media_template = $uri3->as_string;
-	for my $set ( @{$period->{AdaptationSet}} ) {
-		my $content_type = $set->{contentType};
-		my $template = $set->{SegmentTemplate}->[0];
-		for my $repr ( @{$set->{Representation}} ) {
-			my $bitrate = int($repr->{bandwidth}/1000.0);
+	my @audio_medias;
+	my @video_medias;
+	for my $set ( $xpc->findnodes('mpd:AdaptationSet', $period) ) {
+		my $content_type = $set->findvalue('@contentType');
+		my ($template) = $xpc->findnodes('mpd:SegmentTemplate', $set);
+		for my $repr ( $xpc->findnodes('mpd:Representation', $set) ) {
+			my $bitrate = int($repr->findvalue('@bandwidth')/1000.0);
 			next if $min_bitrate && $bitrate < $min_bitrate;
 			next if $max_bitrate && $bitrate > $max_bitrate;
 			if ( ! $template ) {
-				$template = $repr->{SegmentTemplate}->[0];
+				($template) = $xpc->findnodes('mpd:SegmentTemplate', $repr);
 			}
-			my $segment_duration = $template->{duration} / $template->{timescale};
+			my $segment_duration = $template->findvalue('@duration') / $template->findvalue('@timescale');
 			my $num_segments = int($programme_duration / $segment_duration);
 			$num_segments++ if $segment_duration * $num_segments < $programme_duration;
 			my $repr_media = {};
-			$repr_media->{id} = $repr->{id};
+			$repr_media->{id} = $repr->findvalue('@id');
 			$repr_media->{content_type} = $content_type;
 			$repr_media->{bitrate} = $bitrate;
 			$repr_media->{file_size} = int($programme_duration * $repr_media->{bitrate} * 1000.0 / 8.0);
@@ -5446,9 +5445,9 @@ sub parse_dash_connection {
 			$repr_media->{init_template} = $init_template;
 			$repr_media->{media_template} = $media_template;
 			if ( $content_type eq "video" ) {
-				$repr_media->{width} = $repr->{width};
-				$repr_media->{height} = $repr->{height};
-				$repr_media->{frameRate} = $repr->{frameRate} || $set->{frameRate};
+				$repr_media->{width} = $repr->findvalue('@width');
+				$repr_media->{height} = $repr->findvalue('@height');
+				$repr_media->{frameRate} = $repr->findvalue('@frameRate') || $set->findvalue('@frameRate');
 				push @video_medias, $repr_media;
 			} else {
 				push @audio_medias, $repr_media;
