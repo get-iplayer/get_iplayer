@@ -4952,6 +4952,7 @@ sub fetch_episode_pids {
 		last unless $html;
 		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/*/text()');
+		$last_page =~ s/(^\s+|\s+$)//g;
 		$max_page = $last_page if $last_page > $max_page;
 		unless ( $seen{'title'} ) {
 			my $title = $dom->findvalue('//title');
@@ -4984,6 +4985,7 @@ sub fetch_episode_pids {
 			last unless $html;
 			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 			my $last_page = $dom->findvalue('//div[@class="paginate"]//li[@class="page"][last()]/a/text()');
+			$last_page =~ s/(^\s+|\s+$)//g;
 			$max_page = $last_page if $last_page > $max_page;
 			unless ( $seen{'title'} ) {
 				my $title = $dom->findvalue('//title');
@@ -4992,7 +4994,7 @@ sub fetch_episode_pids {
 				$seen{'title'} = 1;
 			}
 			main::logger "INFO: Page $curr_page of $max_page\n";
-			my @episodes = $dom->findnodes('//ul[contains(@class, "iplayer-list")]/li[contains(@class,"episode")]');
+			my @episodes = $dom->findnodes('//ul[contains(@class,"iplayer-list")]/li[contains(@class,"episode")]');
 			for my $episode ( @episodes ) {
 				my $pid = $episode->findvalue('@data-ip-id');
 				next if ( $seen{$pid} );
