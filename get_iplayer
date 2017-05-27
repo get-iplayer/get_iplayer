@@ -5349,9 +5349,12 @@ sub parse_m3u_attribs {
 }
 
 sub parse_dash_connection {
-	eval "use XML::LibXML '1.70'";
+	eval "use XML::LibXML '1.70'; use XML::LibXML::XPathContext;";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to use MPEG-DASH streams.\n";
+		if ( ! $opt->{nowarnlibxmldash} ) {
+			$opt->{nowarnlibxmldash} = 1;
+			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to use MPEG-DASH streams.\n";
+		}
 		return;
 	}
 	my $media = shift;
@@ -5368,7 +5371,6 @@ sub parse_dash_connection {
 		return;
 	}
 	my $dom = XML::LibXML->load_xml(string => $xml);
-	use XML::LibXML::XPathContext;
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
 	$xpc->registerNs('mpd', $doc->namespaceURI());		
@@ -5659,7 +5661,8 @@ sub get_stream_data {
 	my @medias;
 	my $unblocked;
 	my $checked_geoblock;
-
+	delete $opt->{nowarnlibxmldash};
+	
 	my (%seen, $stream_key);
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
 		# get MPEG-DASH streams for on-demand
@@ -6439,7 +6442,7 @@ sub get_links_schedule_html_page {
 	return 1 unless $html;
 	eval "use XML::LibXML '1.70'";
 	if ( $@ ) {
-		main::logger "WARNING: XML::LibXML not available\n";
+		main::logger "WARNING: XML::LibXML not available to index $prog_type programmes.\n";
 		return 1;
 	}
 	my $cache_channel = $channel;
@@ -6726,7 +6729,7 @@ sub ttml_to_srt {
 		'white'   => '#ffffff'
 	);
 
-	eval "use XML::LibXML '1.70'";
+	eval "use XML::LibXML '1.70'; use XML::LibXML::XPathContext;";
 	if ( $@ ) {
 		print "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to convert subtitles.\n";
 		return 1;
@@ -6736,7 +6739,6 @@ sub ttml_to_srt {
 	$columns = 37;
 	$huge = 'overflow';
 
-	use XML::LibXML::XPathContext;
 	my $dom = XML::LibXML->load_xml(string => $ttml);
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
