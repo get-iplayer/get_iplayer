@@ -6350,6 +6350,7 @@ sub get_links_schedule_mojo {
 		main::logger "INFO: Mojo::UserAgent not available\n";
 		return 1;
 	}
+
 	my $active = 0;
 	my %attempts;
 	my $rc_mojo;
@@ -6359,6 +6360,12 @@ sub get_links_schedule_mojo {
 	$ua->proxy->detect;
 	$ua->connect_timeout(60);
 	$ua->inactivity_timeout(60);
+
+	my $sig_int = $SIG{INT};
+	local $SIG{INT} = sub {
+		undef $ua;
+		$sig_int->(shift) if ref $sig_int eq 'CODE';
+	};
 
 	my $get_callback = sub {
 		my (undef, $tx) = @_;
@@ -6408,6 +6415,7 @@ sub get_links_schedule_mojo {
 
 	$do_next->();
 	$delay->wait unless $delay->ioloop->is_running;
+	undef $ua;
 	return 1 if $rc_mojo;
 }
 
