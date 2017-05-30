@@ -72,14 +72,6 @@ STDERR->autoflush(1);
 # Save proxy env var
 my $ENV_HTTP_PROXY = $ENV{HTTP_PROXY} || $ENV{http_proxy};
 
-# Hash of all prog types => Programme class
-# Add an entry here if another Programme class is added
-my %prog_types = (
-	tv		=> 'Programme::tv',
-	radio		=> 'Programme::radio'
-);
-
-
 # Define general 'option names' => ( <help mask>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # <help mask>: 0 for normal help, 1 for advanced help, 2 for basic help
 # If you want the option to be hidden then don't specify <option help section>, use ''
@@ -123,7 +115,7 @@ my $opt_format = {
 	search		=> [ 1, "search=s", 'Search', '--search <search term>', "GetOpt compliant way of specifying search args"],
 	history		=> [ 1, "history!", 'Search', '--history', "Search/show recordings history"],
 	since		=> [ 0, "since=n", 'Search', '--since <hours>', "Limit search to programmes added to the cache in the last <hours> hours"],
-	type		=> [ 2, "type=s", 'Search', '--type <type>,<type>,...', "Only search in these types of programmes: ".join(',', sort keys %prog_types).",all (tv is default)"],
+	type		=> [ 2, "type=s", 'Search', '--type <type>,<type>,...', "Only search in these types of programmes: ".join(',', progclass()).",all (tv is default)"],
 
 	# Output
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording of programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc."],
@@ -220,7 +212,6 @@ my $opt_format = {
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
-
 
 # Pre-processed options instance
 my $opt_pre = Options->new();
@@ -705,7 +696,7 @@ sub init_search {
 
 	# Sanity check valid --type specified
 	for (keys %{ $type }) {
-		if ( not progclass($_) ) {
+		if ( not is_prog_type($_) ) {
 			logger "ERROR: Invalid type '$_' specified. Valid types are: ".( join ',', progclass() )."\n";
 			exit 3;
 		}
@@ -818,127 +809,59 @@ sub find_pid_matches {
 	my @search_args = @_;
 	my ( $type, $prog, $index_prog ) = init_search( @search_args );
 	my $now = time();
-
-	# Get prog by arbitrary '<type>:<pid>' or just '<pid>' (using the specified types)(then exit)
-	my @try_types;
-	my $pid;
-
-	# If $opt->{pid} is in the form of '<type>:<pid>' and <type> is a valid type
-	if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && progclass(lc($1)) ) {
-		my $prog_type;
-		( $prog_type, $pid )= ( lc($1), $2 );
-		# Only try to recording using this prog type
-		@try_types = ($prog_type);
-
-	# $opt->{pid} is in the form of '<pid>'
-	} else {
-		$pid = $opt->{pid};
-		@try_types = (keys %{ $type });
-		# ensure tv tried first if subtitles requested and both tv and radio configured
-		if ( ( $opt->{subtitles} || $opt->{subsonly} ) && $#try_types > 0 ) {
-			@try_types = reverse sort @try_types;
-		}
+	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $opt->{pid} );
+	# load caches from file only
+	for my $t ( progclass() ) {
+		get_links( $prog, $index_prog, $t, 1, $now );
 	}
-	logger "INFO: Will try prog types: ".(join ',', @try_types)."\n" if $opt->{verbose};
-	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $pid );
-
-	# Maybe we don't want to populate caches - this slows down --pid recordings ...
-	# Populate cache with all specified prog types (strange perl bug?? - @try_types is empty after these calls if done in a $_ 'for' loop!!)
-	# only get links and possibly refresh caches if > 1 type is specified
-	# else only load cached data from file if it exists.
-	my $load_from_file_only;
-	$load_from_file_only = 1 if $#try_types == 0;
-	for my $t ( @try_types ) {
-		get_links( $prog, $index_prog, $t, $load_from_file_only, $now );
+	my $opt_pid = $opt->{pid};
+	my $opt_type = "tv";
+	# If $pid is in the form of '<type>:<pid>' and <type> is a valid type
+	if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && is_prog_type(lc($1)) ) {
+		($opt_type, $opt_pid) = ( lc($1), $2 );
 	}
-
-	# Simply record pid if we find it in the caches
-	if ( $prog->{$pid}->{pid} ) {
-		return download_pid_in_cache( $hist, $prog->{$pid} );
-	}
-
+	# See if the specified pid has other episode pids embedded - results in another list of pids.
+	my $dummy = progclass($opt_type)->new( 'pid' => $opt_pid, 'type' => $opt_type );
+	my @pids = $dummy->get_pids_recursive();
 	my $totalretcode = 0;
-	my $quit_attempt = 0;
 	my %done_pids;
-	for my $prog_type ( @try_types ) {
-		last if $quit_attempt;
-
-		# See if the specified pid has other episode pids embedded - results in another list of pids.
-		my $dummy = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
-		my @pids = $dummy->get_pids_recursive();
-
-		# Try to get pid using each specified prog type
-		# process all pids in @pids
-		for my $pid ( @pids ) {
-			# skip this pid if we have already completed it
-			next if $done_pids{$pid};
-			main::logger "INFO: Trying pid: $pid using type: $prog_type\n";
-			my $retcode;
-			if ( not $prog->{$pid}->{pid} ) {
-				$retcode = download_pid_not_in_cache( $hist, $pid, $prog_type );
-				# don't try again for other types because it was recorded successfully
-				$done_pids{$pid} = 1 if ! $retcode;
-			} else {
-				$retcode = download_pid_in_cache( $hist, $prog->{$pid} );
-				# if it's in the cache then there is no need to try this pid for other types
-				$done_pids{$pid} = 1;
-			}
-			$totalretcode += $retcode;
+	for my $pid ( @pids ) {
+		# skip this pid if we have already completed it
+		next if $done_pids{$pid};
+		my $prog_pid = $pid;
+		my $prog_type = 'tv';
+		# If $pid is in the form of '<type>:<pid>' and <type> is a valid type
+		if ( $pid =~ m{^(.+?)\:(.+?)$} && is_prog_type(lc($1)) ) {
+			( $prog_type, $prog_pid ) = ( lc($1), $2 );
 		}
+		my $retcode;
+		if ( $prog->{$prog_pid}->{pid} ) {
+			$retcode = download_pid( $hist, $prog->{$prog_pid} );
+		} else {
+			my $this = progclass($prog_type)->new( 'pid' => $prog_pid, 'type' => $prog_type );
+			$retcode = download_pid( $hist, $this );
+		}
+		$done_pids{$pid} = 1 if ! $retcode;
+		$totalretcode += $retcode;
 	}
-
 	# return zero on success of all pid recordings (used for PVR queue)
 	return $totalretcode;
 }
 
 
-
-sub download_pid_not_in_cache {
-	my $hist = shift;
-	my $pid = shift;
-	my $prog_type = shift;
-	my $retcode;
-
-	# Force prog type and create new prog instance if it doesn't exist
-	my $this;
-	logger "INFO: Trying to download PID using type $prog_type\n";
-	logger "INFO: pid not found in $prog_type cache\n";
-	$this = progclass($prog_type)->new( 'pid' => $pid, 'type' => $prog_type );
-	logger "INFO: Cleaning pid Old: '$this->{pid}', " if $opt->{verbose};
-	$this->clean_pid();
-	logger " New: '$this->{pid}'\n" if $opt->{verbose};
-	if ( $this->{pid} !~ m{^([pb]0[a-z0-9]{6})$} ) {
-		logger "ERROR: Could not extract a valid PID from $this->{pid}\n";
-		return 1;
-	}
-	# Display pid match for recording
-	if ( $opt->{history} ) {
-		$hist->list_progs( 'pid:'.$pid );
-	} else {
-		list_progs( { $this->{type} => 1 }, $this );
-	}
-	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} ) ) {
-		return $this->download_retry_loop( $hist );
-	}
-}
-
-
-
-sub download_pid_in_cache {
+sub download_pid {
 	my $hist = shift;
 	my $this = shift;
 	my $retcode;
-
 	# Prune future scheduled match if not specified
-	if ( (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
-		# If the prog object exists with pid in history delete it from the prog list
-		logger "INFO: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{verbose};
+	if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
+		logger "WARNING: Ignoring future programme ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
+		logger "WARNING: Use --future to download future programmes that are already available from iPlayer.\n";
 		# Don't attempt to download
 		return 1;
 	}
-	logger "INFO: Trying to download PID using type $this->{type}\n";
-	logger "INFO: pid found in cache\n";
+	logger "INFO: Trying to download PID: $this->{pid} using type: $this->{type}\n";
+	logger "INFO: PID found in cache: $this->{pid}\n" if $this->{index};
 	# Display pid match for recording
 	if ( $opt->{history} ) {
 		$hist->list_progs( 'pid:'.$this->{pid} );
@@ -1466,29 +1389,26 @@ sub user_agent {
 }
 
 
-
 # Returns classname for prog type or if not specified, an array of all prog types
 sub progclass {
 	my $prog_type = shift;
-	if ( $prog_type ) {
-		return $prog_types{$prog_type};
-	} elsif ( not defined $prog_type ) {
-		return keys %prog_types;
+	if ( not defined $prog_type ) {
+		return ('tv', 'radio');
+	} elsif ( $prog_type =~ /^(tv|radio)$/ ) {
+		return "Programme::$prog_type";
 	} else {
-		main::logger "ERROR: Programe Type '$prog_type' does not exist. Try using --refresh\n";
+		main::logger "ERROR: Programe Type '$prog_type' does not exist\n";
 		exit 3;
 	}
 }
 
 
-
-# Returns classname for prog type or if not specified, an array of all prog types
+# return true if valid prog type
 sub is_prog_type {
 	my $prog_type = shift;
-	return 1 if defined $prog_types{$prog_type};
+	return 1 if $prog_type =~ /^(tv|radio)$/;
 	return 0;
 }
-
 
 
 # Feed Info:
@@ -4612,7 +4532,7 @@ sub get_metadata {
 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
 		my $json = main::request_url_retry($ua, $url, 3, '', '');
 		if ( $json ) {
-			my $dec =	eval { decode_json($json) };
+			my $dec = eval { decode_json($json) };
 			if ( ! $@ ) {
 				my $doc = $dec->{programme};
 				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
@@ -4912,11 +4832,12 @@ sub get_metadata {
 	return 0;
 }
 
-sub fetch_pid_type {
+sub fetch_pid_info {
 	my $ua = shift;
 	my $pid = shift;
 	my $url = "http://www.bbc.co.uk/programmes/$pid.json";
 	my $pid_type;
+	my $prog_type;
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to determine PID type.\n";
@@ -4924,13 +4845,23 @@ sub fetch_pid_type {
 	}
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
 	if ( $json ) {
-		my $dec =	eval { decode_json($json) };
+		my $doc = eval { decode_json($json) };
 		if ( ! $@ ) {
-			my $doc = $dec->{programme};
-			$pid_type = $doc->{type};
+			$pid_type = $doc->{programme}->{type};
+			if ( $doc->{programme}->{media_type} eq 'audio' ) {
+				$prog_type = 'radio';
+			} elsif ( $doc->{programme}->{media_type} =~ /video/ )  {
+				$prog_type = 'tv';
+			} else {
+				$prog_type = $doc->{programme}->{ownership}->{service}->{type};
+			}
+		} else {
+			main::logger "ERROR: Could not parse JSON PID info: $url\n";
 		}
+	} else {
+		main::logger "WARNING: Failed to download JSON PID info: $url\n";
 	}
-	return $pid_type;
+	return ($pid_type, $prog_type);
 }
 
 sub fetch_episode_pids {
@@ -5013,9 +4944,11 @@ sub get_pids_recursive {
 	my $prog = shift;
 	my $ua = main::create_ua( 'desktop' );
 	my @pids = ();
+	my $pid_type;
+	my $prog_type;
 
 	# Clean up the pid
-	main::logger "Cleaning pid Old: '$prog->{pid}', " if $opt->{verbose};
+	main::logger "Cleaning PID Old: '$prog->{pid}', " if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " New: '$prog->{pid}'\n" if $opt->{verbose};
 	if ( $prog->{pid} !~ m{^([pb]0[a-z0-9]{6})$} ) {
@@ -5023,27 +4956,30 @@ sub get_pids_recursive {
 		return ();
 	}
 
-	my $pid_type = fetch_pid_type( $ua, $prog->{pid} );
+	($pid_type, $prog_type) = fetch_pid_info( $ua, $prog->{pid} );
+	$prog_type ||= 'tv';
 	if ( ! $pid_type ) {
-		main::logger "WARNING: Could not determine PID type. Trying to record PID directly.\n";
-		return $prog->{pid};
+		main::logger "WARNING: Could not determine PID type ($prog->{pid}). Trying to record PID directly.\n";
+		return "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "episode" ) {
-		main::logger "INFO: Episode PID detected\n";
-		push @pids, $prog->{pid};
+		main::logger "INFO: $prog_type episode PID detected ($prog->{pid})\n";
+		push @pids, "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "clip" ) {
-		main::logger "INFO: Clip PID detected\n";
-		push @pids, $prog->{pid};
+		main::logger "INFO: $prog_type clip PID detected ($prog->{pid})\n";
+		push @pids, "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
-		main::logger "INFO: Series or Brand PID detected\n";
+		main::logger "INFO: $prog_type series or brand PID detected ($prog->{pid})\n";
 		my $epids = fetch_episode_pids($ua, $prog->{pid});
-		push @pids, @$epids;
 		if ( ! $opt->{pidrecursive} ) {
 			main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
 			return ();
 		}
+		for my $epid ( @$epids ) {
+			push @pids, "$prog_type:$epid";
+		}
 	} else {
-		main::logger "WARNING: Unknown PID type: $pid_type. Trying to record PID directly.\n";
-		return $prog->{pid};
+		main::logger "WARNING: Unknown PID type: $pid_type ($prog->{pid}). Trying to record PID directly.\n";
+		return "$prog_type:$prog->{pid}";
 	}
 	@pids = main::make_array_unique_ordered( @pids );
 	return @pids;
