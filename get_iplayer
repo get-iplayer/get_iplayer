@@ -94,7 +94,7 @@ my $opt_format = {
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
-	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming (can also be used with thumbnail option)."],
+	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Recording', '--metadata-only', "Create specified metadata info file without any recording or streaming."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults.  Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
@@ -140,7 +140,7 @@ my $opt_format = {
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "Run user command after successful recording of programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>-<episode>-<pid>'"],
 	limitprefixlength => [ 1, "limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
-	metadata	=> [ 1, "metadata=s", 'Output', '--metadata <format>', "Create metadata info file after recording.  Valid formats are: 'generic'"],
+	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Save recorded files into subdirectory.  Default: same name as programme."],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for subdirectory naming.  Use substitution parameters, e.g., '<nameshort>-<seriesnum>'"],
@@ -371,6 +371,11 @@ foreach ('start', 'stop') {
 	if ($opt_cmdline->{$_} && $opt_cmdline->{$_} =~ /(\d\d):(\d\d)(:(\d\d))?/) {
 		$opt_cmdline->{$_} = $1 * 3600 + $2 * 60 + $4;
 	}
+}
+
+# ensure --metadata value
+if ( defined $opt_cmdline->{metadata} ) {
+	$opt_cmdline->{metadata} = "generic";
 }
 
 # Set the personal options according to the specified preset
@@ -656,6 +661,11 @@ sub init_search {
 		$opt->{thumb} = 1;
 	}
 
+	# Set --metadata if --metadata-only is used
+	if ( defined $opt->{metadata} || $opt->{metadataonly} ) {
+		$opt->{metadata} = "generic";
+	}
+
 	# Ensure lowercase types
 	$opt->{type} = lc( $opt->{type} );
 	# Expand 'all' type to comma separated list all prog types
@@ -686,15 +696,6 @@ sub init_search {
 		$ENV{http_proxy} = $proxy if $proxy && ! $opt->{partialproxy};
 		logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
 		logger "INFO: \$ENV{http_proxy} = $ENV{http_proxy}\n" if $ENV{http_proxy} && $opt->{verbose};
-	}
-
-
-	# require --metadata with --metadata-only
-	if ( $opt->{metadataonly} ) {
-		if ( ! $opt->{metadata} ) {
-			main::logger "ERROR: Please specify metadata type using --metadata=<type>\n";
-			exit 2;
-		}
 	}
 
 	# hash of prog types specified
