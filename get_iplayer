@@ -6305,11 +6305,15 @@ sub get_links_schedule_mojo {
 	my $get_callback = sub {
 		my (undef, $tx) = @_;
 		$active--;
-		my $url = $tx->req->url;
+		my $tx0 = $tx;
+		while ( $tx0->previous ) {
+			$tx0 = $tx0->previous;
+		}
+		my $url = $tx0->req->url;
 		my $channel_id = $channel_ids->{$url};
 		my $channel = $channels->{$url};
 		my $code = $tx->res->code;
-		my $html = $tx->res->body;
+		my $html = $tx->res->text;
 		unless ( $code >= 200 and $code < 300 and $html) {
 			if ( $attempts{$url} < 3 ) {
 				main::logger "\nDEBUG: Retrying download of schedule page: $url\n" if $opt->{verbose};
@@ -6844,7 +6848,7 @@ sub index_max { return 39999 };
 sub channels_schedule {
 	return {
 		'national' => {
-			'radio1/programmes/schedules/england'	=> 'BBC Radio 1',
+			'radio1/programmes/schedules'	=> 'BBC Radio 1',
 			'1xtra/programmes/schedules'		=> 'BBC Radio 1Xtra',
 			'radio2/programmes/schedules'		=> 'BBC Radio 2',
 			'radio3/programmes/schedules'		=> 'BBC Radio 3',
