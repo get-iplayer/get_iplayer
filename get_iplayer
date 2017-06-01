@@ -145,7 +145,6 @@ my $opt_format = {
 	thumb		=> [ 1, "thumb|thumbnail!", 'Output', '--thumb', "Download Thumbnail image if available"],
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Output', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
-	thumbsizecache	=> [ 1, "thumbsizecache=n", 'Deprecated', '--thumbsizecache <index|width>', "Default thumbnail size/index to use when building cache. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
@@ -218,7 +217,6 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
-	noscrapeversions	=> [ 1, "noscrapeversions|no-scrape-versions!", 'Deprecated', '--no-scrape-versions', "Do not scrape episode web pages as extra measure to find audiodescribed/signed versions."],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
@@ -4314,7 +4312,7 @@ sub get_verpids {
 
 	my $rc_json = $prog->get_verpids_json( $ua );
 	my $rc_html = 1;
-	if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) && ! $opt->{noscrapeversions} ) {
+	if ( ( ! $prog->{type} || $prog->{type} eq 'tv' ) ) {
 		$rc_html = $prog->get_verpids_html( $ua );
 	}
 	# ensure title info extracted
@@ -4364,7 +4362,7 @@ sub get_verpids_json {
 	unless ( $prog->{thumbnail} ) {
 		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
 		$thumbnail =~ s/\\\//\//g;
-		my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+		my $thumbsize = $opt->{thumbsize} || 150;
 		my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
 		if ( ! $recipe ) {
 			main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (JSON)\n";
@@ -4495,7 +4493,7 @@ sub get_verpids_html {
 		unless ( $prog->{thumbnail} ) {
 			my $thumbnail = $1 if $config =~ /"image":"(.*?)"/;
 			$thumbnail =~ s/\\\//\//g;
-			my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+			my $thumbsize = $opt->{thumbsize} || 150;
 			my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
 			if ( ! $recipe ) {
 				main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (HTML)\n";
@@ -4638,7 +4636,7 @@ sub get_metadata {
 					} elsif ( $brand_image_pid ) {
 						$image_pid = $brand_image_pid;
 					}
-					my $thumbsize = $opt->{thumbsize} || $opt->{thumbsizecache} || 150;
+					my $thumbsize = $opt->{thumbsize} || 150;
 					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
 					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
 					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
