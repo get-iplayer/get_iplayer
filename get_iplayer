@@ -795,10 +795,6 @@ sub init_search {
 
 	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
 
-	if ( $HTML::Parser::VERSION < 3.71 ) {
-		main::logger "WARNING: Web scraping operations may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n\n";
-	}
-
 	return ( $type, $prog, $index_prog );
 }
 
@@ -2269,8 +2265,6 @@ Copyright (C) 2008-2010 Phil Lewis
   This is free software, and you are welcome to redistribute it under certain
   conditions; use --conditions for details.
 
-  NOTE: A UK TV licence is required to legally access BBC iPlayer TV content
-
 EOF
 	return $text;
 }
@@ -3485,6 +3479,11 @@ sub download_retry_loop {
 	my @version_search_list = $prog->generate_version_list;
 	return 1 if $#version_search_list < 0;
 
+	if ( $prog->{type} eq "tv" && ! $opt->{nowarntvlicence} ) {
+		$opt->{nowarntvlicence} = 1;
+		main::logger "WARNING: A UK TV licence is required to legally access BBC iPlayer TV content\n";
+	}
+	
 	# Get all possible (or user overridden) modes for this prog recording
 	my $modelist = $prog->modelist();
 	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
@@ -4353,6 +4352,10 @@ sub get_verpids_json {
 # Only works for TV programmes
 sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
+	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparsermetadata} ) {
+		$opt->{nowarnhtmlparsermetadata} = 1;
+		main::logger "WARNING: Metadata scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
+	}
 	my $pid;
 	if ( $prog->{pid} =~ /^http/i ) {
 		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/
@@ -4875,6 +4878,10 @@ sub fetch_episode_pids {
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to recursively extract episode PIDs.\n";
 		return \@pids;
+	}
+	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserepisode} ) {
+		$opt->{nowarnhtmlparserepisode} = 1;
+		main::logger "WARNING: Episode scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
 	}
 	{ do {
 		my $url = "http://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
@@ -6251,6 +6258,10 @@ sub get_links_schedule {
 			}
 			return;
 		}
+	}
+	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserschedule} ) {
+		$opt->{nowarnhtmlparserschedule} = 1;
+		main::logger "WARNING: Schedule scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
 	}
 	my $ua = main::create_ua( 'desktop', 1 );
 	$ua->timeout(60);
