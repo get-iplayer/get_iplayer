@@ -5609,7 +5609,7 @@ sub get_stream_data {
 	my (%seen, $stream_key);
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
 		# get MPEG-DASH streams for on-demand
-		push @media_stream_pc_prefixes, @media_stream_iptv_prefixes if $prog->{type} eq "tv";
+		unshift @media_stream_pc_prefixes, @media_stream_iptv_prefixes if $prog->{type} eq "tv";
 		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
 			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
 			main::logger "\n$xml\n" if $opt->{debug};
