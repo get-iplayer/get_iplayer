@@ -207,8 +207,9 @@ my $opt_format = {
 	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
+	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
+	throttle	=> [ 1, "bw|throttle=f", 'Misc', '--throttle <Mibit/s>', "Bandwidth limit (in Mibit/s) for media file download. Default: unlimited. Synonym: --bw"],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
@@ -7270,7 +7271,6 @@ sub fetch {
 	my $proxy_prefix;
 	my $resuming = 0;
 	my $retries = 3;
-	my $rate_bps;
 	my $hide_progress = main::hide_progress();
 	my $crlf = ( $hide_progress || $opt->{logprogress} ) ? "\n" : "\r";
 	my $noresume = $opt->{noresume};
@@ -7302,6 +7302,12 @@ sub fetch {
 			return if ($curr_percent - $prev_percent) < 0.1;
 		}
 		$prev_percent = $curr_percent;
+		my $curr_time = time();
+		my $rate_time = max(1, ($curr_time - $begin_time));
+		my $rate_size_bps = max(0, ($curr_size - $begin_size));
+		my $rate_size_mibit = (8.0 / 1024.0 / 1024.0) * $rate_size_bps;
+		my $rate_bps = $rate_size_bps / $rate_time;
+		my $rate_mibit = $rate_size_mibit / $rate_time;
 		if ( $opt->{hash} ) {
 			main::logger '#';
 			$hash_count++;
@@ -7309,38 +7315,44 @@ sub fetch {
 				main::logger "\n";
 			}
 		} else {
-			return if $hide_progress;
-			my $rate;
-			my $time;
-			my $time_called = time();
-			if ($time_called - $begin_time < 1) {
-				$rate = '----.- Mibit/s';
-				$time = '--:--:-- remaining';
-			} else {
-				$rate_bps = ($curr_size - $begin_size) / ($time_called - $begin_time);
-				$rate = sprintf("%6.1f Mibit/s", (8.0 / 1024.0 / 1024.0) * $rate_bps);
-				$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
+			unless ( $hide_progress ) {
+				my $rate;
+				my $time;
+				if ($curr_time - $begin_time < 1) {
+					$rate = '----.- Mibit/s';
+					$time = '--:--:-- remaining';
+				} else {
+					$rate = sprintf("%6.1f Mibit/s", $rate_mibit);
+					$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
+				}
+				if ( $opt->{verbose} ) {
+					main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
+						$curr_size / 1024.0 / 1024.0,
+						$file_size / 1024.0 / 1024.0,
+						(gmtime($curr_elapsed))[2,1,0],
+						$stop_elapsed_str,
+						$curr_sequence,
+						$stop_sequence,
+						$curr_percent,
+						$rate,
+						$time,
+					);
+				} else {
+					main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s${crlf}",
+						$curr_size / 1024.0 / 1024.0,
+						$file_size / 1024.0 / 1024.0,
+						$curr_percent,
+						$rate,
+						$time,
+					);
+				}
 			}
-			if ( $opt->{verbose} ) {
-				main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
-					$curr_size / 1024.0 / 1024.0,
-					$file_size / 1024.0 / 1024.0,
-					(gmtime($curr_elapsed))[2,1,0],
-					$stop_elapsed_str,
-					$curr_sequence,
-					$stop_sequence,
-					$curr_percent,
-					$rate,
-					$time,
-				);
-			} else {
-				main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s${crlf}",
-					$curr_size / 1024.0 / 1024.0,
-					$file_size / 1024.0 / 1024.0,
-					$curr_percent,
-					$rate,
-					$time,
-				);
+		}
+		if ( $opt->{throttle} > 0 ) {
+			my $rate_time_min = $rate_size_mibit / $opt->{throttle};
+			if ( $rate_time < $rate_time_min ) {
+				my $rate_sleep = 1 + ($rate_time_min - $rate_time);
+				sleep($rate_sleep);
 			}
 		}
 	};
