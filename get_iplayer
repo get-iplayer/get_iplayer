@@ -5678,6 +5678,7 @@ sub get_stream_data {
 							next;
 						}
 						my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
+						# for 320k audio (tv/radio) and 96k audio (radio)
 						$iptv_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
 						my ( $min_bitrate, $max_bitrate );
 						if ( $prefix eq "hvf" ) {
@@ -5733,11 +5734,13 @@ sub get_stream_data {
 							$prefix = "hlsaac";
 						}
 					}
-					if ( $prog->{type} eq 'radio' ) {
-						# for HLS 320k and 96k
-						$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+					# for 320k audio (tv/radio) and 96k audio (radio)
+					$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+					my ( $min_bitrate, $max_bitrate );
+					if ( $prefix eq "hvf" ) {
+						$max_bitrate = 6500;
 					}
-					my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, undef, undef, $prefix );
+					my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, $min_bitrate, $max_bitrate, $prefix );
 					for my $hls_media ( @hls_medias ) {
 						for my $hls_conn ( @{$hls_media->{connections}} ) {
 							$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
@@ -5800,18 +5803,20 @@ sub get_stream_data {
 				if ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hvfhd", 'hls', $ext );
 				} elsif ( $mattribs->{height} > 500 ) {
-					if ( $mattribs->{bitrate} > 2500 ) {
+					if ( $mattribs->{fps} > 25 ) {
 						get_stream_data_cdn( $data, $mattribs, "hvfsd", 'hls', $ext );
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "hvfxsd", 'hls', $ext );
 					}
-				} elsif ( $mattribs->{height} > 350 ) {
-					if ( $mattribs->{bitrate} > 1500 ) {
+				} elsif ( $mattribs->{height} > 360 ) {
+					if ( $mattribs->{fps} > 25 ) {
 						get_stream_data_cdn( $data, $mattribs, "hvfhigh", 'hls', $ext );
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "hvfxhigh", 'hls', $ext );
 					}
-				} elsif ( $mattribs->{height} > 250 ) {
+				} elsif ( $mattribs->{height} > 300 ) {
+					get_stream_data_cdn( $data, $mattribs, "hvfstd", 'hls', $ext );
+				} elsif ( $mattribs->{height} > 260 ) {
 					get_stream_data_cdn( $data, $mattribs, "hvflow", 'hls', $ext );
 				}
 			}
