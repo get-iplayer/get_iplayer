@@ -773,14 +773,17 @@ sub init_search {
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} }, ();
 	if ( ! $opt->{ffmpegobsolete} ) {
-		if ( $opt->{debug} ) {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'debug');
-		} elsif ( $opt->{ffmpegverbose} ) {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'verbose');
-		} elsif ( $opt->{quiet} || $opt->{silent} ) {
+		if ( $opt->{quiet} || $opt->{silent} ) {
 			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
+		} elsif ( $opt->{ffmpegloglevel} ) {
+			if ( $opt->{ffmpegloglevel} =~ /^(quiet|-8|panic|0|fatal|8|error|16|warning|24|info|32|verbose|40|debug|48|trace|56)$/ ) {
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', $opt->{ffmpegloglevel});
+			} else {
+				logger "WARNING: invalid value for --ffmpeg-loglevel ('$opt->{ffmpegloglevel}') - using default\n";
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
+			}
 		} else {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'error');
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
 		}
 		if ( main::hide_progress() ) {
 			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
@@ -7033,7 +7036,7 @@ sub opt_format {
 		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary. Assumed to be ffmpeg 3.0 or higher unless --ffmpeg-obsolete is specified."],
 		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<1.0) that may not support certain options. Without this option, MP4 conversion may fail with obsolete versions of ffmpeg."],
 		ffmpegforce		=> [ 1, "ffmpeg-force|ffmpegforce!", 'External Program', '--ffmpeg-force', "Bypass version checks and assume ffmpeg is version 3.0 or higher"],
-		ffmpegverbose		=> [ 1, "ffmpeg-verbose|ffmpegverbose!", 'External Program', '--ffmpeg-verbose', "Show verbose (-loglevel verbose) output from ffmpeg"],
+		ffmpegloglevel		=> [ 1, "ffmpeg-loglevel|ffmpegloglevel=s", 'External Program', '--ffmpeg-loglevel <level>', "Set logging level for ffmpeg. Overridden by --quiet and --silent. Default: 'fatal'"],
 	};
 }
 
