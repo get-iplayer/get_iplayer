@@ -78,6 +78,7 @@ STDERR->autoflush(1);
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
+	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies --force."],
 	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to skip.  Possible values: akamai,limelight,bidi"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps50		=> [ 1, "fps50!", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
@@ -669,6 +670,11 @@ sub init_search {
 	# Force nowrite if metadata/subs/thumb-only
 	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
+	}
+	
+	# use --force with --audio-only so audio stream for previous download can be retrieved
+	if ( $opt->{audioonly} ) {
+		$opt->{force} = 1;
 	}
 
 	# List all options and where they are set from then exit
@@ -3344,6 +3350,7 @@ sub download_retry_loop {
 			my @modes;
 			my @available_modes = sort keys %{ $prog->{streams}->{$version} };
 			for my $modename ( split /,/, $modelist ) {
+				next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
 				# find all numbered modes starting with this modename
 				push @modes, sort { $a cmp $b } grep /^$modename(\d+)?$/, @available_modes;
 			}
@@ -3354,8 +3361,8 @@ sub download_retry_loop {
 			if ($#modes < 0) {
 				my %available_modes_short;
 				# Strip the number from the end of the mode name and make a unique array
-				for ( @available_modes ) {
-					my $modename = $_;
+				for my $modename ( @available_modes ) {
+					next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
 					next if $modename =~ /subtitle/;
 					$modename =~ s/\d+$//g;
 					$available_modes_short{$modename}++;
@@ -3738,6 +3745,7 @@ sub generate_filenames {
 
 	# Get extension from streamdata if defined and raw not specified
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
+	$prog->{ext} = "m4a" if $prog->{type} eq "tv" && $opt->{audioonly};
 	# Use a dummy file ext if one isn't set - helps with readability of metadata
 	$prog->{ext} = 'EXT' if ! $prog->{ext};
 	# output files with --raw
@@ -7048,6 +7056,14 @@ sub get {
 
 	unless ( -f $media_file ) {
 		$streamdata{kind} = "audio+video";
+		if ( $opt->{audioonly} && $url =~ /-video=\d+/ ) {
+			$url =~ s/-video=\d+//;
+			$streamdata{kind} = "audio";
+			if ( $streamdata{audio_bitrate} ) {
+				$streamdata{media_size} = undef;
+				$streamdata{media_bitrate} = $streamdata{audio_bitrate};
+			}
+		}
 		my $segments = $self->parse_playlist($ua, $url);
 		if ( keys %{$segments} == 0 ) {
 			main::logger "ERROR: No file segments in HLS playlist\n";
@@ -7657,7 +7673,7 @@ sub get {
 		}
 	}
 
-	if ( $prog->{type} eq "tv" ) {
+	if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
 		unless ( -f $video_file ) {
 			my $video_media = $streamdata{video_media};
 			$streamdata{file_size} = $video_media->{file_size};
@@ -7686,7 +7702,7 @@ sub get {
 			main::logger "ERROR: Destination file name: $audio_raw\n";
 			return 'skip';
 		}
-		if ( $prog->{type} eq "tv" ) {
+		if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
 			if ( ! move($video_file, $video_raw) ) {
 				main::logger "ERROR: Could not rename file: $video_file\n";
 				main::logger "ERROR: Destination file name: $video_raw\n";
