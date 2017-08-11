@@ -69,8 +69,6 @@ my %SIGORIG;
 $SIGORIG{$_} = $SIG{$_} for keys %SIG;
 STDOUT->autoflush(1);
 STDERR->autoflush(1);
-# Save proxy env var
-my $ENV_HTTP_PROXY = $ENV{HTTP_PROXY} || $ENV{http_proxy};
 
 # Define general 'option names' => ( <help mask>, <option help section>, <option cmdline format>, <usage text>, <option help> )
 # <help mask>: 0 for normal help, 1 for advanced help, 2 for basic help
@@ -87,13 +85,13 @@ my $opt_format = {
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults.  Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
-	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences"],
+	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences and/or http_proxy environment variable."],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
-	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails).  If specified, value of http_proxy environment variable (if any) in parent process is retained and passed to child processes."],
+	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)."],
 	_url		=> [ 2, "", 'Recording', '--url <url>,<url>,...', "Record the embedded media in the specified iPlayer episode URLs.  Use with --type."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>,<pid>,...', "Record arbitrary PIDs that do not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID.  Requires --pid."],
-	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'.  Sets http_proxy environment variable for child processes (e.g., ffmpeg) unless --partial-proxy is specified."],
+	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL e.g. 'http://USERNAME:PASSWORD\@SERVER:PORT' or 'http://SERVER:PORT'.  Value of http_proxy environment variable (if present) will be used unless --proxy is specified. Used for both HTTP and HTTPS. Overridden by --no-proxy."],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	subsrequired	=> [ 1, "subsrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
@@ -677,14 +675,11 @@ sub init_search {
 	# Web proxy
 	if ( $opt->{noproxy} ) {
 		delete $opt->{proxy};
-		$ENV{http_proxy} = $ENV_HTTP_PROXY;
 	} else {
-		(my $proxy = $opt->{proxy}) =~ s/^prepend://i;
-		$opt->{proxy} = $ENV_HTTP_PROXY if not $opt->{proxy};
-		# set proxy env var for child processes unless --partial-proxy
-		$ENV{http_proxy} = $proxy if $proxy && ! $opt->{partialproxy};
-		logger "INFO: Using Proxy $opt->{proxy}\n" if $opt->{proxy};
-		logger "INFO: \$ENV{http_proxy} = $ENV{http_proxy}\n" if $ENV{http_proxy} && $opt->{verbose};
+		unless ( $opt->{proxy} ) {
+			$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy};
+		}
+		logger "INFO: Using proxy: $opt->{proxy}\n" if $opt->{proxy};
 	}
 
 	# hash of prog types specified
@@ -1630,7 +1625,7 @@ sub display_stream_info {
 
 sub proxy_disable {
 	my $ua = shift;
-	$ua->proxy( ['http'] => undef );
+	$ua->proxy( ['http', 'https'] => undef );
 	$proxy_save = $opt->{proxy};
 	delete $opt->{proxy};
 	main::logger "INFO: Disabled proxy: $proxy_save\n" if $opt->{verbose};
@@ -1640,7 +1635,7 @@ sub proxy_disable {
 
 sub proxy_enable {
 	my $ua = shift;
-	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
+	$ua->proxy( ['http', 'https'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$opt->{proxy} = $proxy_save;
 	main::logger "INFO: Restored proxy to $opt->{proxy}\n" if $opt->{verbose};
 }
@@ -1659,7 +1654,7 @@ sub create_ua {
 	my $agent = main::user_agent( $id ) || main::user_agent( 'desktop' );
 	my $ua = LWP::UserAgent->new;
 	$ua->timeout( $lwp_request_timeout );
-	$ua->proxy( ['http'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
+	$ua->proxy( ['http', 'https'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$ua->agent( $agent );
 	# Using this slows down stco parsing!!
 	#$ua->default_header( 'Accept-Encoding', 'gzip,deflate' );
@@ -6307,9 +6302,11 @@ sub get_links_schedule_mojo {
 	my $max_conn = $opt->{indexmaxconn} || 5;
 	my $ua = Mojo::UserAgent->new(max_redirects => 5);
 	$ua->transactor->name(main::user_agent());
-	$ua->proxy->detect;
 	$ua->connect_timeout(60);
 	$ua->inactivity_timeout(60);
+	if ( $opt->{proxy} && $opt->{proxy} !~ /^prepend:/ && ! $opt->{partialproxy} ) {
+		$ua->proxy->http($opt->{proxy})->https($opt->{proxy});
+	}
 
 	my $sig_int = $SIG{INT};
 	local $SIG{INT} = sub {
@@ -8204,8 +8201,6 @@ sub load_options {
 	my $name = shift;
 
 	my $optfile_preset;
-	# reset proxy env var
-	$ENV{http_proxy} = $ENV_HTTP_PROXY;
 	# Clear out existing options and file options hashes
 	%{$opt} = ();
 
