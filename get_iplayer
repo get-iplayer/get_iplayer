@@ -465,7 +465,6 @@ $SIG{INT} = $SIG{PIPE} = \&cleanup;
 # Other Non option-dependent vars
 my $historyfile		= "${profile_dir}/download_history";
 my $cookiejar		= "${profile_dir}/cookies.";
-my $namedpipe 		= "${profile_dir}/namedpipe.$$";
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
 my $proxy_save;
@@ -2035,7 +2034,6 @@ sub StringUtils::sanitize_path {
 sub cleanup {
 	my $signal = shift;
 	logger "\nINFO: Cleaning up $0 (got signal $signal)\n"; # if $opt->{verbose};
-	unlink $namedpipe;
 	unlink $lockfile;
 	# Execute default signal handler
 	$SIGORIG{$signal}->() if ref($SIGORIG{$signal}) eq 'CODE';
