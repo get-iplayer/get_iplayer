@@ -522,7 +522,7 @@ push @search_args, '.*' if ! $search_args[0] && ! $opt->{pid};
 
 # Auto-detect http://, <type>:http:// or bbc-ipd: in a search term and set it as a --pid option (disable if --fields is used).
 if ( ! $opt->{pid} && ! $opt->{fields} ) {
-	if ( $search_args[0] =~ m{^(\w+:)?http://} ) {
+	if ( $search_args[0] =~ m{^(\w+:)?https?://} ) {
 		$opt->{pid} = $search_args[0];
 	}
 	elsif ( $search_args[0] =~ m{^bbc-ipd:download/(\w+)/\w+/(\w+)/} ) {
@@ -3205,16 +3205,6 @@ sub opt {
 }
 
 
-# extract PID from URL if necessary
-sub clean_pid {
-	my $prog = shift;
-
-	if ( $prog->{pid} =~ m{^http.+\/([pb]0[a-z0-9]{6})\/?.*$} ) {
-		$prog->{pid} = $1;
-	}
-}
-
-
 # This gets run before the download retry loop if this class type is selected
 sub init {
 }
@@ -4222,6 +4212,25 @@ use URI;
 # Inherit from Programme class
 use base 'Programme';
 
+use constant REGEX_PID => qr/^[b-df-hj-np-tv-z0-9]{8,}$/;
+
+sub pid_ok {
+	my $prog = shift;
+	return $prog->{pid} =~ REGEX_PID;
+}
+
+# extract PID from URL if necessary
+sub clean_pid {
+	my $prog = shift;
+	$prog->{pid} =~ s/(^\s+|\s+$)//g;
+	if ( $prog->{pid} =~ m{^https?://} ) {
+		my $uri = URI->new($prog->{pid});
+		my @pids = grep /${\REGEX_PID}/, $uri->path_segments;
+		if ( @pids ) {
+	 		$prog->{pid} = $pids[$#pids];
+		}
+	}
+}
 
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
@@ -4246,19 +4255,7 @@ sub get_verpids {
 # Uses JSON playlist: http://www.bbc.co.uk/programmes/<pid>/playlist.json
 sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
-	my $pid;
-	if ( $prog->{pid} =~ /^http/i ) {
-		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/
-	}
-	$pid ||= $prog->{pid};
-	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: PID changed from $prog->{pid} to $pid (JSON)\n" if $opt->{verbose};
-		$prog->{pid} = $pid;
-	}
-	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ ) {
-		main::logger "INFO: skipping playlist for non-PID $pid (JSON)\n" if $opt->{verbose};
-		return;
-	}
+	my $pid = $prog->{pid};
 	my $url = 'http://www.bbc.co.uk/programmes/'.$pid.'/playlist.json';
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3 );
@@ -4355,30 +4352,13 @@ sub get_verpids_html {
 		$opt->{nowarnhtmlparsermetadata} = 1;
 		main::logger "WARNING: Metadata scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
 	}
-	my $pid;
-	if ( $prog->{pid} =~ /^http/i ) {
-		$pid = $1 if $prog->{pid} =~ /\/([bp]0[a-z0-9]{6})/
-	}
-	$pid ||= $prog->{pid};
-	if ( $prog->{pid} ne $pid ) {
-		main::logger "INFO: PID changed from $prog->{pid} to $pid (HTML)\n" if $opt->{verbose};
-		$prog->{pid} = $pid;
-	}
-	if ( $pid !~ /^[bp]0[a-z0-9]{6}$/ && $pid !~ /^http/ ) {
-		main::logger "INFO: skipping playlist for non-PID $pid (HTML)\n" if $opt->{verbose};
-		return;
-	}
+	my $pid = $prog->{pid};
 	my $version_list = $opt->{versionlist} || 'default';
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
 	for my $version ( "default", "audiodescribed", "signed" ) {
 		next if $prog->{verpids}->{$version};
 		my $html;
-		my $url;
-		if ( $pid =~ /^[bp]0[a-z0-9]{6}$/ ) {
-			$url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
-		} else {
-			$url = $pid;
-		}
+		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		$html = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $html ) {
@@ -4446,14 +4426,10 @@ sub get_verpids_html {
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
-			if ( $pid =~ /^[bp]0[a-z0-9]{6}$/ ) {
-				if ( $prog->{type} eq 'tv' ) {
-					$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
-				} elsif ( $prog->{type} eq 'radio' ) {
-					$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
-				}
-			} elsif ( $pid =~ /^http/ ) {
-				$episode_url = $pid;
+			if ( $prog->{type} eq 'tv' ) {
+				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+			} elsif ( $prog->{type} eq 'radio' ) {
+				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
@@ -4529,7 +4505,7 @@ sub get_metadata {
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to retrieve programme metadata.\n";
-	} elsif ( $prog->{pid} =~ /^[bp]0[a-z0-9]{6}$/ ) {
+	} else {
 		my $url = $prog_data_url.$prog->{pid}.".json";
 		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
 		my $json = main::request_url_retry($ua, $url, 3, '', '');
@@ -4959,7 +4935,7 @@ sub get_pids_recursive {
 	main::logger "Cleaning PID Old: '$prog->{pid}', " if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " New: '$prog->{pid}'\n" if $opt->{verbose};
-	if ( $prog->{pid} !~ m{^([pb]0[a-z0-9]{6})$} ) {
+	if ( ! $prog->pid_ok() ) {
 		main::logger "ERROR: Could not extract a valid PID from $prog->{pid}\n";
 		return ();
 	}
