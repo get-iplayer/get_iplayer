@@ -137,7 +137,7 @@ my $opt_format = {
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Output', '--thumbnail-only', "Only Download Thumbnail image if available, not the programme"],
 	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
-	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <index|width>', "Default thumbnail size/index to use for the current recording and metadata. index: 1-11 or width: 86,150,178,512,528,640,832,1024,1280,1600,1920"],
+	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Default: 192"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
 	# Config
@@ -4277,12 +4277,7 @@ sub get_verpids_json {
 	unless ( $prog->{thumbnail} ) {
 		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
 		$thumbnail =~ s/\\\//\//g;
-		my $thumbsize = $opt->{thumbsize} || 150;
-		my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-		if ( ! $recipe ) {
-			main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (JSON)\n";
-			$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
-		}
+		my $recipe = $prog->thumb_url_recipe();
 		$thumbnail =~ s/\$recipe/$recipe/;
 		$prog->{thumbnail} = $thumbnail if $thumbnail;
 		$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
@@ -4395,12 +4390,7 @@ sub get_verpids_html {
 		unless ( $prog->{thumbnail} ) {
 			my $thumbnail = $1 if $config =~ /"image":"(.*?)"/;
 			$thumbnail =~ s/\\\//\//g;
-			my $thumbsize = $opt->{thumbsize} || 150;
-			my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-			if ( ! $recipe ) {
-				main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default (HTML)\n";
-				$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 };
-			}
+			my $recipe = $prog->thumb_url_recipe();
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
 			$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
@@ -4536,9 +4526,7 @@ sub get_metadata {
 							$image_pid = $brand_image_pid;
 						}
 					}
-					my $thumbsize = $opt->{thumbsize} || 150;
-					my $recipe = Programme::bbciplayer->thumb_url_recipes->{ $thumbsize };
-					$recipe = Programme::bbciplayer->thumb_url_recipes->{ 150 } if ! $recipe;
+					my $recipe = $prog->thumb_url_recipe();
 					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
 					$web = "http://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
 					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
@@ -5002,32 +4990,16 @@ sub insert_episode_number {
 }
 
 
-# Returns hash
-sub thumb_url_suffixes {
-	return {
-		86	=> '_86_48.jpg',
-		150	=> '_150_84.jpg',
-		178	=> '_178_100.jpg',
-		512	=> '_512_288.jpg',
-		528	=> '_528_297.jpg',
-		640	=> '_640_360.jpg',
-		832	=> '_832_468.jpg',
-		1024	=> '_1024_576.jpg',
-		1280	=> '_1280_720.jpg',
-		1600	=> '_1600_900.jpg',
-		1920	=> '_1920_1080.jpg',
-		1	=> '_86_48.jpg',
-		2	=> '_150_84.jpg',
-		3	=> '_178_100.jpg',
-		4	=> '_512_288.jpg',
-		5	=> '_528_297.jpg',
-		6	=> '_640_360.jpg',
-		7	=> '_832_468.jpg',
-		8	=> '_1024_576.jpg',
-		9	=> '_1280_720.jpg',
-		10	=> '_1600_900.jpg',
-		11	=> '_1920_1080.jpg',
+sub thumb_url_recipe {
+	my $prog = shift;
+	my $defsize = 192;
+	my $thumbsize = $opt->{thumbsize} || $defsize;
+	my $recipe = $prog->thumb_url_recipes->{ $thumbsize };
+	if ( ! $recipe ) {
+		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default ($defsize)\n";
+		$recipe = $prog->thumb_url_recipes->{ $defsize };
 	}
+	return $recipe;
 }
 
 
@@ -5036,10 +5008,16 @@ sub thumb_url_recipes {
 		86	=> '86x48',
 		150	=> '150x84',
 		178	=> '178x100',
+		192 => '192x108',
+		256 => '256x144',
+		384 => '384x216',
+		448 => '448x252',
 		512	=> '512x288',
 		528	=> '528x297',
 		640	=> '640x360',
+		704	=> '704x396',
 		832	=> '832x468',
+		960	=> '960x540',
 		1024	=> '1024x576',
 		1280	=> '1280x720',
 		1600	=> '1600x900',
