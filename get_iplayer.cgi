@@ -1917,7 +1917,7 @@ sub get_sorted {
 			@sorted = sort { lc $a cmp lc $b } @unsorted;
 		}
 	}
-	# Strip off seach key at beginning of each line
+	# Strip off search key at beginning of each line
 	s/^.*~~~// for @sorted;
 
 	return @sorted;
@@ -3718,7 +3718,7 @@ sub process_params {
 		save	=> 0,
 	};
 
-	# Remeber the status of the tab options display
+	# Remember the status of the tab options display
 	for my $tabname ( grep !/BASICTAB/, @{ $layout->{taborder} } ) {
 		my $default = 'no';
 		# By default only show advanced search tab
