@@ -7070,16 +7070,16 @@ sub remux {
 	} else {
 		# remove the failed converted file
 		unlink $prog->{filepart};
-		main::logger "WARNING: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
-		main::logger "WARNING: Conversion failed - retaining video file: $video_file\n" if $video_ok;
-		return 0;
+		main::logger "ERROR: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
+		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
+		return 'stop';
 	}
 	main::logger "INFO: Finished converting to: \U$prog->{ext}\E\n";
 	# Moving file into place as complete
 	if ( ! move($prog->{filepart}, $prog->{filename}) ) {
 		main::logger "ERROR: Could not rename file: $prog->{filepart}\n";
 		main::logger "ERROR: Destination file name: $prog->{filename}\n";
-		return 'skip';
+		return 'stop';
 	}
 	main::logger "INFO: Finished recording file: $prog->{filename}\n";
 
