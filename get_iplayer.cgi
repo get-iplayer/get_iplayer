@@ -62,6 +62,7 @@ GetOptions(
 	"help|h"			=> \$opt_cmdline->{help},
 	"listen|address|l=s"		=> \$opt_cmdline->{listen},
 	"port|p=n"			=> \$opt_cmdline->{port},
+	"urlprefix|u=s"			=> \$opt_cmdline->{urlprefix},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
 	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
 	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
@@ -83,6 +84,7 @@ Copyright (C) 2009-2010 Phil Lewis
 
 Options:
  --listen,-l        Use the built-in web server and listen on this interface address (default: 0.0.0.0)
+ --urlprefix,-u     Serve requests using this prefix (default: /)
  --port,-p          Use the built-in web server and listen on this TCP port
  --getiplayer,-g    Path to the get_iplayer script
  --ffmpeg           Path to the ffmpeg binary
@@ -98,6 +100,7 @@ EOF
 # Some defaults
 my $default_modes = 'default';
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
+$opt_cmdline->{prefix} = '/' if ! $opt_cmdline->{urlprefix};
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
 	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer', '/usr/local/bin/get_iplayer' ) {
@@ -270,7 +273,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			Reuse => 1,
 		);
 		$server or die "Unable to create server socket: $!";
-		print $se "INFO: Listening on $opt_cmdline->{listen}:$opt_cmdline->{port}\n";
+		print $se "INFO: Listening on http://$opt_cmdline->{listen}:$opt_cmdline->{port}$opt_cmdline->{urlprefix}\n";
 		print $se "WARNING: Insecure Remote access is allowed, use --listen=127.0.0.1 to limit to this host only\n" if $opt_cmdline->{listen} ne '127.0.0.1';
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
@@ -1756,6 +1759,7 @@ sub show_pvr_list {
 	print $fh start_form(
 		-name   => "form1",
 		-method => "POST",
+		-action => $opt_cmdline->{urlprefix},
 	);
 	print $fh p("Click to Edit any PVR Search");
 	# Render options actions
@@ -1832,6 +1836,7 @@ sub pvr_edit {
 	print $fh start_form(
 		-name   => "form1",
 		-method => "POST",
+		-action => $opt_cmdline->{urlprefix},
 	);
 
 	print $fh table( { -class => 'info' }, @html );
@@ -2848,6 +2853,7 @@ sub search_progs {
 	print $fh start_form(
 		-name   => "form1",
 		-method => "POST",
+		-action => $opt_cmdline->{urlprefix},
 	);
 
 
@@ -3254,6 +3260,7 @@ sub form_header {
 	print $fh $cgi->start_form(
 			-name   => "formheader",
 			-method => "POST",
+			-action => $opt_cmdline->{urlprefix},
 	);
 
 	# set $class for tab selection in nav bar
