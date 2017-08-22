@@ -66,6 +66,7 @@ GetOptions(
 	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
 	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
 	"debug"				=> \$opt_cmdline->{debug},
+	"baseurl|base-url|b=s"		=> \$opt_cmdline->{baseurl},
 ) || die usage();
 
 # Display usage if old method of invocation is used or --help
@@ -88,6 +89,7 @@ Options:
  --ffmpeg           Path to the ffmpeg binary
  --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
  --debug            Debug mode
+ --baseurl,-b       Base URL for link generation. Set to full proxy URL if running behind reverse proxy.
  --help,-h          This help text
 EOF
 	print $text;
@@ -110,6 +112,7 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 }
 $opt_cmdline->{encodinglocalefs} ||= (IS_WIN32 ? 'cp1252' : 'utf8');
 $opt_cmdline->{ffmpeg} ||= 'ffmpeg';
+$opt_cmdline->{baseurl} .= "/" if $opt_cmdline->{baseurl} && $opt_cmdline->{baseurl} !~ m{/$};
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
@@ -272,6 +275,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 		$server or die "Unable to create server socket: $!";
 		print $se "INFO: Listening on $opt_cmdline->{listen}:$opt_cmdline->{port}\n";
 		print $se "WARNING: Insecure Remote access is allowed, use --listen=127.0.0.1 to limit to this host only\n" if $opt_cmdline->{listen} ne '127.0.0.1';
+		print $se "INFO: Using base URL $opt_cmdline->{baseurl}\n" if $opt_cmdline->{baseurl};
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
 			my $procid = fork();
@@ -350,10 +354,15 @@ if ( $opt_cmdline->{port} > 0 ) {
 				$ENV{'REQUEST_URI'} = $request{URL};
 				$ENV{'COOKIE'} = $request{cookie};
 				$ENV{'SERVER_PORT'} = $opt_cmdline->{port};
+				my $request_host = "http://$request{host}/";
+				if ( $opt_cmdline->{baseurl} ) {
+					$ENV{'REQUEST_URI'} = $opt_cmdline->{baseurl};
+					$request_host = $opt_cmdline->{baseurl};
+				}
 				# respond OK to browser
 				print $client "HTTP/1.1 200 OK", Socket::CRLF;
 				# Invoke CGI
-				run_cgi( $client, $query_string, $request{URL}, 'http://'.$request{host}.'/' );
+				run_cgi( $client, $query_string, $request{URL}, $request_host );
 
 			# Else 404
 			} else {
@@ -3828,6 +3837,7 @@ sub begin_html {
 	print $fh '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">'."\n";
 	print $fh "<html>";
 	print $fh "<HEAD><TITLE>$title</TITLE>\n";
+	print $fh "<base href=\"$opt_cmdline->{baseurl}\">\n" if $opt_cmdline->{baseurl};
 	insert_stylesheet();
 	print $fh "</HEAD>\n";
 	insert_javascript();
