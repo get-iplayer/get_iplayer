@@ -858,10 +858,7 @@ sub download_pid {
 	my $retcode;
 	# Prune future scheduled match if not specified
 	if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
-		logger "WARNING: Ignoring future programme ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
-		logger "WARNING: Use --future to download future programmes that are already available from iPlayer.\n";
-		# Don't attempt to download
-		return 1;
+		logger "WARNING: Future programme may not yet be available ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
 	}
 	logger "INFO: Trying to download PID: $this->{pid} using type: $this->{type}\n";
 	if ( $this->{index} ) {
@@ -998,16 +995,19 @@ sub find_matches {
 	if ( ! $opt->{future} ) {
 		my $now = time();
 		my @pruned;
+		my $ignored;
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
 			my $available = Programme::get_time_string( $this->{available} );
 			if ( $available && ( $available > $now ) ) {
-				logger "DEBUG: Ignoring Future Prog: '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" if $opt->{debug};
+				logger "WARNING: Ignoring future programme ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
+				$ignored = 1;
 			} else {
 				push @pruned, $this;
 			}
 		}
 		@match_list = @pruned;
+		logger "WARNING: Use --future to download future programmes that are already available from iPlayer\n" if $ignored;
 	}
 
 	# Truncate the array of matches if --limit-matches is specified
