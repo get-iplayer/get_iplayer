@@ -4850,9 +4850,9 @@ sub fetch_episode_pids {
 	my %seen;
 	my $max_page = 1;
 	my $curr_page = 1;
-	eval "use XML::LibXML '1.70'";
+	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to recursively extract episode PIDs.\n";
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to recursively extract episode PIDs.\n";
 		return \@pids;
 	}
 	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserepisode} ) {
@@ -5257,11 +5257,11 @@ sub parse_m3u_attribs {
 }
 
 sub parse_dash_connection {
-	eval "use XML::LibXML '1.70'; use XML::LibXML::XPathContext;";
+	eval "use XML::LibXML '1.91'; use XML::LibXML::XPathContext;";
 	if ( $@ ) {
 		if ( ! $opt->{nowarnlibxmldash} ) {
 			$opt->{nowarnlibxmldash} = 1;
-			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to use MPEG-DASH streams.\n";
+			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to use MPEG-DASH streams.\n";
 		}
 		return;
 	}
@@ -6161,9 +6161,9 @@ sub get_links_schedule {
 	my $future = shift;
 	my $now = shift || time();
 	# check XML::LibXML here before using elsewhere
-	eval "use XML::LibXML '1.70'";
+	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to index $prog_type programmes.\n";
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
 		return;
 	}
 	my @schedule_dates;
@@ -6374,9 +6374,9 @@ sub get_links_schedule_html_page {
 	my $limit = shift;
 	my $now = shift || time();
 	return 1 unless $html;
-	eval "use XML::LibXML '1.70'";
+	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
-		main::logger "WARNING: XML::LibXML not available to index $prog_type programmes.\n";
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
 		return 1;
 	}
 	my $cache_channel = $channel;
@@ -6663,9 +6663,9 @@ sub ttml_to_srt {
 		'white'   => '#ffffff'
 	);
 
-	eval "use XML::LibXML '1.70'; use XML::LibXML::XPathContext;";
+	eval "use XML::LibXML '1.91'; use XML::LibXML::XPathContext;";
 	if ( $@ ) {
-		print "WARNING: Please download and run latest installer or install the XML::LibXML Perl module to convert subtitles.\n";
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to convert subtitles.\n";
 		return 1;
 	}
 
