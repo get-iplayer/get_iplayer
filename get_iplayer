@@ -350,7 +350,7 @@ if ( ! $ENV{IPLAYER_OUTDIR} && $^O eq "MSWin32" ) {
 }
 
 # Parse cmdline opts definitions from each Programme class/subclass
-Options->get_class_options( $_ ) for qw( Streamer Programme Pvr Tagger );
+Options->get_class_options( $_ ) for qw( Streamer Programme Programme::bbciplayer Pvr Tagger );
 Options->get_class_options( progclass($_) ) for progclass();
 Options->get_class_options( "Streamer::$_" ) for qw( hls );
 
@@ -734,72 +734,6 @@ sub init_search {
 	# obtain prog object given index. e.g. $index_prog->{$index_no}->{element};
 	my $index_prog = {};
 	logger "INFO: Search args: '".(join "','", @search_args)."'\n" if $opt->{verbose};
-
-	# External Binaries
-	$bin->{ffmpeg}		= $opt->{ffmpeg} || 'ffmpeg';
-	if (! main::exists_in_path('ffmpeg') ) {
-		$bin->{ffmpeg} = 'ffmpeg';
-	}
-	# ffmpeg checks
-	my ($ffvs, $ffvn);
-	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
-	my $ffout = `$ffcmd`;
-	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
-		$ffvs = $1;
-		if ( $ffvs =~ /^(\d+\.\d+)/i ) {
-			$ffvn = $1;
-			if ( $ffvn >= 3.0 ) {
-				$opt->{ffmpeg30} = 1;
-				$opt->{ffmpeg25} = 1;
-			} elsif ( $ffvn >= 2.5 ) {
-				$opt->{ffmpeg25} = 1;
-			} elsif ( $ffvn < 1.0 ) {
-				$opt->{ffmpegobsolete} = 1;
-			}
-		}
-	}
-	if ( $opt->{verbose} ) {
-		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
-		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
-	}
-	$opt->{ffmpegversion} = $ffvn;
-	unless ( $opt->{ffmpegversion} ) {
-		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
-			delete $opt->{ffmpegobsolete};
-			$opt->{ffmpegav} = 1;
-		}
-		$opt->{ffmpegxx} = 1;
-	}
-	# override ffmpeg checks
-	if ( $opt->{ffmpegforce} ) {
-		$opt->{ffmpeg30} = 1;
-		$opt->{ffmpeg25} = 1;
-		delete $opt->{ffmpegav};
-		delete $opt->{ffmpegxx};
-	}
-	delete $binopts->{ffmpeg};
-	push @{ $binopts->{ffmpeg} }, ();
-	if ( ! $opt->{ffmpegobsolete} ) {
-		if ( $opt->{quiet} || $opt->{silent} ) {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
-		} elsif ( $opt->{ffmpegloglevel} ) {
-			if ( $opt->{ffmpegloglevel} =~ /^(quiet|-8|panic|0|fatal|8|error|16|warning|24|info|32|verbose|40|debug|48|trace|56)$/ ) {
-				push @{ $binopts->{ffmpeg} }, ('-loglevel', $opt->{ffmpegloglevel});
-			} else {
-				logger "WARNING: invalid value for --ffmpeg-loglevel ('$opt->{ffmpegloglevel}') - using default\n";
-				push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
-			}
-		} else {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
-		}
-		if ( main::hide_progress() ) {
-			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
-		} elsif ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
-			push @{ $binopts->{ffmpeg} }, ( '-stats' );
-		}
-	}
-
-	$bin->{atomicparsley}	= $opt->{atomicparsley} || 'AtomicParsley';
 
 	return ( $type, $prog, $index_prog );
 }
@@ -1193,8 +1127,6 @@ sub list_progs {
 			}
 			# tag
 			if ( $opt->{tagonly} && ! $opt->{notag} ) {
-				# this probably needs to be initialised earlier - needed for tagging
-				$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
 				$this->create_dir();
 				$this->tag_file;
 			}
@@ -3685,16 +3617,16 @@ sub tag_file {
 			}
 		}
 		if ( ! -f $prog->{filename} ) {
-			main::logger "WARNING: Cannot tag missing file $prog->{filename}\n";
+			main::logger "WARNING: Cannot tag missing file: $prog->{filename}\n";
 			return;
 		}
-		main::logger "INFO: Tagging file $prog->{filename}\n";
+		main::logger "INFO: Tagging file: $prog->{filename}\n";
 	}
 	# return if file does not exist
 	return if ! -f $prog->{filename};
 	# download thumbnail if necessary
 	if ( -f $prog->{thumbfile} ) {
-		main::logger("WARNING: File $prog->{thumbfile} already exists\n\n") if $opt->{verbose};
+		main::logger("WARNING: File already exists: $prog->{thumbfile}\n") if $opt->{verbose};
 	}
 	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
 	# tag programme
@@ -4230,11 +4162,19 @@ use Storable qw(dclone);
 use strict;
 use Time::Local;
 use URI;
-
 # Inherit from Programme class
 use base 'Programme';
-
 use constant REGEX_PID => qr/^[b-df-hj-np-tv-z0-9]{8,}$/;
+my $ffmpeg_check;
+
+sub opt_format {
+	return {
+		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary. Assumed to be ffmpeg 3.0 or higher unless --ffmpeg-obsolete is specified."],
+		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<1.0) that may not support certain options. Without this option, MP4 conversion may fail with obsolete versions of ffmpeg."],
+		ffmpegforce		=> [ 1, "ffmpeg-force|ffmpegforce!", 'External Program', '--ffmpeg-force', "Bypass version checks and assume ffmpeg is version 3.0 or higher"],
+		ffmpegloglevel		=> [ 1, "ffmpeg-loglevel|ffmpegloglevel=s", 'External Program', '--ffmpeg-loglevel <level>', "Set logging level for ffmpeg. Overridden by --quiet and --silent. Default: 'fatal'"],
+	};
+}
 
 sub pid_ok {
 	my $prog = shift;
@@ -6023,6 +5963,171 @@ sub modelist {
 	return $mlist;
 }
 
+sub ffmpeg_init {
+	return if $ffmpeg_check;
+	$bin->{ffmpeg} = $opt->{ffmpeg} || 'ffmpeg';
+	if (! main::exists_in_path('ffmpeg') ) {
+		if ( $bin->{ffmpeg} ne 'ffmpeg' ) {
+			$bin->{ffmpeg} = 'ffmpeg';
+			if (! main::exists_in_path('ffmpeg') ) {
+				$ffmpeg_check = 1;
+				return;
+			}
+		} else {
+			$ffmpeg_check = 1;
+			return;
+		}
+	}
+	# ffmpeg checks
+	my ($ffvs, $ffvn);
+	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
+	my $ffout = `$ffcmd`;
+	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
+		$ffvs = $1;
+		if ( $ffvs =~ /^(\d+\.\d+)/i ) {
+			$ffvn = $1;
+			if ( $ffvn >= 3.0 ) {
+				$opt->{ffmpeg30} = 1;
+				$opt->{ffmpeg25} = 1;
+			} elsif ( $ffvn >= 2.5 ) {
+				$opt->{ffmpeg25} = 1;
+			} elsif ( $ffvn < 1.0 ) {
+				$opt->{ffmpegobsolete} = 1 unless defined $opt->{ffmpegobsolete};
+			}
+		}
+	}
+	if ( $opt->{verbose} ) {
+		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
+		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
+	}
+	$opt->{ffmpegversion} = $ffvn;
+	unless ( $opt->{ffmpegversion} ) {
+		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
+			delete $opt->{ffmpegobsolete};
+			$opt->{ffmpegav} = 1;
+		}
+		$opt->{ffmpegxx} = 1;
+	}
+	# override ffmpeg checks
+	if ( $opt->{ffmpegforce} ) {
+		$opt->{ffmpeg30} = 1;
+		$opt->{ffmpeg25} = 1;
+		delete $opt->{ffmpegav};
+		delete $opt->{ffmpegxx};
+	}
+	delete $binopts->{ffmpeg};
+	push @{ $binopts->{ffmpeg} }, ();
+	if ( ! $opt->{ffmpegobsolete} ) {
+		if ( $opt->{quiet} || $opt->{silent} ) {
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
+		} elsif ( $opt->{ffmpegloglevel} ) {
+			if ( $opt->{ffmpegloglevel} =~ /^(quiet|-8|panic|0|fatal|8|error|16|warning|24|info|32|verbose|40|debug|48|trace|56)$/ ) {
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', $opt->{ffmpegloglevel});
+			} else {
+				main::logger "WARNING: invalid value for --ffmpeg-loglevel ('$opt->{ffmpegloglevel}') - using default\n";
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
+			}
+		} else {
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
+		}
+		if ( main::hide_progress() ) {
+			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
+		} elsif ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
+			push @{ $binopts->{ffmpeg} }, ( '-stats' );
+		}
+	}
+	$ffmpeg_check = 1;
+	return;
+}
+
+sub postproc {
+	my ( $prog, $audio_file, $video_file ) = @_;
+	my @cmd;
+	my $return;
+
+	$prog->ffmpeg_init();
+	if ( ! main::exists_in_path('ffmpeg') ) {
+		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to: \U$prog->{ext}\E\n\n";
+		return 'stop';
+	}
+	
+	# do nothing if no files
+	my $audio_ok = $audio_file && -f $audio_file;
+	my $video_ok = $video_file && -f $video_file;
+	return 0 unless ( $audio_ok || $video_ok);
+
+	my @global_opts = ( '-y' );
+	my @input_opts;
+	push @input_opts, ( '-i', $audio_file ) if $audio_ok;
+	push @input_opts, ( '-i', $video_file ) if $video_ok;
+	my @codec_opts;
+	if ( ! $opt->{ffmpegobsolete} ) {
+		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' );
+	} else {
+		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' );
+	}
+	my @stream_opts;
+	push @stream_opts, ( '-map', '0:a:0', '-map', '1:v:0' ) if $audio_ok && $video_ok;
+	my @filter_opts;
+	if ( $prog->{mode} =~ /(haf|hvf|hls)/ ) {
+		# need filter for HLS
+		if ( ! $opt->{ffmpegobsolete} ) {
+			push @filter_opts, ( '-bsf:a', 'aac_adtstoasc' );
+		} else {
+			push @filter_opts, ( '-absf', 'aac_adtstoasc' );
+		}
+	}
+	my @other_opts;
+	if ( ! $opt->{ffmpegobsolete} && $opt->{notag} ) {
+		push @other_opts, ( '-movflags', 'faststart' );
+	}
+
+	@cmd = (
+		$bin->{ffmpeg},
+		@{ $binopts->{ffmpeg} },
+		@global_opts,
+		@input_opts,
+		@codec_opts,
+		@stream_opts,
+		@filter_opts,
+		@other_opts,
+		$prog->{filepart},
+	);
+
+	main::logger "INFO: Begin converting to: \U$prog->{ext}\E\n";
+	if ( $opt->{verbose} ) {
+		main::logger "INFO: Begin converting to file: $prog->{filepart}\n";
+		main::logger "INFO: Input audio file: $audio_file\n" if $audio_ok;
+		main::logger "INFO: Input video file: $video_file\n" if $video_ok;
+	}
+
+	# Run conversion and delete source file on success
+	$return = main::run_cmd( 'STDERR', @cmd );
+
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+
+	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
+		unlink( $audio_file, $video_file );
+		main::logger "INFO: Finished converting to file: $prog->{filepart}\n" if $opt->{verbose};
+	} else {
+		# remove the failed converted file
+		unlink $prog->{filepart};
+		main::logger "ERROR: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
+		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
+		return 'stop';
+	}
+	main::logger "INFO: Finished converting to: \U$prog->{ext}\E\n";
+	# Moving file into place as complete
+	if ( ! move($prog->{filepart}, $prog->{filename}) ) {
+		main::logger "ERROR: Could not rename file: $prog->{filepart}\n";
+		main::logger "ERROR: Destination file name: $prog->{filename}\n";
+		return 'stop';
+	}
+	main::logger "INFO: Finished recording file: $prog->{filename}\n";
+
+	return 0;
+}
+
 
 ################### TV class #################
 package Programme::tv;
@@ -6489,48 +6594,51 @@ sub get_links_schedule_html_page {
 sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
 
-	# require ffmpeg for HLS
-	if ( $mode =~ /^(hls|hvf|haf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
-		main::logger "WARNING: Required ffmpeg utility not found - not converting .ts file\n";
-		$opt->{raw} = 1;
-	}
-	# cannot convert hvf with avconv or ffmpeg < 2.5
-	if ( $mode =~ /^hvf/ && ! $opt->{raw} ) {
-		if ( $opt->{ffmpegav} ) {
-			main::logger "WARNING: avconv does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
-			$opt->{raw} = 1;
-		} elsif ( $opt->{ffmpegxx} ) {
-			main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for hvf downloads may fail\n";
-		} elsif ( ! $opt->{ffmpeg25} ) {
-			main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
+	if ( ! $opt->{raw} ) {
+		$prog->ffmpeg_init();
+		# require ffmpeg for HLS
+		if ( $mode =~ /^(hls|hvf|haf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
+			main::logger "WARNING: Required ffmpeg utility not found - not converting .ts file(s)\n";
 			$opt->{raw} = 1;
 		}
-		if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg25} ) {
-			main::logger "WARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4\n";
-			main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .ts file\n";
-			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+		# cannot convert hvf with avconv or ffmpeg < 2.5
+		if ( $mode =~ /^hvf/ && ! $opt->{raw} ) {
+			if ( $opt->{ffmpegav} ) {
+				main::logger "WARNING: avconv does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
+				$opt->{raw} = 1;
+			} elsif ( $opt->{ffmpegxx} ) {
+				main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for hvf downloads may fail\n";
+			} elsif ( ! $opt->{ffmpeg25} ) {
+				main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
+				$opt->{raw} = 1;
+			}
+			if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg25} ) {
+				main::logger "WARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4\n";
+				main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .ts file\n";
+				main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+			}
 		}
-	}
-	# require ffmpeg for DASH
-	if ( $mode =~ /^(daf|dvf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
-		main::logger "WARNING: Required ffmpeg utility not found - not converting .m4a and .m4v files\n";
-		$opt->{raw} = 1;
-	}
-	# cannot convert dvf with avconv or ffmpeg < 3.0
-	if ( $mode =~ /^dvf/ && ! $opt->{raw} ) {
-		if ( $opt->{ffmpegav} ) {
-			main::logger "WARNING: avconv does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
-			$opt->{raw} = 1;
-		} elsif ( $opt->{ffmpegxx} ) {
-			main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for dvf downloads may fail\n";
-		} elsif ( ! $opt->{ffmpeg30} ) {
-			main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+		# require ffmpeg for DASH
+		if ( $mode =~ /^(daf|dvf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
+			main::logger "WARNING: Required ffmpeg utility not found - not converting .m4a and .m4v files\n";
 			$opt->{raw} = 1;
 		}
-		if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg30} ) {
-			main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
-			main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .m4a and .m4v files\n";
-			main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+		# cannot convert dvf with avconv or ffmpeg < 3.0
+		if ( $mode =~ /^dvf/ && ! $opt->{raw} ) {
+			if ( $opt->{ffmpegav} ) {
+				main::logger "WARNING: avconv does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+				$opt->{raw} = 1;
+			} elsif ( $opt->{ffmpegxx} ) {
+				main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for dvf downloads may fail\n";
+			} elsif ( ! $opt->{ffmpeg30} ) {
+				main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+				$opt->{raw} = 1;
+			}
+			if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg30} ) {
+				main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
+				main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .m4a and .m4v files\n";
+				main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+			}
 		}
 	}
 
@@ -6976,7 +7084,6 @@ use Text::ParseWords;
 my $optref;
 my $opt;
 
-
 # Constructor
 # Usage: $streamer = Streamer->new();
 sub new {
@@ -7004,97 +7111,6 @@ sub opt {
 	my $self = shift;
 	my $optname = shift;
 	return $opt->{$optname};
-}
-
-sub opt_format {
-	return {
-		ffmpeg		=> [ 0, "ffmpeg=s", 'External Program', '--ffmpeg <path>', "Location of ffmpeg binary. Assumed to be ffmpeg 3.0 or higher unless --ffmpeg-obsolete is specified."],
-		ffmpegobsolete		=> [ 1, "ffmpeg-obsolete|ffmpegobsolete!", 'External Program', '--ffmpeg-obsolete', "Indicates you are using an obsolete version of ffmpeg (<1.0) that may not support certain options. Without this option, MP4 conversion may fail with obsolete versions of ffmpeg."],
-		ffmpegforce		=> [ 1, "ffmpeg-force|ffmpegforce!", 'External Program', '--ffmpeg-force', "Bypass version checks and assume ffmpeg is version 3.0 or higher"],
-		ffmpegloglevel		=> [ 1, "ffmpeg-loglevel|ffmpegloglevel=s", 'External Program', '--ffmpeg-loglevel <level>', "Set logging level for ffmpeg. Overridden by --quiet and --silent. Default: 'fatal'"],
-	};
-}
-
-sub remux {
-	my ( $self, $audio_file, $video_file, $prog, %streamdata ) = @_;
-	my @cmd;
-	my $return;
-
-	# do nothing if no files
-	my $audio_ok = $audio_file && -f $audio_file;
-	my $video_ok = $video_file && -f $video_file;
-	return 0 unless ( $audio_ok || $video_ok);
-
-	my @global_opts = ( '-y' );
-	my @input_opts;
-	push @input_opts, ( '-i', $audio_file ) if $audio_ok;
-	push @input_opts, ( '-i', $video_file ) if $video_ok;
-	my @codec_opts;
-	if ( ! $opt->{ffmpegobsolete} ) {
-		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' );
-	} else {
-		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' );
-	}
-	my @stream_opts;
-	push @stream_opts, ( '-map', '0:a:0', '-map', '1:v:0' ) if $audio_ok && $video_ok;
-	my @filter_opts;
-	if ( $prog->{mode} =~ /(haf|hvf|hls)/ ) {
-		# need filter for HLS
-		if ( ! $opt->{ffmpegobsolete} ) {
-			push @filter_opts, ( '-bsf:a', 'aac_adtstoasc' );
-		} else {
-			push @filter_opts, ( '-absf', 'aac_adtstoasc' );
-		}
-	}
-	my @other_opts;
-	if ( ! $opt->{ffmpegobsolete} && $opt->{notag} ) {
-		push @other_opts, ( '-movflags', 'faststart' );
-	}
-
-	@cmd = (
-		$bin->{ffmpeg},
-		@{ $binopts->{ffmpeg} },
-		@global_opts,
-		@input_opts,
-		@codec_opts,
-		@stream_opts,
-		@filter_opts,
-		@other_opts,
-		$prog->{filepart},
-	);
-
-	main::logger "INFO: Begin converting to: \U$prog->{ext}\E\n";
-	if ( $opt->{verbose} ) {
-		main::logger "INFO: Begin converting to file: $prog->{filepart}\n";
-		main::logger "INFO: Input audio file: $audio_file\n" if $audio_ok;
-		main::logger "INFO: Input video file: $video_file\n" if $video_ok;
-	}
-
-	# Run conversion and delete source file on success
-	$return = main::run_cmd( 'STDERR', @cmd );
-
-	my $min_download_size = main::progclass($prog->{type})->min_download_size();
-
-	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
-		unlink( $audio_file, $video_file );
-		main::logger "INFO: Finished converting to file: $prog->{filepart}\n" if $opt->{verbose};
-	} else {
-		# remove the failed converted file
-		unlink $prog->{filepart};
-		main::logger "ERROR: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
-		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
-		return 'stop';
-	}
-	main::logger "INFO: Finished converting to: \U$prog->{ext}\E\n";
-	# Moving file into place as complete
-	if ( ! move($prog->{filepart}, $prog->{filename}) ) {
-		main::logger "ERROR: Could not rename file: $prog->{filepart}\n";
-		main::logger "ERROR: Destination file name: $prog->{filename}\n";
-		return 'stop';
-	}
-	main::logger "INFO: Finished recording file: $prog->{filename}\n";
-
-	return 0;
 }
 
 
@@ -7284,7 +7300,7 @@ sub get {
 	}
 
 	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? ($audio_file, $media_file) : ($media_file, undef);
-	return $self->remux($audio_file, $video_file, $prog, %streamdata);
+	return $prog->postproc($audio_file, $video_file);
 }
 
 sub fetch {
@@ -7846,7 +7862,7 @@ sub get {
 		return 0;
 	}
 
-	return $self->remux($audio_file, $video_file, $prog, %streamdata);
+	return $prog->postproc($audio_file, $video_file);
 }
 
 
@@ -8477,98 +8493,114 @@ sub tag_prog {
 	}
 }
 
+sub ap_init {
+	return if $ap_check;
+ 	$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
+	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
+		if ( $bin->{atomicparsley} ne 'AtomicParsley' ) {
+		 	$bin->{atomicparsley} = 'AtomicParsley';
+			if ( ! main::exists_in_path( 'atomicparsley' ) ) {
+				$ap_check = 1;
+				return;
+			}
+		} else {
+			$ap_check = 1;
+			return;
+		}
+	}
+	# determine AtomicParsley features
+	my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
+	$opt->{tag_hdvideo} = 1 if $ap_help =~ /--hdvideo/;
+	$opt->{tag_longdesc} = 1 if $ap_help =~ /--longdesc/;
+	$opt->{tag_longdescription} = 1 if $ap_help =~ /--longDescription/;
+	$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
+	$ap_check = 1;
+}
+
 # add MP4 tag with atomicparsley
 sub tag_file_mp4 {
 	my ($self, $meta, $tags) = @_;
+	ap_init();
 	# Only tag if the required tool exists
-	if ( main::exists_in_path( 'atomicparsley' ) ) {
-		if ( ! $ap_check ) {
-			# determine AtomicParsley features
-			$ap_check = 1;
-			my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
-			$opt->{tag_hdvideo} = 1 if $ap_help =~ /--hdvideo/;
-			$opt->{tag_longdesc} = 1 if $ap_help =~ /--longdesc/;
-			$opt->{tag_longdescription} = 1 if $ap_help =~ /--longDescription/;
-			$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
+	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
+		main::logger "WARNING: Required AtomicParsley utility not found - cannot tag \U$meta->{ext}\E file\n";
+		return 1;
+	}
+	main::logger "INFO: Begin tagging: \U$meta->{ext}\E\n";
+	# handle embedded quotes
+	tags_escape_quotes($tags);
+	# encode metadata for atomicparsley
+	tags_encode($tags) unless $opt->{tag_utf8};
+	# build atomicparsley command
+	my @cmd = (
+		$bin->{atomicparsley},
+		$meta->{filename},
+		'--freefree',
+		'--overWrite',
+		'--stik', $tags->{stik},
+		'--advisory', $tags->{advisory},
+		'--copyright', $tags->{copyright},
+		'--title', $tags->{title},
+		'--artist', $tags->{artist},
+		'--albumArtist', $tags->{albumArtist},
+		'--album', $tags->{album},
+		'--grouping', $tags->{grouping},
+		'--composer', $tags->{composer},
+		'--genre', $tags->{genre},
+		'--comment', $tags->{comment},
+		'--year', $tags->{year},
+		'--tracknum', $tags->{tracknum},
+		'--disk', $tags->{disk},
+		'--lyrics', $tags->{lyrics},
+	);
+	# add descriptions to audio podcasts and video
+	if ( $tags->{is_video} || $tags->{is_podcast}) {
+		push @cmd, ('--description', $tags->{description} );
+		if ( $opt->{tag_longdescription} ) {
+			push @cmd, ( '--longDescription', $tags->{longDescription} );
+		} elsif ( $opt->{tag_longdesc} ) {
+			push @cmd, ( '--longdesc', $tags->{longDescription} );
 		}
-		main::logger "INFO: Begin tagging: \U$meta->{ext}\E\n";
-		# handle embedded quotes
-		tags_escape_quotes($tags);
-		# encode metadata for atomicparsley
-		tags_encode($tags) unless $opt->{tag_utf8};
-		# build atomicparsley command
-		my @cmd = (
-			$bin->{atomicparsley},
-			$meta->{filename},
-			'--freefree',
-			'--overWrite',
-			'--stik', $tags->{stik},
-			'--advisory', $tags->{advisory},
-			'--copyright', $tags->{copyright},
-			'--title', $tags->{title},
-			'--artist', $tags->{artist},
-			'--albumArtist', $tags->{albumArtist},
-			'--album', $tags->{album},
-			'--grouping', $tags->{grouping},
-			'--composer', $tags->{composer},
-			'--genre', $tags->{genre},
-			'--comment', $tags->{comment},
-			'--year', $tags->{year},
-			'--tracknum', $tags->{tracknum},
-			'--disk', $tags->{disk},
-			'--lyrics', $tags->{lyrics},
-		);
-		# add descriptions to audio podcasts and video
-		if ( $tags->{is_video} || $tags->{is_podcast}) {
-			push @cmd, ('--description', $tags->{description} );
-			if ( $opt->{tag_longdescription} ) {
-				push @cmd, ( '--longDescription', $tags->{longDescription} );
-			} elsif ( $opt->{tag_longdesc} ) {
-				push @cmd, ( '--longdesc', $tags->{longDescription} );
-			}
-		}
-		# video only
-		if ( $tags->{is_video} ) {
-			# all video
-			push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
-			# tv only
-			if ( $tags->{is_tvshow} ) {
-				push @cmd, (
-					'--TVShowName', $tags->{TVShowName},
-					'--TVEpisode', $tags->{TVEpisode},
-					'--TVSeasonNum', $tags->{TVSeasonNum},
-					'--TVEpisodeNum', $tags->{TVEpisodeNum},
-					'--TVNetwork', $tags->{TVNetwork},
-				);
-			}
-		}
-		# tag iTunes podcast
-		if ( $tags->{is_podcast} ) {
+	}
+	# video only
+	if ( $tags->{is_video} ) {
+		# all video
+		push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
+		# tv only
+		if ( $tags->{is_tvshow} ) {
 			push @cmd, (
-				'--podcastFlag', $tags->{podcastFlag},
-				'--category', $tags->{category},
-				'--keyword', $tags->{keyword},
-				'--podcastGUID', $tags->{podcastGUID},
+				'--TVShowName', $tags->{TVShowName},
+				'--TVEpisode', $tags->{TVEpisode},
+				'--TVSeasonNum', $tags->{TVSeasonNum},
+				'--TVEpisodeNum', $tags->{TVEpisodeNum},
+				'--TVNetwork', $tags->{TVNetwork},
 			);
 		}
-		# add artwork if available
-		if ( $opt->{noartwork} ) {
-			push @cmd, ( '--artwork', "REMOVE_ALL" );
-		} else {
-			push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
-		}
-		# run atomicparsley command
-		my $run_mode = main::hide_progress() ? 'QUIET_STDOUT' : 'STDERR';
-		if ( main::run_cmd( $run_mode, @cmd ) ) {
-			main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
-			return 2;
-		}
-		# remove images left behind by AtomicParsley
-		unlink glob qq("$meta->{dir}/$meta->{fileprefix}-resized-*");
-		main::logger "INFO: Finished tagging: \U$meta->{ext}\E\n";
-	} else {
-		main::logger "WARNING: Cannot tag \U$meta->{ext}\E file\n";
 	}
+	# tag iTunes podcast
+	if ( $tags->{is_podcast} ) {
+		push @cmd, (
+			'--podcastFlag', $tags->{podcastFlag},
+			'--category', $tags->{category},
+			'--keyword', $tags->{keyword},
+			'--podcastGUID', $tags->{podcastGUID},
+		);
+	}
+	# add artwork if available
+	if ( $opt->{noartwork} ) {
+		push @cmd, ( '--artwork', "REMOVE_ALL" );
+	} else {
+		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
+	}
+	# run atomicparsley command
+	my $run_mode = main::hide_progress() ? 'QUIET_STDOUT' : 'STDERR';
+	if ( main::run_cmd( $run_mode, @cmd ) ) {
+		main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
+		return 2;
+	}
+	# remove images left behind by AtomicParsley
+	unlink glob qq("$meta->{dir}/$meta->{fileprefix}-resized-*");
+	main::logger "INFO: Finished tagging: \U$meta->{ext}\E\n";
 }
 
 ############## End OO ##############
