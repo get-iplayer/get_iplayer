@@ -31,10 +31,10 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 # Help:
 #	./get_iplayer --help | --longhelp
 #
-# Changelog:
+# Release notes:
 # 	https://github.com/get-iplayer/get_iplayer/wiki/releasenotes
 #
-# Usage and Examples:
+# Documentation:
 # 	https://github.com/get-iplayer/get_iplayer/wiki/documentation
 #
 use Env qw[@PATH];
@@ -253,7 +253,6 @@ sub logger(@) {
 	}
 }
 
-
 # fallback encodings
 $opt->{encodinglocale} = $opt->{encodinglocalefs} = default_encodinglocale();
 $opt->{encodingconsoleout} = $opt->{encodingconsolein} = default_encodingconsoleout();
@@ -354,7 +353,6 @@ Options->get_class_options( $_ ) for qw( Streamer Programme Programme::bbciplaye
 Options->get_class_options( progclass($_) ) for progclass();
 Options->get_class_options( "Streamer::$_" ) for qw( hls );
 
-
 # Parse the cmdline using the opt_format hash
 Options->usage( 0 ) if not $opt_cmdline->parse();
 
@@ -392,10 +390,8 @@ if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} 
 	$opt->copy_set_options_from( $opt_file );
 }
 
-
 # Copy to $opt from opt_cmdline those options which are actually set
 $opt->copy_set_options_from( $opt_cmdline );
-
 
 # Update or show user opts file (or preset if defined) if required
 if ( $opt_cmdline->{presetlist} ) {
@@ -415,7 +411,6 @@ if ( $opt_cmdline->{presetlist} ) {
 	exit 0;
 }
 
-
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
 
@@ -428,7 +423,6 @@ if ( $opt->{verbose} ) {
 # Display prefs dirs if required
 main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
 main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
-
 
 # Display Usage
 Options->usage( 2 ) if $opt_cmdline->{helpbasic};
@@ -447,8 +441,6 @@ if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	logger request_url_retry( create_ua( 'get_iplayer', 1 ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
 	exit 1;
 }
-
-
 
 ########## Global vars ###########
 
@@ -738,8 +730,6 @@ sub init_search {
 	return ( $type, $prog, $index_prog );
 }
 
-
-
 sub find_pid_matches {
 	my $hist = shift;
 	my @search_args = @_;
@@ -786,7 +776,6 @@ sub find_pid_matches {
 	return $totalretcode;
 }
 
-
 sub download_pid {
 	my $hist = shift;
 	my $this = shift;
@@ -813,8 +802,6 @@ sub download_pid {
 	}
 	return $retcode;
 }
-
-
 
 # Use the specified options to process the matches in specified array
 # Usage: find_matches( $pids_history_ref, @search_args )
@@ -960,8 +947,6 @@ sub find_matches {
 	return @match_list;
 }
 
-
-
 sub download_matches {
 	my $hist = shift;
 	my @match_list = @_;
@@ -1030,7 +1015,6 @@ sub list_progs {
 	my %names;
 	my ( @matches ) = ( @_ );
 
-
 	# Setup user agent for a persistent connection to get programme metadata
 	if ( $opt->{info} ) {
 		# Truncate array if were lisiting info and > $info_limit entries are requested - be nice to the beeb!
@@ -1051,7 +1035,6 @@ sub list_progs {
 	}
 
 	# Sort display order by field (won't work in tree mode)
-
 
 	# Calculate page sizes etc if required
 	my $items = $#matches+1;
@@ -1142,8 +1125,6 @@ sub list_progs {
 	}
 	logger "INFO: ".($#matches + 1)." matching programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
 }
-
-
 
 # Returns matching programme objects using supplied regex
 # Usage: get_regex_matches ( \%prog, $regex )
@@ -1245,8 +1226,6 @@ sub get_regex_matches {
 	return @match_list;
 }
 
-
-
 # Usage: sort_index( \%prog, \%index_prog, [$prog_type], [sortfield] )
 # Populates the index if the prog hash as well as creating the %index_prog hash
 # Should be run after any number of get_links methods
@@ -1285,8 +1264,6 @@ sub sort_index {
 	return 0;
 }
 
-
-
 sub make_array_unique_ordered {
 	# De-dup array and retain order (don't ask!)
 	my ( @array ) = ( @_ );
@@ -1294,8 +1271,6 @@ sub make_array_unique_ordered {
 	my @unique = grep { ! $seen{ $_ }++ } @array;
 	return @unique;
 }
-
-
 
 # User Agents
 # Uses global $ua_cache
@@ -1336,7 +1311,6 @@ sub user_agent {
 	return $uas || '';
 }
 
-
 # Returns classname for prog type or if not specified, an array of all prog types
 sub progclass {
 	my $prog_type = shift;
@@ -1350,14 +1324,12 @@ sub progclass {
 	}
 }
 
-
 # return true if valid prog type
 sub is_prog_type {
 	my $prog_type = shift;
 	return 1 if $prog_type =~ /^(tv|radio)$/;
 	return 0;
 }
-
 
 # Feed Info:
 # # schedule feeds
@@ -1428,7 +1400,6 @@ sub get_links {
 	} else {
 		logger "INFO: No file cache exists for $prog_type\n" if $opt->{verbose};
 	}
-
 
 	# Do we need to refresh the cache ?
 	# if a cache file doesn't exist/corrupted/empty, refresh option is specified or original file is older than $cache_sec then download new data
@@ -1514,7 +1485,6 @@ sub get_links {
 			}
 		}
 
-
 	# Else copy data from existing cache file into new prog instances and memcache
 	} else {
 		for my $pid ( keys %{ $prog_old } ) {
@@ -1537,8 +1507,6 @@ sub get_links {
 	return 0;
 }
 
-
-
 # Generic
 # Returns an offset timestamp given an srt begin or end timestamp and offset in ms
 sub subtitle_offset {
@@ -1555,8 +1523,6 @@ sub subtitle_offset {
 	$ms = $ts;
 	return sprintf( '%02d:%02d:%02d,%03d', $hr, $min, $sec, $ms );
 }
-
-
 
 # Generic
 sub display_stream_info {
@@ -1578,8 +1544,6 @@ sub display_stream_info {
 	return 0;
 }
 
-
-
 sub proxy_disable {
 	my $ua = shift;
 	$ua->proxy( ['http', 'https'] => undef );
@@ -1588,16 +1552,12 @@ sub proxy_disable {
 	main::logger "INFO: Disabled proxy: $proxy_save\n" if $opt->{verbose};
 }
 
-
-
 sub proxy_enable {
 	my $ua = shift;
 	$ua->proxy( ['http', 'https'] => $opt->{proxy} ) if $opt->{proxy} && $opt->{proxy} !~ /^prepend:/;
 	$opt->{proxy} = $proxy_save;
 	main::logger "INFO: Restored proxy to $opt->{proxy}\n" if $opt->{verbose};
 }
-
-
 
 # Generic
 # create_ua( <agentname>|'', [<cookie mode>] )
@@ -1623,8 +1583,6 @@ sub create_ua {
 	return $ua;
 };
 
-
-
 # Generic
 # Gets the contents of a URL and retries if it fails, returns '' if no page could be retrieved
 # Usage <content> = request_url_retry(<ua>, <url>, <retries>, <succeed message>, [<fail message>], <1=mustproxy>, [<fail_content>] );
@@ -1636,7 +1594,6 @@ sub request_url_retry {
 
 	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content) = @_;
 	my $res;
-
 
 	# Use url prepend if required
 	if ( defined $opt->{proxy} && $opt->{proxy} =~ /^prepend:/ ) {
@@ -1676,8 +1633,6 @@ sub request_url_retry {
 	return $res->decoded_content;
 }
 
-
-
 # Generic
 # Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
@@ -1693,8 +1648,6 @@ sub exists_in_path {
 	}
 	return 0;
 }
-
-
 
 # Generic
 # Checks history for files that are over 30 days old and asks user if they should be deleted
@@ -1739,8 +1692,6 @@ sub purge_downloaded_files {
 	return 0;
 }
 
-
-
 # Returns url decoded string
 sub url_decode {
 	my $str = shift;
@@ -1748,16 +1699,12 @@ sub url_decode {
 	return $str;
 }
 
-
-
 # Returns url encoded string
 sub url_encode {
 	my $str = shift;
 	$str =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
 	return $str;
 }
-
-
 
 # list_unique_element_counts( \%type, $element_name, @matchlist);
 # Show channels for currently specified types in @matchlist - an array of progs
@@ -1784,8 +1731,6 @@ sub list_unique_element_counts {
 	logger "$_ ($elements{$_})\n" for sort keys %elements;
 	return 0;
 }
-
-
 
 # Invokes command in @args as a system call (hopefully) without using a shell
 # Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
@@ -1905,16 +1850,12 @@ sub run_cmd {
 	return $return;
 }
 
-
-
 # Generic
 # Escape chars in string for shell use
 sub StringUtils::esc_chars {
 	# will change, for example, a!!a to a\!\!a
 	$_[0] =~ s/([;<>\*\|&\$!#\(\)\[\]\{\}:'"])/\\$1/g;
 }
-
-
 
 sub StringUtils::clean_utf8_and_whitespace {
 	# Remove non utf8
@@ -1980,7 +1921,6 @@ sub StringUtils::sanitize_path {
 	return $string;
 }
 
-
 # Generic
 # Signal handler to clean up after a ctrl-c or kill
 sub cleanup {
@@ -1991,7 +1931,6 @@ sub cleanup {
 	$SIGORIG{$signal}->() if ref($SIGORIG{$signal}) eq 'CODE';
 	exit 1;
 }
-
 
 # Uses: global $lockfile
 # Lock file detection (<stale_secs>)
@@ -2029,8 +1968,6 @@ sub lockfile {
 	return 0;
 }
 
-
-
 sub expand_list {
 	my $list = shift;
 	my $search = shift;
@@ -2041,8 +1978,6 @@ sub expand_list {
 	}
 	return join ',', @elements;
 }
-
-
 
 # Converts any number words (or numbers) 0 - 99 to a number
 sub convert_words_to_number {
@@ -2101,8 +2036,6 @@ sub convert_words_to_number {
 	return $number;
 }
 
-
-
 # Returns a regex string that matches all number words (or numbers) 0 - 99
 sub regex_numbers {
 	my $regex_units = '(zero|one|two|three|four|five|six|seven|eight|nine)';
@@ -2111,18 +2044,15 @@ sub regex_numbers {
 	return '(\d+|'.$regex_units.'|'.$regex_ten_to_nineteen.'|'.$regex_tens.'((\s+|\-|)'.$regex_units.')?)';
 }
 
-
 sub default_encodinglocale {
 	return 'UTF-8' if (${^UNICODE} & 32);
 	return ($^O eq "MSWin32" ? 'cp1252' : 'UTF-8');
 }
 
-
 sub default_encodingconsoleout {
 	return 'UTF-8' if (${^UNICODE} & 6);
 	return ($^O eq "MSWin32" ? 'cp850' : 'UTF-8');
 }
-
 
 sub encode_fs {
 	my $string = shift;
@@ -2143,7 +2073,7 @@ sub hide_progress {
 
 ############## OO ################
 
-############## Options default class ################
+############## Options class ################
 package Options;
 
 use Env qw[@PATH];
@@ -2169,13 +2099,11 @@ sub new {
 	bless $self, $type;
 }
 
-
 # Use to bind a new options ref to the class global $opt_format_ref var
 sub add_opt_format_object {
 	my $self = shift;
 	$Options::opt_format_ref = shift;
 }
-
 
 # Parse cmdline opts using supplied hash
 # If passthru flag is set then no error will result if there are unrecognised options etc
@@ -2205,8 +2133,6 @@ sub parse {
 	return GetOptions(%get_opts);
 }
 
-
-
 sub copyright_notice {
 	shift;
 	my $text = "get_iplayer $version_text, ";
@@ -2219,8 +2145,6 @@ Copyright (C) 2008-2010 Phil Lewis
 EOF
 	return $text;
 }
-
-
 
 # Usage: $opt_cmdline->usage( <helplevel>, <manpage>, <dump> );
 sub usage {
@@ -2354,7 +2278,6 @@ sub usage {
 	exit 0;
 }
 
-
 # Add all the options into supplied hash from specified class
 # Usage: Options->get_class_options( 'Programme:tv' );
 sub get_class_options {
@@ -2371,7 +2294,6 @@ sub get_class_options {
 	}
 }
 
-
 # Copies values in one instance to another only if they are set with a value/defined
 # Usage: $opt->copy_set_options_from( $opt_cmdline );
 sub copy_set_options_from {
@@ -2383,13 +2305,10 @@ sub copy_set_options_from {
 	}
 }
 
-
-
 # specify regex of options that cannot be saved
 sub excludeopts {
 	return '^(cache|profiledir|encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions|dumpoptions|comment)';
 }
-
 
 # List all available presets in the specified dir
 sub preset_list {
@@ -2404,7 +2323,6 @@ sub preset_list {
 	main::logger "\n";
 }
 
-
 # Clears all option entries for a particular preset (i.e. deletes the file)
 sub clear {
 	my $opt = shift;
@@ -2413,7 +2331,6 @@ sub clear {
 	unlink $prefsfile;
 	main::logger "INFO: Removed all above options from $prefsfile\n";
 }
-
 
 # $opt->add( $opt_cmdline, $optfile, @search_args )
 # Add/change cmdline-only options to file
@@ -2447,8 +2364,6 @@ sub add {
 	put( $opt, $entry, $optfile );
 }
 
-
-
 # $opt->add( $opt_cmdline, $optfile )
 # Add/change cmdline-only options to file
 sub del {
@@ -2475,8 +2390,6 @@ sub del {
 	put( $opt, $entry, $optfile );
 }
 
-
-
 # $opt->show( $optfile )
 # show options from file
 sub show {
@@ -2494,8 +2407,6 @@ sub show {
 		main::logger "\t$_ = $entry->{$_}\n";
 	}
 }
-
-
 
 # $opt->save( $opt_cmdline, $optfile )
 # Save cmdline-only options to file
@@ -2518,8 +2429,6 @@ sub put {
 	main::logger "INFO: Options file $optfile updated\n";
 	return;
 }
-
-
 
 # Returns a hashref of 'optname => internal_opt_name' for all options
 sub get_opt_map {
@@ -2547,7 +2456,6 @@ sub get_opt_map {
 	}
 	return $optname;
 }
-
 
 # $entry = get( $opt, $optfile )
 # get all options from file into $entry ($opt is used just to get access to general options like debug)
@@ -2606,8 +2514,6 @@ sub get {
 	return $entry;
 }
 
-
-
 # $opt_file->load( $opt, $optfile )
 # Load default options from file(s) into instance
 sub load {
@@ -2625,8 +2531,6 @@ sub load {
 
 	return;
 }
-
-
 
 # Usage: $opt_file->display( [<exclude regex>], [<title>] );
 # Display options
@@ -2649,12 +2553,7 @@ sub display {
 	return 0;
 }
 
-
-
-
-########################################################
-
-################ History default class #################
+################ History class #################
 package History;
 
 use Encode;
@@ -2682,7 +2581,6 @@ sub new {
 	bless $self, $type;
 }
 
-
 # $opt->{<option>} access method
 sub opt {
 	my $self = shift;
@@ -2690,13 +2588,11 @@ sub opt {
 	return $opt->{$optname};
 }
 
-
 # Use to bind a new options ref to the class global $opt_ref var
 sub add_opt_object {
 	my $self = shift;
 	$History::optref = shift;
 }
-
 
 sub trim {
 	my $oldhistoryfile = "$historyfile.old";
@@ -2777,8 +2673,6 @@ sub add {
 	return 0;
 }
 
-
-
 # Uses global @history_format
 # returns, for all the pids in the history file, $history->{pid}->{key} = value
 sub load {
@@ -2831,8 +2725,6 @@ sub load {
 	return 0;
 }
 
-
-
 # Clear the history in %{$hist}
 sub clear {
 	my $hist = shift;
@@ -2840,8 +2732,6 @@ sub clear {
 	delete $hist->{$_} for keys %{ $hist };
 	return 0;
 }
-
-
 
 # Loads hist from file if required
 sub conditional_load {
@@ -2855,8 +2745,6 @@ sub conditional_load {
 	return 0;
 }
 
-
-
 # Returns a history pid instance ref
 sub get_record {
 	my $hist = shift;
@@ -2868,16 +2756,12 @@ sub get_record {
 	return undef;
 }
 
-
-
 # Returns a list of current history pids
 sub get_pids {
 	my $hist = shift;
 	$hist->conditional_load();
 	return keys %{ $hist };
 }
-
-
 
 # Lists current history items
 # Requires a load()
@@ -2974,8 +2858,6 @@ sub list_progs {
 	return 0;
 }
 
-
-
 # Generic
 # Checks history for previous download of this pid
 sub check {
@@ -3001,11 +2883,7 @@ sub check {
 	return 0;
 }
 
-
-
-
 #################### Programme class ###################
-
 package Programme;
 
 use Encode;
@@ -3043,7 +2921,6 @@ sub opt_format {
 	return {
 	};
 }
-
 
 # Filter channel names matched with options --refreshexclude/--refreshinclude
 sub channels_filtered {
@@ -3093,11 +2970,9 @@ sub channels_filtered {
 	return \%channels;
 }
 
-
 sub channels_schedule {
 	return {};
 }
-
 
 # Method to return optional list_entry format
 sub optional_list_entry_format {
@@ -3105,24 +2980,20 @@ sub optional_list_entry_format {
 	return '';
 }
 
-
 # Returns the modes to try for this prog type
 sub modelist {
 	return '';
 }
-
 
 # Default minimum expected download size for a programme type
 sub min_download_size {
 	return 1024000;
 }
 
-
 # Default cache expiry in seconds
 sub expiry {
 	return 14400;
 }
-
 
 # Constructor
 # Usage: $prog{$pid} = Programme->new( 'pid' => $pid, 'name' => $name, <and so on> );
@@ -3140,13 +3011,11 @@ sub new {
 	bless $self, $type;
 }
 
-
 # Use to bind a new options ref to the class global $optref var
 sub add_opt_object {
 	my $self = shift;
 	$Programme::optref = shift;
 }
-
 
 # $opt->{<option>} access method
 sub opt {
@@ -3159,11 +3028,9 @@ sub opt {
 	#return $self->{optref}->{$optname};
 }
 
-
 # This gets run before the download retry loop if this class type is selected
 sub init {
 }
-
 
 # Create dir if it does not exist
 sub create_dir {
@@ -3177,7 +3044,6 @@ sub create_dir {
 		}
 	}
 }
-
 
 # Return metadata of the prog
 sub get_metadata {
@@ -3193,7 +3059,6 @@ sub get_metadata {
 	$prog->{versions} = join ',', sort keys %{ $prog->{verpids} };
 	return 0;
 }
-
 
 # Return metadata which is generic such as time and date
 sub get_metadata_general {
@@ -3215,7 +3080,6 @@ sub get_metadata_general {
 
 	return 0;
 }
-
 
 # Displays specified metadata from supplied object
 # Usage: $prog->display_metadata( <array of elements to display> )
@@ -3271,15 +3135,11 @@ sub display_metadata {
 	return 0;
 }
 
-
-
 # Return a list of episode pids from the given contents page/pid
 sub get_pids_recursive {
 	my $prog = shift;
 	return '';
 }
-
-
 
 # Return hash of version => verpid given a pid
 # Also put verpids in $prog->{verpids}->{<version>} = <verpid>
@@ -3289,19 +3149,15 @@ sub get_verpids {
 	return 0;
 }
 
-
-
 # Download Subtitles, convert to srt(SubRip) format and apply time offset
 sub download_subtitles {
 	# return failed...
 	return 1;
 }
 
-
 sub default_version_list {
 	return qw/ default original iplayer technical editorial lengthened shortened podcast opensubtitles other /;
 }
-
 
 # Usage: generate_version_list ($prog)
 # Returns sorted array of versions
@@ -3419,7 +3275,6 @@ sub download_retry_loop {
 		return 1;
 	}
 
-
 	my @version_search_list = $prog->generate_version_list;
 	return 1 if $#version_search_list < 0;
 
@@ -3427,7 +3282,7 @@ sub download_retry_loop {
 		$opt->{nowarntvlicence} = 1;
 		main::logger "WARNING: A UK TV licence is required to legally access BBC iPlayer TV content\n";
 	}
-	
+
 	# Get all possible (or user overridden) modes for this prog recording
 	my $modelist = $prog->modelist();
 	main::logger "INFO: Mode list: $modelist\n" if $opt->{verbose};
@@ -3517,8 +3372,6 @@ sub download_retry_loop {
 	return 1;
 }
 
-
-
 # returns 1 on fail, 0 on success
 sub mode_ver_download_retry_loop {
 	my ( $prog, $hist, $ua, $mode, $version, $version_pid ) = ( @_ );
@@ -3586,16 +3439,12 @@ sub mode_ver_download_retry_loop {
 	return 1;
 }
 
-
-
 # Send a message to STDOUT so that cron can use this to email
 sub report {
 	my $prog = shift;
 	print STDOUT "New $prog->{type} programme: '$prog->{name} - $prog->{episode}', '$prog->{desc}'\n";
 	return 0;
 }
-
-
 
 # add metadata tags to file
 sub tag_file {
@@ -3635,8 +3484,6 @@ sub tag_file {
 	unlink $prog->{thumbfile} if ! $opt->{thumb};
 }
 
-
-
 # Create a metadata file if required
 sub create_metadata_file {
 	my $prog = shift;
@@ -3668,8 +3515,6 @@ sub create_metadata_file {
 		main::logger "WARNING: Couldn't write to metadata file '$filename->{ $opt->{metadata} }'\n";
 	}
 }
-
-
 
 # Usage: print $prog{$pid}->substitute('<name>-<pid>-<episode>', [mode], [begin regex tag], [end regex tag]);
 # Return a string with formatting fields substituted for a given pid
@@ -3756,8 +3601,6 @@ sub substitute {
 	}
 	return $string;
 }
-
-
 
 # Determine the correct filenames for a recording
 # Sets the various filenames and creates appropriate directories
@@ -3973,8 +3816,6 @@ sub generate_filenames {
 	return 0;
 }
 
-
-
 # Run a user specified command
 # e.g. --command 'echo "<pid> <name> recorded"'
 # run_user_command($pid, 'echo "<pid> <name> recorded"');
@@ -3994,8 +3835,6 @@ sub run_user_command {
 	main::logger "INFO: Command succeeded\n" if $opt->{verbose} && ! $exit_value;
 				return 0;
 }
-
-
 
 # %type
 # Display a line containing programme info (using long, terse, and type options)
@@ -4041,7 +3880,6 @@ sub list_entry {
 	}
 	return 0;
 }
-
 
 # Get time ago made available (x days y hours ago) from '2008-06-22T05:01:49Z' and specified epoch time
 # Or, Get time in epoch from '2008-06-22T05:01:49Z' or '2008-06-22T05:01:49[+-]NN:NN' if no specified epoch time
@@ -4104,8 +3942,6 @@ sub get_time_string {
 	}
 }
 
-
-
 sub download_thumbnail {
 	my $prog = shift;
 	my $file;
@@ -4141,8 +3977,7 @@ sub download_thumbnail {
 	return 0;
 }
 
-
-################### iPlayer Parent class #################
+################### iPlayer Programme parent class #################
 package Programme::bbciplayer;
 
 use Env qw[@PATH];
@@ -4189,7 +4024,7 @@ sub clean_pid {
 		my $uri = URI->new($prog->{pid});
 		my @pids = grep /${\REGEX_PID}/, $uri->path_segments;
 		if ( @pids ) {
-	 		$prog->{pid} = $pids[$#pids];
+			$prog->{pid} = $pids[$#pids];
 		}
 	}
 }
@@ -4210,7 +4045,6 @@ sub get_verpids {
 	main::logger "WARNING: No programmes are available for this PID with version(s): ".($opt->{versionlist} ? $opt->{versionlist} : 'default').($prog->{versions} ? " (available versions: $prog->{versions})\n" : "\n");
 	return 1;
 }
-
 
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
@@ -4297,7 +4131,6 @@ sub get_verpids_json {
 	return 1 if ! $found;
 	return 0;
 }
-
 
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
@@ -4919,7 +4752,6 @@ sub get_pids_recursive {
 	return @pids;
 }
 
-
 # Intelligently split name and episode from title string for BBC iPlayer metadata
 sub split_title {
 	my $title = shift;
@@ -4938,7 +4770,6 @@ sub split_title {
 	return ( $name, $episode );
 }
 
-
 sub insert_episode_number {
 	my $episode = shift;
 	my $episodenum = shift;
@@ -4951,7 +4782,6 @@ sub insert_episode_number {
 	return $episode;
 }
 
-
 sub thumb_url_recipe {
 	my $prog = shift;
 	my $defsize = 192;
@@ -4963,7 +4793,6 @@ sub thumb_url_recipe {
 	}
 	return $recipe;
 }
-
 
 sub thumb_url_recipes {
 	return {
@@ -4998,7 +4827,6 @@ sub thumb_url_recipes {
 	}
 }
 
-
 #new_stream_report($mattribs, $cattribs)
 sub new_stream_report {
 	my $mattribs = shift;
@@ -5030,8 +4858,6 @@ sub new_stream_report {
 	return 0;
 }
 
-
-
 sub parse_metadata {
 	my @medias;
 	my $xml = shift;
@@ -5058,7 +4884,6 @@ sub parse_metadata {
 		push @medias, $mattribs;
 	}
 
-
 	# Parse and dump structure
 	if ( $opt->{debug} ) {
 		for my $mattribs ( @medias ) {
@@ -5084,8 +4909,6 @@ sub parse_metadata {
 	return @medias;
 }
 
-
-
 sub parse_attributes {
 	$_ = shift;
 	my $attribs;
@@ -5095,7 +4918,6 @@ sub parse_attributes {
 	}
 	return $attribs;
 }
-
 
 # from https://github.com/osklil/hls-fetch
 sub parse_hls_connection {
@@ -5440,8 +5262,6 @@ sub get_stream_data_cdn {
 	}
 }
 
-
-
 # Builds connection type string
 sub get_stream_set_type {
 		my ( $conn, $mattribs, $cattribs ) = ( @_ );
@@ -5458,11 +5278,9 @@ sub get_stream_set_type {
 		$conn->{type} = join ' ', @type;
 }
 
-
 sub check_geoblock {
 	return shift =~ /geolocation|notukerror/;
 }
-
 
 # Generic
 # Gets media streams data for this version pid
@@ -5517,7 +5335,7 @@ sub get_stream_data {
 	my $unblocked;
 	my $checked_geoblock;
 	delete $opt->{nowarnlibxmldash};
-	
+
 	my (%seen, $stream_key);
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
 		# get MPEG-DASH streams for on-demand
@@ -6050,7 +5868,7 @@ sub postproc {
 		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to: \U$prog->{ext}\E\n\n";
 		return 'stop';
 	}
-	
+
 	# do nothing if no files
 	my $audio_ok = $audio_file && -f $audio_file;
 	my $video_ok = $video_file && -f $video_file;
@@ -6128,8 +5946,7 @@ sub postproc {
 	return 0;
 }
 
-
-################### TV class #################
+################### TV Programme class #################
 package Programme::tv;
 
 use Env qw[@PATH];
@@ -6222,7 +6039,6 @@ sub channels_schedule {
 	};
 }
 
-
 # Class cmdline Options
 sub opt_format {
 	return {
@@ -6231,8 +6047,6 @@ sub opt_format {
 		outputtv	=> [ 1, "outputtv=s", 'Output', '--outputtv <dir>', "Output directory for tv recordings (overrides --output)"],
 	};
 }
-
-
 
 # Method to return optional list_entry format
 sub optional_list_entry_format {
@@ -6243,7 +6057,6 @@ sub optional_list_entry_format {
 	}
 	return ', '.join ', ', @format;
 }
-
 
 # Usage: Programme::tv->get_links( \%prog, 'tv' );
 # Uses: %{ channels_schedule() }, \%prog
@@ -6263,7 +6076,6 @@ sub get_links {
 	main::logger "\n";
 	return 0;
 }
-
 
 # get cache info for programmes from schedule
 sub get_links_schedule {
@@ -6589,7 +6401,6 @@ sub get_links_schedule_html_page {
 	}
 }
 
-
 # Usage: download (<prog>, <ua>, <mode>, <version>, <version_pid>)
 sub download {
 	my ( $prog, $ua, $mode, $version, $version_pid ) = ( @_ );
@@ -6699,8 +6510,6 @@ sub download {
 
 	return $return;
 }
-
-
 
 # BBC iPlayer TV
 # Download Subtitles, convert to srt(SubRip) format and apply time offset
@@ -6918,8 +6727,7 @@ sub ttml_to_srt {
 	return 0;
 }
 
-
-################### Radio class #################
+################### Radio Programme class #################
 package Programme::radio;
 
 use Env qw[@PATH];
@@ -7021,7 +6829,6 @@ sub channels_schedule {
 	};
 }
 
-
 # Class cmdline Options
 sub opt_format {
 	return {
@@ -7031,13 +6838,9 @@ sub opt_format {
 	};
 }
 
-
-
 # This gets run before the download retry loop if this class type is selected
 sub init {
 }
-
-
 
 # Method to return optional list_entry format
 sub optional_list_entry_format {
@@ -7049,13 +6852,10 @@ sub optional_list_entry_format {
 	return ', '.join ', ', @format;
 }
 
-
-
 # Default minimum expected download size for a programme type
 sub min_download_size {
 	return 102400;
 }
-
 
 sub get_links {
 	shift;
@@ -7063,16 +6863,14 @@ sub get_links {
 	return Programme::tv->get_links(@_);
 }
 
-
-
 sub download {
 	# Delegate to Programme::tv (same function is used)
 	return Programme::tv::download(@_);
 }
 
-
 ################### Streamer class #################
 package Streamer;
+
 use File::stat;
 use File::Basename;
 use File::Copy;
@@ -7098,13 +6896,11 @@ sub new {
 	bless $self, $type;
 }
 
-
 # Use to bind a new options ref to the class global $optref var
 sub add_opt_object {
 	my $self = shift;
 	$Streamer::optref = shift;
 }
-
 
 # $opt->{<option>} access method
 sub opt {
@@ -7113,8 +6909,7 @@ sub opt {
 	return $opt->{$optname};
 }
 
-
-################### Streamer::hls class #################
+################### HLS Streamer class #################
 package Streamer::hls;
 
 # Inherit from Streamer class
@@ -7739,8 +7534,7 @@ sub fetch {
 	return 0;
 }
 
-
-################### Streamer::dash class #################
+################### DASH Streamer class #################
 package Streamer::dash;
 
 use base 'Streamer::hls';
@@ -7865,7 +7659,6 @@ sub get {
 	return $prog->postproc($audio_file, $video_file);
 }
 
-
 ############# PVR Class ##############
 package Pvr;
 
@@ -7906,7 +7699,6 @@ sub opt_format {
 	};
 }
 
-
 # Constructor
 # Usage: $pvr = Pvr->new();
 sub new {
@@ -7922,7 +7714,6 @@ sub new {
 	$opt_cmdline = $Pvr::opt_cmdlineref;
 	bless $self, $type;
 }
-
 
 # Use to bind a new options ref to the class global $opt_ref var
 sub add_opt_object {
@@ -7940,7 +7731,6 @@ sub add_opt_cmdline_object {
 	$Pvr::opt_cmdlineref = shift;
 }
 
-
 # Use to bind a new options ref to the class global $optref var
 sub setvar {
 	my $self = shift;
@@ -7954,14 +7744,12 @@ sub getvar {
 	return $vars{$varname};
 }
 
-
 # $opt->{<option>} access method
 sub opt {
 	my $self = shift;
 	my $optname = shift;
 	return $opt->{$optname};
 }
-
 
 # Load all PVR searches and run one-by-one
 # Usage: $pvr->run( [pvr search name] )
@@ -8041,8 +7829,6 @@ sub run {
 	return $retcode;
 }
 
-
-
 sub run_scheduler {
 	my $pvr = shift;
 	my $interval = $opt->{pvrscheduler};
@@ -8067,8 +7853,6 @@ sub run_scheduler {
 		}
 	}
 }
-
-
 
 # If queuing, only add pids because the index number might change by the time the pvr runs
 # If --pid and --type <type> is specified then add this prog also
@@ -8105,8 +7889,6 @@ sub queue {
 	return 0;
 }
 
-
-
 # Save the options on the cmdline as a PVR search with the specified name
 sub add {
 	my $pvr = shift;
@@ -8135,8 +7917,6 @@ sub add {
 	return 0;
 }
 
-
-
 # Delete the named PVR search
 sub del {
 	my $pvr = shift;
@@ -8156,8 +7936,6 @@ sub del {
 	}
 	return 0;
 }
-
-
 
 # Display all the PVR searches
 sub display_list {
@@ -8180,8 +7958,6 @@ sub display_list {
 	}
 	return 0;
 }
-
-
 
 # Load all the PVR searches into %{$pvr}
 sub load_list {
@@ -8227,8 +8003,6 @@ sub load_list {
 	return 0;
 }
 
-
-
 # Clear all the PVR searches in %{$pvr}
 sub clear_list {
 	my $pvr = shift;
@@ -8236,8 +8010,6 @@ sub clear_list {
 	delete $pvr->{$_} for keys %{ $pvr };
 	return 0;
 }
-
-
 
 # Save the array options specified as a PVR search
 sub save {
@@ -8262,7 +8034,6 @@ sub save {
 	close PVR;
 	return 0;
 }
-
 
 # Uses globals: $profile_dir, $optfile_system, $optfile_default
 # Uses class globals: %opt, %opt_file, %opt_cmdline
@@ -8309,8 +8080,6 @@ sub load_options {
 	return @search_args;
 }
 
-
-
 # Disable a PVR search by adding 'disable 1' option
 sub disable {
 	my $pvr = shift;
@@ -8325,8 +8094,6 @@ sub disable {
 	$pvr->save( $name, @options );
 	return 0;
 }
-
-
 
 # Re-enable a PVR search by removing 'disable 1' option
 sub enable {
@@ -8343,8 +8110,9 @@ sub enable {
 	return 0;
 }
 
-
+############# Tagger Class ##############
 package Tagger;
+
 use Encode;
 use File::stat;
 use constant FB_EMPTY => sub { '' };
@@ -8495,10 +8263,10 @@ sub tag_prog {
 
 sub ap_init {
 	return if $ap_check;
- 	$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
+	$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
 	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
 		if ( $bin->{atomicparsley} ne 'AtomicParsley' ) {
-		 	$bin->{atomicparsley} = 'AtomicParsley';
+			$bin->{atomicparsley} = 'AtomicParsley';
 			if ( ! main::exists_in_path( 'atomicparsley' ) ) {
 				$ap_check = 1;
 				return;
