@@ -4788,6 +4788,9 @@ sub thumb_url_recipe {
 	my $thumbsize = $opt->{thumbsize} || $defsize;
 	my $recipe = $prog->thumb_url_recipes->{ $thumbsize };
 	if ( ! $recipe ) {
+		if ( $thumbsize >= 1 && $thumbsize <= 11 ) {
+			main::logger "WARNING: Index numbers 1-11 no longer valid with --thumbsize - specify thumbnail image width\n";
+		}
 		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default ($defsize)\n";
 		$recipe = $prog->thumb_url_recipes->{ $defsize };
 	}
@@ -4813,17 +4816,6 @@ sub thumb_url_recipes {
 		1280	=> '1280x720',
 		1600	=> '1600x900',
 		1920	=> '1920x1080',
-		1	=> '86x48',
-		2	=> '150x84',
-		3	=> '178x100',
-		4	=> '512x288',
-		5	=> '528x297',
-		6	=> '640x360',
-		7	=> '832x468',
-		8	=> '1024x576',
-		9	=> '1280x720',
-		10	=> '1600x900',
-		11	=> '1920x1080',
 	}
 }
 
