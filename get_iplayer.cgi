@@ -20,7 +20,7 @@
 #
 # Author: Phil Lewis
 # Email: iplayer2 (at sign) linuxcentre.net
-# Web: http://www.infradead.org/get_iplayer/html/get_iplayer.html
+# Web: https://github.com/get-iplayer/get_iplayer/wiki
 # License: GPLv3 (see LICENSE.txt)
 #
 
