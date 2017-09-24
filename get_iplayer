@@ -63,7 +63,7 @@ use Encode qw(:DEFAULT :fallback_all);
 use PerlIO::encoding;
 $PerlIO::encoding::fallback = XMLCREF;
 use constant FB_EMPTY => sub { '' };
-use constant DIVIDER => "-==-" x 15;
+use constant DIVIDER => "-==-" x 20;
 
 my %SIGORIG;
 # Save default SIG actions
@@ -640,7 +640,7 @@ if ( defined($opt->{trimhistory}) ) {
 exit $retcode;
 
 sub print_divider {
-	main::logger "${\DIVIDER}\n";
+	main::logger $opt->{verbose} ? "${\DIVIDER}\n" : "\n";
 }
 
 sub init_search {
@@ -791,12 +791,6 @@ sub download_pid {
 	# Prune future scheduled match if not specified
 	if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
 		logger "WARNING: Future programme may not yet be available ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
-	}
-	logger "INFO: Trying to download PID: $this->{pid} using type: $this->{type}\n";
-	if ( $this->{index} ) {
-		logger "INFO: PID found in cache: $this->{pid}\n" 
-	} else {
-		logger "INFO: PID not found in cache: $this->{pid}\n" 
 	}
 	# Display pid match for recording
 	if ( $opt->{history} ) {
@@ -1131,6 +1125,8 @@ sub list_progs {
 			delete $this->{ext};
 		}
 	}
+	# PID not in cache
+	@matches = () if $#matches == 0 && ! $matches[0]->{index};
 	logger "INFO: ".($#matches + 1)." matching programmes\n" if ( $opt->{pvr} && $#matches >= 0 ) || ! $opt->{pvr};
 }
 
@@ -1185,6 +1181,7 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search before = $before\n";
 		main::logger "DEBUG: Search available_since = $available_since\n";
 		main::logger "DEBUG: Search expires_before = $expires_before\n";
+		main::logger "\n";
 	}
 
 	# Determine fields to search
@@ -1327,7 +1324,7 @@ sub progclass {
 	} elsif ( $prog_type =~ /^(tv|radio)$/ ) {
 		return "Programme::$prog_type";
 	} else {
-		main::logger "ERROR: Programe Type '$prog_type' does not exist\n";
+		main::logger "ERROR: Programme type '$prog_type' does not exist\n";
 		exit 3;
 	}
 }
@@ -1449,6 +1446,7 @@ sub get_links {
 		# Open cache file for writing
 		unlink $cachefile;
 		if ( open(CACHE, "> $cachefile") ) {
+			my $added = 0;
 			print CACHE "#".(join '|', @cache_format)."\n";
 			# loop through all progs just obtained through get_links above (in numerical index order)
 			for my $index ( sort {$a <=> $b} keys %{$index_prog} ) {
@@ -1466,7 +1464,8 @@ sub get_links {
 					# Else this is a new entry
 					} else {
 						$this->{timeadded} = $now;
-						$this->list_entry( 'Added: ' ) unless $opt->{quiet};
+						$this->list_entry( 'Added: ' ) if $opt->{verbose};
+						$added++;
 					}
 					# Write each field into cache line
 					print CACHE $this->{$_}.'|' for @cache_format;
@@ -1474,6 +1473,7 @@ sub get_links {
 				}
 			}
 			close (CACHE);
+			main::logger "INFO: Added $added $prog_type programmes to cache\n";
 		} else {
 			logger "WARNING: Couldn't open cache file '$cachefile' for writing\n";
 		}
@@ -1618,7 +1618,7 @@ sub request_url_retry {
 	# Disable proxy unless mustproxy is flagged
 	main::proxy_disable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	my $i;
-	logger "INFO: Getting page $url\n" if $opt->{verbose};
+	logger "INFO: Getting URL: $url\n" if $opt->{verbose};
 	for ($i = 0; $i < $retries; $i++) {
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
@@ -1778,7 +1778,7 @@ sub run_cmd {
 	} else {
 		$log_str = $log_cmd[0]
 	}
-	main::logger "\n\nINFO: Command: $log_str\n\n" if $opt->{verbose};
+	main::logger "INFO: Command: $log_str\n" if $opt->{verbose};
 
 	# Define what to do with STDOUT and STDERR of the child process
 	my $fh_child_out = ">&STDOUT";
@@ -2713,7 +2713,7 @@ sub load {
 
 	main::logger "INFO: Loading recordings history\n" if $opt->{verbose};
 	if ( ! open(HIST, "< $historyfile") ) {
-		main::logger "WARNING: Cannot read $historyfile\n\n" if $opt->{verbose} && -f $historyfile;
+		main::logger "WARNING: Cannot read $historyfile\n" if $opt->{verbose} && -f $historyfile;
 		return 0;
 	}
 
@@ -3141,6 +3141,7 @@ sub display_metadata {
 				main::logger sprintf "%-15s ", $_.':';
 				if ( ref$data{$_}->{$key} ne 'HASH' ) {
 					main::logger "$key: $data{$_}->{$key}";
+					main::logger " [estimated sizes only]" if $_ eq "modesizes";
 				# This is the same as 'modes' list
 				#} else {
 				#	main::logger "$key: ".(join ',', sort keys %{ $data{$_}->{$key} } );
@@ -3217,7 +3218,7 @@ sub generate_version_list {
 	if ( $got == 0 ) {
 		main::logger "INFO: No versions of this programme were selected (available versions: ".(keys %{ $prog->{verpids} } == 0 ? "none" : join ',', sort keys %{ $prog->{verpids} } ).")\n";
 	} else {
-		main::logger "INFO: Will search for versions: ".(join ',', @version_list)."\n" if $opt->{verbose};
+		main::logger "INFO: Searching for versions: ".(join ',', @version_list)."\n" if $opt->{verbose};
 	}
 	return @version_list;
 }
@@ -3225,17 +3226,17 @@ sub generate_version_list {
 sub cmp_modes($$) {
 	my ($x, $y) = @_;
 	my %ranks = (
-		'hd(\d+)' => 100,
-		'[^x]sd(\d+)' => 200,
-		'xsd(\d+)' => 300,
-		'vhigh(\d+)' => 400,
-		'[^vx]high(\d+)' => 500,
-		'xhigh(\d+)' => 600,
-		'[^x]std(\d+)' => 700,
-		'xstd(\d+)' => 800,
-		'med(\d+)' => 900,
-		'low(\d+)' => 1000,
-		'subtitles(\d+)' => 1100,
+		'hd(\d+)?' => 100,
+		'[^x]sd(\d+)?' => 200,
+		'xsd(\d+)?' => 300,
+		'vhigh(\d+)?' => 400,
+		'[^vx]high(\d+)?' => 500,
+		'xhigh(\d+)?' => 600,
+		'[^x]std(\d+)?' => 700,
+		'xstd(\d+)?' => 800,
+		'med(\d+)?' => 900,
+		'low(\d+)?' => 1000,
+		'subtitles(\d+)?' => 1100,
 	);
 	my %ranks2 = (
 		'^daf' => 10000,
@@ -3307,7 +3308,7 @@ sub download_retry_loop {
 
 	if ( $prog->{type} eq "tv" && ! $opt->{nowarntvlicence} ) {
 		$opt->{nowarntvlicence} = 1;
-		main::logger "WARNING: A UK TV licence is required to legally access BBC iPlayer TV content\n";
+		main::logger "WARNING: A UK TV licence is required to access BBC iPlayer TV content legally\n";
 	}
 
 	# Get all possible (or user overridden) modes for this prog recording
@@ -3318,11 +3319,10 @@ sub download_retry_loop {
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( @version_search_list ) {
 		my $retcode = 1;
-		main::logger "DEBUG: Trying version '$version'\n" if $opt->{debug};
+		main::logger "INFO: Searching for version: '$version'\n" if $opt->{verbose};
 		if ( $prog->{verpids}->{$version} ) {
-			main::logger "INFO: Checking existence of '$version' version\n" if $opt->{verbose};
 			$prog->{version} = $version;
-			main::logger "INFO: Version found: '$prog->{version}'\n" if $opt->{verbose};
+			main::logger "INFO: Found version: '$prog->{version}'\n" if $opt->{verbose};
 
 			# Try to get stream data for this version if not already populated
 			if ( not defined $prog->{streams}->{$version} ) {
@@ -3339,7 +3339,9 @@ sub download_retry_loop {
 				# find all numbered modes starting with this modename
 				push @modes, sort { $a cmp $b } grep /^$modename(\d+)?$/, @available_modes;
 			}
+			main::logger "INFO: Modes to try for '$version' version: ".join(',', @modes)."\n" if $opt->{verbose};
 
+			main::logger "INFO: Downloading $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid}) [$version]'\n";
 			# Check for no applicable modes - report which ones are available if none are specified
 			if ($#modes < 0) {
 				my %available_modes_short;
@@ -3356,14 +3358,12 @@ sub download_retry_loop {
 				}
 				main::logger "INFO: $msg ".($modelist ? "($modelist) " : "")."available for this programme with version '$version'\n";
 				if ( keys %available_modes_short ) {
-					main::logger "INFO: Try using --modes=".(join ',', sort Programme::cmp_modes keys %available_modes_short)."\n";
+					main::logger "INFO: Available modes: ".(join ',', sort Programme::cmp_modes keys %available_modes_short)."\n";
 				} else {
 					main::logger "INFO: No other modes are available\n";
 				}
 				next;
 			}
-			main::logger "INFO: Begin recording $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
-			main::logger "INFO: Modes to try for '$version' version: ".join(',', @modes)."\n";
 
 			# Expand the modes into a loop
 			for my $mode ( @modes ) {
@@ -3388,13 +3388,12 @@ sub download_retry_loop {
 		}
 		# stop condition
 		last if $retcode == 3;
-		main::logger "INFO: Finished recording $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid})'\n" unless $retcode;
 		# Break out of loop if we have a successful recording for this version and mode
 		return 0 if not $retcode;
 	}
 
 	if (! $opt->{test}) {
-		main::logger "ERROR: Failed recording $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+		main::logger "ERROR: Failed $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid}) [$version]'\n" if $opt->{verbose};
 	}
 	return 1;
 }
@@ -3408,10 +3407,9 @@ sub mode_ver_download_retry_loop {
 
 	# Retry loop
 	for ($count = 1; $count <= $retries; $count++) {
-		main::logger "INFO: Trying '$mode' mode: attempt $count / $retries\n";
+		main::logger "INFO: Trying '$mode' mode: attempt $count / $retries\n" if $opt->{verbose};
 
 		$retcode = $prog->download( $ua, $mode, $version, $version_pid );
-		main::logger "DEBUG: Record using '$mode' mode return code: '$retcode'\n" if $opt->{verbose};
 
 		# Exit
 		if ( $retcode eq 'abort' ) {
@@ -3436,7 +3434,6 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			# Add to history, tag file, and run post-record command if a stream was written
 			# Get subtitles if they exist and are required and media download succeeded
 			my $subfile_done;
 			my $subfile;
@@ -3448,14 +3445,15 @@ sub mode_ver_download_retry_loop {
 					move($subfile, $subfile_done) if -f $subfile;
 				}
 			}
-			if ( $opt->{thumb} ) {
-				$prog->create_dir();
-				$prog->download_thumbnail();
-			}
 			if ( $opt->{metadata} ) {
 				$prog->create_dir();
 				$prog->create_metadata_file();
 			}
+			if ( $opt->{thumb} ) {
+				$prog->create_dir();
+				$prog->download_thumbnail();
+			}
+			# Add to history, tag file, and run post-record command if a stream was written
 			if ( ! $opt->{nowrite} ) {
 				$hist->add( $prog );
 				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
@@ -3494,7 +3492,7 @@ sub tag_file {
 			$prog->{ext} =~ s/^\.//;
 		}
 		elsif ( $prog->{filename} =~ /\.EXT$/ ) {
-			for my $ext ( 'mp4', 'm4a', 'mp3' ) {
+			for my $ext ( 'mp4', 'm4a' ) {
 				(my $filename = $prog->{filename}) =~ s/\.EXT$/\.$ext/;
 				if ( -f $filename ) {
 					$prog->{filename} = $filename;
@@ -3507,19 +3505,16 @@ sub tag_file {
 			main::logger "WARNING: Cannot tag missing file: $prog->{filename}\n";
 			return;
 		}
-		main::logger "INFO: Tagging file: $prog->{filename}\n";
 	}
 	# return if file does not exist
 	return if ! -f $prog->{filename};
-	# download thumbnail if necessary
-	if ( -f $prog->{thumbfile} ) {
-		main::logger("WARNING: File already exists: $prog->{thumbfile}\n") if $opt->{verbose};
-	}
-	$prog->download_thumbnail if ( ! -f $prog->{thumbfile} && ! $opt->{noartwork} );
+	# assume --thumbnail used if file exists
+	my $thumb_found = -f $prog->{thumbfile};
+	$prog->download_thumbnail unless $opt->{noartwork} || $thumb_found;
 	# tag programme
 	Tagger->tag_prog($prog);
 	# clean up thumbnail if necessary
-	unlink $prog->{thumbfile} if ! $opt->{thumb};
+	unlink $prog->{thumbfile} unless $opt->{thumb} || $thumb_found;
 }
 
 # Create a metadata file if required
@@ -3541,7 +3536,7 @@ sub create_metadata_file {
 		return;
 	}
 
-	main::logger "INFO: Writing $opt->{metadata} metadata to file '$filename->{ $opt->{metadata} }'\n";
+	main::logger "INFO: Writing metadata\n";
 
 	if ( open(XML, "> $filename->{ $opt->{metadata} }") ) {
 		my $text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
@@ -3550,7 +3545,8 @@ sub create_metadata_file {
 		print XML $text;
 		close XML;
 	} else {
-		main::logger "WARNING: Couldn't write to metadata file '$filename->{ $opt->{metadata} }'\n";
+		main::logger "ERROR: Couldn't write to metadata file: $filename->{ $opt->{metadata} }\n";
+		main::logger "ERROR: Use --metadata-only to retry\n";
 	}
 }
 
@@ -3781,17 +3777,8 @@ sub generate_filenames {
 			if ( $opt->{overwrite} ) {
 				# DASH tv output files with --raw
 				if ( $mode =~ /dvf/ ) {
-					if ( -f $audio_raw ) {
-						main::logger "WARNING: Overwriting raw audio file: $audio_raw\n";
-					}
-					if ( -f $video_raw ) {
-						main::logger "WARNING: Overwriting raw video file: $video_raw\n";
-					}
 					unlink ( $audio_raw, $video_raw ) unless $opt->{test};
 				} else {
-					if ( -f $media_raw ) {
-						main::logger "WARNING: Overwriting raw $media_type file: $media_raw\n";
-					}
 					unlink ( $media_raw ) unless $opt->{test};
 				}
 			} else {
@@ -3817,11 +3804,10 @@ sub generate_filenames {
 			}
 		} elsif ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
 			if ( $opt->{overwrite} ) {
-				main::logger("WARNING: Overwriting file: $prog->{filename}\n");
 				unlink $prog->{filename} unless $opt->{test};
 			} else {
 				main::logger("WARNING: File already exists: $prog->{filename}\n");
-				main::logger "WARNING: Use --overwrite to replace\n\n";
+				main::logger "WARNING: Use --overwrite to replace\n";
 				return 3;
 			}
 		}
@@ -3848,7 +3834,7 @@ sub generate_filenames {
 	# Check path length is < 256 chars (Windows only)
 	if ( length( $prog->{filepart} ) > 255 && $^O eq "MSWin32" ) {
 		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir-format, --subdir and --output options to shorten it to below 256 characters\n");
-		main::logger("ERROR: Generated file path: $prog->{filepart}\n\n");
+		main::logger("ERROR: Generated file path: $prog->{filepart}\n");
 		return 1;
 	}
 	return 0;
@@ -3985,33 +3971,33 @@ sub download_thumbnail {
 	my $file;
 	my $ext;
 	my $image;
-
 	if ( $prog->{thumbnail} =~ /^http/i && $prog->{thumbfile} ) {
-		main::logger "INFO: Downloading thumbnail from: $prog->{thumbnail}\n" if $opt->{verbose};
 		$file = $prog->{thumbfile};
-
+		# Don't redownload thumbnail if the file already exists
+		if ( -f $file && ! $opt->{overwrite} ) {
+			main::logger "INFO: Thumbnail file already exists: $file\n";
+			main::logger "INFO: Use --overwrite to re-download\n";
+			return 0;
+		}
+		main::logger "INFO: Downloading thumbnail\n" if $opt->{thumb} || $opt->{verbose};
 		# Download thumb
 		$image = main::request_url_retry( main::create_ua( 'desktop', 1 ), $prog->{thumbnail}, 3);
 		if (! $image ) {
 			main::logger "ERROR: Thumbnail download failed\n";
+			main::logger "ERROR: Use --thumbnail-only to re-download\n";
 			return 1;
-		} else {
-			main::logger "INFO: Downloading thumbnail to: $file\n" if $opt->{verbose} || $opt->{thumb};
 		}
-
 	} else {
 		# Return if we have no url
-		main::logger "INFO: Thumbnail not available\n" if $opt->{verbose};
+		main::logger "INFO: Thumbnail not available\n";
 		return 2;
 	}
-
 	# Write to file
 	unlink($file);
 	open( my $fh, ">:raw", $file );
 	binmode $fh;
 	print $fh $image;
 	close $fh;
-
 	return 0;
 }
 
@@ -4321,16 +4307,12 @@ sub get_metadata {
 
 	# This URL works for tv/radio prog types:
 	# http://www.bbc.co.uk/programmes/{pid}.json
-
-	main::logger "DEBUG: Getting metadata for $prog->{pid}:\n" if $opt->{debug};
-
 	my $got_metadata;
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to retrieve programme metadata.\n";
 	} else {
 		my $url = $prog_data_url.$prog->{pid}.".json";
-		main::logger "INFO: Programme metadata URL = $url\n" if $opt->{verbose};
 		my $json = main::request_url_retry($ua, $url, 3, '', '');
 		if ( $json ) {
 			my $dec = eval { decode_json($json) };
@@ -4555,10 +4537,11 @@ sub get_metadata {
 			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping\n" if $opt->{verbose};
 			next;
 		}
-		$modes->{$version} = join ',', sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
+		my @version_modes = sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
+		$modes->{$version} = join ',', @version_modes;
 		# Estimate the file sizes for each mode
 		my @sizes;
-		for my $mode ( sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} } ) {
+		for my $mode ( @version_modes ) {
 			# get expiry from stream data
 			if ( ! $prog->{expires} && $prog->{streams}->{$version}->{$mode}->{expires} ) {
 				$prog->{expires} = Programme::get_time_string( $prog->{streams}->{$version}->{$mode}->{expires} );
@@ -4588,7 +4571,7 @@ sub get_metadata {
 	# remove versions with no streams
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		if ( ! $modes->{$version} || $modes->{$version} =~ /^subtitles\d+$/ ) {
-			main::logger "INFO: No streams available for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
+			main::logger "INFO: No streams found for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
 			delete $modes->{$version};
 			delete $mode_sizes->{$version};
 			for my $key ( @fields1 ) {
@@ -4753,7 +4736,7 @@ sub get_pids_recursive {
 	my $prog_type;
 
 	# Clean up the pid
-	main::logger "INFO: Cleaning PID - old: '$prog->{pid}', " if $opt->{verbose};
+	main::logger "INFO: Cleaning PID - old: '$prog->{pid}'" if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " new: '$prog->{pid}'\n" if $opt->{verbose};
 	if ( ! $prog->pid_ok() ) {
@@ -4767,13 +4750,13 @@ sub get_pids_recursive {
 		main::logger "WARNING: Could not determine PID type ($prog->{pid}). Trying to record PID directly.\n";
 		return "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "episode" ) {
-		main::logger "INFO: $prog_type episode PID detected ($prog->{pid})\n";
+		main::logger "INFO: $prog_type episode PID detected ($prog->{pid})\n" if $opt->{verbose};
 		push @pids, "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "clip" ) {
-		main::logger "INFO: $prog_type clip PID detected ($prog->{pid})\n";
+		main::logger "INFO: $prog_type clip PID detected ($prog->{pid})\n" if $opt->{verbose};
 		push @pids, "$prog_type:$prog->{pid}";
 	} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
-		main::logger "INFO: $prog_type series or brand PID detected ($prog->{pid})\n";
+		main::logger "INFO: $prog_type series or brand PID detected ($prog->{pid})\n" if $opt->{verbose};
 		my $epids = fetch_episode_pids($ua, $prog->{pid});
 		if ( ! $opt->{pidrecursive} ) {
 			main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
@@ -5653,7 +5636,7 @@ sub get_stream_data {
 
 	# Report modes found
 	if ( $opt->{verbose} ) {
-	main::logger "INFO: Found mode $_: $data->{$_}->{type}\n" for sort Programme::cmp_modes keys %{ $data };
+		main::logger "INFO: Found mode '$_': $data->{$_}->{type}\n" for sort Programme::cmp_modes keys %{ $data };
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
@@ -5881,9 +5864,9 @@ sub ffmpeg_init {
 		} else {
 			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
 		}
-		if ( main::hide_progress() ) {
+		if ( main::hide_progress() || ! $opt->{verbose} ) {
 			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
-		} elsif ( ! ( $opt->{quiet} || $opt->{silent} ) ) {
+		} else {
 			push @{ $binopts->{ffmpeg} }, ( '-stats' );
 		}
 	}
@@ -5896,9 +5879,11 @@ sub postproc {
 	my @cmd;
 	my $return;
 
+	main::logger "INFO: Converting to \U$prog->{ext}\E\n";
+
 	$prog->ffmpeg_init();
 	if ( ! main::exists_in_path('ffmpeg') ) {
-		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to: \U$prog->{ext}\E\n\n";
+		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to \U$prog->{ext}\E\n";
 		return 'stop';
 	}
 
@@ -5945,13 +5930,6 @@ sub postproc {
 		$prog->{filepart},
 	);
 
-	main::logger "INFO: Begin converting to: \U$prog->{ext}\E\n";
-	if ( $opt->{verbose} ) {
-		main::logger "INFO: Begin converting to file: $prog->{filepart}\n";
-		main::logger "INFO: Input audio file: $audio_file\n" if $audio_ok;
-		main::logger "INFO: Input video file: $video_file\n" if $video_ok;
-	}
-
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
 
@@ -5959,7 +5937,6 @@ sub postproc {
 
 	if ( (! $return) && -f $prog->{filepart} && stat($prog->{filepart})->size > $min_download_size ) {
 		unlink( $audio_file, $video_file );
-		main::logger "INFO: Finished converting to file: $prog->{filepart}\n" if $opt->{verbose};
 	} else {
 		# remove the failed converted file
 		unlink $prog->{filepart};
@@ -5967,14 +5944,12 @@ sub postproc {
 		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
 		return 'stop';
 	}
-	main::logger "INFO: Finished converting to: \U$prog->{ext}\E\n";
 	# Moving file into place as complete
 	if ( ! move($prog->{filepart}, $prog->{filename}) ) {
 		main::logger "ERROR: Could not rename file: $prog->{filepart}\n";
 		main::logger "ERROR: Destination file name: $prog->{filename}\n";
 		return 'stop';
 	}
-	main::logger "INFO: Finished recording file: $prog->{filename}\n";
 
 	return 0;
 }
@@ -6098,7 +6073,6 @@ sub get_links {
 	my $prog = shift;
 	my $prog_type = shift;
 	my $now = shift || time();
-	main::logger "\nINFO: Getting $prog_type Index Feeds (this may take a few minutes)\n";
 	my $rc = 0;
 	$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
 	return 1 if $rc && $opt->{refreshabortonerror};
@@ -6171,7 +6145,7 @@ sub get_links_schedule {
 		if ( $@ ) {
 			main::logger "WARNING: Please download and run latest installer or install the Mojolicious Perl module for concurrent indexing of $prog_type programmes.\n";
 		} else {
-			main::logger "\nINFO: Using concurrent indexing\n";
+			main::logger "\nINFO: Indexing $prog_type programmes (concurrent)\n";
 			my @mojo_urls;
 			my %mojo_channel_ids;
 			my %mojo_channels;
@@ -6196,7 +6170,7 @@ sub get_links_schedule {
 	}
 	my $ua = main::create_ua( 'desktop', 1 );
 	$ua->timeout(60);
-	main::logger "\nINFO: Using sequential indexing\n";
+	main::logger "\nINFO: Indexing $prog_type programmes (sequential)\n";
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
@@ -6560,8 +6534,9 @@ sub download_subtitles {
 	return unless $prog->{type} eq "tv";
 
 	# Don't redownload subs if the file already exists
-	if ( ( -f $file || -f "$prog->{dir}/$prog->{fileprefix}.partial.srt" ) && ! $opt->{overwrite} ) {
-		main::logger "INFO: Skipping subtitles download - file already exists: $file\n" if $opt->{verbose};
+	if ( -f $file  && ! $opt->{overwrite} ) {
+		main::logger "INFO: Subtitles file already exists: $file\n";
+		main::logger "INFO: Use --overwrite to re-download\n";
 		return 0;
 	}
 
@@ -6572,7 +6547,7 @@ sub download_subtitles {
 			my $suburl = $prog->{streams}->{$version}->{$subkey}->{streamurl};
 			if ( $suburl ) {
 				$found = 1;
-				main::logger "INFO: Getting subtitles from $suburl\n" if $opt->{verbose};
+				main::logger "INFO: Downloading subtitles\n";
 				$subs = main::request_url_retry($ua, $suburl, 3);
 				last if $subs;
 			}
@@ -6586,20 +6561,18 @@ sub download_subtitles {
 		return 2;
 	}
 	if (! $subs ) {
-		main::logger "ERROR: Subtitle download failed\n";
+		main::logger "ERROR: Subtitles download failed\n";
+		main::logger "ERROR: Use --subtitles-only to re-download\n";
 		return 1;
-	} else {
-		# Dump raw subs into a file if required
-		if ( $opt->{subsraw} ) {
-			unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
-			main::logger "INFO: Downloading raw subtitles to: $prog->{dir}/$prog->{fileprefix}.ttxt\n";
-			open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
-			print $fhraw $subs;
-			close $fhraw;
-		}
-		main::logger "INFO: Downloading subtitles to: $prog->{dir}/$prog->{fileprefix}.srt\n";
 	}
-
+	# Dump raw subs into a file if required
+	if ( $opt->{subsraw} ) {
+		main::logger "INFO: Saving raw subtitles\n" if $opt->{verbose};
+		unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
+		open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
+		print $fhraw $subs;
+		close $fhraw;
+	}
 	return ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
 }
 
@@ -7029,7 +7002,6 @@ sub get {
 	my $media_raw = $prog->{filename};
 
 	if ( $opt->{overwrite} ) {
-		main::logger "INFO: Overwriting HLS $media_type file: $media_file\n" if -f $media_file;
 		unlink $media_file;
 	} else {
 		if ( -f $media_file ) {
@@ -7039,6 +7011,7 @@ sub get {
 	}
 
 	unless ( -f $media_file ) {
+		$streamdata{kind} = "audio+video";
 		my $segments = $self->parse_playlist($ua, $url);
 		if ( keys %{$segments} == 0 ) {
 			main::logger "ERROR: No file segments in HLS playlist\n";
@@ -7052,7 +7025,6 @@ sub get {
 			main::logger "ERROR: Destination file name: $media_file\n";
 			return 'skip';
 		}
-		main::logger "INFO: Saved HLS $media_type file: $media_file\n" if $opt->{verbose};
 	}
 
 	# look for higher-quality audio for hls modes
@@ -7060,13 +7032,12 @@ sub get {
 	my $audio_raw;	
 	my $hq_audio = $prog->{type} eq "tv" && $prog->{mode} =~ /hls/ && ! $opt->{nohqaudio};
 	if ( $hq_audio ) {
-		main::logger "INFO: Attempting to record higher-quality audio for '$prog->{mode}' mode\n" if $opt->{verbose};
+		main::logger "INFO: Attempting to download higher-quality audio for '$prog->{mode}' mode\n" if $opt->{verbose};
 		my $audio_prefix = "$prog->{fileprefix}.hqa";
 		my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.ts"));
 		$audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.hls.ts"));
 		$audio_raw = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.ts"));
 		if ( $opt->{overwrite} ) {
-			main::logger "INFO: Overwriting HLS audio file: $audio_file\n" if -f $audio_file;
 			unlink $audio_file;
 		} else {
 			if ( -f $audio_file ) {
@@ -7087,6 +7058,8 @@ sub get {
 					$streamdata{media_size} = undef;
 					$streamdata{media_bitrate} = $streamdata{audio_bitrate};
 				}
+				$streamdata{kind} = "audio";
+				$streamdata{mode} = $mode;
 				my $segments = $self->parse_playlist($ua, $audio_url);
 				if ( keys %{$segments} == 0 ) {
 					main::logger "ERROR: No file segments in HLS playlist\n";
@@ -7098,8 +7071,6 @@ sub get {
 						if ( ! move($audio_tmp, $audio_file) ) {
 							main::logger "ERROR: Could not rename file: $audio_tmp\n";
 							main::logger "ERROR: Destination file name: $audio_file\n";
-						} else {
-							main::logger "INFO: Saved HLS audio file: $audio_file\n" if $opt->{verbose};
 						}
 						last;
 					}
@@ -7116,13 +7087,10 @@ sub get {
 			main::logger "ERROR: Destination file name: $media_raw\n";
 			return 'skip';
 		}
-		main::logger "INFO: Finished recording raw $media_type file: $media_raw\n";
 		if ( $hq_audio && -f $audio_file ) {
 			if ( ! move($audio_file, $audio_raw) ) {
 				main::logger "ERROR: Could not rename file: $audio_file\n";
 				main::logger "ERROR: Destination file name: $audio_raw\n";
-			} else {
-				main::logger "INFO: Finished recording raw audio file: $audio_raw\n";
 			}
 			if ( $opt->{verbose} && ! -f $audio_raw ) {
 				main::logger "WARNING: Could not record raw higher-quality audio for '$prog->{mode}' mode - using default audio\n";
@@ -7197,10 +7165,10 @@ sub fetch {
 			$curr_size = $size;
 			$curr_elapsed = $elapsed;
 		}
-		if ( $opt->{hash} || $opt->{logprogress} ) {
-			return if ($curr_percent - $prev_percent) < 1;
-		} else {
+		if ( $opt->{verbose} && ! $opt->{logprogress} ) {
 			return if ($curr_percent - $prev_percent) < 0.1;
+		} else {
+			return if ($curr_percent - $prev_percent) < 1;
 		}
 		$prev_percent = $curr_percent;
 		my $curr_time = time();
@@ -7221,13 +7189,13 @@ sub fetch {
 				my $time;
 				if ($curr_time - $begin_time < 1) {
 					$rate = '----.- Mibit/s';
-					$time = '--:--:-- remaining';
+					$time = '--:--:--';
 				} else {
 					$rate = sprintf("%6.1f Mibit/s", $rate_mibit);
-					$time = sprintf("%02d:%02d:%02d remaining", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
+					$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
 				}
 				if ( $opt->{verbose} ) {
-					main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s${crlf}",
+					main::logger sprintf("Downloading: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s remaining${crlf}",
 						$curr_size / 1024.0 / 1024.0,
 						$file_size / 1024.0 / 1024.0,
 						(gmtime($curr_elapsed))[2,1,0],
@@ -7239,12 +7207,11 @@ sub fetch {
 						$time,
 					);
 				} else {
-					main::logger sprintf ( "Recording: %8.2f MiB / ~%.2f MiB %5.1f%% %s %s${crlf}",
-						$curr_size / 1024.0 / 1024.0,
-						$file_size / 1024.0 / 1024.0,
+					main::logger sprintf("%3d%% [%-25s] ETA: %s (%s) [%s]${crlf}",
 						$curr_percent,
-						$rate,
-						$time,
+						'=' x int($curr_percent / 4),
+						$time, $streamdata{mode} || $prog->{mode},
+						$streamdata{kind}
 					);
 				}
 			}
@@ -7369,8 +7336,7 @@ sub fetch {
 		my $tmp_size = -s $file_tmp || 0;
 		# overwrite any partial segment appended in last run
 		if ( $resume_size < $tmp_size ) {
-			main::logger "INFO: Resizing file: $file_tmp\n";
-			main::logger "INFO: Resizing from $tmp_size to $resume_size for resume\n";
+			main::logger "INFO: Resizing file from $tmp_size to $resume_size for resume\n" if $opt->{verbose};
 			if ( ! truncate($fh, $resume_size) || ! seek($fh, 0, 2) ) {
 				$resuming = 0;
 				close $fh;
@@ -7392,12 +7358,11 @@ sub fetch {
 	}
 	unlink $resume_file unless $resuming;
 	if ( $resuming ) {
-		main::logger "INFO: Resume downloading to file: $file_tmp\n" if $opt->{verbose};
-		main::logger sprintf("INFO: Resume recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Resume downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$resume_size / 1024.0 / 1024.0,
 			(gmtime($resume_elapsed))[2,1,0],
 			$resume_sequence
-		);
+		) if $opt->{verbose};
 	} else {
 		# start download from beginning if not resuming
 		if ( ! open($fh, ">:raw", $file_tmp) ) {
@@ -7406,12 +7371,11 @@ sub fetch {
 		}
 		binmode $fh;
 		$fh->autoflush(1);
-		main::logger sprintf("INFO: Begin recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Begin downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$size / 1024.0 / 1024.0,
 			(gmtime($start_elapsed))[2,1,0],
 			$start_sequence
-		);
-		main::logger "INFO: Begin downloading to file: $file_tmp\n" if $opt->{verbose};
+		) if $opt->{verbose};
 	}
 	unless ( $noresume ) {
 		my $open_mode = $resuming ? ">>" : ">";
@@ -7466,7 +7430,7 @@ sub fetch {
 						main::logger "\nWARNING: File segment not available from server [$sequence]\n";
 						main::logger "WARNING: This is the final file segment of the programme\n";
 						main::logger "WARNING: It may be incorrectly flagged as unavailable due to inaccurate programme data\n";
-						main::logger "WARNING: Check the end of the recording to ensure it is complete\n";
+						main::logger "WARNING: Check the end of the downloaded file to ensure it is complete\n";
 						if ( $opt->{verbose} ) {
 							main::logger "WARNING: File segment URL: $curr_segment_url\n";
 						}
@@ -7528,27 +7492,36 @@ sub fetch {
 
 	# summary stats
 	unless ( $hide_progress || $opt->{logprogress} ) {
-		main::logger "${crlf}".(" " x ($opt->{verbose} ? 120 : 80));
+		main::logger "${crlf}".(" " x ($opt->{verbose} || $opt->{hash} ? 120 : 80));
 	}
 	my $end_time = time() + 0.0001;
-	main::logger sprintf("${crlf}INFO: Recorded: %.2f MiB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mibit/s\n",
-		($prev_size - $resume_size) / (1024.0 * 1024.0),
-		(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
-		max($prev_sequence - $resume_sequence + 1, 0),
-		(gmtime($end_time - $begin_time))[2,1,0],
-		($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
-	);
+	if ( $opt->{verbose} ) {
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MiB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mibit/s\n",
+			($prev_size - $resume_size) / (1024.0 * 1024.0),
+			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
+			max($prev_sequence - $resume_sequence + 1, 0),
+			(gmtime($end_time - $begin_time))[2,1,0],
+			($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
+		);
+	} else {
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MiB (%02d:%02d:%02d) \@ %.2f Mibit/s (%s) [%s]\n",
+			($prev_size - $resume_size) / (1024.0 * 1024.0),
+			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
+			($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
+			$streamdata{mode} || $prog->{mode},
+			$streamdata{kind}
+		);
+	}
 
 	# retry if we fail during streaming
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
-		main::logger "WARNING: Stopped recording file: $file_tmp\n";
-		main::logger sprintf("WARNING: Stopped recording at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
-			$prev_size / 1024.0 / 1024.0,
-			(gmtime($prev_elapsed))[2,1,0],
-			$prev_sequence
-		);
 		if ( $opt->{verbose} ) {
+			main::logger sprintf("WARNING: Stopped downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
+				$prev_size / 1024.0 / 1024.0,
+				(gmtime($prev_elapsed))[2,1,0],
+				$prev_sequence
+			);
 			main::logger "WARNING: File segment URL: $curr_segment_url\n";
 		}
 		return $return > 1 ? 'next' : 'retry';
@@ -7559,14 +7532,12 @@ sub fetch {
 
 	if ( $resuming ) {
 		# summary for file
-		main::logger sprintf("INFO: Recorded (total): %.2f MiB (%02d:%02d:%02d) [%d]\n",
+		main::logger sprintf("INFO: Downloaded (total): %.2f MiB (%02d:%02d:%02d) [%d]\n",
 			$prev_size / (1024.0 * 1024.0),
 			(gmtime($prev_elapsed - $start_elapsed))[2,1,0],
 			$prev_sequence - $start_sequence + 1
-		);
+		) if $opt->{verbose};
 	}
-
-	main::logger "INFO: Finished downloading to file: $file_tmp\n" if $opt->{verbose};
 
 	return 0;
 }
@@ -7615,8 +7586,6 @@ sub get {
 	my $video_raw = $prog->{rawvideo};
 
 	if ( $opt->{overwrite} ) {
-		main::logger "WARNING: Overwriting DASH audio file: $audio_file\n" if -f $audio_file;
-		main::logger "WARNING: Overwriting DASH video file: $video_file\n" if $prog->{type} eq "tv" && -f $video_file;
 		unlink ( $audio_file, $video_file );
 	} else {
 		my $skip;
@@ -7637,6 +7606,7 @@ sub get {
 		my $audio_media = $streamdata{audio_media};
 		$streamdata{file_size} = $audio_media->{file_size};
 		$streamdata{media_bitrate} = $audio_media->{bitrate};
+		$streamdata{kind} = "audio";
 		my $segments = $self->generate_segments($audio_media);
 		if ( keys %{$segments} <= 1 ) {
 			main::logger "ERROR: No file segments generated from DASH audio media\n";
@@ -7649,7 +7619,6 @@ sub get {
 			main::logger "ERROR: Destination file name: $audio_file\n";
 			return 'skip';
 		}
-		main::logger "INFO: Saved DASH audio file: $audio_file\n" if $opt->{verbose};
 	}
 
 	if ( $prog->{type} eq "tv" ) {
@@ -7657,6 +7626,7 @@ sub get {
 			my $video_media = $streamdata{video_media};
 			$streamdata{file_size} = $video_media->{file_size};
 			$streamdata{media_bitrate} = $video_media->{bitrate};
+			$streamdata{kind} = "video";
 			my $segments = $self->generate_segments($video_media);
 			if ( keys %{$segments} <= 1 ) {
 				main::logger "ERROR: No file segments generated from DASH video media\n";
@@ -7669,7 +7639,6 @@ sub get {
 				main::logger "ERROR: Destination file name: $video_file\n";
 				return 'skip';
 			}
-			main::logger "INFO: Saved DASH video file: $video_file\n" if $opt->{verbose};
 		}
 	} else {
 		unlink ( $video_tmp, $video_file );
@@ -7688,8 +7657,6 @@ sub get {
 				return 'skip';
 			}
 		}
-		main::logger "INFO: Finished recording raw audio file: $audio_raw\n";
-		main::logger "INFO: Finished recording raw video file: $video_raw\n" if $prog->{type} eq "tv";
 		return 0;
 	}
 
@@ -7818,6 +7785,7 @@ sub run {
 			next;
 		}
 		main::logger "INFO: PVR Run: '$name'\n";
+		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
 		foreach ( @encoding_opts ) {
@@ -7861,7 +7829,7 @@ sub run {
 		if ( $failcount ) {
 			main::logger "WARNING: PVR Run: '$name': $failcount download failure(s)\n";
 		}
-		$retcode += $failcount
+		$retcode += $failcount;
 	}
 	main::purge_warning( $hist, 30 );
 	return $retcode;
@@ -8332,7 +8300,7 @@ sub tag_file_mp4 {
 		main::logger "WARNING: Required AtomicParsley utility not found - cannot tag \U$meta->{ext}\E file\n";
 		return 1;
 	}
-	main::logger "INFO: Begin tagging: \U$meta->{ext}\E\n";
+	main::logger "INFO: Tagging \U$meta->{ext}\E\n";
 	# handle embedded quotes
 	tags_escape_quotes($tags);
 	# encode metadata for atomicparsley
@@ -8399,14 +8367,13 @@ sub tag_file_mp4 {
 		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 	}
 	# run atomicparsley command
-	my $run_mode = main::hide_progress() ? 'QUIET_STDOUT' : 'STDERR';
+	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';	
 	if ( main::run_cmd( $run_mode, @cmd ) ) {
 		main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
 		return 2;
 	}
 	# remove images left behind by AtomicParsley
 	unlink glob qq("$meta->{dir}/$meta->{fileprefix}-resized-*");
-	main::logger "INFO: Finished tagging: \U$meta->{ext}\E\n";
 }
 
 ############## End OO ##############
