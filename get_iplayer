@@ -3435,6 +3435,17 @@ sub mode_ver_download_retry_loop {
 		# Success
 		} elsif ( $retcode eq '0' ) {
 			# Add to history, tag file, and run post-record command if a stream was written
+			# Get subtitles if they exist and are required and media download succeeded
+			my $subfile_done;
+			my $subfile;
+			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
+				$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
+				$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
+				unless ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) ) {
+					# Rename the subtitle file accordingly if the stream get was successful
+					move($subfile, $subfile_done) if -f $subfile;
+				}
+			}
 			if ( $opt->{thumb} ) {
 				$prog->create_dir();
 				$prog->download_thumbnail();
@@ -6487,15 +6498,9 @@ sub download {
 	# Skip from here if we are only testing recordings
 	return 'skip' if $opt->{test};
 
-	# Get subtitles if they exist and are required
-	# best to do this before streaming file so that the subtitles can be enjoyed while recording progresses
-	my $subfile_done;
-	my $subfile;
-	if ( $opt->{subtitles} ) {
-		$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
-		$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-		main::logger "\n";
-		if ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) && $opt->{subsrequired} && $prog->{type} eq 'tv') {
+	# check subtitles if required
+	if ( $opt->{subtitles} && $opt->{subsrequired} && $prog->{type} eq 'tv' ) {
+		if ( ! $prog->subtitles_available( [ $version ] ) ) {
 			main::logger "WARNING: Subtitles not available and --subsrequired specified.\n";
 			return 'skip';
 		}
@@ -6525,10 +6530,20 @@ sub download {
 		main::proxy_enable($ua) if $opt->{partialproxy};
 	}
 
-	# Rename the subtitle file accordingly if the stream get was successful
-	move($subfile, $subfile_done) if $opt->{subtitles} && -f $subfile && ! $return;
-
 	return $return;
+}
+
+sub subtitles_available {
+	my ( $prog, $versions ) = @_;
+	for my $version ( @$versions ) {
+		my @subkeys = grep /subtitles/, sort keys %{$prog->{streams}->{$version}};
+		for my $subkey ( @subkeys ) {
+			my $suburl = $prog->{streams}->{$version}->{$subkey}->{streamurl};
+			if ( $suburl ) {
+				return 1;
+			}
+		}
+	}
 }
 
 # BBC iPlayer TV
