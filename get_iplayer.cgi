@@ -2648,7 +2648,7 @@ sub search_progs {
 		print $fh p("ERROR: get_iplayer returned non-zero:").br().p( join '<br>', $response );
 		return 1;
 	}
-
+	$matchcount ||= 0;
 	my ($first, $last, @pagetrail) = pagetrail( $opt->{PAGENO}->{current}, $opt->{PAGESIZE}->{current}, $matchcount, 7 );
 
 	# Default displaycols

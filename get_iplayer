@@ -470,7 +470,7 @@ my $proxy_save;
 # Option dependent var definitions
 my $bin;
 my $binopts;
-my @search_args = @ARGV;
+my @search_args = map { $_ eq "*" ? ".*" : $_ } @ARGV;
 my $memcache = {};
 
 ########### Main processing ###########
@@ -508,6 +508,7 @@ if ( $opt->{webrequest} ) {
 
 # Add --search option to @search_args if specified
 if ( defined $opt->{search} ) {
+	$opt->{search} = ".*" if $opt->{search} eq "*";
 	push @search_args, $opt->{search};
 	# Remove this option now we've processed it
 	delete $opt->{search};
@@ -515,8 +516,6 @@ if ( defined $opt->{search} ) {
 }
 # check if no search term(s) specified
 my $no_search_args = $#search_args < 0;
-# Assume search term is '.*' if nothing is specified - i.e. lists all programmes
-push @search_args, '.*' if ! $search_args[0] && ! $opt->{pid};
 
 # Auto-detect http://, <type>:http:// or bbc-ipd: in a search term and set it as a --pid option (disable if --fields is used).
 if ( ! $opt->{pid} && ! $opt->{fields} ) {
@@ -834,7 +833,7 @@ sub find_matches {
 			}
 		}
 	}
-
+	$need_get_links = 1 if ! @search_args && ( $opt->{refresh} || $opt->{cachereset} );
 	# Pre-populate caches if --list option used or there was a non-index specified
 	if ( $need_get_links || $opt->{list} ) {
 		# Get stream links from web site or from cache (also populates all hashes) specified in --type option
@@ -844,6 +843,8 @@ sub find_matches {
 		}
 	}
 
+	return unless @search_args;
+	
 	# Parse remaining args
 	my @match_list;
 	my @index_search_args;
