@@ -309,33 +309,30 @@ if ( $opt_pre->{showver} ) {
 
 # This is where all profile data/caches/cookies etc goes
 my $profile_dir;
-# This is where system-wide default options are specified
-my $optfile_system;
-
 # Options directories specified by env vars
 if ( defined $ENV{GETIPLAYERUSERPREFS} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYERUSERPREFS};
 # Otherwise look for windows style file locations
 } elsif ( defined $ENV{USERPROFILE} && $^O eq "MSWin32" ) {
-	$profile_dir = $opt_pre->{profiledir} || $ENV{USERPROFILE}.'/.get_iplayer';
+	$profile_dir = $opt_pre->{profiledir} || File::Spec->catfile($ENV{USERPROFILE}, '.get_iplayer');
 # Options on unix-like systems
 } elsif ( defined $ENV{HOME} ) {
-	$profile_dir = $opt_pre->{profiledir} || $ENV{HOME}.'/.get_iplayer';
+	$profile_dir = $opt_pre->{profiledir} || File::Spec->catfile($ENV{HOME}, '.get_iplayer');
 }
+# This is where user options are specified
+my $optfile_default = File::Spec->catfile($profile_dir, 'options');
 
+# This is where system-wide default options are specified
+my $optfile_system;
 # System options file specified by env var
 if ( defined $ENV{GETIPLAYERSYSPREFS} ) {
 	$optfile_system = $ENV{GETIPLAYERSYSPREFS};
 # Otherwise look for windows style file locations
 } elsif ( defined $ENV{ALLUSERSPROFILE} && $^O eq "MSWin32" ) {
-	$optfile_system = $ENV{ALLUSERSPROFILE}.'/get_iplayer/options';
+	$optfile_system = File::Spec->catfile($ENV{ALLUSERSPROFILE}, 'get_iplayer', 'options');
 # System options on unix-like systems
 } else {
 	$optfile_system = '/etc/get_iplayer/options';
-	# Show warning if this deprecated location exists and is not a symbolic link
-	if ( -f '/var/lib/get_iplayer/options' && ! -l '/var/lib/get_iplayer/options' ) {
-		logger "WARNING: System-wide options file /var/lib/get_iplayer/options will be deprecated in future, please use /etc/get_iplayer/options instead\n";
-	}
 }
 # Make profile dir if it doesn't exist
 mkpath $profile_dir if ! -d $profile_dir;
@@ -370,23 +367,25 @@ if ( defined $opt_cmdline->{metadata} ) {
 }
 
 # Set the personal options according to the specified preset
-my $optfile_default = "${profile_dir}/options";
 my $optfile_preset;
+my $presets_dir;
 if ( $opt_cmdline->{preset} ) {
 	# create dir if it does not exist
-	mkpath "${profile_dir}/presets/" if ! -d "${profile_dir}/presets/";
+	$presets_dir = File::Spec->catfile($profile_dir, 'presets');
+	mkpath $presets_dir if ! -d $presets_dir;
 	# Sanitize preset file name
 	my $presetname = StringUtils::sanitize_path( $opt_cmdline->{preset}, 0, 1 );
-	$optfile_preset = "${profile_dir}/presets/${presetname}";
+	$optfile_preset = File::Spec->catfile($presets_dir, $presetname);
 	logger "INFO: Using user options preset '${presetname}'\n";
 }
-logger "DEBUG: User Preset Options File: $optfile_preset\n" if defined $optfile_preset && $opt->{debug};
+logger "DEBUG: User preset options file: $optfile_preset\n" if defined $optfile_preset && $opt->{debug};
 
 # Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
 if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
 	# Load options from files into $opt_file
 	# system, Default, './.get_iplayer/options' and Preset options in that order should they exist
-	$opt_file->load( $opt, '/var/lib/get_iplayer/options', $optfile_system, $optfile_default, './.get_iplayer/options', $optfile_preset );
+	my $optfile_local = File::Spec->catfile('.', '.get_iplayer', 'options');
+	$opt_file->load( $opt, $optfile_system, $optfile_default, $optfile_local, $optfile_preset );
 	# Copy these loaded options into $opt
 	$opt->copy_set_options_from( $opt_file );
 }
@@ -396,7 +395,7 @@ $opt->copy_set_options_from( $opt_cmdline );
 
 # Update or show user opts file (or preset if defined) if required
 if ( $opt_cmdline->{presetlist} ) {
-	$opt->preset_list( "${profile_dir}/presets/" );
+	$opt->preset_list( $presets_dir );
 	exit 0;
 } elsif ( $opt_cmdline->{prefsadd} ) {
 	$opt->add( $opt_cmdline, $optfile_preset || $optfile_default, @ARGV );
@@ -422,8 +421,11 @@ if ( $opt->{verbose} ) {
 }
 
 # Display prefs dirs if required
-main::logger "INFO: User prefs dir: $profile_dir\n" if $opt->{verbose};
-main::logger "INFO: System options dir: $optfile_system\n" if $opt->{verbose};
+if ( $opt->{verbose} ) {
+	main::logger "INFO: Profile dir: $profile_dir\n";
+	main::logger "INFO: User options file: $optfile_default\n";
+	main::logger "INFO: System options file: $optfile_system\n";
+}
 
 # Display Usage
 Options->usage( 2 ) if $opt_cmdline->{helpbasic};
