@@ -920,18 +920,19 @@ sub find_matches {
 		my $now = time();
 		my @pruned;
 		my $ignored;
+		my $no_future_warn = $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
 		for my $this (@match_list) {
 			# If the prog object exists with pid in history delete it from the prog list
 			my $available = Programme::get_time_string( $this->{available} );
 			if ( $available && ( $available > $now ) ) {
-				logger "WARNING: Ignoring future programme ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
+				logger "WARNING: Ignoring future programme ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n" unless $no_future_warn;
 				$ignored = 1;
 			} else {
 				push @pruned, $this;
 			}
 		}
 		@match_list = @pruned;
-		logger "WARNING: Use --future to download future programmes that are already available from iPlayer\n" if $ignored;
+		logger "WARNING: Use --future to download future programmes that are already available from iPlayer\n" if $ignored && ! $no_future_warn;
 	}
 
 	# apply sort
