@@ -276,6 +276,9 @@ my @argv_save = @ARGV;
 $opt_pre->parse( 1 );
 @ARGV = @argv_save;
 
+# internal ffmpeg options
+my @ffmpeg_opts = ('ffmpegversion', 'ffmpeg25', 'ffmpeg30', 'ffmpegav', 'ffmpegxx');
+
 # set encodings ASAP
 my @encoding_opts = ('encodinglocale', 'encodinglocalefs', 'encodingconsoleout', 'encodingconsolein');
 foreach ( @encoding_opts ) {
@@ -7795,11 +7798,11 @@ sub run {
 		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
-		foreach ( @encoding_opts ) {
+		foreach ( @encoding_opts, @ffmpeg_opts ) {
 			$opt_backup->{$_} = $opt->{$_} if $opt->{$_};
 		}
 		my @search_args = $pvr->load_options($name);
-		foreach ( @encoding_opts ) {
+		foreach ( @encoding_opts, @ffmpeg_opts ) {
 			$opt->{$_} = $opt_backup->{$_} if $opt_backup->{$_};
 		}
 
