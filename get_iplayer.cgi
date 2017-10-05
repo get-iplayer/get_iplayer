@@ -689,7 +689,7 @@ sub record_now {
 	my $out;
 
 	# If a URL was specified by the User (assume auto mode list is OK):
-	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+	if ( $opt->{URL}->{current} =~ m{^https?://} ) {
 		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
 	}
 
@@ -958,7 +958,7 @@ sub create_playlist_m3u_multi {
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
 
 	# If a URL was specified by the User (assume auto mode list is OK):
-	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+	if ( $opt->{URL}->{current} =~ m{^https?://} ) {
 		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
 	}
 
@@ -1991,7 +1991,7 @@ sub show_info {
 		$out .= "$key: $val\n";
 		$prog{$pid}->{$key} = $val;
 		# Make into a link if this value is a URL
-		$val = a( { -class=>'info', -title=>'Open URL', -href=>$val }, $val ) if $val =~ m{^http://.+};
+		$val = a( { -class=>'info', -title=>'Open URL', -href=>$val }, $val ) if $val =~ m{^https?://.+};
 		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
 	}
 	# Show thumb if one exists
@@ -2146,7 +2146,7 @@ sub pvr_queue {
 	my $out;
 
 	# If a URL was specified by the User (assume auto mode list is OK):
-	if ( $opt->{URL}->{current} =~ m{^http://} ) {
+	if ( $opt->{URL}->{current} =~ m{^https?://} ) {
 		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
 	}
 
@@ -2773,7 +2773,7 @@ sub search_progs {
 				if ( ! $prog{$pid}->{$_} && $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
 					$prog{$pid}->{$_} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
 				}
-				if ( $prog{$pid}->{$_} =~ m{^http://} ) {
+				if ( $prog{$pid}->{$_} =~ m{^https?://} ) {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 				} else {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, 'Open URL' ) );
