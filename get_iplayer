@@ -276,9 +276,6 @@ my @argv_save = @ARGV;
 $opt_pre->parse( 1 );
 @ARGV = @argv_save;
 
-# internal ffmpeg options
-my @ffmpeg_opts = ('ffmpegversion', 'ffmpeg25', 'ffmpeg30', 'ffmpegav', 'ffmpegxx');
-
 # set encodings ASAP
 my @encoding_opts = ('encodinglocale', 'encodinglocalefs', 'encodingconsoleout', 'encodingconsolein');
 foreach ( @encoding_opts ) {
@@ -689,6 +686,7 @@ sub init_search {
 	} else {
 		unless ( $opt->{proxy} ) {
 			$opt->{proxy} = $ENV{HTTP_PROXY} || $ENV{http_proxy};
+			delete $opt->{proxy} unless defined $opt->{proxy};
 		}
 		logger "INFO: Using proxy: $opt->{proxy}\n" if $opt->{proxy};
 	}
@@ -5681,11 +5679,11 @@ sub modelist {
 		$mlist =~ s/\bhls\b/hlsaac/g if $mlist !~ /hlsaac/;
 		$mlist =~ s/dash/daf/g;
 	}
-	if ( $mlist ne $mlist_orig && ! $opt->{modewarn} ) {
+	if ( $mlist ne $mlist_orig && ! $opt->{nowarnmoderemap} ) {
 		main::logger "WARNING: Some recording modes were remapped to new values\n";
 		main::logger "WARNING: Input mode list remapped from '$mlist_orig' to '$mlist'\n";
 		main::logger "WARNING: Please update your preferences\n";
-		$opt->{modewarn} = 1;
+		$opt->{nowarnmoderemap} = 1;
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -5832,10 +5830,10 @@ sub ffmpeg_init {
 		if ( $ffvs =~ /^(\d+\.\d+)/i ) {
 			$ffvn = $1;
 			if ( $ffvn >= 3.0 ) {
-				$opt->{ffmpeg30} = 1;
-				$opt->{ffmpeg25} = 1;
+				$opt->{myffmpeg30} = 1;
+				$opt->{myffmpeg25} = 1;
 			} elsif ( $ffvn >= 2.5 ) {
-				$opt->{ffmpeg25} = 1;
+				$opt->{myffmpeg25} = 1;
 			} elsif ( $ffvn < 1.0 ) {
 				$opt->{ffmpegobsolete} = 1 unless defined $opt->{ffmpegobsolete};
 			}
@@ -5845,20 +5843,20 @@ sub ffmpeg_init {
 		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
 		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
 	}
-	$opt->{ffmpegversion} = $ffvn;
-	unless ( $opt->{ffmpegversion} ) {
+	$opt->{myffmpegversion} = $ffvn;
+	unless ( $opt->{myffmpegversion} ) {
 		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
 			delete $opt->{ffmpegobsolete};
-			$opt->{ffmpegav} = 1;
+			$opt->{myffmpegav} = 1;
 		}
-		$opt->{ffmpegxx} = 1;
+		$opt->{myffmpegxx} = 1;
 	}
 	# override ffmpeg checks
 	if ( $opt->{ffmpegforce} ) {
-		$opt->{ffmpeg30} = 1;
-		$opt->{ffmpeg25} = 1;
-		delete $opt->{ffmpegav};
-		delete $opt->{ffmpegxx};
+		$opt->{myffmpeg30} = 1;
+		$opt->{myffmpeg25} = 1;
+		delete $opt->{myffmpegav};
+		delete $opt->{myffmpegxx};
 	}
 	delete $binopts->{ffmpeg};
 	push @{ $binopts->{ffmpeg} }, ();
@@ -6432,16 +6430,16 @@ sub download {
 		}
 		# cannot convert hvf with avconv or ffmpeg < 2.5
 		if ( $mode =~ /^hvf/ && ! $opt->{raw} ) {
-			if ( $opt->{ffmpegav} ) {
+			if ( $opt->{myffmpegav} ) {
 				main::logger "WARNING: avconv does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
 				$opt->{raw} = 1;
-			} elsif ( $opt->{ffmpegxx} ) {
+			} elsif ( $opt->{myffmpegxx} ) {
 				main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for hvf downloads may fail\n";
-			} elsif ( ! $opt->{ffmpeg25} ) {
-				main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
+			} elsif ( ! $opt->{myffmpeg25} ) {
+				main::logger "WARNING: Your version of ffmpeg ($opt->{myffmpegversion}) does not support conversion of hvf downloads to MP4 - not converting .ts file\n";
 				$opt->{raw} = 1;
 			}
-			if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg25} ) {
+			if ( $opt->{myffmpegav} || $opt->{myffmpegxx} || ! $opt->{myffmpeg25} ) {
 				main::logger "WARNING: ffmpeg 2.5 or higher is required to convert hvf downloads to MP4\n";
 				main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .ts file\n";
 				main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
@@ -6454,16 +6452,16 @@ sub download {
 		}
 		# cannot convert dvf with avconv or ffmpeg < 3.0
 		if ( $mode =~ /^dvf/ && ! $opt->{raw} ) {
-			if ( $opt->{ffmpegav} ) {
+			if ( $opt->{myffmpegav} ) {
 				main::logger "WARNING: avconv does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
 				$opt->{raw} = 1;
-			} elsif ( $opt->{ffmpegxx} ) {
+			} elsif ( $opt->{myffmpegxx} ) {
 				main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for dvf downloads may fail\n";
-			} elsif ( ! $opt->{ffmpeg30} ) {
-				main::logger "WARNING: Your version of ffmpeg ($opt->{ffmpegversion}) does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+			} elsif ( ! $opt->{myffmpeg30} ) {
+				main::logger "WARNING: Your version of ffmpeg ($opt->{myffmpegversion}) does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
 				$opt->{raw} = 1;
 			}
-			if ( $opt->{ffmpegav} || $opt->{ffmpegxx} || ! $opt->{ffmpeg30} ) {
+			if ( $opt->{myffmpegav} || $opt->{myffmpegxx} || ! $opt->{myffmpeg30} ) {
 				main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
 				main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .m4a and .m4v files\n";
 				main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
@@ -7799,12 +7797,13 @@ sub run {
 		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
-		foreach ( @encoding_opts, @ffmpeg_opts ) {
-			$opt_backup->{$_} = $opt->{$_} if $opt->{$_};
+		my @backup_opts = grep /^(encoding|myap|myffmpeg|nowarn)/, keys %{$opt};
+		foreach ( @backup_opts ) {
+			$opt_backup->{$_} = $opt->{$_} if defined $opt->{$_};
 		}
 		my @search_args = $pvr->load_options($name);
-		foreach ( @encoding_opts, @ffmpeg_opts ) {
-			$opt->{$_} = $opt_backup->{$_} if $opt_backup->{$_};
+		foreach ( @backup_opts ) {
+			$opt->{$_} = $opt_backup->{$_} if defined $opt_backup->{$_};
 		}
 
 		## Display all options used for this pvr search
@@ -8295,10 +8294,10 @@ sub ap_init {
 	}
 	# determine AtomicParsley features
 	my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
-	$opt->{tag_hdvideo} = 1 if $ap_help =~ /--hdvideo/;
-	$opt->{tag_longdesc} = 1 if $ap_help =~ /--longdesc/;
-	$opt->{tag_longdescription} = 1 if $ap_help =~ /--longDescription/;
-	$opt->{tag_utf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
+	$opt->{myaphdvideo} = 1 if $ap_help =~ /--hdvideo/;
+	$opt->{myaplongdesc} = 1 if $ap_help =~ /--longdesc/;
+	$opt->{myaplongdescription} = 1 if $ap_help =~ /--longDescription/;
+	$opt->{myaputf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
 	$ap_check = 1;
 }
 
@@ -8315,7 +8314,7 @@ sub tag_file_mp4 {
 	# handle embedded quotes
 	tags_escape_quotes($tags);
 	# encode metadata for atomicparsley
-	tags_encode($tags) unless $opt->{tag_utf8};
+	tags_encode($tags) unless $opt->{tag_utf8} || $opt->{myaputf8};
 	# build atomicparsley command
 	my @cmd = (
 		$bin->{atomicparsley},
@@ -8341,16 +8340,16 @@ sub tag_file_mp4 {
 	# add descriptions to audio podcasts and video
 	if ( $tags->{is_video} || $tags->{is_podcast}) {
 		push @cmd, ('--description', $tags->{description} );
-		if ( $opt->{tag_longdescription} ) {
+		if ( $opt->{myaplongdescription} ) {
 			push @cmd, ( '--longDescription', $tags->{longDescription} );
-		} elsif ( $opt->{tag_longdesc} ) {
+		} elsif ( $opt->{myaplongdesc} ) {
 			push @cmd, ( '--longdesc', $tags->{longDescription} );
 		}
 	}
 	# video only
 	if ( $tags->{is_video} ) {
 		# all video
-		push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{tag_hdvideo};
+		push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{myaphdvideo};
 		# tv only
 		if ( $tags->{is_tvshow} ) {
 			push @cmd, (
