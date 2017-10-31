@@ -5752,7 +5752,7 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hlsaacbest', 'hlsaachigh,hlsaacbetter');
 		$mlist = main::expand_list($mlist, 'hlsaacbetter', 'hlsaacvgood');
 		$mlist = main::expand_list($mlist, 'hlsaacvgood', 'hlsaacstd,hlsaacgood');
-		$mlist = main::expand_list($mlist, 'hlsaacgood', 'hlsaacworse');
+		$mlist = main::expand_list($mlist, 'hlsaacgood', 'hlsaacmed,hlsaacworse');
 		$mlist = main::expand_list($mlist, 'hlsaacworse', 'hlsaacworst');
 		$mlist = main::expand_list($mlist, 'hlsaacworst', 'hlsaaclow');
 	}
@@ -5778,10 +5778,10 @@ sub modelist {
 	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
 		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
 		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
-		$mlist = main::expand_list($mlist, 'radiobest', 'dafhigh,hafhigh,radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobest', 'dafhigh,hafhigh,hlsaachigh,radiobetter');
 		$mlist = main::expand_list($mlist, 'radiobetter', 'radiovgood');
 		$mlist = main::expand_list($mlist, 'radiovgood', 'dafstd,hafstd,hlsaacstd,radiogood');
-		$mlist = main::expand_list($mlist, 'radiogood', 'dafmed,hafmed,radioworse');
+		$mlist = main::expand_list($mlist, 'radiogood', 'dafmed,hafmed,hlsaacmed,radioworse');
 		$mlist = main::expand_list($mlist, 'radioworse', 'radioworst');
 		$mlist = main::expand_list($mlist, 'radioworst', 'daflow,haflow,hlsaaclow');
 	}
@@ -6851,7 +6851,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlsaacstd,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,haf,hlsaac (default=dafhigh,hafhigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,daflow,haflow,hlsaaclow)."],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlsaachigh,hlsaacstd,hlsaacmed,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,haf,hlsaac (default=dafhigh,hafhigh,hlsaachigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,hlsaacmed,daflow,haflow,hlsaaclow)."],
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "Run user command after successful recording of radio programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 	};
