@@ -5074,7 +5074,12 @@ sub parse_dash_connection {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
 	}
-	my $dom = XML::LibXML->load_xml(string => $xml);
+	my $dom;
+	eval { $dom = XML::LibXML->load_xml(string => $xml); };
+	if ( $@ ) {
+		main::logger "ERROR: Failed to load DASH manifest:\n$@";
+		return;
+	}
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
 	$xpc->registerNs('mpd', $doc->namespaceURI());		
@@ -6542,6 +6547,9 @@ sub download_subtitles {
 	my ( $ua, $file, $versions ) = @_;
 	my $subs;
 	my $found;
+	my $dumped;
+	my $converted;
+	my $rc;
 
 	# in case --subtitles used with --pid for radio programme
 	return unless $prog->{type} eq "tv";
@@ -6562,10 +6570,25 @@ sub download_subtitles {
 				$found = 1;
 				main::logger "INFO: Downloading subtitles\n";
 				$subs = main::request_url_retry($ua, $suburl, 3);
-				last if $subs;
+				if ($subs) {
+					# Dump raw subs into a file if required
+					if ( $opt->{subsraw} && ! $dumped ) {
+						main::logger "INFO: Saving raw subtitles\n" if $opt->{verbose};
+						unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
+						open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
+						print $fhraw $subs;
+						close $fhraw;
+						$dumped = 1;
+					}
+					unless ( $converted ) {
+						$rc = ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
+						$converted = 1 unless $rc;
+					}
+				}
+				last if $converted;
 			}
 		}
-		last if $subs;
+		last if $converted;
 	}
 	# Return if we have no url
 	if (! $found) {
@@ -6578,15 +6601,11 @@ sub download_subtitles {
 		main::logger "ERROR: Use --subtitles-only to re-download\n";
 		return 1;
 	}
-	# Dump raw subs into a file if required
-	if ( $opt->{subsraw} ) {
-		main::logger "INFO: Saving raw subtitles\n" if $opt->{verbose};
-		unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
-		open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
-		print $fhraw $subs;
-		close $fhraw;
+	if (! $converted) {
+		main::logger "ERROR: Subtitles conversion to SRT failed\n";
+		main::logger "ERROR: Use --subtitles-only to re-download\n";
+		return $rc;
 	}
-	return ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
 }
 
 sub ttml_to_srt {
@@ -6620,7 +6639,12 @@ sub ttml_to_srt {
 	$columns = 37;
 	$huge = 'overflow';
 
-	my $dom = XML::LibXML->load_xml(string => $ttml);
+	my $dom;
+	eval { $dom = XML::LibXML->load_xml(string => $ttml); };
+	if ( $@ ) {
+		main::logger "ERROR: Failed to load subtitles:\n$@";
+		return 4;
+	}
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
 	$xpc->registerNs('tt', $doc->namespaceURI());
