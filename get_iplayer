@@ -1630,7 +1630,10 @@ sub request_url_retry {
 	for ($i = 0; $i < $retries; $i++) {
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
-			logger $failmsg if $i == $retries - 1;
+			if ( $i == $retries - 1 ) {
+				logger $failmsg;
+				logger "ERROR: ${\$res->code()} ${\$res->message()}\n";
+			}
 		} else {
 			logger $succeedmsg;
 			last;
@@ -6248,6 +6251,13 @@ sub get_links_schedule_mojo {
 			} else {
 				main::logger "\nWARNING: Failed to download schedule page: $url\n";
 				$rc_mojo = 1;
+				if ( my $err = $tx->error ) {
+					if ( $err->{code} ) {
+						main::logger "ERROR: $err->{code} $err->{message}\n";
+					} else {
+						main::logger "ERROR: Connection error: $err->{message}\n";
+					}
+				}
 			}
 			return;
 		}
@@ -7430,8 +7440,9 @@ sub fetch {
 		my $expected = 0;
 		my $got404 = 0;
 		my $i;
+		my $res;
 		for ($i = 0; $i < $retries; $i++) {
-			my $res = $ua->get($segment_url, ':content_cb' => $callback);
+			$res = $ua->get($segment_url, ':content_cb' => $callback);
 			$expected = $res->header("Content-Length");
 			if ( ! $res->is_success || ! $res->header("Content-Length") ) {
 				if ( $res->code == 404 ) {
@@ -7463,7 +7474,7 @@ sub fetch {
 		last if $got404;
 		# bail out on download failure
 		if ( $i == $retries ) {
-			@warnings = ("Failed to download file segment [$sequence]");
+			@warnings = ("Failed to download file segment [$sequence] (${\$res->code()} ${\$res->message()})");
 			$return = 1;
 			last;
 		}
