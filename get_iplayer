@@ -6337,8 +6337,17 @@ sub get_links_schedule_html_page {
 		my $pid = $entry->findvalue('.//div[@typeof="Episode" or @typeof="TVEpisode" or @typeof="RadioEpisode"]/@data-pid');
 		next unless $pid;
 		my $available_str = $entry->findvalue('.//h3[@property="startDate"]/@content');
-		next unless $available_str;
 		$available = Programme::get_time_string( $available_str );
+		my $end_date = $entry->findvalue('.//meta[@property="endDate"]/@content');
+		if ( $end_date ) {
+			my $finish = Programme::get_time_string( $end_date );
+			if ( $finish ) {
+				$duration = $finish - $available;
+				$available_str = $end_date;
+				$available = $finish;
+			}
+		}
+		next unless $available_str;
 		next if $available < $min_available;
 		next if ! $future && $available > $now;
 		next if $future && $available <= $now;
@@ -6354,14 +6363,6 @@ sub get_links_schedule_html_page {
 				$prog->{$pid}->{expires} = $expires;
 			}
 			next;
-		}
-		my $end_date = $entry->findvalue('.//meta[@property="endDate"]/@content');
-		if ( $end_date ) {
-			# compute duration
-			my $finish = Programme::get_time_string( $end_date );
-			if ( $finish ) {
-				$duration = $finish - $available;
-			}
 		}
 		$channel = $entry->findvalue('.//span[@typeof="BroadcastService"]/meta[@property="name"]/@content');
 		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="description"]');
