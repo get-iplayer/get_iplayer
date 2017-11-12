@@ -1530,6 +1530,8 @@ sub subtitle_offset {
 	my ( $hr, $min, $sec, $ms ) = split /[:,\.]/, $timestamp;
 	# split into hrs, mins, secs, ms
 	my $ts = $ms + $sec*1000 + $min*60*1000 + $hr*60*60*1000 + $offset;
+	my $sign = "-" if $ts < 0;
+	$ts = abs($ts);
 	$hr = int( $ts/(60*60*1000) );
 	$ts -= $hr*60*60*1000;
 	$min = int( $ts/(60*1000) );
@@ -1537,7 +1539,7 @@ sub subtitle_offset {
 	$sec = int( $ts/1000 );
 	$ts -= $sec*1000;
 	$ms = $ts;
-	return sprintf( '%02d:%02d:%02d,%03d', $hr, $min, $sec, $ms );
+	return sprintf( "$sign%02d:%02d:%02d,%03d", $hr, $min, $sec, $ms );
 }
 
 # Generic
@@ -3442,10 +3444,13 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			# Get subtitles if they exist and are required and media download succeeded
-			my $subfile_done;
-			my $subfile;
+			# Get subtitles if media download successful
 			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
+				if ( $opt->{start} && ! defined $opt->{suboffset} ) {
+					$opt->{suboffset} = $opt->{mysuboffset} if defined $opt->{mysuboffset};
+				}
+				my $subfile_done;
+				my $subfile;
 				$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
 				$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
 				unless ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) ) {
@@ -6654,7 +6659,7 @@ sub ttml_to_srt {
 		my $div_color = $style_colors{$div_style} || $body_color;
 		$curr_color = $div_color;
 		for my $p ($xpc->findnodes('tt:p', $div)) {
-			my @times;
+			my (@times, @ts);
 			for my $key ('begin', 'end') {
 				my $val = $p->findvalue("\@$key");
 				my @parts = split /:/, $val;
@@ -6670,7 +6675,7 @@ sub ttml_to_srt {
 			}
 			my ($begin, $end) = @times;
 			next unless $begin && $end;
-			if ( $offset ) {
+			if ( defined $offset ) {
 				$begin = main::subtitle_offset( $begin, $offset );
 				$end = main::subtitle_offset( $end, $offset );
 			}
@@ -7333,6 +7338,8 @@ sub fetch {
 	$media_size ||= int($total_duration * $media_bitrate * 1024.0 / 8.0);
 	$file_duration = $stop_elapsed - $start_elapsed;
 	$file_size = int($file_duration / $total_duration * $media_size);
+	# capture subtitles offset
+	$opt->{mysuboffset} = $start_elapsed * -1000.0 unless defined $opt->{suboffset} || $start_elapsed <= 0;
 
 	# open files
 	if ( $resuming ) {
@@ -7798,7 +7805,7 @@ sub run {
 		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
-		my @backup_opts = grep /^(encoding|myap|myffmpeg|nowarn)/, keys %{$opt};
+		my @backup_opts = grep /^(encoding|myap|myffmpeg|mysub|nowarn)/, keys %{$opt};
 		foreach ( @backup_opts ) {
 			$opt_backup->{$_} = $opt->{$_} if defined $opt->{$_};
 		}
