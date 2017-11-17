@@ -1097,10 +1097,10 @@ sub list_progs {
 			$this->generate_filenames( $ua, $this->file_prefix_format() );
 			# info
 			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
-			# subs (only for tv)
-			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
+			# tag
+			if ( $opt->{tagonly} && ! $opt->{notag} ) {
 				$this->create_dir();
-				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt", \@versions );
+				$this->tag_file;
 			}
 			# metadata
 			if ( $opt->{metadataonly} ) {
@@ -1112,10 +1112,10 @@ sub list_progs {
 				$this->create_dir();
 				$this->download_thumbnail();
 			}
-			# tag
-			if ( $opt->{tagonly} && ! $opt->{notag} ) {
+			# subs (only for tv)
+			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
 				$this->create_dir();
-				$this->tag_file;
+				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt", \@versions );
 			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
@@ -3442,16 +3442,10 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			# Get subtitles if they exist and are required and media download succeeded
-			my $subfile_done;
-			my $subfile;
-			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
-				$subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
-				$subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-				unless ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) ) {
-					# Rename the subtitle file accordingly if the stream get was successful
-					move($subfile, $subfile_done) if -f $subfile;
-				}
+			# Add to history and tag file
+			if ( ! $opt->{nowrite} ) {
+				$hist->add( $prog );
+				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
 			}
 			if ( $opt->{metadata} ) {
 				$prog->create_dir();
@@ -3461,11 +3455,16 @@ sub mode_ver_download_retry_loop {
 				$prog->create_dir();
 				$prog->download_thumbnail();
 			}
-			# Add to history, tag file, and run post-record command if a stream was written
-			if ( ! $opt->{nowrite} ) {
-				$hist->add( $prog );
-				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
+			# Get subtitles if they exist and are required and media download succeeded
+			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
+				my $subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
+				my $subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
+				unless ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) ) {
+					# Rename the subtitle file accordingly if the stream get was successful
+					move($subfile, $subfile_done) if -f $subfile;
+				}
 			}
+			# Run post-record command if a stream was written
 			my $command = $opt->{"command".$prog->{type}} || $opt->{command};
 			if ( $command && ! $opt->{nowrite} ) {
 				$prog->run_user_command( $command );
