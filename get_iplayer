@@ -213,7 +213,7 @@ my $opt_format = {
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
 	purgefiles	=> [ 1, "purgefiles|purge-files!", 'Misc', '--purge-files', "Delete downloaded programmes more than 30 days old"],
-	throttle	=> [ 1, "bw|throttle=f", 'Misc', '--throttle <Mibit/s>', "Bandwidth limit (in Mibit/s) for media file download. Default: unlimited. Synonym: --bw"],
+	throttle	=> [ 1, "bw|throttle=f", 'Misc', '--throttle <Mb/s>', "Bandwidth limit (in Mb/s) for media file download. Default: unlimited. Synonym: --bw"],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
@@ -4570,10 +4570,10 @@ sub get_metadata {
 				next if ( ! $prog->{durations}->{$version} ) || (! $prog->{streams}->{$version}->{$mode}->{bitrate} );
 				$size = $prog->{streams}->{$version}->{$mode}->{bitrate} * $prog->{durations}->{$version} / 8.0 * 1000.0;
 			}
-			if ( $size < 1048576 ) {
-				push @sizes, sprintf( "%s=%.0fKiB", $mode, $size / 1024.0 );
+			if ( $size < 1000000 ) {
+				push @sizes, sprintf( "%s=%.0fkB", $mode, $size / 1000.0 );
 			} else {
-				push @sizes, sprintf( "%s=%.0fMiB", $mode, $size / 1048576.0 );
+				push @sizes, sprintf( "%s=%.0fMB", $mode, $size / 1000000.0 );
 			}
 		}
 		$mode_sizes->{$version} = join ',', sort Programme::cmp_modes @sizes;
@@ -7189,12 +7189,18 @@ sub fetch {
 	my $total_duration = 0;
 	my $file_duration = 0;
 	my $file_size = 0;
+	my $file_size_mb = 0;
 	my $proxy_prefix;
 	my $resuming = 0;
 	my $retries = 3;
 	my $hide_progress = main::hide_progress();
 	my $crlf = ( $hide_progress || $opt->{logprogress} ) ? "\n" : "\r";
 	my $noresume = $opt->{noresume};
+	my $prog_mode = $streamdata{mode} || $prog->{mode};
+	my $prog_kind = $streamdata{kind};
+	my $rate_str;
+	my $rate_percent;
+	my $eta_str;
 
 	# LWP download callback
 	my $callback = sub {
@@ -7217,7 +7223,7 @@ sub fetch {
 			$curr_size = $size;
 			$curr_elapsed = $elapsed;
 		}
-		if ( $opt->{verbose} && ! $opt->{logprogress} ) {
+		if ( ! $opt->{logprogress} ) {
 			return if ($curr_percent - $prev_percent) < 0.1;
 		} else {
 			return if ($curr_percent - $prev_percent) < 1;
@@ -7225,10 +7231,10 @@ sub fetch {
 		$prev_percent = $curr_percent;
 		my $curr_time = time();
 		my $rate_time = max(1, ($curr_time - $begin_time));
-		my $rate_size_bps = max(0, ($curr_size - $begin_size));
-		my $rate_size_mibit = (8.0 / 1024.0 / 1024.0) * $rate_size_bps;
-		my $rate_bps = $rate_size_bps / $rate_time;
-		my $rate_mibit = $rate_size_mibit / $rate_time;
+		my $rate_size_b = max(0, ($curr_size - $begin_size));
+		my $rate_size_mbit = $rate_size_b * 8.0 / 1000000.0;
+		my $rate_b = $rate_size_b / $rate_time;
+		my $rate_mbit = $rate_size_mbit / $rate_time;
 		if ( $opt->{hash} ) {
 			main::logger '#';
 			$hash_count++;
@@ -7237,39 +7243,44 @@ sub fetch {
 			}
 		} else {
 			unless ( $hide_progress ) {
-				my $rate;
-				my $time;
 				if ($curr_time - $begin_time < 1) {
-					$rate = '----.- Mibit/s';
-					$time = '--:--:--';
+					$rate_str = '----.- Mb/s';
+					$eta_str = '--:--:--';
 				} else {
-					$rate = sprintf("%6.1f Mibit/s", $rate_mibit);
-					$time = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_bps ) )[2,1,0] );
+					if ( ($curr_percent - $rate_percent) >= 1.0 ) {
+						$rate_percent = $curr_percent;
+						$rate_str = sprintf("%6.1f Mb/s", $rate_mbit);
+						$eta_str = sprintf("%02d:%02d:%02d", ( gmtime( max(0, ($file_size - $curr_size)) / $rate_b ) )[2,1,0] );
+					}
 				}
 				if ( $opt->{verbose} ) {
-					main::logger sprintf("Downloading: %8.2f MiB / ~%.2f MiB (%02d:%02d:%02d / %8s) [%5d / %d] %5.1f%% %s %s remaining${crlf}",
-						$curr_size / 1024.0 / 1024.0,
-						$file_size / 1024.0 / 1024.0,
+					main::logger sprintf("%5.1f%% %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] @%s ETA: %s (%s) [%s]${crlf}",
+						$curr_percent,
+						$curr_size / 1000000.0,
+						$file_size_mb,
 						(gmtime($curr_elapsed))[2,1,0],
 						$stop_elapsed_str,
 						$curr_sequence,
 						$stop_sequence,
-						$curr_percent,
-						$rate,
-						$time,
+						$rate_str,
+						$eta_str,
+						$prog_mode,
+						$prog_kind,
 					);
 				} else {
-					main::logger sprintf("%3d%% [%-25s] ETA: %s (%s) [%s]${crlf}",
+					main::logger sprintf("%5.1f%% of ~%.2f MB @%s ETA: %s (%s) [%s]${crlf}",
 						$curr_percent,
-						'=' x int($curr_percent / 4),
-						$time, $streamdata{mode} || $prog->{mode},
-						$streamdata{kind}
+						$file_size_mb,
+						$rate_str,
+						$eta_str,
+						$prog_mode,
+						$prog_kind,
 					);
 				}
 			}
 		}
 		if ( $opt->{throttle} > 0 ) {
-			my $rate_time_min = $rate_size_mibit / $opt->{throttle};
+			my $rate_time_min = $rate_size_mbit / $opt->{throttle};
 			if ( $rate_time < $rate_time_min ) {
 				my $rate_sleep = 1 + ($rate_time_min - $rate_time);
 				sleep($rate_sleep);
@@ -7372,9 +7383,10 @@ sub fetch {
 	$resume_elapsed ||= $start_elapsed;
 	$prev_elapsed = $elapsed = $resume_elapsed;
 	# estimate expected file size
-	$media_size ||= int($total_duration * $media_bitrate * 1024.0 / 8.0);
+	$media_size ||= int($total_duration * $media_bitrate * 1000.0 / 8.0);
 	$file_duration = $stop_elapsed - $start_elapsed;
 	$file_size = int($file_duration / $total_duration * $media_size);
+	$file_size_mb = $file_size / 1000000.0;
 
 	# open files
 	if ( $resuming ) {
@@ -7410,8 +7422,8 @@ sub fetch {
 	}
 	unlink $resume_file unless $resuming;
 	if ( $resuming ) {
-		main::logger sprintf("INFO: Resume downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
-			$resume_size / 1024.0 / 1024.0,
+		main::logger sprintf("INFO: Resume downloading at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$resume_size / 1000000.0,
 			(gmtime($resume_elapsed))[2,1,0],
 			$resume_sequence
 		) if $opt->{verbose};
@@ -7423,8 +7435,8 @@ sub fetch {
 		}
 		binmode $fh;
 		$fh->autoflush(1);
-		main::logger sprintf("INFO: Begin downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
-			$size / 1024.0 / 1024.0,
+		main::logger sprintf("INFO: Begin downloading at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$size / 1000000.0,
 			(gmtime($start_elapsed))[2,1,0],
 			$start_sequence
 		) if $opt->{verbose};
@@ -7548,20 +7560,22 @@ sub fetch {
 	}
 	my $end_time = time() + 0.0001;
 	if ( $opt->{verbose} ) {
-		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MiB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d at %.2f Mibit/s\n",
-			($prev_size - $resume_size) / (1024.0 * 1024.0),
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d \@ %.2f Mb/s (%s) [%s]\n",
+			($prev_size - $resume_size) / 1000000.0,
 			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
 			max($prev_sequence - $resume_sequence + 1, 0),
 			(gmtime($end_time - $begin_time))[2,1,0],
-			($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
+			($prev_size - $resume_size) / ($end_time - $begin_time) / 1000000.0 * 8.0,
+			$prog_mode,
+			$prog_kind,
 		);
 	} else {
-		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MiB (%02d:%02d:%02d) \@ %.2f Mibit/s (%s) [%s]\n",
-			($prev_size - $resume_size) / (1024.0 * 1024.0),
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) \@ %.2f Mb/s (%s) [%s]\n",
+			($prev_size - $resume_size) / 1000000.0,
 			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
-			($prev_size - $resume_size) / ($end_time - $begin_time) / 1024.0 / 1024.0 * 8.0,
-			$streamdata{mode} || $prog->{mode},
-			$streamdata{kind}
+			($prev_size - $resume_size) / ($end_time - $begin_time) / 1000000.0 * 8.0,
+			$prog_mode,
+			$prog_kind,
 		);
 	}
 
@@ -7569,8 +7583,8 @@ sub fetch {
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
 		if ( $opt->{verbose} ) {
-			main::logger sprintf("WARNING: Stopped downloading at: %.2f MiB (%02d:%02d:%02d) [%d]\n",
-				$prev_size / 1024.0 / 1024.0,
+			main::logger sprintf("WARNING: Stopped downloading at: %.2f MB (%02d:%02d:%02d) [%d]\n",
+				$prev_size / 1000000.0,
 				(gmtime($prev_elapsed))[2,1,0],
 				$prev_sequence
 			);
@@ -7584,8 +7598,8 @@ sub fetch {
 
 	if ( $resuming ) {
 		# summary for file
-		main::logger sprintf("INFO: Downloaded (total): %.2f MiB (%02d:%02d:%02d) [%d]\n",
-			$prev_size / (1024.0 * 1024.0),
+		main::logger sprintf("INFO: Downloaded (total): %.2f MB (%02d:%02d:%02d) [%d]\n",
+			$prev_size / 1000000.0,
 			(gmtime($prev_elapsed - $start_elapsed))[2,1,0],
 			$prev_sequence - $start_sequence + 1
 		) if $opt->{verbose};
