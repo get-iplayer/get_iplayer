@@ -124,6 +124,7 @@ my $opt_format = {
 	limitprefixlength => [ 1, "limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
 	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Output', '--metadata-only', "Create specified metadata info file without any recording or streaming."],
+	nosanitise	=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid characters for Windows ('\"*:<>?|') and macOS (':') will be removed."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	raw		=> [ 0, "raw!", 'Output', '--raw', "Don't remux or change the recording in any way.  Saves output file in native container format (HLS->MPEG-TS, DASH->MP4)"],
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Save recorded files into subdirectory.  Default: same name as programme."],
@@ -645,6 +646,10 @@ sub print_divider {
 
 sub init_search {
 	print_divider if $opt->{pid} && $opt->{verbose};
+
+	if ( $opt->{nosanitise} ) {
+		$opt->{whitespace} = 1;
+	}
 
 	# Set --subtitles if --subsonly is used
 	if ( $opt->{subsonly} ) {
@@ -1928,33 +1933,44 @@ sub StringUtils::sanitize_path {
 	my $is_path = shift || 0;
 	my $force_default = shift || 0;
 	my $punct_bad = '[!"#$%&\'()*+,:;<=>?@[\]^`{|}~]';
-	# Replace forward slashes with _ if not path
-	$string =~ s/\//_/g unless $is_path;
-	# Replace backslashes with _ if not Windows path
-	$string =~ s/\\/_/g unless $^O eq "MSWin32" && $is_path;
-	# use ISO8601 dates
-	$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
-	# ASCII-fy some punctuation
-	$string = StringUtils::convert_punctuation($string);
-	# Remove non-ASCII chars
-	$string = StringUtils::remove_marks($string);
-	$string =~ s/[^\x{20}-\x{7e}]//g;
-	# Truncate duplicate colon/semi-colon/comma
-	$string =~ s/([:;,])(\1)+/$1/g;
-	# Add whitespace behind colon/semi-colon/comma if not present
-	$string =~ s/([:;,])(\S)/$1 $2/g;
-	# Remove most punctuation chars
-	# Includes invalid chars for FAT and HFS
-	$string =~ s/$punct_bad//g;
-	# Replace ellipsis
-	$string =~ s/\.{3}/_/g;
-	# Remove extra/leading/trailing whitespace
-	$string =~ s/\s+/ /g;
-	$string =~ s/(^\s+|\s+$)//g;
-	# Replace whitespace with _ unless --whitespace
-	$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
-	# Truncate multiple replacement chars
-	$string =~ s/_+/_/g;
+	my $win_bad = '["*:<>?|]';
+	my $mac_bad = '[:]';
+	# Replace forward slashes with underscore if not path
+	$string =~ s|\/|_|g unless $is_path;
+	# Replace backslashes with underscore if not Windows path
+	$string =~ s|\\|_|g unless $^O eq "MSWin32" && $is_path;
+	# Do not sanitise if specified
+	if ( $opt->{nosanitise} && ! $force_default ) {
+		# Remove invalid chars for Windows
+		$string =~ s/$win_bad//g if $^O eq "MSWin32";
+		# Remove invalid chars for macOS
+		$string =~ s/$mac_bad//g if $^O eq "darwin";
+	} else {
+		# use ISO8601 dates
+		$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
+		# ASCII-fy some punctuation
+		$string = StringUtils::convert_punctuation($string);
+		# Remove diacritical marks
+		$string = StringUtils::remove_marks($string);
+		# Remove non-ASCII chars
+		$string =~ s/[^\x{20}-\x{7e}]//g;
+		# Truncate duplicate colon/semi-colon/comma
+		$string =~ s/([:;,])(\1)+/$1/g;
+		# Add whitespace behind colon/semi-colon/comma if not present
+		$string =~ s/([:;,])(\S)/$1 $2/g;
+		# Remove most punctuation chars
+		# Includes invalid chars for Windows and macOS
+		$string =~ s/$punct_bad//g;
+		# Replace ellipsis
+		$string =~ s/\.{3}/_/g;
+		# Remove extra/leading/trailing whitespace
+		$string =~ s/\s+/ /g;
+		$string =~ s/(^\s+|\s+$)//g;
+		# Replace whitespace with underscore unless --whitespace
+		$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
+		# Truncate multiple replacement chars
+		$string =~ s/_+/_/g;
+	}
 	return $string;
 }
 
