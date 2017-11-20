@@ -1525,11 +1525,13 @@ sub get_links {
 
 # Generic
 # Returns an offset timestamp given an srt begin or end timestamp and offset in ms
+# returns undef if timestamp < 0 or < --start or > --stop
 sub subtitle_offset {
-	my ( $timestamp, $offset ) = @_;
+	my ( $timestamp, $offset, $start, $stop ) = @_;
 	my ( $hr, $min, $sec, $ms ) = split /[:,\.]/, $timestamp;
 	# split into hrs, mins, secs, ms
-	my $ts = $ms + $sec*1000 + $min*60*1000 + $hr*60*60*1000 + $offset;
+	my $ts = $ms + $sec*1000 + $min*60*1000 + $hr*60*60*1000 + $offset - $start;
+	return undef if $ts < 0 || ( $stop && $ts > $stop + $offset - $start );
 	$hr = int( $ts/(60*60*1000) );
 	$ts -= $hr*60*60*1000;
 	$min = int( $ts/(60*1000) );
@@ -6583,7 +6585,7 @@ sub download_subtitles {
 		print $fhraw $subs;
 		close $fhraw;
 	}
-	return ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
+	return ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset}, $opt->{mysubstart}, $opt->{mysubstop} );
 }
 
 sub ttml_to_srt {
@@ -6591,6 +6593,8 @@ sub ttml_to_srt {
 	my $srt = shift;
 	my $mono = shift;
 	my $offset = shift;
+	my $start = shift;
+	my $stop = shift;
 	my $prefix = "\n- ";
 	my $index = 0;
 	my %hex_colors = (
@@ -6654,7 +6658,7 @@ sub ttml_to_srt {
 		my $div_color = $style_colors{$div_style} || $body_color;
 		$curr_color = $div_color;
 		for my $p ($xpc->findnodes('tt:p', $div)) {
-			my @times;
+			my (@times, @ts);
 			for my $key ('begin', 'end') {
 				my $val = $p->findvalue("\@$key");
 				my @parts = split /:/, $val;
@@ -6670,10 +6674,9 @@ sub ttml_to_srt {
 			}
 			my ($begin, $end) = @times;
 			next unless $begin && $end;
-			if ( $offset ) {
-				$begin = main::subtitle_offset( $begin, $offset );
-				$end = main::subtitle_offset( $end, $offset );
-			}
+			$begin = main::subtitle_offset( $begin, $offset, $start, $stop );
+			$end = main::subtitle_offset( $end, $offset, $start, $stop );
+			next unless $begin && $end;
 			my $text;
 			my $p_color;
 			my $p_style = $p->findvalue('@style');
@@ -7326,6 +7329,11 @@ sub fetch {
 	$stop_sequence ||= $max_sequence;
 	$stop_elapsed ||= $total_duration;
 	$stop_elapsed_str = sprintf("%02d:%02d:%02d", (gmtime($stop_elapsed))[2,1,0]);
+	if ( $opt->{verbose} ) {
+		my $start_elapsed_str = sprintf("%02d:%02d:%02d", (gmtime($start_elapsed))[2,1,0]);
+		main::logger "INFO: Actual start time: ".sprintf("%.3f secs (%s.%.3d)\n", $start_elapsed, $start_elapsed_str, ($start_elapsed - int($start_elapsed)) * 1000) if $opt->{start};
+		main::logger "INFO: Actual stop  time: ".sprintf("%.3f secs (%s.%.3d)\n", $stop_elapsed, $stop_elapsed_str, ($stop_elapsed - int($stop_elapsed)) * 1000) if $opt->{stop};
+	}
 	$resume_sequence ||= $start_sequence;
 	$resume_elapsed ||= $start_elapsed;
 	$prev_elapsed = $elapsed = $resume_elapsed;
@@ -7333,7 +7341,10 @@ sub fetch {
 	$media_size ||= int($total_duration * $media_bitrate * 1024.0 / 8.0);
 	$file_duration = $stop_elapsed - $start_elapsed;
 	$file_size = int($file_duration / $total_duration * $media_size);
-
+	# capture subtitles start/stop
+	$opt->{mysubstart} = $start_elapsed * 1000.0 if $opt->{start};
+	$opt->{mysubstop} = $stop_elapsed * 1000.0 if $opt->{stop};
+	
 	# open files
 	if ( $resuming ) {
 		# open output file for resume
@@ -7798,7 +7809,7 @@ sub run {
 		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
-		my @backup_opts = grep /^(encoding|myap|myffmpeg|nowarn)/, keys %{$opt};
+		my @backup_opts = grep /^(encoding|myap|myffmpeg|mysub|nowarn)/, keys %{$opt};
 		foreach ( @backup_opts ) {
 			$opt_backup->{$_} = $opt->{$_} if defined $opt->{$_};
 		}
