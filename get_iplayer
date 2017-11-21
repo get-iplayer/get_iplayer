@@ -1823,6 +1823,7 @@ sub run_cmd {
 	# use system(); - probably only likely in win32
 	if ($@) {
 		main::logger "WARNING: Please download and run latest installer - 'IPC::Open3' is not available\n";
+		main::logger "ERROR: Failed to load IPC::Open3:\n$@" if $opt->{verbose};
 		#push @cmd, $system_suffix;
 		my $rtn = system( @cmd );
 
@@ -4327,6 +4328,7 @@ sub get_metadata {
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to retrieve programme metadata.\n";
+		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
 	} else {
 		my $url = $prog_data_url.$prog->{pid}.".json";
 		my $json = main::request_url_retry($ua, $url, 3, '', '');
@@ -4642,6 +4644,7 @@ sub fetch_pid_info {
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to determine PID type.\n";
+		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
 		return undef;
 	}
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
@@ -4675,6 +4678,7 @@ sub fetch_episode_pids {
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to recursively extract episode PIDs.\n";
+		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		return \@pids;
 	}
 	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserepisode} ) {
@@ -5065,6 +5069,7 @@ sub parse_dash_connection {
 		if ( ! $opt->{nowarnlibxmldash} ) {
 			$opt->{nowarnlibxmldash} = 1;
 			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to use MPEG-DASH streams.\n";
+			main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		}
 		return;
 	}
@@ -6120,6 +6125,7 @@ sub get_links_schedule {
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
+		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		return;
 	}
 	my @schedule_dates;
@@ -6169,6 +6175,7 @@ sub get_links_schedule {
 		eval "use Mojo::UserAgent";
 		if ( $@ ) {
 			main::logger "WARNING: Please download and run latest installer or install the Mojolicious Perl module for concurrent indexing of $prog_type programmes.\n";
+			main::logger "ERROR: Failed to load Mojo::UserAgent:\n$@" if $opt->{verbose};
 		} else {
 			main::logger "\nINFO: Indexing $prog_type programmes (concurrent)\n";
 			my @mojo_urls;
@@ -6224,6 +6231,7 @@ sub get_links_schedule_mojo {
 	eval "use Mojo::UserAgent";
 	if ( $@ ) {
 		main::logger "INFO: Mojo::UserAgent not available\n";
+		main::logger "ERROR: Failed to load Mojo::UserAgent:\n$@" if $opt->{verbose};
 		return 1;
 	}
 
@@ -6333,6 +6341,7 @@ sub get_links_schedule_html_page {
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
+		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		return 1;
 	}
 	my $cache_channel = $channel;
@@ -6639,6 +6648,7 @@ sub ttml_to_srt {
 	eval "use XML::LibXML '1.91'; use XML::LibXML::XPathContext;";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to convert subtitles.\n";
+		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		return 1;
 	}
 
