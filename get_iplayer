@@ -3220,15 +3220,15 @@ sub generate_version_list {
 
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
 	my @version_search_order = default_version_list();
+	for my $key ( keys %{$prog->{verpids}} ) {
+		next if $key =~ /(audiodescribed|signed)/;
+		$key =~ s/\s+.*$//;
+		if ( ! grep /^${key}$/i, @version_search_order ) {
+			push @version_search_order, lc($key);
+		}
+	}
 	if ( $opt->{versionlist} ) {
 		@version_search_order = map { /^default$/i ? @version_search_order : $_ } split /,/, $opt->{versionlist};
-	} else {
-		for my $key ( keys %{$prog->{verpids}} ) {
-			next if $key =~ /(audiodescribed|signed)/;
-			if ( ! grep /^${key}$/i, @version_search_order ) {
-				push @version_search_order, lc($key);
-			}
-		}
 	}
 
 	# check here for no matching verpids for specified version search list???
