@@ -2571,8 +2571,9 @@ sub refresh {
 		'--encoding-locale=UTF-8',
 		'--encoding-console-out=UTF-8',
 		'--nocopyright',
+		'--refresh',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'expiry=30', 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture", "search=no search just refresh" ),
+		get_iplayer_webrequest_args( 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture" ),
 	);
 	print $fh '<pre>';
 	run_cmd_autorefresh( $fh, $se, 1, @cmd );
