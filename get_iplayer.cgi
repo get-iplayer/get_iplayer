@@ -3820,10 +3820,10 @@ sub begin_html {
 	my $title;
 	my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
 	my $autopvrrun  = $cgi->cookie( 'AUTOPVRRUN' ) || $cgi->param( 'AUTOPVRRUN' );
-	if ( $autorefresh && $cgi->param( 'NEXTPAGE' ) eq 'refresh' ) {
+	if ( $autorefresh > 0 && $cgi->param( 'NEXTPAGE' ) eq 'refresh' ) {
 		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh&PROGTYPES=$opt->{PROGTYPES}->{current}', ".(1000*3600*$autorefresh)." );\">";
 		$title = 'Refreshing Cache: get_iplayer Web PVR Manager';
-	} elsif ( $autopvrrun && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
+	} elsif ( $autopvrrun > 0 && $cgi->param( 'NEXTPAGE' ) eq 'pvr_run' ) {
 		$body_element = "<BODY onLoad=\"javascript:RefreshTab( '${request_host}?NEXTPAGE=pvr_run&AUTOPVRRUN=$autopvrrun', ".(1000*3600*$autopvrrun)." );\">";
 		$title = 'Running PVR: get_iplayer Web PVR Manager';
 	} else {
@@ -3859,6 +3859,9 @@ sub insert_javascript {
 	function RefreshTab(url, time, force ) {
 		if ( force ) {
 			window.location.href = url;
+		}
+		if ( time <= 0 ) {
+			return;
 		}
 		setTimeout( "RefreshTab('" + url + "'," + time + ", 1 )", time );
 	}
