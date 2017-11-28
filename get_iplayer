@@ -1647,7 +1647,7 @@ sub request_url_retry {
 		if ( ! $res->is_success ) {
 			if ( $i == $retries - 1 ) {
 				logger $failmsg;
-				logger "ERROR: ${\$res->code()} ${\$res->message()}\n";
+				logger "ERROR: Response: ${\$res->code()} ${\$res->message()}\n" if $opt->{verbose};
 			}
 		} else {
 			logger $succeedmsg;
@@ -6291,11 +6291,13 @@ sub get_links_schedule_mojo {
 			} else {
 				main::logger "\nWARNING: Failed to download schedule page: $url\n";
 				$rc_mojo = 1;
-				if ( my $err = $tx->error ) {
-					if ( $err->{code} ) {
-						main::logger "ERROR: $err->{code} $err->{message}\n";
-					} else {
-						main::logger "ERROR: Connection error: $err->{message}\n";
+				if ( $opt->{verbose} ) {
+					if ( my $err = $tx->error ) {
+						if ( $err->{code} ) {
+							main::logger "ERROR: Response: $err->{code} $err->{message}\n";
+						} else {
+							main::logger "ERROR: Connection error: $err->{message}\n";
+						}
 					}
 				}
 			}
@@ -7568,7 +7570,8 @@ sub fetch {
 		last if $got404;
 		# bail out on download failure
 		if ( $i == $retries ) {
-			@warnings = ("Failed to download file segment [$sequence] (${\$res->code()} ${\$res->message()})");
+			@warnings = ("Failed to download file segment [$sequence]");
+			push @warnings, "Response: ${\$res->code()} ${\$res->message()}" if $opt->{verbose};
 			$return = 1;
 			last;
 		}
