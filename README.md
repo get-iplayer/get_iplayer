@@ -43,7 +43,7 @@
 
 * List all TV programmes (`--type=tv` set by default):
 
-	`get_iplayer`
+	`get_iplayer ".*"`
 
 	Search output appears in this format:
 
@@ -57,11 +57,11 @@
   
 * List all TV programmes with long descriptions:
 
-	`get_iplayer --long`
+	`get_iplayer --long ".*"`
 
 * List all radio programmes:
 
-	`get_iplayer --type=radio`
+	`get_iplayer --type=radio ".*"`
 
 * List all TV programmes with "doctor who" in the name (matching is case-insensitive):
 
@@ -73,7 +73,7 @@
 
 * List all BBC One programmes:
 
-	`get_iplayer --channel="BBC One"`
+	`get_iplayer --channel="BBC One" ".*"`
 
 * List Radio 4 and Radio 4 Extra programmes with "Book at Bedtime" in the title:
 
