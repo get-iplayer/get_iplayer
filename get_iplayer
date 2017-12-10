@@ -6754,7 +6754,10 @@ sub ttml_to_srt {
 			if ($p_style) {
 				$p_color = $style_colors{$p_style};
 			} else {
-				eval { $p_color = $hex_colors{$p->findvalue('@tts:color')} };
+				eval { $p_color = $p->findvalue('@tts:color') };
+			}
+			if ( $p_color && $p_color !~ /^#/ ) {
+				$p_color = $hex_colors{$p_color};
 			}
 			$p_color ||= $div_color;
 			for my $p_child ($p->childNodes) {
@@ -6780,7 +6783,10 @@ sub ttml_to_srt {
 					if ($span_style) {
 						$span_color = $style_colors{$span_style};
 					} else {
-						eval { $span_color = $hex_colors{$span->findvalue('@tts:color')} };
+						eval { $span_color = $span->findvalue('@tts:color') };
+					}
+					if ( $span_color && $span_color !~ /^#/ ) {
+						$span_color = $hex_colors{$span_color};
 					}
 					$span_color ||= $p_color;
 					for my $span_child ($span->childNodes) {
