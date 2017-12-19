@@ -1128,7 +1128,7 @@ sub list_progs {
 			# subs (only for tv)
 			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
 				$this->create_dir();
-				$this->download_subtitles( $ua, "$this->{dir}/$this->{fileprefix}.srt", \@versions );
+				$this->download_subtitles( $ua, $this->{subsfile}, \@versions );
 			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
@@ -3500,11 +3500,9 @@ sub mode_ver_download_retry_loop {
 			}
 			# Get subtitles if they exist and are required and media download succeeded
 			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
-				my $subfile_done = "$prog->{dir}/$prog->{fileprefix}.srt";
-				my $subfile = "$prog->{dir}/$prog->{fileprefix}.partial.srt";
-				unless ( $prog->download_subtitles( $ua, $subfile, [ $version ] ) ) {
+				unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $version ] ) ) {
 					# Rename the subtitle file accordingly if the stream get was successful
-					move($subfile, $subfile_done) if -f $subfile;
+					move($prog->{subspart}, $prog->{subsfile}) if -f $prog->{subspart};
 				}
 			}
 			# Run post-record command if a stream was written
@@ -3873,7 +3871,13 @@ sub generate_filenames {
 		$prog->{thumbfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}");
 		$prog->{thumbfile} = main::encode_fs($prog->{thumbfile});
 	}
-
+	
+	if ( $prog->{type} eq "tv" ) {
+		$prog->{subsraw} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttxt"));
+		$prog->{subspart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.srt"));
+		$prog->{subsfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.srt"));
+	}
+	
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
 	main::logger "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
 	main::logger "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
@@ -6631,8 +6635,8 @@ sub download_subtitles {
 					# Dump raw subs into a file if required
 					if ( $opt->{subsraw} && ! $dumped ) {
 						main::logger "INFO: Saving raw subtitles\n" if $opt->{verbose};
-						unlink("$prog->{dir}/$prog->{fileprefix}.ttxt");
-						open( my $fhraw, "> $prog->{dir}/$prog->{fileprefix}.ttxt");
+						unlink($prog->{subsraw});
+						open( my $fhraw, "> $prog->{subsraw}");
 						print $fhraw $subs;
 						close $fhraw;
 						$dumped = 1;
