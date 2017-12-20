@@ -1128,7 +1128,10 @@ sub list_progs {
 			# subs (only for tv)
 			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
 				$this->create_dir();
-				$this->download_subtitles( $ua, $this->{subsfile}, \@versions );
+				unless ( $this->download_subtitles( $ua, $this->{subspart}, \@versions ) ) {
+					# Rename the subtitle file accordingly if the stream get was successful
+					move($this->{subspart}, $this->{subsfile}) if -f $this->{subspart};
+				}
 			}
 			# streaminfo
 			if ( $opt->{streaminfo} ) {
