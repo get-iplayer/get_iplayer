@@ -673,7 +673,7 @@ sub init_search {
 	}
 
 	# Ensure lowercase types
-	$opt->{type} = lc( $opt->{type} );
+	$opt->{type} = lc( $opt->{type} ) if $opt->{type};
 	# Expand 'all' type to comma separated list all prog types
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 
@@ -854,7 +854,13 @@ sub find_matches {
 		}
 	}
 
-	return unless @search_args;
+	unless ( @search_args ) {
+		if ( grep /^(exclude|category|excludecategory|channel|excludechannel|availablesince|expiresbefore|since|before|list|tree|fields|future|long|type)$/, keys %{$opt} ) {
+			# force to stderr for web pvr
+			print STDERR "ERROR: Search term(s) required. To list all programmes, use \".*\" (incl. quotes)\n";
+		}
+		return;
+	}
 	
 	# Parse remaining args
 	my @match_list;
