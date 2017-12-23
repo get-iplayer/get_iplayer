@@ -126,6 +126,7 @@ my $opt_format = {
 	limitprefixlength => [ 1, "limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
 	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Output', '--metadata-only', "Create specified metadata info file without any recording or streaming."],
+	nometadata	=> [ 1, "nometadata|no-metadata!", 'Output', '--no-metadata', "Do not create metadata info file after recording (overrides --metadata)."],
 	nosanitise	=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid characters for Windows ('\"*:<>?|') and macOS (':') will be removed."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
 	raw		=> [ 0, "raw!", 'Output', '--raw', "Don't remux or change the recording in any way.  Saves output file in native container format (HLS->MPEG-TS, DASH->MP4)"],
@@ -665,6 +666,10 @@ sub init_search {
 	# Set --metadata if --metadata-only is used
 	if ( defined $opt->{metadata} || $opt->{metadataonly} ) {
 		$opt->{metadata} = "generic";
+	}
+	
+	if ( $opt->{nometadata} && ! $opt->{metadataonly} ) {
+		delete $opt->{metadata};
 	}
 
 	# Ensure lowercase types
