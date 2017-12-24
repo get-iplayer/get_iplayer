@@ -761,7 +761,7 @@ sub find_pid_matches {
 	print_divider unless $opt->{pid} && $opt->{verbose};
 	my ( $type, $prog, $index_prog ) = init_search( @search_args );
 	my $now = time();
-	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} ) ) && $hist->check( $opt->{pid} );
+	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} || $opt->{streaminfo} ) ) && $hist->check( $opt->{pid} );
 	# load caches from file only
 	for my $t ( progclass() ) {
 		get_links( $prog, $index_prog, $t, 1, $now );
@@ -816,7 +816,7 @@ sub download_pid {
 		list_progs( { $this->{type} => 1 }, $this );
 	}
 	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} ) ) {
+	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} || $opt->{streaminfo} ) ) {
 		$retcode = $this->download_retry_loop( $hist );
 	}
 	return $retcode;
