@@ -3379,6 +3379,10 @@ sub download_retry_loop {
 		my $retcode = 1;
 		main::logger "INFO: Searching for version: '$version'\n" if $opt->{verbose};
 		if ( $prog->{verpids}->{$version} ) {
+			if ( $prog->{version} ne $version ) {
+				undef $prog->{filename};
+				main::logger "INFO: Regenerate filename for version change: $prog->{version} -> $version\n" if ( $prog->{version} && $opt->{verbose} );
+			}
 			$prog->{version} = $version;
 			main::logger "INFO: Found version: '$prog->{version}'\n" if $opt->{verbose};
 
