@@ -3725,12 +3725,6 @@ sub generate_filenames {
 		$prog->get_metadata_general();
 	}
 
-	# Determine directory and find its absolute path
-	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
-	$prog->{dir} = main::encode_fs($prog->{dir});
-
-	$prog->{fileprefix} = $opt->{fileprefix} || $format;
-
 	# get $name, $episode from title
 	my ( $name, $episode ) = Programme::bbciplayer::split_title( $prog->{title} ) if $prog->{title};
 	$prog->{name} = $name if $name && ! $prog->{name};
@@ -3748,46 +3742,30 @@ sub generate_filenames {
 	$prog->{descmedium} = substr( $prog->{desc}, 0, 1024 ) if ! $prog->{descmedium};
 	$prog->{descshort} = substr( $prog->{desc}, 0, 255 ) if ! $prog->{descshort};
 
+	# Determine directory and find its absolute path
+	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{IPLAYER_OUTDIR} || '.' );
+	$prog->{dir} = main::encode_fs($prog->{dir});
+	# Create a subdir for programme
+	if ( $opt->{subdir} ) {
+		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
+		$prog->{dir} = main::encode_fs(File::Spec->catdir($prog->{dir}, $subdir));
+		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
+	}
+
+	$prog->{fileprefix} = $opt->{fileprefix} || $format;
 	# substitute fields and sanitize $prog->{fileprefix}
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	# Don't allow <mode> in fileprefix as it can break when resumes fallback on differently numbered modes of the same type change for <modeshort>
 	$prog->{fileprefix} =~ s/<mode>/<modeshort>/g;
 	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
 	$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
-
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	# limitprefixlength allows this to be shortened
 	unless ( $opt->{limitprefixlength} ) {
 		$opt->{limitprefixlength} = 240;
 	}
 	$prog->{fileprefix} = substr( $prog->{fileprefix}, 0, $opt->{limitprefixlength} );
-
 	main::logger "'$prog->{fileprefix}'\n" if $opt->{debug};
-
-	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
-		$prog->{filename} = $opt->{tagonlyfilename};
-	}
-	# Special case for history mode, parse the fileprefix and dir from filename if it is already defined
-	if ( ( $opt->{history} || $opt->{tagonly} ) && defined $prog->{filename} && $prog->{filename} ne '' ) {
-		( $prog->{fileprefix}, $prog->{dir}, $prog->{ext} ) = fileparse($prog->{filename}, qr/\.[^.]*/);
-		# Fix up file path components
-		$prog->{ext} =~ s/\.//;
-		$prog->{dir} = File::Spec->canonpath($prog->{dir});
-		$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}");
-	}
-
-	# Don't create subdir if we are only testing recordings
-	# Create a subdir for programme sorting option
-	elsif ( $opt->{subdir} ) {
-		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
-		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
-		$prog->{dir} = main::encode_fs($prog->{dir});
-		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
-	}
-
-	if ( ! $opt->{nowrite} ) {
-		main::logger("INFO: File name prefix = $prog->{fileprefix}\n") if $opt->{verbose};
-	}
 
 	# Get extension from streamdata if defined and raw not specified
 	$prog->{ext} = $prog->{streams}->{$version}->{$mode}->{ext};
@@ -3806,20 +3784,41 @@ sub generate_filenames {
 		}
 	}
 
-	# check if file extension has changed as a result of failed attempt with different mode
-	my $ext_changed = 0;
-	if ( ! $opt->{history} && defined $prog->{filename} && $prog->{filename} ne '' ) {
-		( my $fileprefix, my $dir, my $ext ) = fileparse($prog->{filename}, qr/\.[^.]*/);
-		$ext =~ s/\.//;
-		$ext_changed = ( defined $ext && $ext ne '' && $ext ne $prog->{ext} );
-		main::logger "DEBUG: File ext changed:   $ext -> $prog->{ext}\n" if $ext_changed && $opt->{debug};
+	# force filename with --tag-only-filename
+	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
+		$prog->{filename} = $opt->{tagonlyfilename};
+	}
+	# Special case for history/tag-only mode, parse the fileprefix and dir from filename if it is already defined
+	if ( ( $opt->{history} || $opt->{tagonly} ) && defined $prog->{filename} && $prog->{filename} ne '' ) {
+		( $prog->{fileprefix}, $prog->{dir}, $prog->{ext} ) = fileparse($prog->{filename}, qr/\.[^.]*/);
+		# Fix up file path components
+		$prog->{dir} = main::encode_fs(File::Spec->canonpath($prog->{dir}));
+		$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
+		$prog->{ext} =~ s/\.//;
 	}
 
-	# Don't override the {filename} if it is already set (i.e. for history info)
-	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") if ( defined $prog->{filename} && $prog->{filename} =~ /\.EXT$/ ) || ! $prog->{filename} || $ext_changed;
-	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}");
-	$prog->{filename} = main::encode_fs($prog->{filename});
-	$prog->{filepart} = main::encode_fs($prog->{filepart});
+	if ( ! $opt->{nowrite} ) {
+		main::logger("INFO: File name prefix = $prog->{fileprefix}\n") if $opt->{verbose};
+	}
+
+	# set final/partial file names
+	$prog->{filename} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}")) unless $prog->{filename};
+	$prog->{filepart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}")) unless $prog->{filepart};
+	
+	# Determine thumbnail filename
+	if ( $prog->{thumbnail} =~ /^http/i ) {
+		my $ext;
+		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
+		$ext = $opt->{thumbext} || $ext;
+		$prog->{thumbfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}") );
+	}
+	
+	# Determine subtitle filenames
+	if ( $prog->{type} eq "tv" ) {
+		$prog->{subsraw} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttxt"));
+		$prog->{subspart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.srt"));
+		$prog->{subsfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.srt"));
+	}
 
 	# overwrite/error if the file already exists and is going to be written to
 	my $min_download_size = main::progclass($prog->{type})->min_download_size();
@@ -3875,21 +3874,6 @@ sub generate_filenames {
 
 	}
 
-	# Determine thumbnail filename
-	if ( $prog->{thumbnail} =~ /^http/i ) {
-		my $ext;
-		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
-		$ext = $opt->{thumbext} || $ext;
-		$prog->{thumbfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}");
-		$prog->{thumbfile} = main::encode_fs($prog->{thumbfile});
-	}
-	
-	if ( $prog->{type} eq "tv" ) {
-		$prog->{subsraw} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttxt"));
-		$prog->{subspart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.srt"));
-		$prog->{subsfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.srt"));
-	}
-	
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
 	main::logger "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
 	main::logger "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
