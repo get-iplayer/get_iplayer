@@ -4880,30 +4880,42 @@ sub thumb_url_recipe {
 		if ( $thumbsize >= 1 && $thumbsize <= 11 ) {
 			main::logger "WARNING: Index numbers 1-11 no longer valid with --thumbsize - specify thumbnail image width\n";
 		}
-		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using default ($defsize)\n";
-		$recipe = $prog->thumb_url_recipes->{ $defsize };
+		my $newsize;
+		my @sizes = sort { $a <=> $b } keys %{$prog->thumb_url_recipes()};
+		if ( $thumbsize < $sizes[0] ) {
+			$newsize = $sizes[0];
+		} elsif ( $thumbsize > $sizes[$#sizes] ) {
+			$newsize = $sizes[$#sizes];
+		} else {
+			my $diff = abs($sizes[$#sizes] - $sizes[0]);
+			my $size = $defsize;
+			for my $size2 ( @sizes ) {
+				my $diff2 = abs($thumbsize - $size2);
+				if ( $diff2 < $diff ) {
+					$diff = $diff2;
+					$size = $size2;
+				} 
+			}
+			$newsize = $size;
+		}
+		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using nearest available ($newsize)\n";
+		$recipe = $prog->thumb_url_recipes->{ $newsize };
 	}
 	return $recipe;
 }
 
 sub thumb_url_recipes {
 	return {
-		86	=> '86x48',
-		150	=> '150x84',
-		178	=> '178x100',
 		192 => '192x108',
 		256 => '256x144',
 		384 => '384x216',
 		448 => '448x252',
 		512	=> '512x288',
-		528	=> '528x297',
 		640	=> '640x360',
 		704	=> '704x396',
 		832	=> '832x468',
 		960	=> '960x540',
-		1024	=> '1024x576',
 		1280	=> '1280x720',
-		1600	=> '1600x900',
 		1920	=> '1920x1080',
 	}
 }
