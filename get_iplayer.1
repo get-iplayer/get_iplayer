@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "November 2017" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "December 2017" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -74,7 +74,7 @@ Only search in these types of programmes: tv,radio,all (tv is default)
 Shows GPLv3 conditions
 .TP
 \fB\-\-debug
-Debug output
+Debug output (very verbose and rarely useful)
 .TP
 \fB\-\-dump\-options
 Dumps all options with their internal option key names
@@ -160,6 +160,9 @@ Number of attempts to make or resume a failed connection.  \-\-attempts is appli
 .TP
 \fB\-\-audio\-only
 Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies \-\-force.
+.TP
+\fB\-\-download\-abortonfail
+Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked.
 .TP
 \fB\-\-exclude\-supplier <supplier>,<supplier>,...
 Comma\-separated list of media stream suppliers to skip.  Possible values: akamai,limelight,bidi
@@ -261,6 +264,9 @@ Create metadata info file after recording.
 \fB\-\-metadata\-only
 Create specified metadata info file without any recording or streaming.
 .TP
+\fB\-\-no\-metadata
+Do not create metadata info file after recording (overrides \-\-metadata).
+.TP
 \fB\-\-no\-sanitise
 Do not sanitise output file and directory names. Implies \-\-whitespace. Invalid characters for Windows ('"*:<>?|') and macOS (':') will be removed.
 .TP
@@ -277,7 +283,7 @@ Output directory for tv recordings (overrides \-\-output)
 Don't remux or change the recording in any way.  Saves output file in native container format (HLS\->MPEG\-TS, DASH\->MP4)
 .TP
 \fB\-\-subdir, \-s
-Save recorded files into subdirectory.  Default: same name as programme.
+Save recorded files into subdirectory of output directory.  Default: same name as programme (see \-\-subdir\-format).
 .TP
 \fB\-\-subdir\-format <format>
 The format to be used for subdirectory naming.  Use substitution parameters, e.g., '<nameshort>\-<seriesnum>'
@@ -298,25 +304,25 @@ Download subtitles into srt/SubRip format if available and supported
 Only download the subtitles, not the programme
 .TP
 \fB\-\-tag\-only
-Only update the programme metadata tag and not download the programme (can also be used with \-\-history)
+Only update the programme metadata tag and not download the programme. Use with \-\-history or \-\-tag\-only\-filename.
 .TP
 \fB\-\-tag\-only\-filename <filename>
 Add metadata tags to specified file (ignored unless used with \-\-tag\-only)
 .TP
 \fB\-\-thumb
-Download Thumbnail image if available
+Download thumbnail image if available
 .TP
 \fB\-\-thumb\-ext <ext>
 Thumbnail filename extension to use
 .TP
 \fB\-\-thumbnail\-only
-Only Download Thumbnail image if available, not the programme
+Only download thumbnail image if available, not the programme
 .TP
 \fB\-\-thumbnail\-series
 Force use of series/brand thumbnail (series preferred) instead of episode thumbnail
 .TP
 \fB\-\-thumbsize <width>
-Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Default: 192
+Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192
 .TP
 \fB\-\-whitespace, \-w
 Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores.
@@ -461,7 +467,7 @@ Indicates you are using an obsolete version of ffmpeg (<1.0) that may not suppor
 Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written.
 .TP
 \fB\-\-no\-tag
-Do not tag downloaded programmes. Note that moov atom will be at end of output file if \-\-no\-tag used. Remuxing would be necessary to stream file.
+Do not tag downloaded programmes.
 .TP
 \fB\-\-tag\-format\-show
 Format template for programme name in tag metadata (use substitution parameters). Default: <name>
@@ -517,7 +523,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.07, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.08, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
