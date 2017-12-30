@@ -79,6 +79,7 @@ my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
 	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies --force."],
+	downloadabortonfail	=> [ 1, "downloadabortonfail|download-abortonfail!", 'Recording', '--download-abortonfail', "Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked."],
 	excludesupplier	=> [ 1, "excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to skip.  Possible values: akamai,limelight,bidi"],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps50		=> [ 1, "fps50!", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
@@ -3451,6 +3452,11 @@ sub download_retry_loop {
 				$retcode = mode_ver_download_retry_loop( $prog, $hist, $ua, $mode, $version, $prog->{verpids}->{$version} );
 				main::logger "DEBUG: mode_ver_download_retry_loop retcode = $retcode\n" if $opt->{debug};
 
+				if ( $opt->{downloadabortonfail} && $retcode == 1 ) {
+					main::logger "ERROR: Failed to download '$prog->{mode}' stream and --download-abortonfail specified - exiting\n";
+					unlink $lockfile;
+					exit 7;
+				}
 				# quit if successful or skip or stop
 				last if ( $retcode == 0 || $retcode == 2 || $retcode == 3 );
 			}
@@ -6717,6 +6723,7 @@ sub ttml_to_srt {
 	$columns = 37;
 	$huge = 'overflow';
 
+	$ttml =~ tr/\x00//d;
 	my $dom;
 	eval { $dom = XML::LibXML->load_xml(string => $ttml); };
 	if ( $@ ) {
