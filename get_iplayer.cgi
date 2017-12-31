@@ -25,7 +25,7 @@
 #
 
 my $VERSION = 3.09;
-my $VERSION_TEXT;
+my $VERSION_TEXT = "3.10-dev";
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use strict;
