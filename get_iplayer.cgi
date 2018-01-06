@@ -24,8 +24,8 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = 3.09;
-my $VERSION_TEXT = "3.10-dev";
+my $VERSION = 3.10;
+my $VERSION_TEXT;
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use strict;
