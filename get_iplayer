@@ -6057,6 +6057,7 @@ use LWP::UserAgent;
 use POSIX qw(ceil mkfifo strftime);
 use strict;
 use Time::Local;
+use Time::Piece;
 use URI;
 
 # Inherit from Programme class
@@ -6206,16 +6207,15 @@ sub get_links_schedule {
 		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 		$limit_days = 0 if $limit_days < 0;
 		$limit_days = 30 if $limit_days > 30;
-		$limit = $now - (ceil($limit_days / 7) * 7 * 86400) if $limit_days;
+		$limit = $now - ($limit_days * 86400) if $limit_days;
 		if ( $limit ) {
-			my $limit_time = $limit;
-			my $limit_year = (gmtime($limit_time))[5];
-			my $limit_week = strftime( "%W", gmtime($limit_time) );
-			while ( $limit_time < $then ) {
-				push @schedule_dates, sprintf("%04d/w%02d", $limit_year+1900, $limit_week+1);
-				$limit_time += $one_week;
-				$limit_year = (gmtime($limit_time))[5];
-				$limit_week = strftime( "%W", gmtime($limit_time) );
+			my $timepiece = gmtime( $now - (ceil($limit_days / 7) * 7 * 86400) );
+			my $iso8601_year_diff;
+			while ( $timepiece < $now ) {
+				$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
+				$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
+				push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
+				$timepiece += $one_week;
 			}
 			push @schedule_dates, "this_week";
 		} else {
