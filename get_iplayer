@@ -6185,21 +6185,6 @@ sub get_links_schedule {
 	}
 	my @schedule_dates;
 	my $limit = 0;
-	my $one_week = 7 * 86400;
-	my $then = $now - $one_week;
-	my $this_year = (gmtime($now))[5];
-	my $that_year = (gmtime($then))[5];
-	my $this_week = strftime( "%W", gmtime($now) );
-	my $that_week = strftime( "%W", gmtime($then) );
-	my $cache_file = "${profile_dir}/${prog_type}.cache";
-	my ($cache_this_week, $cache_last_week);
-	if ( ! $opt->{cachereset} && -f $cache_file ) {
-		my $cache_time = stat($cache_file)->mtime;
-		my $cache_year = (gmtime($cache_time))[5];
-		my $cache_week = strftime( "%W", gmtime($cache_time) );
-		$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
-		$cache_last_week = ( $that_year == $cache_year && $that_week == $cache_week );
-	}
 	if ( $future ) {
 		push @schedule_dates, "this_week", "next_week";
 	} else {
@@ -6214,6 +6199,7 @@ sub get_links_schedule {
 				main::logger "ERROR: Failed to load Time::Piece:\n$@" if $opt->{verbose};
 				return;
 			}
+			my $one_week = 7 * 86400;
 			my $timepiece = Time::Piece::gmtime( $now - (ceil($limit_days / 7) * 7 * 86400) );
 			my $iso8601_year_diff;
 			while ( $timepiece < $now ) {
@@ -6224,6 +6210,16 @@ sub get_links_schedule {
 			}
 			push @schedule_dates, "this_week";
 		} else {
+			my $cache_file = "${profile_dir}/${prog_type}.cache";
+			my $cache_this_week;
+			if ( ! $opt->{cachereset} && -f $cache_file ) {
+				my $this_year = (gmtime($now))[5];
+				my $this_week = strftime( "%W", gmtime($now) );
+				my $cache_time = stat($cache_file)->mtime;
+				my $cache_year = (gmtime($cache_time))[5];
+				my $cache_week = strftime( "%W", gmtime($cache_time) );
+				$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
+			}
 			push @schedule_dates, "last_week" unless $cache_this_week;
 			push @schedule_dates, "this_week";
 		}
