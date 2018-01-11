@@ -6057,7 +6057,6 @@ use LWP::UserAgent;
 use POSIX qw(ceil mkfifo strftime);
 use strict;
 use Time::Local;
-use Time::Piece;
 use URI;
 
 # Inherit from Programme class
@@ -6209,7 +6208,13 @@ sub get_links_schedule {
 		$limit_days = 30 if $limit_days > 30;
 		$limit = $now - ($limit_days * 86400) if $limit_days;
 		if ( $limit ) {
-			my $timepiece = gmtime( $now - (ceil($limit_days / 7) * 7 * 86400) );
+			eval "require Time::Piece";
+			if ( $@ ) {
+				main::logger "WARNING: Please download and run latest installer or install the Time::Piece Perl module for --cache-rebuild or --refresh-limit.\n";
+				main::logger "ERROR: Failed to load Time::Piece:\n$@" if $opt->{verbose};
+				return;
+			}
+			my $timepiece = Time::Piece::gmtime( $now - (ceil($limit_days / 7) * 7 * 86400) );
 			my $iso8601_year_diff;
 			while ( $timepiece < $now ) {
 				$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
