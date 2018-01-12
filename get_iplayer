@@ -6054,7 +6054,7 @@ use IO::Seekable;
 use IO::Socket;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(ceil mkfifo strftime);
+use POSIX qw(mkfifo strftime);
 use strict;
 use Time::Local;
 use URI;
@@ -6200,9 +6200,10 @@ sub get_links_schedule {
 				return;
 			}
 			my $one_week = 7 * 86400;
-			my $timepiece = Time::Piece::gmtime( $now - (ceil($limit_days / 7) * 7 * 86400) );
 			my $iso8601_year_diff;
-			while ( $timepiece < $now ) {
+			my $timepiece = Time::Piece::gmtime($limit);
+			my $stop = Time::Piece::gmtime($now);
+			while ( $timepiece->week != $stop->week ) {
 				$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
 				$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
 				push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
