@@ -4511,12 +4511,10 @@ sub get_metadata {
 							$type = "audiodescribed";
 						} elsif ( grep /sign/i, @ver_types ) {
 							$type = "signed";
-						} elsif ( grep /open subtitles/i, @ver_types ) {
-							$type = "opensubtitles";
 						} else {
-							my @other_types = grep !/(described|description|sign|open subtitles)/i, @ver_types;
+							my @other_types = grep !/(described|description|sign)/i, @ver_types;
 							next unless @other_types;
-							($type = lc($other_types[0])) =~ s/\s+.*$//;
+							($type = lc($other_types[0])) =~ s/\W//g;
 						}
 						if ( $type ) {
 							my $version = $type;
