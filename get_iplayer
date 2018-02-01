@@ -4039,8 +4039,10 @@ sub download_thumbnail {
 		$file = $prog->{thumbfile};
 		# Don't redownload thumbnail if the file already exists
 		if ( -f $file && ! $opt->{overwrite} ) {
-			main::logger "INFO: Thumbnail file already exists: $file\n";
-			main::logger "INFO: Use --overwrite to re-download\n";
+			if ( $opt->{notag} || $opt->{thumbonly} ) {
+				main::logger "INFO: Thumbnail file already exists: $file\n";
+				main::logger "INFO: Use --overwrite to re-download\n";
+			}
 			return 0;
 		}
 		main::logger "INFO: Downloading thumbnail\n" if $opt->{thumb} || $opt->{verbose};
