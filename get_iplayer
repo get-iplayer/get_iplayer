@@ -6807,7 +6807,8 @@ sub ttml_to_srt {
 					$text .= "\n";
 				} elsif ($p_child->nodeName eq "#text") {
 					my $p_text = $p_child->to_literal();
-					if ($p_text) {
+					if ($p_text =~ /\S/) {
+						$p_text =~ s/(^\s{2,}|\s{2,}$)/ /g;
 						if ($mono) {
 							if ($p_color ne $curr_color) {
 								$curr_color = $p_color;
@@ -6836,7 +6837,8 @@ sub ttml_to_srt {
 							$text .= "\n";
 						} elsif ($span_child->nodeName eq "#text") {
 							my $span_text = $span_child->to_literal();
-							if ($span_text) {
+							if ($span_text =~ /\S/) {
+								$span_text =~ s/(^\s{2,}|\s{2,}$)/ /g;
 								if ($mono) {
 									if ($span_color ne $curr_color) {
 										$curr_color = $span_color;
