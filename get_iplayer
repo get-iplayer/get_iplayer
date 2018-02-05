@@ -6667,7 +6667,7 @@ sub download_subtitles {
 						$dumped = 1;
 					}
 					unless ( $converted ) {
-						$rc = ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset} );
+						$rc = ttml_to_srt( $subs, $file, $opt->{subsmono}, $opt->{suboffset}, $opt->{mysubstart}, $opt->{mysubstop} );
 						$converted = 1 unless $rc;
 					}
 				}
@@ -7485,6 +7485,8 @@ sub fetch {
 	$file_size_mb = $file_size / 1000000.0;
 
 	# capture subtitles start/stop
+	delete $opt->{mysubstart};
+	delete $opt->{mysubstop};
 	$opt->{mysubstart} = $start_elapsed * 1000.0 if $opt->{start};
 	$opt->{mysubstop} = $stop_elapsed * 1000.0 if $opt->{stop};
 	
@@ -7956,7 +7958,7 @@ sub run {
 		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
-		my @backup_opts = grep /^(encoding|myap|myffmpeg|mysub|nowarn)/, keys %{$opt};
+		my @backup_opts = grep /^(encoding|myap|myffmpeg|nowarn)/, keys %{$opt};
 		foreach ( @backup_opts ) {
 			$opt_backup->{$_} = $opt->{$_} if defined $opt->{$_};
 		}
