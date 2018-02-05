@@ -134,10 +134,11 @@ my $opt_format = {
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Save recorded files into subdirectory of output directory.  Default: same name as programme (see --subdir-format)."],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for subdirectory naming.  Use substitution parameters, e.g., '<nameshort>-<seriesnum>'"],
 	suboffset	=> [ 1, "suboffset=n", 'Output', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
-	subtitles	=> [ 2, "subtitles|subs!", 'Output', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
-	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Output', '--subtitles-only', "Only download the subtitles, not the programme"],
+	subsembed	=> [ 1, "subtitlesembed|subsembed|subtitles-embed|subs-embed!", 'Output', '--subs-embed', "Embed subtitles in MP4 output file. Requires --subtitles. Ignored with --audio-only and --ffmpeg-obsolete."],
 	subsmono	=> [ 1, "subsmono|subs-mono!", 'Output', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker."],
+	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Output', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subsraw!", 'Output', '--subsraw', "Additionally save the raw subtitles file"],
+	subtitles	=> [ 2, "subtitles|subs!", 'Output', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
 	tagonly		=> [ 1, "tagonly|tag-only!", 'Output', '--tag-only', "Only update the programme metadata tag and not download the programme. Use with --history or --tag-only-filename."],
 	tagonlyfilename		=> [ 1, "tagonlyfilename|tag-only-filename=s", 'Output', '--tag-only-filename <filename>', "Add metadata tags to specified file (ignored unless used with --tag-only)"],
 	thumb		=> [ 1, "thumb|thumbnail!", 'Output', '--thumb', "Download thumbnail image if available"],
@@ -3522,8 +3523,7 @@ sub mode_ver_download_retry_loop {
 				$prog->create_dir();
 				$prog->download_thumbnail();
 			}
-			# Get subtitles if they exist and are required and media download succeeded
-			if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
+			if ( $opt->{subtitles} && $prog->{type} eq 'tv' && ( ! $opt->{subsembed} || $opt->{raw} ) ) {
 				unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $version ] ) ) {
 					# Rename the subtitle file accordingly if the stream get was successful
 					move($prog->{subspart}, $prog->{subsfile}) if -f $prog->{subspart};
@@ -5970,11 +5970,9 @@ sub ffmpeg_init {
 }
 
 sub postproc {
-	my ( $prog, $audio_file, $video_file ) = @_;
+	my ( $prog, $audio_file, $video_file, $ua ) = @_;
 	my @cmd;
 	my $return;
-
-	main::logger "INFO: Converting to \U$prog->{ext}\E\n";
 
 	$prog->ffmpeg_init();
 	if ( ! main::exists_in_path('ffmpeg') ) {
@@ -6013,6 +6011,26 @@ sub postproc {
 		push @other_opts, ( '-movflags', 'faststart' );
 	}
 
+	if ( ! $opt->{audioonly} && $opt->{subtitles} && $prog->{type} eq "tv" && $opt->{subsembed} ) {
+		# download subtitles here if embedding
+		unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $prog->{version} ] ) ) {
+			# Rename the subtitle file accordingly if the stream get was successful
+			move($prog->{subspart}, $prog->{subsfile}) if -f $prog->{subspart};
+		}
+		if ( ! $opt->{ffmpegobsolete} ) {
+			if ( -f $prog->{subsfile} ) {
+					push @input_opts, ( '-i', $prog->{subsfile} );
+					push @codec_opts, ( '-c:s', 'mov_text' );
+					push @stream_opts, ( '-map', '2:s:0' ) if $audio_ok && $video_ok;
+					push @stream_opts, ( '-metadata:s:s:0', 'language=eng' );
+			} else {
+				main::logger "WARNING: --subs-embed specified but subtitles file not found: $prog->{subsfile}\n";
+			}
+		} else {
+			main::logger "WARNING: Your version of ffmpeg ($opt->{myffmpegversion}) does not support embedding subtitles\n";
+		}
+	}
+
 	@cmd = (
 		$bin->{ffmpeg},
 		@{ $binopts->{ffmpeg} },
@@ -6024,6 +6042,8 @@ sub postproc {
 		@other_opts,
 		$prog->{filepart},
 	);
+
+	main::logger "INFO: Converting to \U$prog->{ext}\E\n";
 
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
@@ -6648,9 +6668,9 @@ sub download_subtitles {
 	return unless $prog->{type} eq "tv";
 
 	# Don't redownload subs if the file already exists
-	if ( -f $file  && ! $opt->{overwrite} ) {
-		main::logger "INFO: Subtitles file already exists: $file\n";
-		main::logger "INFO: Use --overwrite to re-download\n";
+	if ( -f $prog->{subsfile}  && ! $opt->{overwrite} ) {
+		main::logger "WARNING: Subtitles file already exists: $prog->{subsfile}\n";
+		main::logger "WARNING: Use --overwrite to re-download\n";
 		return 0;
 	}
 
@@ -7252,7 +7272,7 @@ sub get {
 	}
 
 	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? ($audio_file, $media_file) : ($media_file, undef);
-	return $prog->postproc($audio_file, $video_file);
+	return $prog->postproc($audio_file, $video_file, $ua);
 }
 
 sub fetch {
@@ -7839,7 +7859,7 @@ sub get {
 		return 0;
 	}
 
-	return $prog->postproc($audio_file, $video_file);
+	return $prog->postproc($audio_file, $video_file, $ua);
 }
 
 ############# PVR Class ##############
