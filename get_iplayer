@@ -3539,9 +3539,16 @@ sub mode_ver_download_retry_loop {
 
 		# Retry this mode
 		} elsif ( $retcode eq 'retry' && $count < $retries ) {
-			main::logger "WARNING: Retrying $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid}) [$version]'\n";
 			# Try to get stream data for this version/mode - retries require new auth data
 			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version );
+			if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
+				main::logger "WARNING: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping (retry)\n";
+				if ( $prog->{geoblocked} ) {
+					main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK. (retry)\n";
+				}
+				return 2;
+			}
+			main::logger "WARNING: Retrying $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid}) [$version]'\n";
 		}
 	}
 	return 1;
