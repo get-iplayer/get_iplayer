@@ -621,10 +621,7 @@ if ( defined($opt->{trimhistory}) ) {
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
 	my @pids = split( /,/, $opt->{pid} );
-	for ( @pids ) {
-		$opt->{pid} = $_;
-		$retcode += find_pid_matches( $hist );
-	}
+	$retcode += download_pid_matches( $hist, find_pid_matches( $hist, @pids ) );
 	purge_warning( $hist, 30 );
 
 # Show history
@@ -649,7 +646,8 @@ sub print_divider {
 }
 
 sub init_search {
-	print_divider if $opt->{pid} && $opt->{verbose};
+	my @search_args = @_;
+	print_divider;
 
 	if ( $opt->{nosanitise} ) {
 		$opt->{whitespace} = 1;
@@ -759,69 +757,75 @@ sub init_search {
 
 sub find_pid_matches {
 	my $hist = shift;
-	my @search_args = @_;
-	print_divider unless $opt->{pid} && $opt->{verbose};
-	my ( $type, $prog, $index_prog ) = init_search( @search_args );
+	my @opt_pids = @_;
+	my @match_list;
+	my @ep_list;
+	my %ep_seen;
+	my %ep_types;
+	my ( $type, $prog, $index_prog ) = init_search();
 	my $now = time();
-	return 0 if ( ! ( $opt->{metadataonly} || $opt->{info} || $opt->{thumbonly} || $opt->{tagonly} || $opt->{subsonly} || $opt->{streaminfo} ) ) && $hist->check( $opt->{pid} );
 	# load caches from file only
 	for my $t ( progclass() ) {
 		get_links( $prog, $index_prog, $t, 1, $now );
 	}
-	my $opt_pid = $opt->{pid};
-	my $opt_type = "tv";
-	# If $pid is in the form of '<type>:<pid>' and <type> is a valid type
-	if ( $opt->{pid} =~ m{^(.+?)\:(.+?)$} && is_prog_type(lc($1)) ) {
-		($opt_type, $opt_pid) = ( lc($1), $2 );
-	}
-	# See if the specified pid has other episode pids embedded - results in another list of pids.
-	my $dummy = progclass($opt_type)->new( 'pid' => $opt_pid, 'type' => $opt_type );
-	my @pids = $dummy->get_pids_recursive();
-	my $totalretcode = 0;
-	my %done_pids;
-	for my $pid ( @pids ) {
-		# skip this pid if we have already completed it
-		next if $done_pids{$pid};
-		my $prog_pid = $pid;
-		my $prog_type = 'tv';
+	for my $opt_pid ( @opt_pids ) {
+		my $opt_type = "tv";
 		# If $pid is in the form of '<type>:<pid>' and <type> is a valid type
-		if ( $pid =~ m{^(.+?)\:(.+?)$} && is_prog_type(lc($1)) ) {
-			( $prog_type, $prog_pid ) = ( lc($1), $2 );
+		if ( $opt_pid =~ m{^(.+?)\:(.+?)$} && is_prog_type(lc($1)) ) {
+			($opt_type, $opt_pid) = ( lc($1), $2 );
 		}
-		print_divider if $#pids > 0;
-		my $retcode;
-		if ( $prog->{$prog_pid}->{pid} ) {
-			$retcode = download_pid( $hist, $prog->{$prog_pid} );
-		} else {
-			my $this = progclass($prog_type)->new( 'pid' => $prog_pid, 'type' => $prog_type );
-			$retcode = download_pid( $hist, $this );
+		# See if the specified pid has other episode pids embedded - results in another list of pids.
+		my $dummy = progclass($opt_type)->new( pid => $opt_pid, type => $opt_type );
+		my $eps = $dummy->get_episodes_recursive();
+		next unless ( $eps && @$eps );
+		for my $ep ( @$eps ) {
+			next if $ep_seen{$ep->{pid}};
+			$ep_seen{$ep->{pid}} = 1;
+			next if ( $opt->{hide} && ! $opt->{force} && $hist->check( $ep->{pid}, 1 ) );
+			$ep_types{$ep->{type}} = 1 unless $ep_types{$ep->{type}};
+			my $this;
+			if ( $prog->{$ep->{pid}}->{pid} ) {
+				$this = $prog->{$ep->{pid}};
+			} else {
+				$this = $ep;
+			}
+			push @match_list, $this;
+			push @ep_list, $ep;
 		}
-		$done_pids{$pid} = 1 if ! $retcode;
-		$totalretcode += $retcode;
 	}
-	# return zero on success of all pid recordings (used for PVR queue)
-	return $totalretcode;
+	unless ( @match_list ) {
+		main::logger "INFO: 0 total programmes\n";
+		return;
+	}
+	if ( @ep_list ) {
+		my $show_type = keys %ep_types > 1;
+		main::logger "Episodes:\n";
+		for my $ep ( @ep_list ) {
+			my $ep_desc = " - $ep->{desc}" if $opt->{long} && $ep->{desc};
+			my $ep_type = "$ep->{type}, " if $show_type;
+			main::logger "${ep_type}$ep->{name} - $ep->{episode}, $ep->{channel}, $ep->{pid}${ep_desc}\n";
+		}
+	}
+	main::logger "INFO: ".(scalar @ep_list)." total programmes\n";
+	return @match_list;
 }
 
-sub download_pid {
+sub download_pid_matches {
 	my $hist = shift;
-	my $this = shift;
-	my $retcode;
-	# Prune future scheduled match if not specified
-	if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
-		logger "WARNING: Future programme may not yet be available ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
-	}
-	# Display pid match for recording
-	if ( $opt->{history} ) {
-		$hist->list_progs( 'pid:'.$this->{pid} );
+	my @match_list = @_;
+	my $failcount = 0;
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+		download_other( $hist, @match_list );
 	} else {
-		list_progs( { $this->{type} => 1 }, $this );
+		for my $this (@match_list) {
+			print_divider;
+			if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
+				logger "WARNING: Future programme may not yet be available ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
+			}
+			$failcount = $this->download_retry_loop( $hist );
+		}
 	}
-	# Don't do a pid recording if metadataonly or thumbonly were specified
-	if ( !( $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{info} || $opt->{tagonly} || $opt->{streaminfo} ) ) {
-		$retcode = $this->download_retry_loop( $hist );
-	}
-	return $retcode;
+	return $failcount;
 }
 
 # Use the specified options to process the matches in specified array
@@ -980,17 +984,68 @@ sub find_matches {
 sub download_matches {
 	my $hist = shift;
 	my @match_list = @_;
-
-	# Do the recordings based on list of index numbers if required
 	my $failcount = 0;
-	if ( $opt->{get} && ! $opt->{info} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+		download_other( $hist, @match_list );
+	} elsif ( $opt->{get} ) {
 		for my $this (@match_list) {
 			print_divider;
 			$failcount += $this->download_retry_loop( $hist );
 		}
 	}
-
 	return $failcount;
+}
+
+sub download_other {
+	my $hist = shift;
+	my @match_list = @_;
+	my $ua = create_ua( 'desktop', 1 );
+	for my $this ( @match_list ) {
+		print_divider;
+		$this->get_metadata_general();
+		if ( $this->get_metadata( $ua ) ) {
+			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
+			next;
+		}
+		# Search versions for versionlist versions
+		my @versions = $this->generate_version_list;
+		# Use first version in list if a version list is not specified
+		$this->{version} = $versions[0] || 'default';
+		$this->generate_filenames( $ua, $this->file_prefix_format() );
+		# info
+		$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
+		# metadata
+		if ( $opt->{metadataonly} ) {
+			$this->create_dir();
+			$this->create_metadata_file;
+		}
+		# thumbnail
+		if ( $opt->{thumbonly} && $this->{thumbnail} ) {
+			$this->create_dir();
+			$this->download_thumbnail();
+		}
+		# tag
+		if ( $opt->{tagonly} && ! $opt->{notag} ) {
+			$this->create_dir();
+			$this->tag_file;
+		}
+		# subs (only for tv)
+		if ( $opt->{subsonly} && $this->{type} eq 'tv') {
+			$this->create_dir();
+			unless ( $this->download_subtitles( $ua, $this->{subspart}, \@versions ) ) {
+				# Rename the subtitle file accordingly if the stream get was successful
+				move($this->{subspart}, $this->{subsfile}) if -f $this->{subspart};
+			}
+		}
+		# streaminfo
+		if ( $opt->{streaminfo} ) {
+			main::display_stream_info( $this, $this->{verpids}->{$this->{version}}, $this->{version} );
+		}
+		# remove offending metadata
+		delete $this->{filename};
+		delete $this->{filepart};
+		delete $this->{ext};
+	}
 }
 
 sub sort_matches {
@@ -1107,53 +1162,6 @@ sub list_progs {
 					$this->list_entry( '', 0, $number_of_types ) if ( $this->{name} );
 				}
 			}
-		}
-		# Get info, create metadata, subtitles, tag and/or thumbnail file (i.e. don't stream/record)
-		if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
-			$this->get_metadata_general();
-			if ( $this->get_metadata( $ua ) ) {
-				main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
-				next;
-			}
-			# Search versions for versionlist versions
-			my @versions = $this->generate_version_list;
-
-			# Use first version in list if a version list is not specified
-			$this->{version} = $versions[0] || 'default';
-			$this->generate_filenames( $ua, $this->file_prefix_format() );
-			# info
-			$this->display_metadata( sort keys %{ $this } ) if $opt->{info};
-			# tag
-			if ( $opt->{tagonly} && ! $opt->{notag} ) {
-				$this->create_dir();
-				$this->tag_file;
-			}
-			# metadata
-			if ( $opt->{metadataonly} ) {
-				$this->create_dir();
-				$this->create_metadata_file;
-			}
-			# thumbnail
-			if ( $opt->{thumbonly} && $this->{thumbnail} ) {
-				$this->create_dir();
-				$this->download_thumbnail();
-			}
-			# subs (only for tv)
-			if ( $opt->{subsonly} && $this->{type} eq 'tv') {
-				$this->create_dir();
-				unless ( $this->download_subtitles( $ua, $this->{subspart}, \@versions ) ) {
-					# Rename the subtitle file accordingly if the stream get was successful
-					move($this->{subspart}, $this->{subsfile}) if -f $this->{subspart};
-				}
-			}
-			# streaminfo
-			if ( $opt->{streaminfo} ) {
-				main::display_stream_info( $this, $this->{verpids}->{$this->{version}}, $this->{version} );
-			}
-			# remove offending metadata
-			delete $this->{filename};
-			delete $this->{filepart};
-			delete $this->{ext};
 		}
 	}
 	# PID not in cache
@@ -2772,7 +2780,7 @@ sub load {
 	my $hist = shift;
 
 	# Return if force option specified
-	return 0 if ! $opt->{history} && ( ( $opt->{force} && ! $opt->{pid} ) || $opt->{nowrite} );
+	return 0 if ! $opt->{history} && ( $opt->{force} || $opt->{nowrite} );
 
 	# clear first
 	$hist->clear();
@@ -2968,7 +2976,7 @@ sub check {
 	if ( defined $hist->{ $pid } ) {
 		my ( $name, $episode, $histmode ) = ( $hist->{$pid}->{name}, $hist->{$pid}->{episode}, $hist->{$pid}->{mode} );
 		main::logger "DEBUG: Found PID='$pid' with MODE='$histmode' in history\n" if $opt->{debug};
-		main::logger "INFO: $name - $episode ($pid) Already in history ($historyfile) - use --force to override\n" if ! $silent;
+		main::logger "INFO: '$name - $episode ($pid)' already in history ($historyfile) - use --force to override\n" if ! $silent;
 		return 1;
 	}
 
@@ -4698,11 +4706,15 @@ sub fetch_pid_info {
 	my $url = "http://www.bbc.co.uk/programmes/$pid.json";
 	my $pid_type;
 	my $prog_type;
+	my $prog_name;
+	my $prog_episode;
+	my $prog_channel;
+	my $prog_desc;
 	eval "use JSON::PP";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to determine PID type.\n";
 		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-		return undef;
+		return;
 	}
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
 	if ( $json ) {
@@ -4716,27 +4728,36 @@ sub fetch_pid_info {
 			} else {
 				$prog_type = $doc->{programme}->{ownership}->{service}->{type};
 			}
+			$prog_name = $doc->{programme}->{display_title}->{title};
+			$prog_episode = $doc->{programme}->{display_title}->{subtitle};
+			$prog_channel = $doc->{programme}->{ownership}->{service}->{title};
+			$prog_desc = $doc->{programme}->{short_synopsis};
+			$prog_episode =~ s/(Series \d+)[, :]+//;
+			$prog_name .= ": $1" if $1;
 		} else {
 			main::logger "ERROR: Could not parse JSON PID info: $url\n";
 		}
 	} else {
 		main::logger "WARNING: Failed to download JSON PID info: $url\n";
 	}
-	return ($pid_type, $prog_type);
+	return ($pid_type, $prog_type, $prog_name, $prog_episode, $prog_channel, $prog_desc);
 }
 
-sub fetch_episode_pids {
+sub fetch_episodes_recursive {
 	my $ua = shift;
 	my $parent_pid = shift;
-	my @pids = ();
+	my $prog_type = shift;
+	my $eps;
 	my %seen;
 	my $max_page = 1;
 	my $curr_page = 1;
+	my $title;
+	my $channel;
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
 		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to recursively extract episode PIDs.\n";
 		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return \@pids;
+		return;
 	}
 	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserepisode} ) {
 		$opt->{nowarnhtmlparserepisode} = 1;
@@ -4747,108 +4768,140 @@ sub fetch_episode_pids {
 		my $html = main::request_url_retry($ua, $url, 3, '', '');
 		last unless $html;
 		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/*/text()');
+		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/a');
 		$last_page =~ s/(^\s+|\s+$)//g;
 		$max_page = $last_page if $last_page > $max_page;
-		unless ( $seen{'title'} ) {
-			my $title = $dom->findvalue('//title');
-			$title =~ s/(^\s+|\s+$)//g;
-			main::logger "INFO: $title\n";
-			$seen{'title'} = 1;
+		unless ( $channel ) {
+			$channel = $dom->findvalue('//a[contains(@class,"br-masthead__masterbrand")]');
 		}
-		main::logger "INFO: Page $curr_page of $max_page\n";
+		unless ( $title ) {
+			$title = $dom->findvalue('//div[contains(@class,"br-masthead__title")]/a');
+			unless ( $title ) {
+				$title = $dom->findvalue('//title');
+			}
+			$title =~ s/(^\s+|\s+$)//g;
+			$title =~ s/[-\s]+(Available now|Ar gael nawr)//gi;
+			$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
+			$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
+		}
 		my @episodes = $dom->findnodes('//div[contains(@typeof,"Episode")]');
-		for my $episode ( @episodes ) {
-			my $pid = $episode->findvalue('@data-pid');
-			next if ( $seen{$pid} );
-			$seen{$pid} = 1;
-			my $name = $episode->findvalue('.//span[contains(@class,"programme__title")]/span/text()');
-			my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]/span/span/text()');
-			$name = "$name2, $name" if $name2;
-			main::logger "INFO:     $name ($pid)\n";
-			push @pids, $pid;
+		if ( @episodes ) {
+			for my $episode ( @episodes ) {
+				my $pid = $episode->findvalue('@data-pid');
+				next unless $pid;
+				next if $seen{$pid};
+				$seen{$pid} = 1;
+				my $prog_episode = $episode->findvalue('.//span[contains(@class,"programme__title")]/span');
+				my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]/span/span');
+				my $prog_name = $name2 ? "$title: $name2" : $title;
+				my $prog_desc = $episode->findvalue('.//span[contains(@property,"description")]');
+				unless ( $name2 ) {
+					if ( $prog_episode =~ s/(Series \d+(\s+Reversions)?)[, :]+// ) {
+						$prog_name .= ": $1";
+					}
+				}
+				push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $channel, desc => $prog_desc );
+			}
 		}
 		$curr_page++;
 	} while ( $curr_page <= $max_page ) };
-	if ( ! @pids ) {
-		main::logger "INFO: No episode PIDs found, checking alternate location...\n";
-		$seen{'title'} = 0;
+	unless ( $eps && @$eps ) {
+		main::logger "INFO: No episodes found, checking alternate location...\n" if $opt->{verbose};
+		%seen = undef;
 		$max_page = 1;
 		$curr_page = 1;
+		$title = undef;
+		$channel = undef;
 		{ do {
 			my $url = "http://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
 			my $html = main::request_url_retry($ua, $url, 3, '', '');
 			last unless $html;
 			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-			my $last_page = $dom->findvalue('//div[@class="paginate"]//li[@class="page"][last()]/a/text()');
+			my $last_page = $dom->findvalue('//div[contains(@class,"list__pagination")]//ol[contains(@class,"pagination__list")]/li[contains(@class,"pagination__number")][last()]//a/span/span[1]');
 			$last_page =~ s/(^\s+|\s+$)//g;
 			$max_page = $last_page if $last_page > $max_page;
-			unless ( $seen{'title'} ) {
-				my $title = $dom->findvalue('//title');
-				$title =~ s/(^\s+|\s+$)//g;
-				main::logger "INFO: $title\n";
-				$seen{'title'} = 1;
+			unless ( $channel ) {
+				$channel = $dom->findvalue('//div[contains(@class,"episodes-available")]/img/@alt');
 			}
-			main::logger "INFO: Page $curr_page of $max_page\n";
-			my @episodes = $dom->findnodes('//ul[contains(@class,"iplayer-list")]/li[contains(@class,"episode")]');
-			for my $episode ( @episodes ) {
-				my $pid = $episode->findvalue('@data-ip-id');
-				next if ( $seen{$pid} );
-				$seen{$pid} = 1;
-				my $name = $episode->findvalue('.//div[@class="secondary"]/div[@class="subtitle"]/text()');
-				main::logger "INFO:     $name ($pid)\n";
-				push @pids, $pid;
+			unless ( $title ) {
+				$title = $dom->findvalue('//h1[contains(@class,"hero-header__title")]');
+				unless ( $title ) {
+					$title = $dom->findvalue('//title');
+				}
+				$title =~ s/(^\s+|\s+$)//g;
+				$title =~ s/[-\s]+(Available now|Ar gael nawr)//gi;
+				$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
+				$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
+			}
+			my @episodes = $dom->findnodes('//div[contains(@class,"list__grid")]/ul/li[contains(@class,"list__grid__item")]');
+			if ( @episodes ){
+				for my $episode ( @episodes ) {
+					my $item = $episode->findvalue('.//div[contains(@class,"content-item")]/a/@href');
+					my $pid = $1 if $item =~ m{/episode/([a-z0-9]+)};
+					next unless $pid;
+					next if $seen{$pid};
+					$seen{$pid} = 1;
+					my $prog_episode = $episode->findvalue('.//div[contains(@class,"content-item__title")]');
+					my $name2 = $episode->findvalue('.//div[contains(@class,"content-item__title")]/span[1]');
+					my $prog_name = $name2 ? "$title: $name2" : $title;
+					my $prog_desc = $episode->findvalue('.//div[contains(@class,"content-item__info__secondary")]/div[contains(@class,"content-item__description")]');
+					unless ( $name2 ) {
+						if ( $prog_episode =~ s/(Series \d+(\s+Reversions)?)[, :]+// ) {
+							$prog_name .= ": $1";
+						}
+					}
+					push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $channel, desc => $prog_desc );
+				}
 			}
 			$curr_page++;
 		} while ( $curr_page <= $max_page ) };
 	}
-	main::logger "INFO: No episode PIDs found for parent PID: $parent_pid\n" unless @pids;
-	return \@pids;
+	return $eps;
 }
 
-sub get_pids_recursive {
+sub get_episodes_recursive {
 	my $prog = shift;
-	my $ua = main::create_ua( 'desktop' );
-	my @pids = ();
+	my $eps;
 	my $pid_type;
 	my $prog_type;
-
+	my $prog_name;
+	my $prog_episode;
+	my $prog_channel;
+	my $prog_desc;
 	# Clean up the pid
 	main::logger "INFO: Cleaning PID - old: '$prog->{pid}'" if $opt->{verbose};
 	$prog->clean_pid();
 	main::logger " new: '$prog->{pid}'\n" if $opt->{verbose};
 	if ( ! $prog->pid_ok() ) {
 		main::logger "ERROR: Could not extract a valid PID from $prog->{pid}\n";
-		return ();
+		return;
 	}
-
-	($pid_type, $prog_type) = fetch_pid_info( $ua, $prog->{pid} );
+	my $ua = main::create_ua( 'desktop' );
+	($pid_type, $prog_type, $prog_name, $prog_episode, $prog_channel, $prog_desc ) = fetch_pid_info( $ua, $prog->{pid} );
 	$prog_type ||= 'tv';
+	$prog_name ||= 'get_iplayer';
+	$prog_episode ||= $prog_name eq "get_iplayer" ? $prog->{pid} : "-";
+	$prog_channel ||= 'BBC iPlayer';
+	$prog_desc ||= 'No description';
 	if ( ! $pid_type ) {
 		main::logger "WARNING: Could not determine PID type ($prog->{pid}). Trying to record PID directly.\n";
-		return "$prog_type:$prog->{pid}";
-	} elsif ( $pid_type eq "episode" ) {
-		main::logger "INFO: $prog_type episode PID detected ($prog->{pid})\n" if $opt->{verbose};
-		push @pids, "$prog_type:$prog->{pid}";
-	} elsif ( $pid_type eq "clip" ) {
-		main::logger "INFO: $prog_type clip PID detected ($prog->{pid})\n" if $opt->{verbose};
-		push @pids, "$prog_type:$prog->{pid}";
+		push @$eps, main::progclass($prog_type)->new( pid => $prog->{pid}, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $prog_channel, desc => $prog_desc );
+	} elsif ( $pid_type eq "episode" || $pid_type eq "clip" ) {
+		main::logger "INFO: $prog_type $pid_type PID detected ($prog->{pid})\n" if $opt->{verbose};
+		push @$eps, main::progclass($prog_type)->new( pid => $prog->{pid}, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $prog_channel, desc => $prog_desc );
 	} elsif ( $pid_type eq "series" || $pid_type eq "brand" ) {
 		main::logger "INFO: $prog_type series or brand PID detected ($prog->{pid})\n" if $opt->{verbose};
-		my $epids = fetch_episode_pids($ua, $prog->{pid});
-		if ( ! $opt->{pidrecursive} ) {
-			main::logger "INFO: Please run the command again using one of the above episode PIDs or to get all programmes add the --pid-recursive option\n";
-			return ();
-		}
-		for my $epid ( @$epids ) {
-			push @pids, "$prog_type:$epid";
+		if ( $opt->{pidrecursive} ) {
+			$eps = fetch_episodes_recursive($ua, $prog->{pid}, $prog_type);
+		} else {
+			main::logger "INFO: '$prog->{pid}' is a series or brand PID for '$prog_name' - add the --pid-recursive option to retrieve available episodes\n";
+			return;
 		}
 	} else {
 		main::logger "WARNING: Unknown PID type: $pid_type ($prog->{pid}). Trying to record PID directly.\n";
-		return "$prog_type:$prog->{pid}";
+		push @$eps, progclass($prog_type)->new( pid => $prog->{pid}, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $prog_channel, desc => $prog_desc );
 	}
-	@pids = main::make_array_unique_ordered( @pids );
-	return @pids;
+	return $eps;
 }
 
 # Intelligently split name and episode from title string for BBC iPlayer metadata
@@ -7984,7 +8037,6 @@ sub run {
 			next;
 		}
 		main::logger "INFO: PVR Run: '$name'\n";
-		main::print_divider;
 		# Clear then Load options for specified pvr search name
 		my $opt_backup;
 		my @backup_opts = grep /^(encoding|myap|myffmpeg|nowarn)/, keys %{$opt};
@@ -8013,11 +8065,7 @@ sub run {
 		my $failcount = 0;
 		if ( $pvr->{$name}->{pid} ) {
 			my @pids = split( /,/, $pvr->{$name}->{pid} );
-			for ( @pids ) {
-				$opt->{pid} = $_;
-				$failcount += main::find_pid_matches( $hist );
-			}
-
+			$failcount += main::download_pid_matches( $hist, main::find_pid_matches( $hist, @pids ) );
 		# Just make recordings of matching progs
 		} else {
 			$failcount = main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
