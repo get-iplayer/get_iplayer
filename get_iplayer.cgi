@@ -2327,7 +2327,7 @@ sub pvr_add {
 
 	# Only allow alphanumerics,_,-,. here for security reasons
 	my $searchname = "$opt->{SEARCH}->{current}_$opt->{SEARCHFIELDS}->{current}_$opt->{PROGTYPES}->{current}";
-	$searchname =~ s/[^\w\-\. \+\(\)]/_/g;
+	$searchname =~ s/[^\w]+/_/g;
 
 	# Remove a few options from leaking into a PVR search
 	my @cmd = (

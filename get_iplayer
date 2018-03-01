@@ -597,9 +597,33 @@ if ( defined($opt->{trimhistory}) ) {
 		}
 	}
 # PVR functions
+} elsif ( $opt->{pvrseries} ) {
+	if ( $no_search_args ) {
+		main::logger "ERROR: Search term(s) required with --pvr-series\n";
+		exit 1;
+	}
+	my @bad = grep !/\w/, @search_args;
+	if ( @bad ) {
+		main::logger "ERROR: '".(join "','", @bad)."' not permitted as search term(s) with --pvr-series\n";
+		exit 1;
+	}
+	my $hist = History->new();
+	my @matches = find_matches( $hist, @search_args );
+	my %seen;
+	for my $this ( @matches ) {
+		next if $seen{$this->{name}};
+		$seen{$this->{name}} = 1;
+		(my $pvr_search = $this->{name}) =~ s/([\\\^\$\.\|\?\*\+\(\)\[\]])/\\$1/g;;
+		$pvr_search = "^${pvr_search}\$";
+		(my $pvr_name = $pvr_search) =~ s/[^\w]+/_/g;
+		$pvr_name .= "_name_$this->{type}";
+		$opt_cmdline->{type} = $this->{type};
+		$pvr->add( $pvr_name, $pvr_search );
+	}
+
 } elsif ( $opt->{pvradd} ) {
 	if ( ! $opt->{pid} && $no_search_args ) {
-		main::logger "ERROR: Search term(s) or PID required for recording\n";
+		main::logger "ERROR: Search term(s) or --pid or --url required with --pvr-add\n";
 		exit 1;
 	}
 	$pvr->add( $opt->{pvradd}, @search_args );
@@ -618,7 +642,7 @@ if ( defined($opt->{trimhistory}) ) {
 
 } elsif ( $opt->{pvrqueue} ) {
 	if ( ! $opt->{pid} && $no_search_args ) {
-		main::logger "ERROR: Search term(s) or PID required for recording\n";
+		main::logger "ERROR: Search term(s) or --pid or --url required with --pvr-queue\n";
 		exit 1;
 	}
 	$pvr->queue( @search_args );
@@ -7979,6 +8003,7 @@ sub opt_format {
 		pvrlist		=> [ 0, "pvrlist|pvr-list!", 'PVR', '--pvr-list', "Show the PVR search list. Synonyms: --pvrlist"],
 		pvrqueue	=> [ 0, "pvrqueue|pvr-queue!", 'PVR', '--pvr-queue', "Add currently matched programmes to queue for later one-off recording using the --pvr option. Search terms required unless --pid specified. Synonyms: --pvrqueue"],
 		pvrscheduler	=> [ 0, "pvrscheduler|pvr-scheduler=n", 'PVR', '--pvr-scheduler <seconds>', "Runs the PVR using all saved PVR searches every <seconds>. Synonyms: --pvrscheduler"],
+		pvrseries		=> [ 0, "pvrseries|pvr-series!", 'PVR', '--pvr-series', "Create PVR search for each unique series name in search results. Search terms required. Synonyms: --pvrseries"],
 		comment		=> [ 1, "comment=s", 'PVR', '--comment <string>', "Adds a comment to a PVR search"],
 	};
 }
