@@ -6273,6 +6273,7 @@ sub postproc {
 		push @other_opts, ( '-movflags', 'faststart' );
 	}
 
+	my $embedding;
 	if ( ! $opt->{audioonly} && $opt->{subtitles} && $prog->{type} eq "tv" && $opt->{subsembed} ) {
 		# download subtitles here if embedding
 		unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $prog->{version} ] ) ) {
@@ -6285,6 +6286,7 @@ sub postproc {
 					push @codec_opts, ( '-c:s', 'mov_text' );
 					push @stream_opts, ( '-map', '2:s:0' ) if $audio_ok && $video_ok;
 					push @stream_opts, ( '-metadata:s:s:0', 'language=eng' );
+					$embedding = " and embedding subtitles";
 			} else {
 				main::logger "WARNING: --subs-embed specified but subtitles file not found: $prog->{subsfile}\n";
 			}
@@ -6305,7 +6307,7 @@ sub postproc {
 		$prog->{filepart},
 	);
 
-	main::logger "INFO: Converting to \U$prog->{ext}\E\n";
+	main::logger "INFO: Converting to \U$prog->{ext}\E$embedding\n";
 
 	# Run conversion and delete source file on success
 	$return = main::run_cmd( 'STDERR', @cmd );
