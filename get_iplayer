@@ -147,6 +147,8 @@ my $opt_format = {
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Output', '--thumbnail-only', "Only download thumbnail image if available, not the programme"],
 	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192"],
+	tracklist		=> [ 1, "tracklist!", 'Output', '--tracklist', "Download track list of music played in programme, if available. Track times and durations may be missing or incorrect."],
+	tracklistonly		=> [ 1, "tracklistonly|tracklist-only|tracklist-only!", 'Output', '--tracklist-only', "Only download track list of music played in programme, if available"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
 	# Config
@@ -715,6 +717,11 @@ sub init_search {
 		$opt->{thumb} = 1;
 	}
 
+	# Set --tracklist if --tracklist-only is used
+	if ( $opt->{tracklistonly} ) {
+		$opt->{tracklist} = 1;
+	}
+
 	# Set --metadata if --metadata-only is used
 	if ( defined $opt->{metadata} || $opt->{metadataonly} ) {
 		$opt->{metadata} = "generic";
@@ -730,7 +737,7 @@ sub init_search {
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 
 	# Force nowrite if metadata/subs/thumb-only
-	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tagonly} ) {
+	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
 	}
 	
@@ -866,7 +873,7 @@ sub download_pid_matches {
 	my $hist = shift;
 	my @match_list = @_;
 	my $failcount = 0;
-	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
 	} else {
 		for my $this (@match_list) {
@@ -1037,7 +1044,7 @@ sub download_matches {
 	my $hist = shift;
 	my @match_list = @_;
 	my $failcount = 0;
-	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
 	} elsif ( $opt->{get} ) {
 		for my $this (@match_list) {
@@ -1075,6 +1082,11 @@ sub download_other {
 		if ( $opt->{thumbonly} && $this->{thumbnail} ) {
 			$this->create_dir();
 			$this->download_thumbnail();
+		}
+		# tracklist
+		if ( $opt->{tracklistonly} && $this->{tracklist} ) {
+			$this->create_dir();
+			$this->download_tracklist();
 		}
 		# tag
 		if ( $opt->{tagonly} && ! $opt->{notag} ) {
@@ -1733,14 +1745,25 @@ sub request_url_retry {
 	# Re-enable proxy unless mustproxy is flagged
 	main::proxy_enable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	# Return empty string if we failed and content not required
-	return '' if $i == $retries and ! $fail_content;
+	if ( $i == $retries ) {
+		$fail_content ||= '';
+		if ( wantarray ) {
+			return ($fail_content, $res);
+		} else {
+			return $fail_content;
+		}
+	}
 
 	# Only return decoded content if gzip is used - otherwise this severely slows down stco scanning! Perl bug?
 	main::logger "DEBUG: ".($res->header('Content-Encoding') || 'No')." Encoding used on $url\n" if $opt->{debug};
 	# this appears to be obsolete
 	# return $res->decoded_content if defined $res->header('Content-Encoding') && $res->header('Content-Encoding') eq 'gzip';
 	# return $res->content;
-	return $res->decoded_content;
+	if ( wantarray ) {
+		return ($res->decoded_content, $res);
+	} else {
+		return $res->decoded_content;
+	}
 }
 
 # Generic
@@ -3570,11 +3593,6 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
-			# Add to history and tag file
-			if ( ! $opt->{nowrite} ) {
-				$hist->add( $prog );
-				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
-			}
 			if ( $opt->{metadata} ) {
 				$prog->create_dir();
 				$prog->create_metadata_file();
@@ -3583,6 +3601,16 @@ sub mode_ver_download_retry_loop {
 				$prog->create_dir();
 				$prog->download_thumbnail();
 			}
+			if ( $opt->{tracklist} ) {
+				$prog->create_dir();
+				$prog->download_tracklist();
+			}
+			# Add to history and tag file
+			if ( ! $opt->{nowrite} ) {
+				$hist->add( $prog );
+				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
+			}
+			# Get subtitles if they exist and are required and media download succeeded
 			if ( $opt->{subtitles} && $prog->{type} eq 'tv' && ( ! $opt->{subsembed} || $opt->{raw} ) ) {
 				unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $version ] ) ) {
 					# Rename the subtitle file accordingly if the stream get was successful
@@ -3647,13 +3675,8 @@ sub tag_file {
 	}
 	# return if file does not exist
 	return if ! -f $prog->{filename};
-	# assume --thumbnail used if file exists
-	my $thumb_found = -f $prog->{thumbfile};
-	$prog->download_thumbnail unless $opt->{noartwork} || $thumb_found;
 	# tag programme
 	Tagger->tag_prog($prog);
-	# clean up thumbnail if necessary
-	unlink $prog->{thumbfile} unless $opt->{thumb} || $thumb_found;
 }
 
 # Create a metadata file if required
@@ -3891,6 +3914,9 @@ sub generate_filenames {
 		$ext = $opt->{thumbext} || $ext;
 		$prog->{thumbfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}") );
 	}
+
+	# Determine tracklist filename
+	$prog->{tracklist} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.trk") );
 	
 	# Determine subtitle filenames
 	if ( $prog->{type} eq "tv" ) {
@@ -3905,6 +3931,7 @@ sub generate_filenames {
 		( ! $opt->{nowrite} )
 		&& ( ! $opt->{metadataonly} )
 		&& ( ! $opt->{thumbonly} )
+		&& ( ! $opt->{tracklistonly} )
 		&& ( ! $opt->{subsonly} )
 		&& ( ! $opt->{tagonly} )
 	) {
@@ -4106,10 +4133,8 @@ sub download_thumbnail {
 		$file = $prog->{thumbfile};
 		# Don't redownload thumbnail if the file already exists
 		if ( -f $file && ! $opt->{overwrite} ) {
-			if ( $opt->{notag} || $opt->{thumbonly} ) {
-				main::logger "INFO: Thumbnail file already exists: $file\n";
-				main::logger "INFO: Use --overwrite to re-download\n";
-			}
+			main::logger "INFO: Thumbnail file already exists: $file\n";
+			main::logger "INFO: Use --overwrite to re-download\n";
 			return 0;
 		}
 		main::logger "INFO: Downloading thumbnail\n" if $opt->{thumb} || $opt->{verbose};
@@ -4130,6 +4155,138 @@ sub download_thumbnail {
 	open( my $fh, ">:raw", $file );
 	binmode $fh;
 	print $fh $image;
+	close $fh;
+	return 0;
+}
+
+sub download_tracklist {
+	my $prog = shift;
+	my ($times, $durations, $tracklist);
+	eval "use JSON::PP";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to download tracklist.\n";
+		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
+		return 1;
+	}
+	eval "use XML::LibXML '1.91'";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to download tracklist.\n";
+		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
+		return 1;
+	}
+	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparsertracklist} ) {
+		$opt->{nowarnhtmlparsertracklist} = 1;
+		main::logger "WARNING: Tracklist download may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
+	}
+	my $file = $prog->{tracklist};
+	if ( -f $file && ! $opt->{overwrite} ) {
+		main::logger "INFO: Tracklist file already exists: $file\n";
+		main::logger "INFO: Use --overwrite to re-download\n";
+		return 0;
+	}
+	main::logger "INFO: Downloading tracklist\n" if $opt->{tracklist} || $opt->{verbose};
+	my $ua = main::create_ua( 'desktop', 1 );
+	my $url1 = "http://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
+	my ($html, $res1) = main::request_url_retry($ua , $url1, 3);
+	unless ( $res1 && $res1->is_success ) {
+		if ( $res1 && $res1->code == 404 ) {
+			main::logger "WARNING: Track info not found\n";
+		} else {
+			main::logger "WARNING: Track info download failed\n";
+		}
+		return 1;
+	}
+	unless ( $html ) {
+		main::logger "WARNING: Track info not defined\n";
+		return 1;
+	}
+	my $json;
+	if ( $res1 && $res1->request ) {
+		my ($url2, $res2);
+		($url2 = $res1->request->uri) =~ s/segments\.inc/segments\.json/;
+		if ( $url2 ) {
+			($json, $res2) = main::request_url_retry($ua , $url2, 3);
+			unless ( $res2 && $res2->is_success ) {
+				if ( $res2 && $res2->code == 404 ) {
+					main::logger "WARNING: Track times not found\n";
+				} else {
+					main::logger "WARNING: Track times download failed\n";
+				}
+				undef $json;
+			}
+			if ( $json ) {
+				my $jom = eval { decode_json($json) };
+				undef $jom if ( $@ );
+				if ( $jom && @{$jom->{segment_events}} ) {
+					my $start = $opt->{mysubstart} > 0 ? $opt->{mysubstart}/1000 : 0;
+					my $stop = $opt->{mysubstop} > 0 ? $opt->{mysubstop}/1000 : 0;
+					for my $se ( @{$jom->{segment_events}} ) {
+						my $rec_id = $se->{segment}->{record_id};
+						next unless $rec_id;
+						my $begin = $se->{version_offset};
+						next unless defined $begin;
+						my $duration = $se->{segment}->{duration};
+						my $end = $begin + $duration;
+						unless ( ( $stop > 0 && $begin > $stop ) || ( $start > 0 && $end < $start ) ) {
+							$begin = $start if ( $start > 0 && $begin < $start );
+							$end = $stop if ( $stop > 0 && $end > $stop );
+							if ( $begin >= $start ) {
+								my $ts = sprintf("%02d:%02d:%02d", (gmtime($begin - $start))[2,1,0]);
+								$times->{$rec_id} = $ts;
+							}
+							if ( $end > 0 && $end > $begin ) {
+								my $td = sprintf("%02d:%02d:%02d", (gmtime($end - $begin))[2,1,0]);
+								if ( $end - $begin < $duration ) {
+									#$td .= sprintf(" (truncated from %02d:%02d:%02d)", (gmtime($duration))[2,1,0]);
+									$td .= " (partial)";
+								}
+								$durations->{$rec_id} = $td;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if ( $json && keys %$times == 0 ) {
+		main::logger "WARNING: Track times not defined\n";
+	}
+	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
+	my @tracks = $dom->findnodes('//li[contains(@class,"segments-list__item")]//div[contains(@class,"segment__track")]');
+	if ( @tracks ) {
+		my @out;
+		for my $track ( @tracks ) {
+			push @out, "\n--------\n";
+			my $rec_id = $track->findvalue('ancestor::li//bbc-snippet/@data-record-id');
+			my $ts = $times->{$rec_id} if $rec_id;
+			push @out, $ts if $ts;
+			my $artist = $track->findvalue('h3');
+			push @out, $artist if $artist;
+			my $title = $track->findvalue('p');
+			push @out, $title if $title;
+			for my $e ( $track->findnodes('ul/li') ) {
+				unless ( $e->findnodes('./abbr[@title="Track Number"]') ) {
+					my $item = $e->findvalue('.');
+					push @out, $item if $item;
+				}
+			}
+			my $td = $durations->{$rec_id} if $rec_id;
+			push @out, "Duration: $td" if $td;
+		}
+		my $heading = "$prog->{name}\n$prog->{episode}\n";
+		$heading .= "$prog->{firstbcastdate}\n" if $prog->{firstbcastdate};
+		$heading .= $prog->{player} ? "$prog->{player}\n" : "PID: $prog->{pid}\n";
+		unshift @out, $heading;
+		$tracklist = join "\n", @out;
+		$tracklist =~ s/([ \t]){2,}/$1/g;
+		$tracklist =~ s/(^[ \t]+|[ \t\.]+$)//gm;
+		$tracklist =~ s/\n{2,}/\n/g;
+	} else {
+		main::logger "WARNING: Track info not found\n";
+		return 1;
+	}
+	open( my $fh, "> $file" );
+	print $fh $tracklist, "\n";
 	close $fh;
 	return 0;
 }
@@ -4613,7 +4770,7 @@ sub get_metadata {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version PIDs and metadata\n" if $opt->{verbose};
 			# Return at this stage unless we want metadata/tags only for various reasons
-			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
+			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{tagonly} )
 		}
 	}
 
@@ -4743,7 +4900,7 @@ sub get_metadata {
 			main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK.\n";
 		}
 		# Return at this stage unless we want metadata/tags only for various reasons
-		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tagonly} )
+		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{tagonly} )
 	}
 
 	$versions = join ',', sort keys %{ $prog->{verpids} };
@@ -8208,7 +8365,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|^purge|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tracklistonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|^purge|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
@@ -8447,6 +8604,7 @@ sub opt_format {
 		tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts"],
 		tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts"],
 		tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts"],
+		tag_tracklist => [ 1, "tagtracklist|tag-tracklist!", 'Tagging', '--tag-tracklist', "Add tracklist (if available) to long description (lyrics)."],
 		tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "Use UTF-8 encoding for non-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto-detect fails."],
 	};
 }
@@ -8516,6 +8674,18 @@ sub tags_from_metadata {
 			$tags->{$field} =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
 		}
 	}
+	if ( $opt->{tag_tracklist} ) {
+		if ( -f $meta->{tracklist} ) {
+			my $tracklist = do { local(@ARGV, $/) = $meta->{tracklist}; <> };
+			if ( $tracklist ) {
+				$tags->{lyrics} .= "\n\nTRACKLIST\n$tracklist";
+			} else {
+				main::logger "WARNING: --tag-tracklist specified but tracklist file empty: $meta->{tracklist}\n";
+			}
+		} else {
+			main::logger "WARNING: --tag-tracklist specified but tracklist file not found: $meta->{tracklist}\n";
+		}
+	}
 	while ( my ($key, $val) = each %{$tags} ) {
 		$tags->{$key} = StringUtils::convert_punctuation($val);
 	}
@@ -8547,6 +8717,13 @@ sub tags_encode {
 # add metadata tag to programme
 sub tag_prog {
 	my ($self, $prog) = @_;
+	my $rc;
+	# download thumbnail if necessary
+	my $thumb_found = -f $prog->{thumbfile};
+	$prog->download_thumbnail() unless $opt->{noartwork} || $thumb_found;
+	# download tracklist if necessary
+	my $tracklist_found = -f $prog->{tracklist};
+	$prog->download_tracklist() unless ! $opt->{tag_tracklist} || $tracklist_found;
 	# create metadata for tagging
 	my $meta;
 	while ( my ($key, $val) = each %{$prog} ) {
@@ -8560,12 +8737,18 @@ sub tag_prog {
 	my $fmt_title = $opt->{tag_formattitle} || "<episodeshort>";
 	$meta->{show} = $prog->substitute($fmt_show, 99);
 	$meta->{title} = $prog->substitute($fmt_title, 99);
+	# do tagging
 	my $tags = $self->tags_from_metadata($meta);
 	if ( $meta->{filename} =~ /\.(mp4|m4v|m4a)$/i ) {
-		return $self->tag_file_mp4($meta, $tags);
+		$rc = $self->tag_file_mp4($meta, $tags);
 	} else {
 		main::logger "WARNING: Don't know how to tag \U$meta->{ext}\E file\n" if $opt->{verbose};
 	}
+	# clean up thumbnail if necessary
+	unlink $prog->{thumbfile} unless $opt->{thumb} || $thumb_found;
+	# clean up tracklist if necessary
+	unlink $prog->{tracklist} unless $opt->{tracklist} || $tracklist_found;
+	return $rc;
 }
 
 sub ap_init {
