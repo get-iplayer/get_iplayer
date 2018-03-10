@@ -7585,6 +7585,9 @@ sub fetch {
 	my $rate_str;
 	my $rate_percent;
 	my $eta_str;
+	my $prog_cdn;
+	($prog_cdn = "$streamdata{type} ak ll bi") =~ s/^.*akamai(?=.*\b(ak)\b).*$|^.*limelight(?=.*\b(ll)\b).*$|^.*bidi(?=.*\b(bi)\b).*$/$1$2$3/;
+	$prog_cdn = "un" unless $prog_cdn =~ /^(ak|ll|bi)$/;
 
 	# LWP download callback
 	my $callback = sub {
@@ -7638,7 +7641,7 @@ sub fetch {
 					}
 				}
 				if ( $opt->{verbose} ) {
-					main::logger sprintf("%5.1f%% %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] @%s ETA: %s (%s) [%s]${crlf}",
+					main::logger sprintf("%5.1f%% %8.2f MB / ~%.2f MB (%02d:%02d:%02d / %8s) [%5d / %d] @%s ETA: %s (%s/%s) [%s]${crlf}",
 						$curr_percent,
 						$curr_size / 1000000.0,
 						$file_size_mb,
@@ -7649,15 +7652,17 @@ sub fetch {
 						$rate_str,
 						$eta_str,
 						$prog_mode,
+						$prog_cdn,
 						$prog_kind,
 					);
 				} else {
-					main::logger sprintf("%5.1f%% of ~%.2f MB @%s ETA: %s (%s) [%s]${crlf}",
+					main::logger sprintf("%5.1f%% of ~%.2f MB @%s ETA: %s (%s/%s) [%s]${crlf}",
 						$curr_percent,
 						$file_size_mb,
 						$rate_str,
 						$eta_str,
 						$prog_mode,
+						$prog_cdn,
 						$prog_kind,
 					);
 				}
@@ -7957,21 +7962,23 @@ sub fetch {
 	}
 	my $end_time = time() + 0.0001;
 	if ( $opt->{verbose} ) {
-		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d \@ %.2f Mb/s (%s) [%s]\n",
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) [%d] in %02d:%02d:%02d \@ %.2f Mb/s (%s/%s) [%s]\n",
 			($prev_size - $resume_size) / 1000000.0,
 			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
 			max($prev_sequence - $resume_sequence + 1, 0),
 			(gmtime($end_time - $begin_time))[2,1,0],
 			($prev_size - $resume_size) / ($end_time - $begin_time) / 1000000.0 * 8.0,
 			$prog_mode,
+			$prog_cdn,
 			$prog_kind,
 		);
 	} else {
-		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) \@ %.2f Mb/s (%s) [%s]\n",
+		main::logger sprintf("${crlf}INFO: Downloaded: %.2f MB (%02d:%02d:%02d) \@ %.2f Mb/s (%s/%s) [%s]\n",
 			($prev_size - $resume_size) / 1000000.0,
 			(gmtime($prev_elapsed - $resume_elapsed))[2,1,0],
 			($prev_size - $resume_size) / ($end_time - $begin_time) / 1000000.0 * 8.0,
 			$prog_mode,
+			$prog_cdn,
 			$prog_kind,
 		);
 	}
