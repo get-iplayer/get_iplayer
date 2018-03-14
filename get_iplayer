@@ -3515,6 +3515,7 @@ sub download_retry_loop {
 					main::logger "INFO: Available modes: ".(join ',', sort Programme::cmp_modes keys %available_modes_short)."\n";
 				} else {
 					main::logger "INFO: No other modes are available\n";
+					main::logger "INFO: The programme may no longer be available - check the iPlayer site\n";
 				}
 				next;
 			}
@@ -4898,6 +4899,8 @@ sub get_metadata {
 		main::logger "WARNING: No media streams found for requested programme versions and recording modes.\n";
 		if ( $prog->{geoblocked} ) {
 			main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK.\n";
+		} else {
+			main::logger "WARNING: The programme may no longer be available - check the iPlayer site.\n";
 		}
 		# Return at this stage unless we want metadata/tags only for various reasons
 		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{tagonly} )
