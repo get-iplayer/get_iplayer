@@ -5643,16 +5643,15 @@ sub get_stream_data_cdn {
 sub get_stream_set_type {
 		my ( $conn, $mattribs, $cattribs ) = ( @_ );
 		my @type;
-		push @type, "($mattribs->{service})" if $mattribs->{service};
-		push @type, "$conn->{streamer}";
-		push @type, "$mattribs->{encoding}" if $mattribs->{encoding};
-		push @type, "$mattribs->{width}x$mattribs->{height}" if $mattribs->{width} && $mattribs->{height};
-		push @type, "$mattribs->{fps}fps" if $mattribs->{fps};
-		push @type, "$mattribs->{bitrate}kbps" if $mattribs->{bitrate};
-		push @type, "stream";
-		push @type, "(CDN: $cattribs->{kind}/$cattribs->{priority})" if $cattribs->{kind} && $cattribs->{priority};
-		push @type, "(CDN: $cattribs->{kind})" if $cattribs->{kind} && not defined $cattribs->{priority};
-		$conn->{type} = join ' ', @type;
+		push @type, $mattribs->{service} ? $mattribs->{service} : "N/A";
+		push @type, $conn->{streamer};
+		push @type, $mattribs->{encoding} ? $mattribs->{encoding} : "N/A";
+		push @type, $mattribs->{width} && $mattribs->{height} ? "$mattribs->{width}x$mattribs->{height}" : "N/A";
+		push @type, $mattribs->{fps} ? "$mattribs->{fps}fps" : "N/A" ;
+		push @type, $mattribs->{bitrate} ? "$mattribs->{bitrate}kbps" : "N/A";
+		push @type, "$cattribs->{kind}/$cattribs->{priority}" if $cattribs->{kind} && $cattribs->{priority};
+		push @type, "$cattribs->{kind}" if $cattribs->{kind} && not defined $cattribs->{priority};
+		$conn->{type} = sprintf("%22s %4s %4s %9s %5s %8s %s", @type);
 }
 
 sub check_geoblock {
@@ -5996,7 +5995,7 @@ sub get_stream_data {
 
 	# Report modes found
 	if ( $opt->{verbose} ) {
-		main::logger "INFO: Found mode '$_': $data->{$_}->{type}\n" for sort Programme::cmp_modes keys %{ $data };
+		main::logger sprintf("INFO: Found mode %10s: %s\n", $_, $data->{$_}->{type}) for sort Programme::cmp_modes keys %{ $data };
 	}
 
 	# Return a hash with media => url if '' is specified - otherwise just the specified url
