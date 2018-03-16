@@ -5667,28 +5667,8 @@ sub check_geoblock {
 # $media = undef|<modename>
 sub get_stream_data {
 	my ( $prog, $verpid, $media, $version ) = @_;
-	my $mode;
 	my $modelist = $prog->modelist();
 	my $data = {};
-	my @media_stream_pc_prefixes;
-	my @media_stream_iptv_prefixes;
-	my @media_stream_mobile_prefixes;
-	my ( @pc_mediasets, @iptv_mediasets, @mobile_mediasets );
-	@pc_mediasets = ( 'pc' );
-	@iptv_mediasets = ( 'iptv-all' );
-	@mobile_mediasets = ( 'apple-ipad-hls' );
-	if ( $prog->{type} eq "radio" ) {
-		push @mobile_mediasets, 'apple-iphone4-ipad-hls-3g';
-	}
-	for my $mediaset ( @pc_mediasets ) {
-		push @media_stream_pc_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/";
-	}
-	for my $mediaset ( @iptv_mediasets ) {
-		push @media_stream_iptv_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/";
-	}
-	for my $mediaset ( @mobile_mediasets ) {
-		push @media_stream_mobile_prefixes, "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/";
-	}
 
 	# filter CDN suppliers
 	my @exclude_supplier = split(/,/, $opt->{excludesupplier});
@@ -5706,165 +5686,79 @@ sub get_stream_data {
 		$exclude_regex = '('.(join('|', @exclude_supplier)).')';
 	}
 
-	# Setup user agent with redirection enabled
+	# retrieve stream data
 	my $ua = main::create_ua( 'desktop' );
-
-	# BBC streams
-	my $xml;
-	my @medias;
+	delete $opt->{nowarnlibxmldash};
 	my $unblocked;
 	my $checked_geoblock;
-	delete $opt->{nowarnlibxmldash};
-
-	my (%seen, $stream_key);
+	my %seen;
+	my @medias;
+	my @mediasets;
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
-		# get MPEG-DASH streams for on-demand
-		unshift @media_stream_pc_prefixes, @media_stream_iptv_prefixes if $prog->{type} eq "tv";
-		for my $media_stream_pc_prefix ( @media_stream_pc_prefixes ) {
-			$xml = main::request_url_retry( $ua, $media_stream_pc_prefix.$verpid.'/transferformat/dash?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			$checked_geoblock = 1;
-			next if check_geoblock( $xml );
-			$unblocked = 1;
-			decode_entities($xml);
-			my @pc_medias = parse_metadata( $xml );
-			for my $pc_media ( @pc_medias ) {
-				for my $pc_conn ( @{$pc_media->{connections}} ) {
-					next if $pc_conn->{supplier} =~ /$exclude_regex/;
-					$stream_key = "$pc_media->{service}-$pc_conn->{protocol}-$pc_conn->{supplier}";
-					next if $seen{$stream_key};
-					$seen{$stream_key}++;
-					($stream_key = $pc_conn->{href}) =~ s/\?.*//;
-					next if $seen{$stream_key};
-					$seen{$stream_key}++;
-					next if ! $opt->{includehttps} && $pc_conn->{href} =~ /^https:/;
-					if ( $pc_media->{kind} eq "captions" ) {
-						my $media = dclone($pc_media);
-						@{$media->{connections}} = ( $pc_conn );
-						push @medias, $media;
-						next;
-					}
-					my $prefix = $prog->{type} eq "radio" ? "daf" : "dvf";
-					my @dash_medias = parse_dash_connection( $pc_media, $pc_conn, undef, undef, $prefix );
-					for my $dash_media ( @dash_medias ) {
-						for my $dash_conn ( @{$dash_media->{connections}} ) {
-							$stream_key = "$dash_media->{service}-$dash_conn->{protocol}-$dash_conn->{supplier}";
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							($stream_key = $dash_conn->{href}) =~ s/\?.*//;
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							push @medias, $dash_media;
-							last;
-						}
-					}
-				}
-			}
-		}
+		push @mediasets, "pc";
 	}
-	if ( $opt->{info} || $modelist =~ /(hls|hvf|haf)/ ) {
-		if ( $prog->{type} eq "tv" ) {
-			# get HLS streams from IPTV data
-			for my $media_stream_iptv_prefix ( @media_stream_iptv_prefixes ) {
-				$xml = main::request_url_retry( $ua, $media_stream_iptv_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-				main::logger "\n$xml\n" if $opt->{debug};
-				$checked_geoblock = 1;
-				next if check_geoblock( $xml );
-				$unblocked = 1;
-				decode_entities($xml);
-				my @iptv_medias = parse_metadata( $xml );
-				for my $iptv_media ( @iptv_medias ) {
-					for my $iptv_conn ( @{$iptv_media->{connections}} ) {
-						next if $iptv_conn->{supplier} =~ /$exclude_regex/;
-						$stream_key = "$iptv_media->{service}-$iptv_conn->{protocol}-$iptv_conn->{supplier}";
-						next if $seen{$stream_key};
-						$seen{$stream_key}++;
-						($stream_key = $iptv_conn->{href}) =~ s/\?.*//;
-						next if $seen{$stream_key};
-						$seen{$stream_key}++;
-						next if ! $opt->{includehttps} && $iptv_conn->{href} =~ /^https:/;
-						if ( $iptv_media->{kind} eq "captions" ) {
-							my $media = dclone($iptv_media);
-							@{$media->{connections}} = ( $iptv_conn );
-							push @medias, $media;
-							next;
-						}
-						my $prefix = $iptv_conn->{supplier} =~ /hls_open/ ? "hls" : "hvf";
-						# for 320k audio
-						$iptv_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
-						my ( $min_bitrate, $max_bitrate );
-						if ( $prefix eq "hvf" ) {
-							$min_bitrate = 1500;
-							$max_bitrate = 6500;
-						}
-						my @hls_medias = parse_hls_connection( $iptv_media, $iptv_conn, $min_bitrate, $max_bitrate, $prefix );
-						for my $hls_media ( @hls_medias ) {
-							for my $hls_conn ( @{$hls_media->{connections}} ) {
-								$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
-								next if $seen{$stream_key};
-								$seen{$stream_key}++;
-								($stream_key = $hls_conn->{href}) =~ s/\?.*//;
-								next if $seen{$stream_key};
-								$seen{$stream_key}++;
-								push @medias, $hls_media;
-								last;
-							}
-						}
-					}
+	if ( $opt->{info} || $modelist =~ /(haf|hvf|hls)/ ) {
+		push @mediasets, "iptv-all";
+	}
+	if ( ( $opt->{info} || $modelist =~ /hlsaac/ ) && $prog->{type} eq "radio" ) {
+		# for hlsaaclow stream
+		push @mediasets, "apple-iphone4-ipad-hls-3g";
+	}
+	my @ms_proto = ( "http" );
+	push @ms_proto, "https" if $opt->{includehttps};
+	my $ms_tf = { "pc" => "dash", "iptv-all" => "hls", "apple-iphone4-ipad-hls-3g" => "hls" };
+	for my $mediaset ( @mediasets ) {
+		my $url = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/${verpid}?cb=".( sprintf "%05.0f", 99999*rand(0) );
+		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, 1 );
+		main::logger "\n$xml\n" if $opt->{debug};
+		$checked_geoblock = 1;
+		next if check_geoblock( $xml );
+		$unblocked = 1;
+		decode_entities($xml);
+		my @ms_medias = parse_metadata( $xml );
+		for my $ms_media ( @ms_medias ) {
+			for my $ms_conn ( @{$ms_media->{connections}} ) {
+				next unless grep /^$ms_conn->{protocol}$/, @ms_proto;
+				next unless $ms_conn->{transferFormat} eq $ms_tf->{$mediaset} || $ms_media->{kind} eq "captions";
+				next if $ms_conn->{supplier} =~ /$exclude_regex/;
+				my $stream_key = "$ms_media->{service}-$ms_conn->{protocol}-$ms_conn->{supplier}";
+				next if $seen{$stream_key};
+				$seen{$stream_key}++;
+				($stream_key = $ms_conn->{href}) =~ s/\?.*//;
+				next if $seen{$stream_key};
+				$seen{$stream_key}++;
+				if ( $ms_media->{kind} eq "captions" ) {
+					my $media = dclone($ms_media);
+					@{$media->{connections}} = ( $ms_conn );
+					push @medias, $media;
+					next;
 				}
-			}
-		}
-		# get HLS streams from mobile data
-		for my $media_stream_mobile_prefix ( @media_stream_mobile_prefixes ) {
-			$xml = main::request_url_retry( $ua, $media_stream_mobile_prefix.$verpid.'/transferformat/hls?cb='.( sprintf "%05.0f", 99999*rand(0) ), 3, undef, undef, 1, 1 );
-			main::logger "\n$xml\n" if $opt->{debug};
-			$checked_geoblock = 1;
-			next if check_geoblock( $xml );
-			$unblocked = 1;
-			decode_entities($xml);
-			my @mobile_medias = parse_metadata( $xml );
-			for my $mobile_media ( @mobile_medias ) {
-				for my $mobile_conn ( @{$mobile_media->{connections}} ) {
-					next if $mobile_conn->{supplier} =~ /$exclude_regex/;
-					$stream_key = "$mobile_media->{service}-$mobile_conn->{protocol}-$mobile_conn->{supplier}";
-					next if $seen{$stream_key};
-					$seen{$stream_key}++;
-					($stream_key = $mobile_conn->{href}) =~ s/\?.*//;
-					next if $seen{$stream_key};
-					$seen{$stream_key}++;
-					next if ! $opt->{includehttps} && $mobile_conn->{href} =~ /^https:/;
-					if ( $mobile_media->{kind} eq "captions" ) {
-						my $media = dclone($mobile_media);
-						@{$media->{connections}} = ( $mobile_conn );
-						push @medias, $media;
-						next;
+				my ( $prefix, $min_bitrate, $max_bitrate, @new_medias );
+				if ( $ms_conn->{transferFormat} eq "dash" ) {
+					$prefix = $prog->{type} eq "tv" ? "dvf" : "daf";
+					@new_medias = parse_dash_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+				} elsif ( $ms_conn->{transferFormat} eq "hls" ) {
+					$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
+					if ( $ms_conn->{supplier} =~ /hls_open/ ) {
+						$prefix = $prog->{type} eq "tv" ? "hls" : "hlsaac";
 					}
-					my $prefix = $prog->{type} eq "radio" ? "haf" : "hvf";
-					if ( $mobile_conn->{supplier} =~ /hls_open/ ) {
-						if ( $prog->{type} eq 'tv' ) {
-							$prefix = "hls";
-						} elsif ( $prog->{type} eq 'radio' ) {
-							$prefix = "hlsaac";
-						}
-					}
-					# for 320k audio (tv/radio) and 96k audio (radio)
-					$mobile_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
-					my ( $min_bitrate, $max_bitrate );
+					# for 320k tv audio or 320k/96k radio
+					$ms_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
 					if ( $prefix eq "hvf" ) {
 						$max_bitrate = 6500;
 					}
-					my @hls_medias = parse_hls_connection( $mobile_media, $mobile_conn, $min_bitrate, $max_bitrate, $prefix );
-					for my $hls_media ( @hls_medias ) {
-						for my $hls_conn ( @{$hls_media->{connections}} ) {
-							$stream_key = "$hls_media->{service}-$hls_conn->{protocol}-$hls_conn->{supplier}";
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							($stream_key = $hls_conn->{href}) =~ s/\?.*//;
-							next if $seen{$stream_key};
-							$seen{$stream_key}++;
-							push @medias, $hls_media;
-							last;
-						}
+					@new_medias = parse_hls_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+				}
+				for my $new_media ( @new_medias ) {
+					for my $new_conn ( @{$new_media->{connections}} ) {
+						my $stream_key = "$new_media->{service}-$new_conn->{protocol}-$new_conn->{supplier}";
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						($stream_key = $new_conn->{href}) =~ s/\?.*//;
+						next if $seen{$stream_key};
+						$seen{$stream_key}++;
+						push @medias, $new_media;
+						last;
 					}
 				}
 			}
