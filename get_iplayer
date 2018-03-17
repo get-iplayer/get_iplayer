@@ -382,6 +382,10 @@ if ( $opt_cmdline->{preset} ) {
 	# create dir if it does not exist
 	$presets_dir = File::Spec->catfile($profile_dir, 'presets');
 	mkpath $presets_dir if ! -d $presets_dir;
+	if ( $opt_cmdline->{preset} !~ m{[\w\-\+]+} || $opt_cmdline->{preset} =~ m{^\-+} ) {
+		main::logger "ERROR: Invalid preset name '$opt_cmdline->{preset}'\n";
+		exit 1;
+	}
 	# Sanitize preset file name
 	my $presetname = StringUtils::sanitize_path( $opt_cmdline->{preset}, 0, 1 );
 	$optfile_preset = File::Spec->catfile($presets_dir, $presetname);
@@ -8371,7 +8375,7 @@ sub add {
 	my @search_args = @_;
 	my @options;
 	# validate name
-	if ( $name !~ m{[\w\-\+]+} ) {
+	if ( $name !~ m{[\w\-\+]+} || $name =~ m{^\-+} ) {
 		main::logger "ERROR: Invalid PVR search name '$name'\n";
 		return 1;
 	}
