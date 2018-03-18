@@ -6490,6 +6490,39 @@ sub get_links_schedule_mojo {
 	my %attempts;
 	my $rc_mojo;
 	my $max_conn = $opt->{indexmaxconn} || 5;
+	# use LWP CA file for SSL verification unless Mojo CA file specified
+	unless ( $ENV{MOJO_CA_FILE} ) {
+		my %ssl_opts;
+		my $verify_mode;
+		my $ca_file;
+		eval {
+			%ssl_opts = LWP::Protocol::create("https", LWP::UserAgent->new)->_extra_sock_opts;
+		};
+		if ( $@ ) {
+			main::logger "WARNING: Failed to load LWP SSL options\n";
+			main::logger "WARNING: SSL hostname verification disabled for cache update\n";
+			main::logger "ERROR: Failed to load LWP SSL options with LWP::Protocol::https:\n$@" if $opt->{verbose};
+		} else {
+			$verify_mode = $ssl_opts{SSL_verify_mode};
+			$ca_file = $ssl_opts{SSL_ca_file};
+		}
+		if ( $opt->{verbose} ) {
+			main::logger "DEBUG: SSL verify mode: $verify_mode\n";
+			main::logger "DEBUG: SSL CA file: $ca_file\n";
+		}
+		if ( $verify_mode ) {
+			if ( -f $ca_file ) {
+				$ENV{MOJO_CA_FILE} = $ca_file;
+			} else {
+				if ( $ca_file ) {
+					main::logger "WARNING: SSL CA file not found: $ca_file\n" ;
+				}	else {
+					main::logger "WARNING: SSL CA file not defined\n" ;
+				}
+				main::logger "WARNING: SSL hostname verification disabled for cache update\n";
+			}
+		}
+	}
 	my $ua = Mojo::UserAgent->new(max_redirects => 5);
 	$ua->transactor->name(main::user_agent());
 	$ua->connect_timeout(60);
