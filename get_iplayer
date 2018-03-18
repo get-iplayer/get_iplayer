@@ -15,7 +15,7 @@
 #    GNU General Public License for more details.
 #
 #    You should have received a copy of the GNU General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 # Author: Phil Lewis
 # Email: iplayer2 (at sign) linuxcentre.net
@@ -84,7 +84,6 @@ my $opt_format = {
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps50		=> [ 1, "fps50!", 'Recording', '--fps50', "Prefer 50 fps streams for TV programmes (not available for all video sizes)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes.  Search terms required unless --pid specified.  Use  --search=.* to force download of all available programmes."],
-	includehttps		=> [ 1, "includehttps|include-https!", 'Recording', '--include-https', "Allow HTTPS playlist/manifest/segment URLs for media streams."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	hlshqaudio	=> [ 1, "hlshqaudio|hls-hq-audio!", 'Recording', '--hls-hq-audio', "Attempt to download higher-quality audio for 'hls' modes (TV only). Output file may require editing to sync audio and video."],
@@ -102,6 +101,7 @@ my $opt_format = {
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL, e.g., http://username:password\@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless --proxy is specified. Used for both HTTP and HTTPS. Overridden by --no-proxy."],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
+	streamhttp		=> [ 1, "streamhttp|stream-http!", 'Recording', '--stream-http', "Use HTTP (instead of HTTPS) media stream playlist URLs."],
 	subsrequired	=> [ 1, "subsrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
@@ -460,7 +460,7 @@ Options->usage( 1, $opt_cmdline->{manpage} ) if $opt_cmdline->{manpage};
 # Display GPLv3 stuff
 if ( $opt_cmdline->{warranty} || $opt_cmdline->{conditions}) {
 	# Get license from GNU
-	logger request_url_retry( create_ua( 'get_iplayer', 1 ), 'http://www.gnu.org/licenses/gpl-3.0.txt'."\n", 1);
+	logger request_url_retry( create_ua( 'get_iplayer', 1 ), "https://www.gnu.org/licenses/gpl-3.0.txt"."\n", 1);
 	exit 1;
 }
 
@@ -1462,9 +1462,9 @@ sub is_prog_type {
 
 # Feed Info:
 # # schedule feeds
-#	http://www.bbc.co.uk/radio4/programmes/schedules/this_week
-#	http://www.bbc.co.uk/radio4/programmes/schedules/next_week
-#	http://www.bbc.co.uk/radio4/programmes/schedules/w23
+#	https://www.bbc.co.uk/radio4/programmes/schedules/this_week
+#	https://www.bbc.co.uk/radio4/programmes/schedules/next_week
+#	https://www.bbc.co.uk/radio4/programmes/schedules/w23
 #
 # Usage: get_links( \%prog, \%index_prog, <prog_type>, <only load from file flag> )
 # Globals: $memcache
@@ -4214,7 +4214,7 @@ sub download_tracklist {
 	}
 	main::logger "INFO: Downloading tracklist\n" if $opt->{tracklist} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
-	my $url1 = "http://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
+	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
 	my ($html, $res1) = main::request_url_retry($ua , $url1, 3);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
@@ -4340,7 +4340,7 @@ sub download_credits {
 	}
 	main::logger "INFO: Downloading credits\n" if $opt->{credits} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
-	my $url1 = "http://www.bbc.co.uk/programmes/$prog->{pid}/credits.inc";
+	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/credits.inc";
 	my ($html, $res1) = main::request_url_retry($ua , $url1, 3);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
@@ -4457,11 +4457,11 @@ sub get_verpids {
 
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
-# Uses JSON playlist: http://www.bbc.co.uk/programmes/<pid>/playlist.json
+# Uses JSON playlist: https://www.bbc.co.uk/programmes/<pid>/playlist.json
 sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
 	my $pid = $prog->{pid};
-	my $url = 'http://www.bbc.co.uk/programmes/'.$pid.'/playlist.json';
+	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3 );
 	if ( ! $json ) {
@@ -4485,7 +4485,7 @@ sub get_verpids_json {
 		my $recipe = $prog->thumb_url_recipe();
 		$thumbnail =~ s/\$recipe/$recipe/;
 		$prog->{thumbnail} = $thumbnail if $thumbnail;
-		$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
+		$prog->{thumbnail} = "https:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
 	}
 	unless ( $prog->{title} ) {
 		my $title = $1 if $default =~ /"title":"(.*?)"/;
@@ -4522,9 +4522,9 @@ sub get_verpids_json {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
 			if ( $prog->{type} eq 'tv' ) {
-				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+				$episode_url = "https://www.bbc.co.uk/iplayer/episode/$pid/$version_map->{$_}";
 			} elsif ( $prog->{type} eq 'radio' ) {
-				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+				$episode_url = "https://www.bbc.co.uk/programmes/$pid";
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
@@ -4543,7 +4543,7 @@ sub get_verpids_json {
 
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
-# Scrapes HTML from episode page: http://www.bbc.co.uk/iplayer/episode/<pid>
+# Scrapes HTML from episode page: https://www.bbc.co.uk/iplayer/episode/<pid>
 # Only works for TV programmes
 sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
@@ -4557,7 +4557,7 @@ sub get_verpids_html {
 	for my $version ( "default", "audiodescribed", "signed" ) {
 		next if $prog->{verpids}->{$version};
 		my $html;
-		my $url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$version}";
+		my $url = "https://www.bbc.co.uk/iplayer/episode/$pid/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
 		$html = main::request_url_retry( $ua, $url, 3 );
 		if ( ! $html ) {
@@ -4597,7 +4597,7 @@ sub get_verpids_html {
 			my $recipe = $prog->thumb_url_recipe();
 			$thumbnail =~ s/{recipe}/$recipe/;
 			$prog->{thumbnail} = $thumbnail if $thumbnail;
-			$prog->{thumbnail} = "http:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
+			$prog->{thumbnail} = "https:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
 		}
 		unless ( $prog->{episodenum} ) {
 			$prog->{episodenum} = $1 if $config =~ /"parent_position":(\d+)/;
@@ -4621,9 +4621,9 @@ sub get_verpids_html {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
 			if ( $prog->{type} eq 'tv' ) {
-				$episode_url = 'http://www.bbc.co.uk/iplayer/episode/'.$pid."/$version_map->{$_}";
+				$episode_url = "https://www.bbc.co.uk/iplayer/episode/$pid/$version_map->{$_}";
 			} elsif ( $prog->{type} eq 'radio' ) {
-				$episode_url = 'http://www.bbc.co.uk/programmes/'.$pid;
+				$episode_url = "https://www.bbc.co.uk/programmes/$pid";
 			}
 			unless ( $prog->{player} ) {
 				$prog->{player} = $episode_url if $episode_url;
@@ -4685,13 +4685,13 @@ sub parse_title {
 sub get_metadata {
 	my $prog = shift;
 	my $ua = shift;
-	my $prog_data_url = 'http://www.bbc.co.uk/programmes/'; # $pid
+	my $prog_data_url = "https://www.bbc.co.uk/programmes/";
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
 
 	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart, $firstbcast );
 
 	# This URL works for tv/radio prog types:
-	# http://www.bbc.co.uk/programmes/{pid}.json
+	# https://www.bbc.co.uk/programmes/{pid}.json
 	my $got_metadata;
 	eval "use JSON::PP";
 	if ( $@ ) {
@@ -4728,12 +4728,12 @@ sub get_metadata {
 						}
 					}
 					my $recipe = $prog->thumb_url_recipe();
-					$thumbnail = "http://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
-					$web = "http://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
+					$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
+					$web = "https://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
 					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
-						$player = "http://www.bbc.co.uk/iplayer/episode/$pid";
+						$player = "https://www.bbc.co.uk/iplayer/episode/$pid";
 					} else {
-						$player = "http://www.bbc.co.uk/programmes/$pid";
+						$player = "https://www.bbc.co.uk/programmes/$pid";
 					}
 					# title strings
 					my ($series_position, $subseries_position);
@@ -5010,7 +5010,7 @@ sub get_metadata {
 sub fetch_pid_info {
 	my $ua = shift;
 	my $pid = shift;
-	my $url = "http://www.bbc.co.uk/programmes/$pid.json";
+	my $url = "https://www.bbc.co.uk/programmes/$pid.json";
 	my $pid_type;
 	my $prog_type;
 	my $prog_name;
@@ -5071,7 +5071,7 @@ sub fetch_episodes_recursive {
 		main::logger "WARNING: Episode scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
 	}
 	{ do {
-		my $url = "http://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
+		my $url = "https://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
 		my $html = main::request_url_retry($ua, $url, 3, '', '');
 		last unless $html;
 		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
@@ -5120,7 +5120,7 @@ sub fetch_episodes_recursive {
 		$title = undef;
 		$channel = undef;
 		{ do {
-			my $url = "http://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
+			my $url = "https://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
 			my $html = main::request_url_retry($ua, $url, 3, '', '');
 			last unless $html;
 			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
@@ -5806,10 +5806,9 @@ sub get_stream_data {
 		# for hlsaaclow stream
 		push @mediasets, "apple-iphone4-ipad-hls-3g";
 	}
-	my @ms_proto = ( "http" );
-	push @ms_proto, "https" if $opt->{includehttps};
+	my $ms_proto = $opt->{streamhttp} ? "http" : "https";
 	for my $mediaset ( @mediasets ) {
-		my $url = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/${verpid}?cb=".( sprintf "%05.0f", 99999*rand(0) );
+		my $url = "https://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/$verpid?cb=".( sprintf "%05.0f", 99999*rand(0) );
 		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
 		$checked_geoblock = 1;
@@ -5819,7 +5818,7 @@ sub get_stream_data {
 		my @ms_medias = parse_metadata( $xml );
 		for my $ms_media ( @ms_medias ) {
 			for my $ms_conn ( @{$ms_media->{connections}} ) {
-				next unless grep(/^$ms_conn->{protocol}$/, @ms_proto);
+				next unless $ms_conn->{protocol} eq $ms_proto;
 				next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
 				next if $ms_conn->{supplier} =~ /$exclude_regex/;
 				my $stream_key = "$ms_media->{service}-$ms_conn->{protocol}-$ms_conn->{supplier}";
@@ -6381,7 +6380,7 @@ sub channels {
 	};
 }
 
-# channel ids be found on http://www.bbc.co.uk/bbcone/programmes/schedules/today
+# channel ids be found on https://www.bbc.co.uk/bbcone/programmes/schedules/today
 sub channels_schedule {
 	return {
 		'national' => {
@@ -6552,7 +6551,7 @@ sub get_links_schedule {
 			my %mojo_channels;
 			for my $channel_id ( @channel_list ) {
 				for my $schedule_date ( @schedule_dates ) {
-					my $mojo_url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+					my $mojo_url = "https://www.bbc.co.uk/${channel_id}/${schedule_date}";
 					push @mojo_urls, $mojo_url;
 					$mojo_channel_ids{$mojo_url} = $channel_id;
 					$mojo_channels{$mojo_url} = $channels{$channel_id};
@@ -6575,7 +6574,7 @@ sub get_links_schedule {
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
-			$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
+			$url = "https://www.bbc.co.uk/${channel_id}/${schedule_date}";
 			$rc = $self->get_links_schedule_lwp($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
 				return 1 if $opt->{refreshabortonerror};
@@ -6768,7 +6767,7 @@ sub get_links_schedule_html {
 		# collapse BBC One/Two variants
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
-	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
+	my $bbc_prog_page_prefix = "https://www.bbc.co.uk/programmes";
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
@@ -6884,7 +6883,7 @@ sub get_links_schedule_json {
 		# collapse BBC One/Two variants
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
-	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
+	my $bbc_prog_page_prefix = 'https://www.bbc.co.uk/programmes'; # /$pid
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $blob = $1 if $html =~ /<script type="application\/ld\+json">(.+?)<\/script>/s;
@@ -7363,7 +7362,7 @@ use base 'Programme::bbciplayer';
 sub index_min { return 30001 }
 sub index_max { return 99999 };
 
-# channel ids be found on http://www.bbc.co.uk/radio/stations
+# channel ids be found on https://www.bbc.co.uk/radio/stations
 sub channels_schedule {
 	return {
 		'national' => {
