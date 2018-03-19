@@ -2649,8 +2649,7 @@ sub get {
 	my (@ignored, @deprecated);
 	# Load opts
 	main::logger "DEBUG: Parsing options from $optfile:\n" if $opt->{debug};
-	my $opt_encoding = ( $^O eq "MSWin32" && $optfile eq $optfile_system ) ? $opt->{encodinglocalefs} : "utf8";
-	open (OPT, "<:encoding($opt_encoding)", $optfile) || die ("ERROR: Cannot read options file $optfile\n");
+	open (OPT, "< $optfile") || die ("ERROR: Cannot read options file: $optfile\n");
 	while(<OPT>) {
 		next unless (/^\s*([\w\-_]+)\s+(.*)\s*$/);
 		# Error if the option is not valid
