@@ -136,9 +136,9 @@ my $opt_format = {
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for subdirectory naming.  Use substitution parameters, e.g., '<nameshort>-<seriesnum>'"],
 	suboffset	=> [ 1, "suboffset=n", 'Output', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds"],
 	subsembed	=> [ 1, "subtitlesembed|subsembed|subtitles-embed|subs-embed!", 'Output', '--subs-embed', "Embed subtitles in MP4 output file. Requires --subtitles. Ignored with --audio-only and --ffmpeg-obsolete."],
-	subsmono	=> [ 1, "subsmono|subs-mono!", 'Output', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker."],
+	subsmono	=> [ 1, "subtitlesmono|subsmono|subtitles-mono|subs-mono!", 'Output', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker."],
 	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Output', '--subtitles-only', "Only download the subtitles, not the programme"],
-	subsraw		=> [ 1, "subsraw!", 'Output', '--subsraw', "Additionally save the raw subtitles file"],
+	subsraw		=> [ 1, "subtitlesraw|subsraw|subtitles-raw|subs-raw!", 'Output', '--subs-raw', "Additionally save the raw subtitles file"],
 	subtitles	=> [ 2, "subtitles|subs!", 'Output', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
 	tagonly		=> [ 1, "tagonly|tag-only!", 'Output', '--tag-only', "Only update the programme metadata tag and not download the programme. Use with --history or --tag-only-filename."],
 	tagonlyfilename		=> [ 1, "tagonlyfilename|tag-only-filename=s", 'Output', '--tag-only-filename <filename>', "Add metadata tags to specified file (ignored unless used with --tag-only)"],
@@ -148,7 +148,7 @@ my $opt_format = {
 	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
 	thumbsize	=> [ 1, "thumbsize|thumbsizemeta=n", 'Output', '--thumbsize <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192"],
 	tracklist		=> [ 1, "tracklist!", 'Output', '--tracklist', "Download track list of music played in programme, if available. Track times and durations may be missing or incorrect."],
-	tracklistonly		=> [ 1, "tracklistonly|tracklist-only|tracklist-only!", 'Output', '--tracklist-only', "Only download track list of music played in programme, if available"],
+	tracklistonly		=> [ 1, "tracklistonly|tracklist-only!", 'Output', '--tracklist-only', "Only download track list of music played in programme, if available"],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
 	# Config
@@ -715,7 +715,7 @@ sub init_search {
 	}
 
 	# Set --subtitles if --subsonly is used
-	if ( $opt->{subsonly} ) {
+	if ( $opt->{subsonly} || $opt->{subsrequired} || $opt->{subsraw} || $opt->{subsmono} || $opt->{subsembed} ) {
 		$opt->{subtitles} = 1;
 	}
 
