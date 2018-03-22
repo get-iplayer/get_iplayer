@@ -6372,6 +6372,13 @@ sub get_links_schedule {
 	my $prog_type = shift;
 	my $future = shift;
 	my $now = shift || time();
+	# check JSON::PP here before using elsewhere
+	eval "use JSON::PP";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to index $prog_type programmes.\n";
+		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
+		return;
+	}
 	# check XML::LibXML here before using elsewhere
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
@@ -6460,7 +6467,7 @@ sub get_links_schedule {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
 			$url = "http://www.bbc.co.uk/${channel_id}/${schedule_date}";
-			$rc = $self->get_links_schedule_html($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
+			$rc = $self->get_links_schedule_lwp($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
 				return 1 if $opt->{refreshabortonerror};
 				next;
@@ -6570,10 +6577,14 @@ sub get_links_schedule_mojo {
 			}
 			return;
 		}
-		my $rc = $self->get_links_schedule_html_page($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+		my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
 		if ( $rc ) {
-			main::logger "\nWARNING: Failed to parse schedule page: $url\n";
-			$rc_mojo = 1;
+			main::logger "\nWARNING: Failed to parse schedule page (JSON): $url\n";
+			$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+			if ( $rc ) {
+				main::logger "\nWARNING: Failed to parse schedule page (HTML): $url\n";
+				$rc_mojo = 1;
+			}
 		}
 	};
 
@@ -6605,7 +6616,7 @@ sub get_links_schedule_mojo {
 }
 
 # get cache info from schedule html
-sub get_links_schedule_html {
+sub get_links_schedule_lwp {
 	my $self = shift;
 	my $ua = shift;
 	my $prog = shift;
@@ -6619,10 +6630,18 @@ sub get_links_schedule_html {
 	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
 	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
 	return 1 unless $html;
-	return $self->get_links_schedule_html_page($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now)
+	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+	if ( $rc ) {
+		main::logger "\nWARNING: Failed to parse schedule page (JSON): $url\n";
+		$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+		if ( $rc ) {
+			main::logger "\nWARNING: Failed to parse schedule page (HTML): $url\n";
+		}
+	}
+	return $rc;
 }
 
-sub get_links_schedule_html_page {
+sub get_links_schedule_html {
 	my $self = shift;
 	my $html = shift;
 	my $prog = shift;
@@ -6635,8 +6654,11 @@ sub get_links_schedule_html_page {
 	return 1 unless $html;
 	eval "use XML::LibXML '1.91'";
 	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
+		if ( ! $opt->{nowarnlibxmlcache} ) {
+			$opt->{nowarnlibxmlcache} = 1;
+			main::logger "WARNING: XML::LibXML 1.91 or higher not available\n";
+			main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
+		}
 		return 1;
 	}
 	my $cache_channel = $channel;
@@ -6648,15 +6670,14 @@ sub get_links_schedule_html_page {
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-	my @entries = $dom->findnodes('//li[@class="week-guide__table__item"]');
-	# get list of entries within <broadcast> </broadcast> tags
-	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel\n" if $opt->{verbose};
+	my @entries = $dom->findnodes('//li[contains(@class,"week-guide__table__item")]');
+	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel (HTML)\n" if $opt->{verbose};
 	foreach my $entry (@entries) {
-		my ( $title, $name, $episode, $brand_pid, $series_pid, $brand, $series, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $max_expires, $duration, $thumbnail, $version, $guidance, $descshort );
+		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
 		my ($available_str, $until_str);
-		my $pid = $entry->findvalue('.//div[@typeof="Episode" or @typeof="TVEpisode" or @typeof="RadioEpisode"]/@data-pid');
+		my $pid = $entry->findvalue('.//div[contains(@class,"programme--episode")]/@data-pid');
 		next unless $pid;
-		my $available_str = $entry->findvalue('.//h3[@property="startDate"]/@content');
+		my $available_str = $entry->findvalue('.//h3[contains(@class,"broadcast__time")]/@content');
 		$available = Programme::get_time_string( $available_str );
 		my $end_date = $entry->findvalue('.//meta[@property="endDate"]/@content');
 		if ( $end_date ) {
@@ -6684,10 +6705,9 @@ sub get_links_schedule_html_page {
 			}
 			next;
 		}
-		$channel = $entry->findvalue('.//span[@typeof="BroadcastService"]/meta[@property="name"]/@content');
-		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="description"]');
+		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]/span');
 		$desc =~ s/[\r\n]/ /g;
-		my @title_nodes = $entry->findnodes('.//h4[@class="programme__titles"]//span[@property="name"]');
+		my @title_nodes = $entry->findnodes('.//h4[contains(@class,"programme__titles")]//span/span');
 		my @titles = map {$_->findvalue('.')} @title_nodes;
 		if ( $#titles == 2 ) {
 			$name = "$titles[0]: $titles[1]";
@@ -6699,7 +6719,7 @@ sub get_links_schedule_html_page {
 			$name = $titles[0];
 			$episode = "-";
 		}
-		$episodenum = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]//span[@property="position"]');
+		$episodenum = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]/abbr/span[@datatype="xsd:int"]');
 		if ( ! $episodenum ) {
 			# Extract the episode num
 			my $regex_1 = 'Episode\s+'.main::regex_numbers();
@@ -6728,7 +6748,124 @@ sub get_links_schedule_html_page {
 			'episodenum'	=> $episodenum,
 			'desc'		=> $desc,
 			'duration'	=> $duration,
-			'thumbnail'	=> $thumbnail,
+			'channel'	=> $cache_channel,
+			'type'		=> $prog_type,
+			'web'		=> "${bbc_prog_page_prefix}/${pid}",
+			'available' => $available_str,
+			'expires' => $expires,
+		);
+	}
+}
+
+sub get_links_schedule_json {
+	my $self = shift;
+	my $html = shift;
+	my $prog = shift;
+	my $prog_type = shift;
+	my $channel_id = shift;
+	my $channel = shift;
+	my $future = shift;
+	my $limit = shift;
+	my $now = shift || time();
+	return 1 unless $html;
+	eval "use JSON::PP";
+	if ( $@ ) {
+		if ( ! $opt->{nowarnjsonppcache} ) {
+			$opt->{nowarnjsonppcache} = 1;
+			main::logger "WARNING: JSON:PP not available\n";
+			main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
+		}
+		return 1;
+	}
+	my $cache_channel = $channel;
+	if ( $prog_type eq "tv" ) {
+		# collapse BBC One/Two variants
+		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
+	}
+	my $bbc_prog_page_prefix = 'http://www.bbc.co.uk/programmes'; # /$pid
+	my $thirty_days = 30 * 86400;
+	my $min_available = $limit || ( $now - $thirty_days );
+	my $blob = $1 if $html =~ /<script type="application\/ld\+json">(.+?)<\/script>/s;
+	return 1 unless $blob =~ /\w/;
+	my $json = eval { decode_json($blob) };
+	return 1 if $@ || ! $json;
+	my @entries = @{$json->{'@graph'}};
+	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel (JSON)\n" if $opt->{verbose};
+	for my $entry ( @entries ) {
+ 		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
+ 		my ($available_str, $until_str);
+ 		my $pid = $entry->{identifier};
+ 		next unless $pid;
+ 		my $available_str = $entry->{publication}->{startDate};
+ 		$available = Programme::get_time_string( $available_str );
+ 		my $end_date = $entry->{publication}->{endDate};
+		if ( $end_date ) {
+			my $finish = Programme::get_time_string( $end_date );
+			if ( $finish ) {
+				$duration = $finish - $available;
+				$available_str = $end_date;
+				$available = $finish;
+			}
+		}
+		next unless $available_str;
+		next if $available < $min_available;
+		next if ! $future && $available > $now;
+		next if $future && $available <= $now;
+		$expires = $available + $thirty_days;
+		if ( defined $prog->{$pid} ) {
+			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
+			# use listing with earliest availability
+			if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
+				$prog->{$pid}->{available} = $available_str;
+			}
+			# use listing with latest expiry
+			if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
+				$prog->{$pid}->{expires} = $expires;
+			}
+			next;
+		}
+		$desc = $entry->{description};
+		$desc =~ s/[\r\n]/ /g;
+		my @titles = grep /\w/, ($entry->{partOfSeries}->{name}, $entry->{partOfSeason}->{name}, $entry->{name});
+		if ( $#titles == 2 ) {
+			$name = "$titles[0]: $titles[1]";
+			$episode = $titles[2];
+		} elsif ( $#titles == 1 ) {
+			$name = $titles[0];
+			$episode = $titles[1];
+		} elsif ( $#titles == 0 ) {
+			$name = $titles[0];
+			$episode = "-";
+		}
+		$episodenum = $entry->{episodeNumber};
+		if ( ! $episodenum ) {
+			# Extract the episode num
+			my $regex_1 = 'Episode\s+'.main::regex_numbers();
+			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+			if ( $episode =~ m{$regex_1}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			} elsif ( $episode =~ m{$regex_2}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			}
+		}
+		# Extract the seriesnum
+		my $regex = 'Series\s+'.main::regex_numbers();
+		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		# only default version in schedules
+		$version = 'default';
+		# build data structure
+		decode_entities($name);
+		decode_entities($episode);
+		decode_entities($desc);
+		$prog->{$pid} = main::progclass($prog_type)->new(
+			'pid'		=> $pid,
+			'name'		=> $name,
+			'versions'	=> $version,
+			'episode'	=> $episode,
+			'seriesnum'	=> $seriesnum,
+			'episodenum'	=> $episodenum,
+			'desc'		=> $desc,
+			'duration'	=> $duration,
 			'channel'	=> $cache_channel,
 			'type'		=> $prog_type,
 			'web'		=> "${bbc_prog_page_prefix}/${pid}",
