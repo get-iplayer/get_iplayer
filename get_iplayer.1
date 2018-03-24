@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "January 2018" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "March 2018" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -49,7 +49,7 @@ Narrow search to exclude matched channel(s) (comma\-separated regex list).  Defa
 Limit search to programmes that will expire in the next <hours> hours
 .TP
 \fB\-\-fields <field1>,<field2>,...
-Searches only in the specified comma separated fields
+Searches only in the specified fields. The fields are concatenated with spaces in the order specified and the search term is applied to the resulting string.
 .TP
 \fB\-\-future
 Additionally search future programme schedule if it has been indexed (refresh cache with: \-\-refresh \-\-refresh\-future).
@@ -191,6 +191,9 @@ Comma\-separated list of media stream suppliers to use if not included by defaul
 \fB\-\-log\-progress
 Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal.
 .TP
+\fB\-\-mark\-downloaded
+Mark programmes in search results or specified with \-\-pid/\-\-url as downloaded by inserting records in download history.
+.TP
 \fB\-\-modes <mode>,<mode>,...
 Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type).
 .TP
@@ -291,10 +294,13 @@ The format to be used for subdirectory naming.  Use substitution parameters, e.g
 \fB\-\-suboffset <offset>
 Offset the subtitle timestamps by the specified number of milliseconds
 .TP
+\fB\-\-subs\-embed
+Embed soft subtitles in MP4 output file. Ignored with \-\-audio\-only and \-\-ffmpeg\-obsolete.
+.TP
 \fB\-\-subs\-mono
 Create monochrome titles, with leading hyphen used to denote change of speaker.
 .TP
-\fB\-\-subsraw
+\fB\-\-subs\-raw
 Additionally save the raw subtitles file
 .TP
 \fB\-\-subtitles
@@ -323,6 +329,12 @@ Force use of series/brand thumbnail (series preferred) instead of episode thumbn
 .TP
 \fB\-\-thumbsize <width>
 Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192
+.TP
+\fB\-\-tracklist
+Download track list of music played in programme, if available. Track times and durations may be missing or incorrect.
+.TP
+\fB\-\-tracklist\-only
+Only download track list of music played in programme (if available), not programme.
 .TP
 \fB\-\-whitespace, \-w
 Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores.
@@ -357,6 +369,9 @@ Add currently matched programmes to queue for later one\-off recording using the
 .TP
 \fB\-\-pvr\-scheduler <seconds>
 Runs the PVR using all saved PVR searches every <seconds>. Synonyms: \-\-pvrscheduler
+.TP
+\fB\-\-pvr\-series
+Create PVR search for each unique series name in search results. Search terms required. Synonyms: \-\-pvrseries
 .TP
 \fB\-\-pvr\-single <search name>
 Runs a named PVR search. Synonyms: \-\-pvrsingle
@@ -487,6 +502,9 @@ Tag only downloaded radio programmes as iTunes podcasts
 \fB\-\-tag\-podcast\-tv
 Tag only downloaded tv programmes as iTunes podcasts
 .TP
+\fB\-\-tag\-tracklist
+Add track list of music played in programme (if available) to long description (lyrics).
+.TP
 \fB\-\-tag\-utf8
 Use UTF\-8 encoding for non\-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto\-detect fails.
 .SS "Misc Options:"
@@ -523,7 +541,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.12, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.13, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
