@@ -156,7 +156,6 @@ my $opt_format = {
 
 	# Config
 	cacherebuild	=> [ 1, "rebuildcache|rebuild-cache|cacherebuild|cache-rebuild!", 'Config', '--cache-rebuild', "Rebuild cache with full 30-day programme index. Use --refresh-limit to restrict cache window."],
-	cachereset	=> [ 1, "resetcache|reset-cache|cachereset|cache-reset!", 'Config', '--cache-reset', "Reset cache to retain only latest update and discard previous contents."],
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
 	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't show warning about programmes recorded over 30 days ago"],
@@ -813,11 +812,6 @@ sub init_search {
 		$opt->{indexmaxconn} = 1 if $opt->{indexmaxconn} < 1;
 	}
 
-	if ( $opt->{cacherebuild} ) {
-		$opt->{cachereset} = 1;
-		$opt->{refreshlimit} = 30 unless defined  $opt->{refreshlimit};
-	}
-
 	# Show options
 	$opt->display('Current options') if $opt->{verbose};
 	# $prog->{pid}->object hash
@@ -924,7 +918,7 @@ sub find_matches {
 			}
 		}
 	}
-	$need_get_links = 1 if ! @search_args && ( $opt->{refresh} || $opt->{cachereset} );
+	$need_get_links = 1 if ! @search_args && ( $opt->{refresh} || $opt->{cacherebuild} );
 	# Pre-populate caches if --list option used or there was a non-index specified
 	if ( $need_get_links || $opt->{list} ) {
 		# Get stream links from web site or from cache (also populates all hashes) specified in --type option
@@ -935,7 +929,7 @@ sub find_matches {
 	}
 
 	unless ( @search_args ) {
-		if ( !( $opt->{refresh} || $opt->{cachereset} ) && grep(/^(exclude|category|excludecategory|channel|excludechannel|availablesince|expiresbefore|since|before|list|tree|fields|future|long|type)$/, keys %{$opt}) ) {
+		if ( !( $opt->{refresh} || $opt->{cacherebuild} ) && grep(/^(exclude|category|excludecategory|channel|excludechannel|availablesince|expiresbefore|since|before|list|tree|fields|future|long|type)$/, keys %{$opt}) ) {
 			# force to stderr for web pvr
 			print STDERR "ERROR: Search term(s) required. To list all programmes, use \".*\" (incl. quotes)\n";
 		}
@@ -1502,6 +1496,7 @@ sub get_links {
 		return 0;
 	}
 
+	my $mra = 0;
 	# Open cache file (need to verify we can even read this)
 	if ( -f $cachefile && open(CACHE, "< $cachefile") ) {
 		my @cache_format_old = @cache_format;
@@ -1526,6 +1521,10 @@ sub get_links {
 			$prog_old->{ $record_entries->{pid} } = $record_entries;
 			# Copy pid into index_prog_old hash
 			$index_prog_old->{ $record_entries->{index} } = $record_entries->{pid};
+			if ( ! $opt->{cacherebuild} && $record_entries->{timeadded} > $mra )
+			{
+				$mra = $record_entries->{timeadded};
+			}
 		}
 		close (CACHE);
 		logger "INFO: Got ".(keys %{ $prog_old })." file cache entries for $prog_type\n" if $opt->{verbose};
@@ -1540,11 +1539,11 @@ sub get_links {
 	my $cache_secs = $opt->{expiry} || main::progclass( $prog_type )->expiry() || 14400;
 	main::logger "DEBUG: Cache expiry time for $prog_type is ${cache_secs} secs - refresh in ".( stat($cachefile)->mtime + $cache_secs - $now )." secs\n" if $opt->{debug} && -f $cachefile && ! $opt->{refresh};
 	if ( (! $only_load_from_cache) &&
-		( (! keys %{ $prog_old } ) || (! -f $cachefile) || $opt->{refresh} || ($now >= ( stat($cachefile)->mtime + $cache_secs )) || $opt->{cachereset} )
+		( (! keys %{ $prog_old } ) || (! -f $cachefile) || $opt->{refresh} || ($now >= ( $mra + $cache_secs )) || ($now >= ( stat($cachefile)->mtime + $cache_secs )) || $opt->{cacherebuild} )
 	) {
 
 		# Get links for specific type of programme class into %prog
-		if ( progclass( $prog_type )->get_links( $prog, $prog_type, $now ) != 0 ) {
+		if ( progclass( $prog_type )->get_links( $prog, $prog_type, $mra, $now ) != 0 ) {
 			# failed - leave cache unchanged
 			main::logger "\nERROR: Errors encountered when indexing $prog_type programmes - skipping\n";
 			return 0;
@@ -1555,7 +1554,7 @@ sub get_links {
 		if ( -e $cachefile && ! copy($cachefile, $oldcachefile) ) {
 			die "ERROR: Cannot copy $cachefile to $oldcachefile: $!\n";
 		}
-		if ( ! $opt->{cachereset} && $prog_type =~ /^(radio|tv)$/ ) {
+		if ( ! $opt->{cacherebuild} && $prog_type =~ /^(radio|tv)$/ ) {
 			my $min_timeadded = $now - (30 * 86400);
 			# Retain old cache entries that are not expired or superseded
 			for my $pid ( keys %{$prog_old} ) {
@@ -5264,7 +5263,7 @@ sub thumb_url_recipe {
 				if ( $diff2 < $diff ) {
 					$diff = $diff2;
 					$size = $size2;
-				} 
+				}
 			}
 			$newsize = $size;
 		}
@@ -5523,7 +5522,7 @@ sub parse_dash_connection {
 	}
 	my $xpc = XML::LibXML::XPathContext->new($dom);
 	my ($doc) = $xpc->findnodes('/*');
-	$xpc->registerNs('mpd', $doc->namespaceURI());		
+	$xpc->registerNs('mpd', $doc->namespaceURI());
 	my $mediaPresentationDuration = $doc->findvalue('@mediaPresentationDuration');
 	$mediaPresentationDuration =~ /^(-)?P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:((\d+)(\.(\d+))?)S)?)?$/;
 	my $programme_duration = int($5 * 3600 + $6 * 60 + $7);
@@ -6445,12 +6444,13 @@ sub get_links {
 	my $self = shift; # ignore obj ref
 	my $prog = shift;
 	my $prog_type = shift;
+	my $mra = shift;
 	my $now = shift || time();
 	my $rc = 0;
-	$rc = $self->get_links_schedule($prog, $prog_type, 0, $now);
+	$rc = $self->get_links_schedule($prog, $prog_type, 0, $mra, $now);
 	return 1 if $rc && $opt->{refreshabortonerror};
 	if ( $opt->{refreshfuture} ) {
-		$rc = $self->get_links_schedule($prog, $prog_type, 1, $now);
+		$rc = $self->get_links_schedule($prog, $prog_type, 1, $mra, $now);
 		return 1 if $rc && $opt->{refreshabortonerror};
 	}
 	main::logger "\n";
@@ -6463,6 +6463,7 @@ sub get_links_schedule {
 	my $prog = shift;
 	my $prog_type = shift;
 	my $future = shift;
+	my $mra = shift;
 	my $now = shift || time();
 	# check JSON::PP here before using elsewhere
 	eval "use JSON::PP";
@@ -6478,47 +6479,55 @@ sub get_links_schedule {
 		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
 		return;
 	}
+	eval "require Time::Piece";
+	if ( $@ ) {
+		main::logger "WARNING: Please download and run latest installer or install the Time::Piece Perl module for --cache-rebuild or --refresh-limit.\n";
+		main::logger "ERROR: Failed to load Time::Piece:\n$@" if $opt->{verbose};
+		return;
+	}
 	my @schedule_dates;
 	my $limit = 0;
+	my $limit_min = $now - ( 30 * 86400 );
 	if ( $future ) {
 		push @schedule_dates, "this_week", "next_week";
 	} else {
-		my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
-		$limit_days = 0 if $limit_days < 0;
-		$limit_days = 30 if $limit_days > 30;
-		$limit = $now - ($limit_days * 86400) if $limit_days;
-		if ( $limit ) {
-			eval "require Time::Piece";
-			if ( $@ ) {
-				main::logger "WARNING: Please download and run latest installer or install the Time::Piece Perl module for --cache-rebuild or --refresh-limit.\n";
-				main::logger "ERROR: Failed to load Time::Piece:\n$@" if $opt->{verbose};
-				return;
+		unless ( $opt->{cacherebuild} ) {
+			my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
+			if ( $limit_days ) {
+				$limit = $now - ($limit_days * 86400);
+			} else {
+				if ( $mra ) {
+					$limit = $mra;
+				} else {
+					my $cache_file = "${profile_dir}/${prog_type}.cache";
+					my $cache_time;
+					if ( -f $cache_file ) {
+						$cache_time = stat($cache_file)->mtime;
+					}
+					if ( $cache_time ) {
+						$limit = $cache_time;
+					} else {
+						$limit = $limit_min;
+					}
+				}
 			}
-			my $one_week = 7 * 86400;
-			my $iso8601_year_diff;
-			my $timepiece = Time::Piece::gmtime($limit);
-			my $stop = Time::Piece::gmtime($now);
-			while ( $timepiece->week != $stop->week ) {
-				$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
-				$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
-				push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
-				$timepiece += $one_week;
-			}
-			push @schedule_dates, "this_week";
-		} else {
-			my $cache_file = "${profile_dir}/${prog_type}.cache";
-			my $cache_this_week;
-			if ( ! $opt->{cachereset} && -f $cache_file ) {
-				my $this_year = (gmtime($now))[5];
-				my $this_week = strftime( "%W", gmtime($now) );
-				my $cache_time = stat($cache_file)->mtime;
-				my $cache_year = (gmtime($cache_time))[5];
-				my $cache_week = strftime( "%W", gmtime($cache_time) );
-				$cache_this_week = ( $this_year == $cache_year && $this_week == $cache_week );
-			}
-			push @schedule_dates, "last_week" unless $cache_this_week;
-			push @schedule_dates, "this_week";
 		}
+		my $overlap = $opt->{expiry} || $self->expiry() || 14400;
+		$limit -= $overlap;
+		$limit = $limit_min if $limit < $limit_min;
+		my $limit_str = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($limit));
+		main::logger("INFO: Cache refresh limit ($prog_type): $limit_str\n") if $opt->{verbose};
+		my $one_week = 7 * 86400;
+		my $iso8601_year_diff;
+		my $timepiece = Time::Piece::gmtime($limit);
+		my $stop = Time::Piece::gmtime($now);
+		while ( $timepiece->week != $stop->week ) {
+			$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
+			$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
+			push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
+			$timepiece += $one_week;
+		}
+		push @schedule_dates, "this_week";
 	}
 	return unless @schedule_dates;
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
@@ -7625,8 +7634,8 @@ sub get {
 	}
 
 	# look for higher-quality audio for hls modes
-	my $audio_file;	
-	my $audio_raw;	
+	my $audio_file;
+	my $audio_raw;
 	my $hq_audio = $prog->{type} eq "tv" && $prog->{mode} =~ /hls/ && $opt->{hlshqaudio};
 	if ( $hq_audio ) {
 		main::logger "INFO: Attempting to download higher-quality audio for '$prog->{mode}' mode\n" if $opt->{verbose};
@@ -7954,7 +7963,7 @@ sub fetch {
 	delete $opt->{mysubstop};
 	$opt->{mysubstart} = $start_elapsed * 1000.0 if $opt->{start};
 	$opt->{mysubstop} = $stop_elapsed * 1000.0 if $opt->{stop};
-	
+
 	# open files
 	if ( $resuming ) {
 		# open output file for resume
@@ -9113,7 +9122,7 @@ sub tag_file_mp4 {
 		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 	}
 	# run atomicparsley command
-	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';	
+	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';
 	if ( main::run_cmd( $run_mode, @cmd ) ) {
 		main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
 		return 2;
