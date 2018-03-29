@@ -2666,9 +2666,9 @@ sub search_progs {
 		my ($title, $class, $onclick);
 
 		if ( $opt->{SORT}->{current} eq $heading && not $opt->{REVERSE}->{current} ) {
-			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[0].checked=true; form1.submit();");
+			($title, $class, $onclick) = ("Sort by Reverse $heading", 'sorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[1].checked=true; form1.submit();");
 		} else {
-			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[1].checked=true; form1.submit();");
+			($title, $class, $onclick) = ("Sort by $heading", 'unsorted pointer', "form1.NEXTPAGE.value='search_progs'; form1.SORT.value='$heading'; form1.REVERSE[0].checked=true; form1.submit();");
 		}
 		$class = 'sorted_reverse pointer' if $opt->{SORT}->{current} eq $heading && $opt->{REVERSE}->{current};
 
