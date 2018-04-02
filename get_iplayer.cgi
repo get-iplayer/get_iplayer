@@ -3356,7 +3356,7 @@ sub process_params {
 		tooltip	=> 'Select the number of search results displayed on each page', # Tooltip
 		webvar	=> 'PAGESIZE', # webvar
 		type	=> 'popup', # type
-		default	=> 20, # default
+		default	=> 10, # default
 		value	=> ['10','25','50','100','200','400'], # values
 		onChange=> "BackupFormVars(form1); form1.NEXTPAGE.value='search_progs'; form1.PAGENO.value=1; form1.submit(); RestoreFormVars(form1);",
 		save	=> 1,
