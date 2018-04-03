@@ -28,26 +28,28 @@ my $VERSION = 3.13;
 my $VERSION_TEXT = "3.14-dev";
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
-use strict;
 use CGI qw(-utf8 :all);
 use CGI::Cookie;
-use IO::File;
+use Cwd 'abs_path';
+use Encode qw(:DEFAULT :fallback_all);
+use Getopt::Long;
+use File::Basename;
 use File::Copy;
 use HTML::Entities;
+use IO::File;
+use IO::Handle;
+use IPC::Open3;
 use LWP::ConnCache;
 #use LWP::Debug qw(+);
 use LWP::UserAgent;
-use IO::Handle;
-use Getopt::Long;
-use Cwd 'abs_path';
-use File::Basename;
-use Encode qw(:DEFAULT :fallback_all);
 use PerlIO::encoding;
-$PerlIO::encoding::fallback = XMLCREF;
+use strict;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
+$PerlIO::encoding::fallback = XMLCREF;
 # suppress Perl 5.22/CGI 4 warning
 $CGI::LIST_CONTEXT_WARN = 0;
 $| = 1;
+
 my $fh;
 # Send log messages to this fh
 my $se = *STDERR;
@@ -1217,23 +1219,12 @@ sub run_cmd_unix {
 
 	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
-	# Check if we have IPC::Open3 otherwise fallback on system()
-	eval "use IPC::Open3";
-
-	# probably only likely in win32
-	if ($@) {
-		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		exit 1;
-
-	# Use open3()
-	} else {
-		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		my $procid = open3( 0, ">&".fileno($fh_child_out), ">&".fileno($fh_child_err), @cmd );
-		# Wait for child to complete
-		waitpid( $procid, 0 );
-		$rtn = $?;
-	}
+	#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
+	# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+	my $procid = open3( 0, ">&".fileno($fh_child_out), ">&".fileno($fh_child_err), @cmd );
+	# Wait for child to complete
+	waitpid( $procid, 0 );
+	$rtn = $?;
 
 	# Interpret return code
 	return interpret_return_code( $rtn );
@@ -1269,147 +1260,136 @@ sub run_cmd {
 
 	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
-	# Check if we have IPC::Open3 otherwise fallback on system()
-	eval "use IPC::Open3";
-
-	# probably only likely in win32
-	if ($@) {
-		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		exit 1;
-
-	# Use open3()
-	} else {
-		my $procid;
-		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
-		local $SIG{PIPE} = sub {
-			my $signal = shift;
-			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
-			for my $sig ( qw/INT PIPE TERM KILL/ ) {
-				# Kill process with SIGs
-				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
-				kill $sig, $procid;
-				sleep 1;
-				if ( ! kill 0, $procid ) {
-					print $se "INFO: $$ killed cmd PID=$procid\n";
-					last;
-				}
-				sleep 4;
+	my $procid;
+	# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
+	local $SIG{PIPE} = sub {
+		my $signal = shift;
+		print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+		for my $sig ( qw/INT PIPE TERM KILL/ ) {
+			# Kill process with SIGs
+			print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+			kill $sig, $procid;
+			sleep 1;
+			if ( ! kill 0, $procid ) {
+				print $se "INFO: $$ killed cmd PID=$procid\n";
+				last;
 			}
-			exit 0;
-		};
+			sleep 4;
+		}
+		exit 0;
+	};
 
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		$procid = open3( gensym, $from, $err, @cmd ) || print $se "ERROR: Could not execute command: $!\n";
+	# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+	$procid = open3( gensym, $from, $err, @cmd ) || print $se "ERROR: Could not execute command: $!\n";
 
-		my $childpidout = fork();
+	my $childpidout = fork();
 
-		# Fork a child process to read from the indirect (STDOUT) fh of the spawned command and write it to the selected fh (browser client)
-		if ( $childpidout <= 0 ) {
-			# Not sure if these are necessary:
-			$fh_cmd_out->autoflush(1);
-			$from->autoflush(1);
-			if ( $stdout_raw)  {
-				binmode $from, ':raw';
+	# Fork a child process to read from the indirect (STDOUT) fh of the spawned command and write it to the selected fh (browser client)
+	if ( $childpidout <= 0 ) {
+		# Not sure if these are necessary:
+		$fh_cmd_out->autoflush(1);
+		$from->autoflush(1);
+		if ( $stdout_raw)  {
+			binmode $from, ':raw';
+		} else {
+			binmode $from, ':utf8';
+		}
+		# Read each char from command output and push to socket fh
+		my $char;
+		my $bytes;
+		while ( $bytes = read( $from, $char, $size ) ) {
+			if ( $bytes <= 0 ) {
+				print $se "DEBUG: STDOUT fd closed - exiting thread\n";
+				exit 0;
 			} else {
-				binmode $from, ':utf8';
+				print $fh_cmd_out $char;
 			}
-			# Read each char from command output and push to socket fh
-			my $char;
-			my $bytes;
-			while ( $bytes = read( $from, $char, $size ) ) {
+			last if $bytes < $size;
+		}
+		#print $se "CMD STDOUT FH EMPTY\n";
+		exit 0;
+	# Parent continues here
+	} elsif ( defined $childpidout ) {
+		print $se "DEBUG: Forked STDOUT reader with PID $childpidout\n";
+	# Failed to fork
+	} else {
+		print $se "ERROR: Failed to fork STDOUT reader process: $!\n";
+		exit 1;
+	}
+
+	my $childpiderr = fork();
+
+	# Fork a child process to read from the indirect (STDERR) fh of the spawned command and write it to the selected fh (browser client)
+	if ( $childpiderr <= 0 ) {
+		# Not sure if these are necessary:
+		$fh_cmd_err->autoflush(1);
+		$err->autoflush(1);
+		binmode $err, ':utf8';
+		# Read each char from command output and push to socket fh
+		my $char;
+		my $bytes;
+		# Assume that we don't want to buffer STDERR output of the command
+		$size = 1;
+		if ( $is_hls ) {
+			my ($count, $buf);
+			while ( $bytes = read( $err, $char, $size ) ) {
 				if ( $bytes <= 0 ) {
-					print $se "DEBUG: STDOUT fd closed - exiting thread\n";
+					print $se "DEBUG: STDERR fd closed - exiting thread\n";
 					exit 0;
 				} else {
-					print $fh_cmd_out $char;
+					if ( $char eq "#" ) {
+						print $fh_cmd_err $char;
+					} elsif ( $char =~ /[\r\n]/ ) {
+						if ( $buf =~ /size=/ ) {
+							$count++;
+							print $fh_cmd_err "#";
+							print $fh_cmd_err "\n" if ! ($count % 100);
+						} else {
+							print $fh_cmd_err $buf;
+							print $fh_cmd_err "\n";
+						}
+						$buf = '';
+					} else {
+						$buf .= $char;
+					}
+				}
+				if ( $bytes < $size ) {
+					print $fh_cmd_err "$buf\n" if $buf;
+					last;
+				}
+			}
+		} else {
+			while ( $bytes = read( $err, $char, $size ) ) {
+				if ( $bytes <= 0 ) {
+					print $se "DEBUG: STDERR fd closed - exiting thread\n";
+					exit 0;
+				} else {
+					print $fh_cmd_err $char;
 				}
 				last if $bytes < $size;
 			}
-			#print $se "CMD STDOUT FH EMPTY\n";
-			exit 0;
-		# Parent continues here
-		} elsif ( defined $childpidout ) {
-			print $se "DEBUG: Forked STDOUT reader with PID $childpidout\n";
-		# Failed to fork
-		} else {
-			print $se "ERROR: Failed to fork STDOUT reader process: $!\n";
-			exit 1;
 		}
-
-		my $childpiderr = fork();
-
-		# Fork a child process to read from the indirect (STDERR) fh of the spawned command and write it to the selected fh (browser client)
-		if ( $childpiderr <= 0 ) {
-			# Not sure if these are necessary:
-			$fh_cmd_err->autoflush(1);
-			$err->autoflush(1);
-			binmode $err, ':utf8';
-			# Read each char from command output and push to socket fh
-			my $char;
-			my $bytes;
-			# Assume that we don't want to buffer STDERR output of the command
-			$size = 1;
-			if ( $is_hls ) {
-				my ($count, $buf);
-				while ( $bytes = read( $err, $char, $size ) ) {
-					if ( $bytes <= 0 ) {
-						print $se "DEBUG: STDERR fd closed - exiting thread\n";
-						exit 0;
-					} else {
-						if ( $char eq "#" ) {
-							print $fh_cmd_err $char;
-						} elsif ( $char =~ /[\r\n]/ ) {
-							if ( $buf =~ /size=/ ) {
-								$count++;
-								print $fh_cmd_err "#";
-								print $fh_cmd_err "\n" if ! ($count % 100);
-							} else {
-								print $fh_cmd_err $buf;
-								print $fh_cmd_err "\n";
-							}
-							$buf = '';
-						} else {
-							$buf .= $char;
-						}
-					}
-					if ( $bytes < $size ) {
-						print $fh_cmd_err "$buf\n" if $buf;
-						last;
-					}
-				}
-			} else {
-				while ( $bytes = read( $err, $char, $size ) ) {
-					if ( $bytes <= 0 ) {
-						print $se "DEBUG: STDERR fd closed - exiting thread\n";
-						exit 0;
-					} else {
-						print $fh_cmd_err $char;
-					}
-					last if $bytes < $size;
-				}
-			}
-			#print $se "CMD STDERR FH EMPTY\n";
-			exit 0;
-		# Parent continues here
-		} elsif ( defined $childpiderr ) {
-			print $se "DEBUG: Forked STDERR reader with PID $childpiderr\n";
-		# Failed to fork
-		} else {
-			print $se "ERROR: Failed to fork STDERR reader process: $!\n";
-			exit 1;
-		}
-
-		# Reap reader processes
-		waitpid( $childpidout, 0 );
-		waitpid( $childpiderr, 0 );
-
-		# Reap command child
-		waitpid( $procid, 0 );
-		$rtn = $?;
-
-		# Restore sigpipe handler for reader and writer processes
-		$SIG{PIPE} = 'DEFAULT';
+		#print $se "CMD STDERR FH EMPTY\n";
+		exit 0;
+	# Parent continues here
+	} elsif ( defined $childpiderr ) {
+		print $se "DEBUG: Forked STDERR reader with PID $childpiderr\n";
+	# Failed to fork
+	} else {
+		print $se "ERROR: Failed to fork STDERR reader process: $!\n";
+		exit 1;
 	}
+
+	# Reap reader processes
+	waitpid( $childpidout, 0 );
+	waitpid( $childpiderr, 0 );
+
+	# Reap command child
+	waitpid( $procid, 0 );
+	$rtn = $?;
+
+	# Restore sigpipe handler for reader and writer processes
+	$SIG{PIPE} = 'DEFAULT';
 
 	# Interpret return code
 	return interpret_return_code( $rtn );
@@ -1510,68 +1490,57 @@ sub get_cmd_output {
 
 	print $se "INFO: Command: ".(join ' ', @cmd)."\n"; # if $opt->{verbose};
 
-	# Check if we have IPC::Open3 otherwise fallback on system()
-	eval "use IPC::Open3";
-
-	# probably only likely in win32
-	if ($@) {
-		print $se "ERROR: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		exit 1;
-
-	# Use open3()
-	} else {
-		my $procid;
-		# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
-		local $SIG{PIPE} = sub {
-			my $signal = shift;
-			print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
-			for my $sig ( qw/INT PIPE TERM KILL/ ) {
-				# Kill process with SIGs
-				print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
-				kill $sig, $procid;
-				sleep 1;
-				if ( ! kill 0, $procid ) {
-					print $se "INFO: $$ killed cmd PID=$procid\n";
-					last;
-				}
-				sleep 4;
+	my $procid;
+	# Setup signal handlers so that when the browser is closed the SIGPIPE results in sending a SIGTERM to the forked command.
+	local $SIG{PIPE} = sub {
+		my $signal = shift;
+		print $se "\nINFO: $$ Cleaning up (signal = $signal), killing cmd PID=$procid:\n";
+		for my $sig ( qw/INT PIPE TERM KILL/ ) {
+			# Kill process with SIGs
+			print $se "INFO: $$ killing cmd PID=$procid with SIG${sig}\n";
+			kill $sig, $procid;
+			sleep 1;
+			if ( ! kill 0, $procid ) {
+				print $se "INFO: $$ killed cmd PID=$procid\n";
+				last;
 			}
-			exit 0;
-		};
-
-		#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		$procid = open3( gensym, $from, $error, @cmd );
-		# Wait for child to complete
-
-		my $childpid = fork();
-		binmode $se, IS_WIN32 ? ":encoding(cp1252)" : ':encoding(UTF-8)';
-		# Child
-		if ( $childpid == 0 ) {
-			binmode $error, ':utf8';
-			while ( <$error> ) {
-				print $se "CMD STDERR: $_";
-			}
-			#print $se "CMD STDERR EMPTY\n";
-			exit 0;
-		# Parent
-		} elsif ( defined $childpid ) {
-			binmode $from, ':utf8';
-			while ( <$from> ) {
-				push @out_from, $_;
-			}
-		} else {
-			print $se "ERROR: Could not fork STDERR reader process\n";
-			exit 1;
+			sleep 4;
 		}
-		waitpid( $childpid, 0 );
+		exit 0;
+	};
 
-		waitpid( $procid, 0 );
-		$rtn = $?;
+	#print $se "INFO: open3( 0, \">&".fileno($fh_child_out).", \">&".fileno($fh_child_err).", <cmd> )\n";
+	# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+	$procid = open3( gensym, $from, $error, @cmd );
+	# Wait for child to complete
 
-		# Restore sigpipe handler for reader and writer processes
-		$SIG{PIPE} = 'DEFAULT';
+	my $childpid = fork();
+	binmode $se, IS_WIN32 ? ":encoding(cp1252)" : ':encoding(UTF-8)';
+	# Child
+	if ( $childpid == 0 ) {
+		binmode $error, ':utf8';
+		while ( <$error> ) {
+			print $se "CMD STDERR: $_";
+		}
+		#print $se "CMD STDERR EMPTY\n";
+		exit 0;
+	# Parent
+	} elsif ( defined $childpid ) {
+		binmode $from, ':utf8';
+		while ( <$from> ) {
+			push @out_from, $_;
+		}
+	} else {
+		print $se "ERROR: Could not fork STDERR reader process\n";
+		exit 1;
 	}
+	waitpid( $childpid, 0 );
+
+	waitpid( $procid, 0 );
+	$rtn = $?;
+
+	# Restore sigpipe handler for reader and writer processes
+	$SIG{PIPE} = 'DEFAULT';
 
 	# Interpret return code
 	interpret_return_code( $rtn );

@@ -37,6 +37,8 @@ $version_text = sprintf("v%.2f", $version) unless $version_text;
 # Documentation:
 # 	https://github.com/get-iplayer/get_iplayer/wiki/documentation
 #
+use Encode qw(:DEFAULT :fallback_all);
+use Encode::Locale;
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -49,24 +51,24 @@ use HTTP::Cookies;
 use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
+use IPC::Open3;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(mkfifo strftime);
+use open qw(:utf8);
+use PerlIO::encoding;
+use POSIX qw(strftime);
 use POSIX qw(:termios_h);
 use strict;
 #use warnings;
 use Time::Local;
 use Unicode::Normalize;
 use URI;
-use open qw(:utf8);
-use Encode qw(:DEFAULT :fallback_all);
-use PerlIO::encoding;
-$PerlIO::encoding::fallback = XMLCREF;
-use constant FB_EMPTY => sub { '' };
 use constant DIVIDER => "-==-" x 20;
+use constant FB_EMPTY => sub { '' };
+$PerlIO::encoding::fallback = XMLCREF;
 
-my %SIGORIG;
 # Save default SIG actions
+my %SIGORIG;
 $SIGORIG{$_} = $SIG{$_} for keys %SIG;
 STDOUT->autoflush(1);
 STDERR->autoflush(1);
@@ -270,16 +272,11 @@ sub logger(@) {
 $opt->{encodinglocale} = $opt->{encodinglocalefs} = default_encodinglocale();
 $opt->{encodingconsoleout} = $opt->{encodingconsolein} = default_encodingconsoleout();
 # attempt to automatically determine encodings
-eval {
-	require Encode::Locale;
-};
-if (!$@) {
-	# set encodings unless already set by PERL_UNICODE or perl -C
-	$opt->{encodinglocale} = $Encode::Locale::ENCODING_LOCALE unless (${^UNICODE} & 32);
-	$opt->{encodinglocalefs} = $Encode::Locale::ENCODING_LOCALE_FS unless (${^UNICODE} & 32);
-	$opt->{encodingconsoleout} = $Encode::Locale::ENCODING_CONSOLE_OUT unless (${^UNICODE} & 6);
-	$opt->{encodingconsolein} = $Encode::Locale::ENCODING_CONSOLE_IN unless (${^UNICODE} & 1);
-}
+# set encodings unless already set by PERL_UNICODE or perl -C
+$opt->{encodinglocale} = $Encode::Locale::ENCODING_LOCALE unless (${^UNICODE} & 32);
+$opt->{encodinglocalefs} = $Encode::Locale::ENCODING_LOCALE_FS unless (${^UNICODE} & 32);
+$opt->{encodingconsoleout} = $Encode::Locale::ENCODING_CONSOLE_OUT unless (${^UNICODE} & 6);
+$opt->{encodingconsolein} = $Encode::Locale::ENCODING_CONSOLE_IN unless (${^UNICODE} & 1);
 
 # Pre-Parse the cmdline using the opt_format hash so that we know some of the options before we properly parse them later
 # Parse options with passthru mode (i.e. ignore unknown options at this stage)
@@ -1912,8 +1909,6 @@ sub run_cmd {
 	my $mode = shift;
 	my @cmd = ( @_ );
 	my $rtn;
-	my $USE_SYSTEM = 0;
-	#my $system_suffix;
 	local *DEVNULL;
 
 	my $log_str;
@@ -1948,63 +1943,44 @@ sub run_cmd {
 		}
 	}
 
-	# Check if we have IPC::Open3 otherwise fallback on system()
-	eval "use IPC::Open3";
-
-	# use system(); - probably only likely in win32
-	if ($@) {
-		main::logger "WARNING: Please download and run latest installer - 'IPC::Open3' is not available\n";
-		main::logger "ERROR: Failed to load IPC::Open3:\n$@" if $opt->{verbose};
-		#push @cmd, $system_suffix;
-		my $rtn = system( @cmd );
-
-	# use system() regardless
-	} elsif ( $USE_SYSTEM ) {
-		#push @cmd, $system_suffix;
-		my $rtn = system( @cmd );
-
-	# Use open3()
-	} else {
-
-		my $procid;
-		# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
-		##### local $SIG{CHLD} = 'IGNORE';
-		# Setup signal handler for SIGTERM/INT/KILL - kill, kill, killlllll
-		$SIG{TERM} = $SIG{PIPE} = $SIG{INT} = sub {
-			my $signal = shift;
-			main::logger "\nINFO: Cleaning up (signal = $signal), killing PID=$procid:";
-			for my $sig ( qw/INT TERM KILL/ ) {
-				# Kill process with SIGs (try to allow proper handling of kill by child process)
-				if ( $opt->{verbose} ) {
-					main::logger "\nINFO: $$ killing cmd PID=$procid with SIG${sig}";
-				} else {
-					main::logger '.';
-				}
-				kill $sig, $procid;
-				sleep 1;
-				if ( ! kill 0, $procid ) {
-					main::logger "\nINFO: $$ killed cmd PID=$procid\n";
-					last;
-				}
-				sleep 1;
+	my $procid;
+	# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
+	##### local $SIG{CHLD} = 'IGNORE';
+	# Setup signal handler for SIGTERM/INT/KILL - kill, kill, killlllll
+	$SIG{TERM} = $SIG{PIPE} = $SIG{INT} = sub {
+		my $signal = shift;
+		main::logger "\nINFO: Cleaning up (signal = $signal), killing PID=$procid:";
+		for my $sig ( qw/INT TERM KILL/ ) {
+			# Kill process with SIGs (try to allow proper handling of kill by child process)
+			if ( $opt->{verbose} ) {
+				main::logger "\nINFO: $$ killing cmd PID=$procid with SIG${sig}";
+			} else {
+				main::logger '.';
 			}
-			main::logger "\n";
-			exit 0;
-		};
+			kill $sig, $procid;
+			sleep 1;
+			if ( ! kill 0, $procid ) {
+				main::logger "\nINFO: $$ killed cmd PID=$procid\n";
+				last;
+			}
+			sleep 1;
+		}
+		main::logger "\n";
+		exit 0;
+	};
 
-		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-		$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
+	# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+	$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
 
-		# Wait for child to complete
-		waitpid( $procid, 0 );
-		$rtn = $?;
+	# Wait for child to complete
+	waitpid( $procid, 0 );
+	$rtn = $?;
 
-		# Restore old signal handlers
-		$SIG{TERM} = $SIGORIG{TERM};
-		$SIG{PIPE} = $SIGORIG{PIPE};
-		$SIG{INT} = $SIGORIG{INT};
-		#$SIG{CHLD} = $SIGORIG{CHLD};
-	}
+	# Restore old signal handlers
+	$SIG{TERM} = $SIGORIG{TERM};
+	$SIG{PIPE} = $SIGORIG{PIPE};
+	$SIG{INT} = $SIGORIG{INT};
+	#$SIG{CHLD} = $SIGORIG{CHLD};
 	close(DEVNULL);
 
 	# Interpret return code	and force return code 2 upon error
@@ -3081,6 +3057,7 @@ sub check {
 #################### Programme class ###################
 package Programme;
 
+use Cwd 'abs_path';
 use Encode;
 use Env qw[@PATH];
 use Fcntl;
@@ -3090,17 +3067,19 @@ use File::Path;
 use File::Spec;
 use File::stat;
 use HTML::Entities;
+use HTML::Parser 3.71;
 use HTTP::Cookies;
 use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
+use JSON::PP;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use POSIX qw(mkfifo strftime);
+use POSIX qw(strftime);
 use strict;
 use Time::Local;
 use URI;
-use Cwd 'abs_path';
+use XML::LibXML 1.91;
 
 # Class vars
 # Global options
@@ -4190,22 +4169,6 @@ sub download_thumbnail {
 sub download_tracklist {
 	my $prog = shift;
 	my ($times, $durations, $tracklist);
-	eval "use JSON::PP";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to download tracklist.\n";
-		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-		return 1;
-	}
-	eval "use XML::LibXML '1.91'";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to download tracklist.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return 1;
-	}
-	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparsertracklist} ) {
-		$opt->{nowarnhtmlparsertracklist} = 1;
-		main::logger "WARNING: Tracklist download may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
-	}
 	my $file = $prog->{tracklist};
 	if ( -f $file && ! $opt->{overwrite} ) {
 		main::logger "INFO: Tracklist file already exists: $file\n";
@@ -4322,16 +4285,6 @@ sub download_tracklist {
 sub download_credits {
 	my $prog = shift;
 	my $credits;
-	eval "use XML::LibXML '1.91'";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to download credits.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return 1;
-	}
-	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparsercredits} ) {
-		$opt->{nowarnhtmlparsercredits} = 1;
-		main::logger "WARNING: Credits download may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
-	}
 	my $file = $prog->{credits};
 	if ( -f $file && ! $opt->{overwrite} ) {
 		main::logger "INFO: Credits file already exists: $file\n";
@@ -4389,16 +4342,20 @@ sub download_credits {
 ################### iPlayer Programme parent class #################
 package Programme::bbciplayer;
 
+# Inherit from Programme class
+use base 'Programme';
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
 use File::Path;
 use File::stat;
 use HTML::Entities;
+use HTML::Parser 3.71;
 use HTTP::Cookies;
 use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
+use JSON::PP;
 use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(mkfifo);
@@ -4406,9 +4363,10 @@ use Storable qw(dclone);
 use strict;
 use Time::Local;
 use URI;
-# Inherit from Programme class
-use base 'Programme';
+use XML::LibXML 1.91;
+use XML::LibXML::XPathContext;
 use constant REGEX_PID => qr/^[b-df-hj-np-tv-z0-9]{8,}$/;
+
 my $ffmpeg_check;
 
 sub opt_format {
@@ -4547,10 +4505,6 @@ sub get_verpids_json {
 # Only works for TV programmes
 sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
-	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparsermetadata} ) {
-		$opt->{nowarnhtmlparsermetadata} = 1;
-		main::logger "WARNING: Metadata scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
-	}
 	my $pid = $prog->{pid};
 	my $version_list = $opt->{versionlist} || 'default';
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
@@ -4687,176 +4641,168 @@ sub get_metadata {
 	my $ua = shift;
 	my $prog_data_url = "https://www.bbc.co.uk/programmes/";
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
-
 	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $versions, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart, $firstbcast );
-
 	# This URL works for tv/radio prog types:
 	# https://www.bbc.co.uk/programmes/{pid}.json
 	my $got_metadata;
-	eval "use JSON::PP";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to retrieve programme metadata.\n";
-		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-	} else {
-		my $url = $prog_data_url.$prog->{pid}.".json";
-		my $json = main::request_url_retry($ua, $url, 3, '', '');
-		if ( $json ) {
-			my $dec = eval { decode_json($json) };
-			if ( ! $@ ) {
-				my $doc = $dec->{programme};
-				if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
-					my $parent = $doc->{parent}->{programme};
-					my $grandparent = $parent->{parent}->{programme};
-					my $greatgrandparent = $grandparent->{parent}->{programme};
-					my $pid = $doc->{pid};
-					my $parentpid = $parent->{pid};
-					$prog_type = $doc->{media_type};
-					$prog_type = 'tv' if $prog_type =~ m{video}s;
-					$prog_type = 'radio' if $prog_type eq 'audio';
-					$longdesc = $doc->{long_synopsis};
-					$meddesc = $doc->{medium_synopsis};
-					$summary = $doc->{short_synopsis};
-					$channel = $doc->{ownership}->{service}->{title};
-					my $image_pid = $doc->{image}->{pid};
-					my $series_image_pid = $doc->{parent}->{programme}->{image}->{pid};
-					my $brand_image_pid = $doc->{parent}->{programme}->{parent}->{programme}->{image}->{pid};
-					if ( $opt->{thumbseries} || ! $image_pid ) {
-						if ( $series_image_pid ) {
-							$image_pid = $series_image_pid;
-						} elsif ( $brand_image_pid ) {
-							$image_pid = $brand_image_pid;
-						}
+	my $url = $prog_data_url.$prog->{pid}.".json";
+	my $json = main::request_url_retry($ua, $url, 3, '', '');
+	if ( $json ) {
+		my $dec = eval { decode_json($json) };
+		if ( ! $@ ) {
+			my $doc = $dec->{programme};
+			if ( $doc->{type} eq "episode" || $doc->{type} eq "clip" ) {
+				my $parent = $doc->{parent}->{programme};
+				my $grandparent = $parent->{parent}->{programme};
+				my $greatgrandparent = $grandparent->{parent}->{programme};
+				my $pid = $doc->{pid};
+				my $parentpid = $parent->{pid};
+				$prog_type = $doc->{media_type};
+				$prog_type = 'tv' if $prog_type =~ m{video}s;
+				$prog_type = 'radio' if $prog_type eq 'audio';
+				$longdesc = $doc->{long_synopsis};
+				$meddesc = $doc->{medium_synopsis};
+				$summary = $doc->{short_synopsis};
+				$channel = $doc->{ownership}->{service}->{title};
+				my $image_pid = $doc->{image}->{pid};
+				my $series_image_pid = $doc->{parent}->{programme}->{image}->{pid};
+				my $brand_image_pid = $doc->{parent}->{programme}->{parent}->{programme}->{image}->{pid};
+				if ( $opt->{thumbseries} || ! $image_pid ) {
+					if ( $series_image_pid ) {
+						$image_pid = $series_image_pid;
+					} elsif ( $brand_image_pid ) {
+						$image_pid = $brand_image_pid;
 					}
-					my $recipe = $prog->thumb_url_recipe();
-					$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
-					$web = "https://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
-					if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
-						$player = "https://www.bbc.co.uk/iplayer/episode/$pid";
-					} else {
-						$player = "https://www.bbc.co.uk/programmes/$pid";
-					}
-					# title strings
-					my ($series_position, $subseries_position);
-					$episode = $doc->{title};
-					for my $ancestor ($parent, $grandparent, $greatgrandparent) {
-						if ( $ancestor->{type} && $ancestor->{title} ) {
-							if ( $ancestor->{type} eq "brand" ) {
-								$brand = $ancestor->{title};
-							} elsif ( $ancestor->{type} eq "series" ) {
-								# handle rare subseries
-								if ( $series ) {
-									$episode = "$series $episode";
-									$subseries_position = $series_position;
-								}
-								$series = $ancestor->{title};
-								$series_position = $ancestor->{position};
-							}
-						}
-					}
-					if ( $brand ) {
-						if ( $series && $series ne $brand ) {
-							$name = "$brand: $series";
-						} else {
-							$name = $brand;
-						}
-					} else {
-							$name = $series;
-					}
-					unless ( $name ) {
-						$name = $brand = $episode;
-						$episode = "-";
-						$title = $name;
-					} else {
-						$title = "$name: $episode";
-					}
-					# first broadcast date
-					$firstbcast = $doc->{first_broadcast_date};
-					# categories
-					my (@cats1, @cats2, @cats3);
-					for my $cat1 ( @{$doc->{categories}} ) {
-						unshift @cats1, $cat1->{title};
-						my $cat2 = $cat1->{broader}->{category};
-						unshift @cats2, $cat2->{title} if $cat2;
-						my $cat3 = $cat2->{broader}->{category};
-						unshift @cats3, $cat3->{title} if $cat3;
-					}
-					my %seen;
-					my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
-					$categories = join(',', @categories);
-					foreach my $cat ( @categories ) {
-						if ( ! grep(/$cat/i, @ignore_categories) ) {
-							$category = $cat;
-							last;
-						}
-					}
-					$categories ||= "get_iplayer";
-					$category ||= $categories[0] || "get_iplayer";
-					# series/episode numbers
-					if ( $subseries_position ) {
-						my @parts = ("a".."z");
-						$episodepart = $parts[$doc->{position} - 1];
-					}
-					$episodenum = $subseries_position || $doc->{position};
-					$seriesnum = $series_position || $parent->{position};
-					# the Doctor Who fudge
-					my ($seriesnum2, $episodenum2);
-					# Extract the seriesnum
-					my $regex = 'Series\s+'.main::regex_numbers();
-					if ( "$name $episode" =~ m{$regex}i ) {
-						$seriesnum2 = main::convert_words_to_number( $1 );
-					}
-					# Extract the episode num
-					my $regex_1 = 'Episode\s+'.main::regex_numbers();
-					my $regex_2 = '^'.main::regex_numbers().'\.\s+';
-					if ( "$name $episode" =~ m{$regex_1}i ) {
-						$episodenum2 = main::convert_words_to_number( $1 );
-					} elsif ( $episode =~ m{$regex_2}i ) {
-						$episodenum2 = main::convert_words_to_number( $1 );
-					}
-					# override series/episode numbers if mismatch
-					$seriesnum = $seriesnum2 if $seriesnum2;
-					$episodenum = $episodenum2 if $episodenum2;
-					# insert episode number in $episode
-					$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
-					# minimum episode number = 1 if not a film and series number == 0
-					$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
-					# minimum series number = 1 if episode number != 0
-					$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
-					# programme versions
-					my %found;
-					for my $ver ( @{$doc->{versions}} ) {
-						my @ver_types = @{$ver->{types}};
-						next unless @ver_types;
-						my $type;
-						if ( grep /(described|description)/i, @ver_types ) {
-							$type = "audiodescribed";
-						} elsif ( grep /sign/i, @ver_types ) {
-							$type = "signed";
-						} elsif ( grep /open subtitles/i, @ver_types ) {
-							$type = "opensubtitles";
-						} else {
-							my @other_types = grep !/(described|description|sign|open subtitles)/i, @ver_types;
-							next unless @other_types;
-							($type = lc($other_types[0])) =~ s/\s+.*$//;
-							$type =~ s/\W//g;
-						}
-						if ( $type ) {
-							my $version = $type;
-							$version .= $found{$type} if ++$found{$type} > 1;
-							$prog->{verpids}->{$version} = $ver->{pid};
-							$prog->{durations}->{$version} = $ver->{duration};
-						}
-					}
-					$got_metadata = 1 if $pid;
-				} else {
-					main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode or clip. Download may fail and metadata may be inaccurate.\n";
 				}
+				my $recipe = $prog->thumb_url_recipe();
+				$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
+				$web = "https://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
+				if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
+					$player = "https://www.bbc.co.uk/iplayer/episode/$pid";
+				} else {
+					$player = "https://www.bbc.co.uk/programmes/$pid";
+				}
+				# title strings
+				my ($series_position, $subseries_position);
+				$episode = $doc->{title};
+				for my $ancestor ($parent, $grandparent, $greatgrandparent) {
+					if ( $ancestor->{type} && $ancestor->{title} ) {
+						if ( $ancestor->{type} eq "brand" ) {
+							$brand = $ancestor->{title};
+						} elsif ( $ancestor->{type} eq "series" ) {
+							# handle rare subseries
+							if ( $series ) {
+								$episode = "$series $episode";
+								$subseries_position = $series_position;
+							}
+							$series = $ancestor->{title};
+							$series_position = $ancestor->{position};
+						}
+					}
+				}
+				if ( $brand ) {
+					if ( $series && $series ne $brand ) {
+						$name = "$brand: $series";
+					} else {
+						$name = $brand;
+					}
+				} else {
+						$name = $series;
+				}
+				unless ( $name ) {
+					$name = $brand = $episode;
+					$episode = "-";
+					$title = $name;
+				} else {
+					$title = "$name: $episode";
+				}
+				# first broadcast date
+				$firstbcast = $doc->{first_broadcast_date};
+				# categories
+				my (@cats1, @cats2, @cats3);
+				for my $cat1 ( @{$doc->{categories}} ) {
+					unshift @cats1, $cat1->{title};
+					my $cat2 = $cat1->{broader}->{category};
+					unshift @cats2, $cat2->{title} if $cat2;
+					my $cat3 = $cat2->{broader}->{category};
+					unshift @cats3, $cat3->{title} if $cat3;
+				}
+				my %seen;
+				my @categories = grep { ! $seen{$_}++ } ( @cats3, @cats2, @cats1 );
+				$categories = join(',', @categories);
+				foreach my $cat ( @categories ) {
+					if ( ! grep(/$cat/i, @ignore_categories) ) {
+						$category = $cat;
+						last;
+					}
+				}
+				$categories ||= "get_iplayer";
+				$category ||= $categories[0] || "get_iplayer";
+				# series/episode numbers
+				if ( $subseries_position ) {
+					my @parts = ("a".."z");
+					$episodepart = $parts[$doc->{position} - 1];
+				}
+				$episodenum = $subseries_position || $doc->{position};
+				$seriesnum = $series_position || $parent->{position};
+				# the Doctor Who fudge
+				my ($seriesnum2, $episodenum2);
+				# Extract the seriesnum
+				my $regex = 'Series\s+'.main::regex_numbers();
+				if ( "$name $episode" =~ m{$regex}i ) {
+					$seriesnum2 = main::convert_words_to_number( $1 );
+				}
+				# Extract the episode num
+				my $regex_1 = 'Episode\s+'.main::regex_numbers();
+				my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+				if ( "$name $episode" =~ m{$regex_1}i ) {
+					$episodenum2 = main::convert_words_to_number( $1 );
+				} elsif ( $episode =~ m{$regex_2}i ) {
+					$episodenum2 = main::convert_words_to_number( $1 );
+				}
+				# override series/episode numbers if mismatch
+				$seriesnum = $seriesnum2 if $seriesnum2;
+				$episodenum = $episodenum2 if $episodenum2;
+				# insert episode number in $episode
+				$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
+				# minimum episode number = 1 if not a film and series number == 0
+				$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
+				# minimum series number = 1 if episode number != 0
+				$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
+				# programme versions
+				my %found;
+				for my $ver ( @{$doc->{versions}} ) {
+					my @ver_types = @{$ver->{types}};
+					next unless @ver_types;
+					my $type;
+					if ( grep /(described|description)/i, @ver_types ) {
+						$type = "audiodescribed";
+					} elsif ( grep /sign/i, @ver_types ) {
+						$type = "signed";
+					} elsif ( grep /open subtitles/i, @ver_types ) {
+						$type = "opensubtitles";
+					} else {
+						my @other_types = grep !/(described|description|sign|open subtitles)/i, @ver_types;
+						next unless @other_types;
+						($type = lc($other_types[0])) =~ s/\s+.*$//;
+						$type =~ s/\W//g;
+					}
+					if ( $type ) {
+						my $version = $type;
+						$version .= $found{$type} if ++$found{$type} > 1;
+						$prog->{verpids}->{$version} = $ver->{pid};
+						$prog->{durations}->{$version} = $ver->{duration};
+					}
+				}
+				$got_metadata = 1 if $pid;
 			} else {
-				main::logger "WARNING: Could not parse programme metadata from $url ($@)\n";
+				main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode or clip. Download may fail and metadata may be inaccurate.\n";
 			}
 		} else {
-			main::logger "WARNING: Could not download programme metadata from $url\n";
+			main::logger "WARNING: Could not parse programme metadata from $url ($@)\n";
 		}
+	} else {
+		main::logger "WARNING: Could not download programme metadata from $url\n";
 	}
 
 	# Get list of available modes for each version available
@@ -5017,12 +4963,6 @@ sub fetch_pid_info {
 	my $prog_episode;
 	my $prog_channel;
 	my $prog_desc;
-	eval "use JSON::PP";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to determine PID type.\n";
-		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-		return;
-	}
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
 	if ( $json ) {
 		my $doc = eval { decode_json($json) };
@@ -5060,16 +5000,6 @@ sub fetch_episodes_recursive {
 	my $curr_page = 1;
 	my $title;
 	my $channel;
-	eval "use XML::LibXML '1.91'";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to recursively extract episode PIDs.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return;
-	}
-	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserepisode} ) {
-		$opt->{nowarnhtmlparserepisode} = 1;
-		main::logger "WARNING: Episode scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
-	}
 	{ do {
 		my $url = "https://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
 		my $html = main::request_url_retry($ua, $url, 3, '', '');
@@ -5496,15 +5426,6 @@ sub parse_m3u_attribs {
 }
 
 sub parse_dash_connection {
-	eval "use XML::LibXML '1.91'; use XML::LibXML::XPathContext;";
-	if ( $@ ) {
-		if ( ! $opt->{nowarnlibxmldash} ) {
-			$opt->{nowarnlibxmldash} = 1;
-			main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to use MPEG-DASH streams.\n";
-			main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		}
-		return;
-	}
 	my $media = shift;
 	my $conn = shift;
 	my $min_bitrate = shift;
@@ -5786,7 +5707,6 @@ sub get_stream_data {
 
 	# retrieve stream data
 	my $ua = main::create_ua( 'desktop' );
-	delete $opt->{nowarnlibxmldash};
 	my $unblocked;
 	my $checked_geoblock;
 	my %seen;
@@ -6336,29 +6256,35 @@ sub postproc {
 ################### TV Programme class #################
 package Programme::tv;
 
+# Inherit from Programme::bbciplayer class
+use base 'Programme::bbciplayer';
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
 use File::Path;
 use File::stat;
 use HTML::Entities;
+use HTML::Parser 3.71;
 use HTTP::Cookies;
 use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
+use JSON::PP;
 use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(mkfifo strftime);
 use strict;
 use Time::Local;
+use Time::Piece;
 use URI;
-
-# Inherit from Programme class
-use base 'Programme::bbciplayer';
+use XML::LibXML 1.91;
+use XML::LibXML::XPathContext;
 
 # Class vars
 sub index_min { return 1 }
+
 sub index_max { return 29999 }
+
 sub channels {
 	return {
 		'national' => {
@@ -6472,26 +6398,6 @@ sub get_links_schedule {
 	my $future = shift;
 	my $mra = shift;
 	my $now = shift || time();
-	# check JSON::PP here before using elsewhere
-	eval "use JSON::PP";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the JSON::PP Perl module to index $prog_type programmes.\n";
-		main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-		return;
-	}
-	# check XML::LibXML here before using elsewhere
-	eval "use XML::LibXML '1.91'";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to index $prog_type programmes.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return;
-	}
-	eval "require Time::Piece";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the Time::Piece Perl module for --cache-rebuild or --refresh-limit.\n";
-		main::logger "ERROR: Failed to load Time::Piece:\n$@" if $opt->{verbose};
-		return;
-	}
 	my @schedule_dates;
 	my $limit = 0;
 	my $limit_min = $now - ( 30 * 86400 );
@@ -6563,10 +6469,7 @@ sub get_links_schedule {
 			}
 			return;
 		}
-	}
-	if ( $HTML::Parser::VERSION < 3.71 && ! $opt->{nowarnhtmlparserschedule} ) {
-		$opt->{nowarnhtmlparserschedule} = 1;
-		main::logger "WARNING: Schedule scraping may fail with HTML::Parser versions before 3.71. You have version $HTML::Parser::VERSION.\n";
+		return;
 	}
 	my $ua = main::create_ua( 'desktop', 1 );
 	$ua->timeout(60);
@@ -6753,15 +6656,6 @@ sub get_links_schedule_html {
 	my $limit = shift;
 	my $now = shift || time();
 	return 1 unless $html;
-	eval "use XML::LibXML '1.91'";
-	if ( $@ ) {
-		if ( ! $opt->{nowarnlibxmlcache} ) {
-			$opt->{nowarnlibxmlcache} = 1;
-			main::logger "WARNING: XML::LibXML 1.91 or higher not available\n";
-			main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		}
-		return 1;
-	}
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
@@ -6869,15 +6763,6 @@ sub get_links_schedule_json {
 	my $limit = shift;
 	my $now = shift || time();
 	return 1 unless $html;
-	eval "use JSON::PP";
-	if ( $@ ) {
-		if ( ! $opt->{nowarnjsonppcache} ) {
-			$opt->{nowarnjsonppcache} = 1;
-			main::logger "WARNING: JSON:PP not available\n";
-			main::logger "ERROR: Failed to load JSON::PP:\n$@" if $opt->{verbose};
-		}
-		return 1;
-	}
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
 		# collapse BBC One/Two variants
@@ -7181,13 +7066,6 @@ sub ttml_to_srt {
 		'white'   => '#ffffff'
 	);
 
-	eval "use XML::LibXML '1.91'; use XML::LibXML::XPathContext;";
-	if ( $@ ) {
-		main::logger "WARNING: Please download and run latest installer or install the XML::LibXML Perl module 1.91 or higher to convert subtitles.\n";
-		main::logger "ERROR: Failed to load XML::LibXML:\n$@" if $opt->{verbose};
-		return 1;
-	}
-
 	use Text::Wrap qw(fill $columns $huge);
 	$columns = 37;
 	$huge = 'overflow';
@@ -7338,6 +7216,8 @@ sub ttml_to_srt {
 ################### Radio Programme class #################
 package Programme::radio;
 
+# Inherit from Programme::bbciplayer class
+use base 'Programme::bbciplayer';
 use Env qw[@PATH];
 use Fcntl;
 use File::Copy;
@@ -7355,11 +7235,9 @@ use strict;
 use Time::Local;
 use URI;
 
-# Inherit from Programme class
-use base 'Programme::bbciplayer';
-
 # Class vars
 sub index_min { return 30001 }
+
 sub index_max { return 99999 };
 
 # channel ids be found on https://www.bbc.co.uk/radio/stations
@@ -7522,7 +7400,6 @@ package Streamer::hls;
 
 # Inherit from Streamer class
 use base 'Streamer';
-
 use File::Basename;
 use File::Copy;
 use File::Path;
@@ -8191,6 +8068,7 @@ sub fetch {
 ################### DASH Streamer class #################
 package Streamer::dash;
 
+# Inherit from Streamer::hls class
 use base 'Streamer::hls';
 use File::Basename;
 use File::Copy;
