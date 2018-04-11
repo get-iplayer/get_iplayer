@@ -5698,11 +5698,15 @@ sub get_stream_data {
 	my %seen;
 	my @medias;
 	my @mediasets;
+	my @ms_tf;
 	if ( $opt->{info} || $modelist =~ /(daf|dvf)/ ) {
-		push @mediasets, "pc";
+		push @ms_tf, "dash";
+		push @mediasets, "iptv-all", "pc";
 	}
 	if ( $opt->{info} || $modelist =~ /(haf|hvf|hls)/ ) {
-		push @mediasets, "iptv-all";
+		push @ms_tf, "hls";
+		push @mediasets, "iptv-all" unless ( $opt->{info} || $modelist =~ /(daf|dvf)/ );
+		push @mediasets, "apple-ipad-hls";
 	}
 	if ( ( $opt->{info} || $modelist =~ /hlsaac/ ) && $prog->{type} eq "radio" ) {
 		# for hlsaaclow stream
@@ -5710,7 +5714,6 @@ sub get_stream_data {
 	}
 	my @ms_proto = ( "http" );
 	push @ms_proto, "https" if $opt->{includehttps};
-	my $ms_tf = { "pc" => "dash", "iptv-all" => "hls", "apple-iphone4-ipad-hls-3g" => "hls" };
 	for my $mediaset ( @mediasets ) {
 		my $url = "http://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/${verpid}?cb=".( sprintf "%05.0f", 99999*rand(0) );
 		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, 1 );
@@ -5722,8 +5725,8 @@ sub get_stream_data {
 		my @ms_medias = parse_metadata( $xml );
 		for my $ms_media ( @ms_medias ) {
 			for my $ms_conn ( @{$ms_media->{connections}} ) {
-				next unless grep /^$ms_conn->{protocol}$/, @ms_proto;
-				next unless $ms_conn->{transferFormat} eq $ms_tf->{$mediaset} || $ms_media->{kind} eq "captions";
+				next unless grep(/^$ms_conn->{protocol}$/, @ms_proto);
+				next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
 				next if $ms_conn->{supplier} =~ /$exclude_regex/;
 				my $stream_key = "$ms_media->{service}-$ms_conn->{protocol}-$ms_conn->{supplier}";
 				next if $seen{$stream_key};
@@ -5748,6 +5751,7 @@ sub get_stream_data {
 					}
 					# for 320k tv audio or 320k/96k radio
 					$ms_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+					# full HD streams do not exist
 					if ( $prefix eq "hvf" ) {
 						$max_bitrate = 6500;
 					}
