@@ -91,6 +91,7 @@ my $opt_format = {
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	markdownloaded	=> [ 1, "markdownloaded|mark-downloaded!", 'Recording', '--mark-downloaded', "Mark programmes in search results or specified with --pid/--url as downloaded by inserting records in download history."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults.  Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type)."],
+	nodashremux	=> [ 1, "nodashremux|no-dash-remux!", 'Recording', '--no-dash-remux', "Do not perform additional remux to ensure DASH downloads are compatible with iTunes, Windows Media Player, and some others."],
 	nohqaudio	=> [ 1, "nohqaudio|no-hq-audio!", 'Ignored', '--no-hq-audio', "Do not attempt to use higher-quality audio with HLS TV streams ('hvf' and 'hls' modes)."],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences and/or http_proxy environment variable."],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
@@ -6168,8 +6169,7 @@ sub postproc {
 	my @stream_opts;
 	push @stream_opts, ( '-map', '0:a:0', '-map', '1:v:0' ) if $audio_ok && $video_ok;
 	my @filter_opts;
-	if ( $prog->{mode} =~ /(haf|hvf|hls)/ ) {
-		# need filter for HLS
+	if ( $audio_file =~ /\.ts$/ || $video_file =~ /\.ts$/ ) {
 		if ( ! $opt->{ffmpegobsolete} ) {
 			push @filter_opts, ( '-bsf:a', 'aac_adtstoasc' );
 		} else {
@@ -7613,8 +7613,11 @@ sub get {
 		return 0;
 	}
 
-	my ($audio_file, $video_file) = $prog->{type} eq "tv" ? ($audio_file, $media_file) : ($media_file, undef);
-	return $prog->postproc($audio_file, $video_file, $ua);
+	if ( $prog->{type} eq "tv") {
+		return $prog->postproc($audio_file, $media_file, $ua);
+	} else {
+		return $prog->postproc($media_file, undef, $ua);
+	}
 }
 
 sub fetch {
@@ -8208,8 +8211,76 @@ sub get {
 		return 0;
 	}
 
-	return $prog->postproc($audio_file, $video_file, $ua);
+	unless ( $opt->{nodashremux} )	{
+		if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
+			return $self->postproc($prog, $audio_file, $video_file, $ua);
+		} else {
+			return $self->postproc($prog, $audio_file, undef, $ua);
+		}
+	} else {
+		return $prog->postproc($audio_file, $video_file, $ua);
+	}
 }
+
+sub postproc {
+	my ( $self, $prog, $audio_file, $video_file, $ua ) = @_;
+	my @cmd;
+	my $return;
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts"));
+	$prog->ffmpeg_init();
+	if ( ! main::exists_in_path('ffmpeg') ) {
+		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to MPEG-TS\n";
+		return 'stop';
+	}
+	my $audio_ok = $audio_file && -f $audio_file;
+	my $video_ok = $video_file && -f $video_file;
+	return 0 unless ( $audio_ok || $video_ok);
+	my @global_opts = ( '-y' );
+	my @input_opts;
+	push @input_opts, ( '-i', $audio_file ) if $audio_ok;
+	push @input_opts, ( '-i', $video_file ) if $video_ok;
+	my @codec_opts;
+	if ( ! $opt->{ffmpegobsolete} ) {
+		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' );
+	} else {
+		push @codec_opts, ( '-vcodec', 'copy', '-acodec', 'copy' );
+	}
+	my @stream_opts;
+	push @stream_opts, ( '-map', '0:a:0', '-map', '1:v:0' ) if $audio_ok && $video_ok;
+	my @filter_opts;
+	if ( ! $opt->{ffmpegobsolete} ) {
+		push @filter_opts, ( '-bsf:v', 'h264_mp4toannexb' );
+	} else {
+		push @filter_opts, ( '-vbsf', 'h264_mp4toannexb' );
+	}
+	@cmd = (
+		$bin->{ffmpeg},
+		@{ $binopts->{ffmpeg} },
+		@global_opts,
+		@input_opts,
+		@codec_opts,
+		@stream_opts,
+		@filter_opts,
+		$media_file,
+	);
+	main::logger "INFO: Converting to MPEG-TS\n";
+	$return = main::run_cmd( 'STDERR', @cmd );
+	my $min_download_size = main::progclass($prog->{type})->min_download_size();
+	if ( (! $return) && -f $media_file && stat($media_file)->size > $min_download_size ) {
+		unlink( $audio_file, $video_file );
+	} else {
+		unlink $media_file;
+		main::logger "ERROR: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
+		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
+		return 'stop';
+	}
+	if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
+		return $prog->postproc(undef, $media_file, $ua);
+	} else {
+		return $prog->postproc($media_file, undef, $ua);
+	}
+}
+
 
 ############# PVR Class ##############
 package Pvr;
