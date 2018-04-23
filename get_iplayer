@@ -5454,7 +5454,7 @@ sub parse_hls_connection {
 				($hls_media->{width}, $hls_media->{height}) = split(/x/, $stream->{RESOLUTION});
 				$hls_media->{fps} = $stream->{"FRAME-RATE"} || 25;
 			}
-			$hls_media->{service} = "gip_${prefix}_iplayer_$hls_media->{bitrate}";
+			$hls_media->{service} = "gip_${prefix}_$hls_media->{bitrate}";
 			my $hls_conn = dclone($conn);
 			my $uri1 = URI->new($hls_conn->{href});
 			my $uri2 = URI->new($stream->{URL});
@@ -5594,7 +5594,7 @@ sub parse_dash_connection {
 			$repr_media->{segment_duration} = $segment_duration;
 			$repr_media->{programme_duration} = $programme_duration;
 			$repr_media->{start_time} = $now;
-			$repr_media->{service} = "gip_${prefix}_iplayer_$repr_media->{bitrate}";
+			$repr_media->{service} = "gip_${prefix}_$repr_media->{bitrate}";
 			$repr_media->{start_number} = $template->{startNumber} || 1;
 			$repr_media->{stop_number} = $repr_media->{start_number} + $num_segments - 1;
 			$repr_media->{init_template} = $init_template;
@@ -5627,6 +5627,8 @@ sub parse_dash_connection {
 			$dash_media->{width} = $video_media->{width};
 			$dash_media->{height} = $video_media->{height};
 			$dash_media->{bitrate} = $video_media->{bitrate};
+			$dash_media->{video_bitrate} = $video_media->{bitrate};
+			$dash_media->{audio_bitrate} = $video_audio->{bitrate};
 			$dash_media->{service} = $video_media->{service};
 			$dash_media->{media_file_size} = $video_media->{file_size};
 			$dash_media->{fps} = $video_media->{frameRate};
@@ -5646,6 +5648,7 @@ sub parse_dash_connection {
 			delete $dash_conn->{href};
 			$dash_media->{playlist_url} = $conn->{href};
 			$dash_media->{bitrate} = $audio_media->{bitrate};
+			$dash_media->{audio_bitrate} = $audio_media->{bitrate};
 			$dash_media->{service} = $audio_media->{service};
 			$dash_media->{media_file_size} = $audio_media->{file_size};
 			$dash_media->{audio_media} = $audio_media;
@@ -5687,10 +5690,10 @@ sub get_stream_data_cdn {
 			$conn->{streamurl} = $cattribs->{href};
 			$conn->{kind} = $mattribs->{kind};
 			if ( $conn->{kind} eq 'video' ) {
+				$mattribs->{audio_bitrate} ||= 96;
 				$conn->{audio_bitrate} = $mattribs->{audio_bitrate};
-				$conn->{audio_bitrate} ||= 96;
+				$mattribs->{video_bitrate} ||= $mattribs->{bitrate} - $conn->{audio_bitrate};
 				$conn->{video_bitrate} = $mattribs->{video_bitrate};
-				$conn->{video_bitrate} ||= $mattribs->{bitrate} - $conn->{audio_bitrate};
 			}
 
 		# dash stream
@@ -5746,10 +5749,11 @@ sub get_stream_set_type {
 		push @type, $mattribs->{encoding} ? $mattribs->{encoding} : "N/A";
 		push @type, $mattribs->{width} && $mattribs->{height} ? "$mattribs->{width}x$mattribs->{height}" : "N/A";
 		push @type, $mattribs->{fps} ? "$mattribs->{fps}fps" : "N/A" ;
-		push @type, $mattribs->{bitrate} ? "$mattribs->{bitrate}kbps" : "N/A";
+		push @type, $mattribs->{video_bitrate} ? "$mattribs->{video_bitrate}kbps" : "N/A";
+		push @type, $mattribs->{audio_bitrate} ? "$mattribs->{audio_bitrate}kbps" : "N/A";
 		push @type, "$cattribs->{kind}/$cattribs->{priority}" if $cattribs->{kind} && $cattribs->{priority};
 		push @type, "$cattribs->{kind}" if $cattribs->{kind} && not defined $cattribs->{priority};
-		$conn->{type} = sprintf("%22s %4s %4s %9s %5s %8s %s", @type);
+		$conn->{type} = sprintf("%12s %4s %4s %9s %5s %8s %7s %s", @type);
 }
 
 sub check_geoblock {
