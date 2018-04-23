@@ -238,7 +238,7 @@ $layout->{COLUMNSTAB}->{order} = [ qw/ COLS / ];
 
 $layout->{RECORDINGTAB}->{title} = 'Recording';
 $layout->{RECORDINGTAB}->{heading} = 'Recording Options:';
-$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT VERSIONLIST MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE / ];
+$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT VERSIONLIST MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE FPS25 / ];
 
 $layout->{STREAMINGTAB}->{title} = 'Streaming';
 $layout->{STREAMINGTAB}->{heading} = 'Streaming Options:';
@@ -3492,6 +3492,16 @@ sub process_params {
 		optkey	=> 'refreshfuture', # option
 		type	=> 'radioboolean', # type
 		default	=> '0', # value
+		save	=> 1,
+	};
+
+	$opt->{FPS25} = {
+		title	=> 'Use only 25fps streams',
+		tooltip	=> "Use only 25fps media streams. HD video not available.",
+		webvar	=> 'FPS25',
+		optkey	=> 'fps25',
+		type	=> 'radioboolean',
+		default	=> '0',
 		save	=> 1,
 	};
 
