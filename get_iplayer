@@ -6310,45 +6310,45 @@ sub channels {
 sub channels_schedule {
 	return {
 		'national' => {
-			'bbcone/programmes/schedules/hd'	=> 'BBC One',
-			'bbctwo/programmes/schedules/hd'	=> 'BBC Two',
-			'bbcfour/programmes/schedules'		=> 'BBC Four',
-			'cbbc/programmes/schedules'		=> 'CBBC',
-			'cbeebies/programmes/schedules'		=> 'CBeebies',
-			'bbcnews/programmes/schedules'		=> 'BBC News',
-			'bbcparliament/programmes/schedules'	=> 'BBC Parliament',
+			'p00fzl6b' => 'BBC Four', # bbcfour/programmes/schedules
+			'p00fzl6g' => 'BBC News', # bbcnews/programmes/schedules
+			'p00fzl6n' => 'BBC One', # bbcone/programmes/schedules/hd
+			'p00fzl73' => 'BBC Parliament', # bbcparliament/programmes/schedules
+			'p015pksy' => 'BBC Two', # bbctwo/programmes/schedules/hd
+			'p00fzl9r' => 'CBBC', # cbbc/programmes/schedules
+			'p00fzl9s' => 'CBeebies', # cbeebies/programmes/schedules
 		},
 		'regional' => {
-			'bbcone/programmes/schedules/ni'	=> 'BBC One Northern Ireland',
-			'bbcone/programmes/schedules/ni_hd'	=> 'BBC One Northern Ireland',
-			'bbcone/programmes/schedules/scotland'	=> 'BBC One Scotland',
-			'bbcone/programmes/schedules/scotland_hd'	=> 'BBC One Scotland',
-			'bbcone/programmes/schedules/wales'	=> 'BBC One Wales',
-			'bbcone/programmes/schedules/wales_hd'	=> 'BBC One Wales',
-			'bbctwo/programmes/schedules/england'	=> 'BBC Two England',
-			'bbctwo/programmes/schedules/ni'	=> 'BBC Two Northern Ireland',
-			'bbctwo/programmes/schedules/scotland'	=> 'BBC Two Scotland',
-			'bbctwo/programmes/schedules/wales'	=> 'BBC Two Wales',
-			'bbcalba/programmes/schedules'		=> 'BBC Alba',
-			's4c/programmes/schedules'		=> 'S4C',
+			'p00fzl67' => 'BBC Alba', # bbcalba/programmes/schedules
+			'p00fzl6q' => 'BBC One Northern Ireland', # bbcone/programmes/schedules/ni
+			'p00zskxc' => 'BBC One Northern Ireland', # bbcone/programmes/schedules/ni_hd
+			'p00fzl6v' => 'BBC One Scotland', # bbcone/programmes/schedules/scotland
+			'p013blmc' => 'BBC One Scotland', # bbcone/programmes/schedules/scotland_hd
+			'p00fzl6z' => 'BBC One Wales', # bbcone/programmes/schedules/wales
+			'p013bkc7' => 'BBC One Wales', # bbcone/programmes/schedules/wales_hd
+			'p00fzl97' => 'BBC Two England', # bbctwo/programmes/schedules/england
+			'p00fzl99' => 'BBC Two Northern Ireland', # bbctwo/programmes/schedules/ni
+			'p00fzl9b' => 'BBC Two Scotland', # bbctwo/programmes/schedules/scotland
+			'p00fzl9d' => 'BBC Two Wales', # bbctwo/programmes/schedules/wales
+			'p020dmkf' => 'S4C', # s4c/programmes/schedules
 		},
 		'local' => {
-			'bbcone/programmes/schedules/cambridge'	=> 'BBC One Cambridgeshire',
-			'bbcone/programmes/schedules/channel_islands'	=> 'BBC One Channel Islands',
-			'bbcone/programmes/schedules/east'	=> 'BBC One East',
-			'bbcone/programmes/schedules/east_midlands'	=> 'BBC One East Midlands',
-			'bbcone/programmes/schedules/london'	=> 'BBC One London',
-			'bbcone/programmes/schedules/north_east'	=> 'BBC One North East & Cumbria',
-			'bbcone/programmes/schedules/north_west'	=> 'BBC One North West',
-			'bbcone/programmes/schedules/oxford'	=> 'BBC One Oxfordshire',
-			'bbcone/programmes/schedules/south'	=> 'BBC One South',
-			'bbcone/programmes/schedules/south_east'	=> 'BBC One South East',
-			'bbcone/programmes/schedules/south_west'	=> 'BBC One South West',
-			'bbcone/programmes/schedules/west'	=> 'BBC One West',
-			'bbcone/programmes/schedules/west_midlands'	=> 'BBC One West Midlands',
-			'bbcone/programmes/schedules/east_yorkshire'	=> 'BBC One Yorks & Lincs',
-			'bbcone/programmes/schedules/yorkshire'	=> 'BBC One Yorkshire',
-		}
+			'p00fzl6h' => 'BBC One Cambridgeshire', # bbcone/programmes/schedules/cambridge
+			'p00fzl6j' => 'BBC One Channel Islands', # bbcone/programmes/schedules/channel_islands
+			'p00fzl6k' => 'BBC One East', # bbcone/programmes/schedules/east
+			'p00fzl6l' => 'BBC One East Midlands', # bbcone/programmes/schedules/east_midlands
+			'p00fzl6m' => 'BBC One Yorks & Lincs', # bbcone/programmes/schedules/east_yorkshire
+			'p00fzl6p' => 'BBC One London', # bbcone/programmes/schedules/london
+			'p00fzl6r' => 'BBC One North East & Cumbria', # bbcone/programmes/schedules/north_east
+			'p00fzl6s' => 'BBC One North West', # bbcone/programmes/schedules/north_west
+			'p00fzl6t' => 'BBC One Oxfordshire', # bbcone/programmes/schedules/oxford
+			'p00fzl6w' => 'BBC One South', # bbcone/programmes/schedules/south
+			'p00fzl6x' => 'BBC One South East', # bbcone/programmes/schedules/south_east
+			'p00fzl6y' => 'BBC One South West', # bbcone/programmes/schedules/south_west
+			'p00fzl70' => 'BBC One West', # bbcone/programmes/schedules/west
+			'p00fzl71' => 'BBC One West Midlands', # bbcone/programmes/schedules/west_midlands
+			'p00fzl72' => 'BBC One Yorkshire', # bbcone/programmes/schedules/yorkshire
+		},
 	};
 }
 
@@ -6399,11 +6399,14 @@ sub get_links_schedule {
 	my $mra = shift;
 	my $now = shift || time();
 	my @schedule_dates;
+	my ($timepiece, $stop);
+	my $one_week = 7 * 86400;
 	my $limit = 0;
-	my $limit_min = $now - ( 30 * 86400 );
 	if ( $future ) {
-		push @schedule_dates, "this_week", "next_week";
+		$timepiece = Time::Piece::gmtime($now);
+		$stop = Time::Piece::gmtime($now + 2 * $one_week);
 	} else {
+		my $limit_min = $now - ( 30 * 86400 );
 		unless ( $opt->{cacherebuild} ) {
 			my $limit_days = $opt->{"refreshlimit".${prog_type}} || $opt->{"refreshlimit"};
 			if ( $limit_days ) {
@@ -6430,17 +6433,15 @@ sub get_links_schedule {
 		$limit = $limit_min if $limit < $limit_min;
 		my $limit_str = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($limit));
 		main::logger("INFO: Cache refresh limit ($prog_type): $limit_str\n") if $opt->{verbose};
-		my $one_week = 7 * 86400;
-		my $iso8601_year_diff;
-		my $timepiece = Time::Piece::gmtime($limit);
-		my $stop = Time::Piece::gmtime($now);
-		while ( $timepiece->week != $stop->week ) {
-			$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
-			$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
-			push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
-			$timepiece += $one_week;
-		}
-		push @schedule_dates, "this_week";
+		$timepiece = Time::Piece::gmtime($limit);
+		$stop = Time::Piece::gmtime($now + $one_week);
+	}
+	my $iso8601_year_diff;
+	while ( $timepiece->week != $stop->week ) {
+		$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
+		$iso8601_year_diff = -1 if $timepiece->mon == 1 && $timepiece->week > 51;
+		push @schedule_dates, sprintf("%04d/w%02d", $timepiece->year + $iso8601_year_diff, $timepiece->week);
+		$timepiece += $one_week;
 	}
 	return unless @schedule_dates;
 	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
@@ -6457,7 +6458,7 @@ sub get_links_schedule {
 			my %mojo_channels;
 			for my $channel_id ( @channel_list ) {
 				for my $schedule_date ( @schedule_dates ) {
-					my $mojo_url = "https://www.bbc.co.uk/${channel_id}/${schedule_date}";
+					my $mojo_url = "https://www.bbc.co.uk/schedules/${channel_id}/${schedule_date}";
 					push @mojo_urls, $mojo_url;
 					$mojo_channel_ids{$mojo_url} = $channel_id;
 					$mojo_channels{$mojo_url} = $channels{$channel_id};
@@ -6477,7 +6478,7 @@ sub get_links_schedule {
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
-			$url = "https://www.bbc.co.uk/${channel_id}/${schedule_date}";
+			$url = "https://www.bbc.co.uk/schedules/${channel_id}/${schedule_date}";
 			$rc = $self->get_links_schedule_lwp($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
 				return 1 if $opt->{refreshabortonerror};
@@ -6601,7 +6602,7 @@ sub get_links_schedule_mojo {
 			$active++;
 			$attempts{$url}++;
 			main::logger ".";
-			main::logger "\nDEBUG: Downloading schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
+			main::logger "\nDEBUG: Downloading $channels->{$url} schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
 			$ua->get($url => sub {
 				my ($ua, $tx) = @_;
 				unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
@@ -6631,7 +6632,7 @@ sub get_links_schedule_lwp {
 	my $url = shift;
 	my $limit = shift;
 	my $now = shift || time();
-	main::logger "DEBUG: Getting feed $url\n" if $opt->{verbose};
+	main::logger "\nDEBUG: Getting $channel schedule page: $url\n" if $opt->{verbose};
 	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
 	return 1 unless $html;
 	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
@@ -7244,74 +7245,74 @@ sub index_max { return 99999 };
 sub channels_schedule {
 	return {
 		'national' => {
-			'radio1/programmes/schedules'	=> 'BBC Radio 1',
-			'1xtra/programmes/schedules'		=> 'BBC Radio 1Xtra',
-			'radio2/programmes/schedules'		=> 'BBC Radio 2',
-			'radio3/programmes/schedules'		=> 'BBC Radio 3',
-			'radio4/programmes/schedules/fm'	=> 'BBC Radio 4',
-			'radio4/programmes/schedules/lw'	=> 'BBC Radio 4',
-			'radio4extra/programmes/schedules'	=> 'BBC Radio 4 Extra',
-			'5live/programmes/schedules'		=> 'BBC Radio 5 live',
-			'5livesportsextra/programmes/schedules'	=> 'BBC Radio 5 live sports extra',
-			'6music/programmes/schedules'		=> 'BBC Radio 6 Music',
-			'asiannetwork/programmes/schedules'	=> 'BBC Asian Network',
-			'worldserviceradio/programmes/schedules/uk'	=> 'BBC World Service',
+			'p00fzl64' => 'BBC Radio 1Xtra', # 1xtra/programmes/schedules
+			'p00fzl7g' => 'BBC Radio 5 live', # 5live/programmes/schedules
+			'p00fzl7h' => 'BBC Radio 5 live sports extra', # 5livesportsextra/programmes/schedules
+			'p00fzl65' => 'BBC Radio 6 Music', # 6music/programmes/schedules
+			'p00fzl68' => 'BBC Asian Network', # asiannetwork/programmes/schedules
+			'p00fzl86' => 'BBC Radio 1', # radio1/programmes/schedules
+			'p00fzl8v' => 'BBC Radio 2', # radio2/programmes/schedules
+			'p00fzl8t' => 'BBC Radio 3', # radio3/programmes/schedules
+			'p00fzl7j' => 'BBC Radio 4', # radio4/programmes/schedules/fm
+			'p00fzl7k' => 'BBC Radio 4', # radio4/programmes/schedules/lw
+			'p00fzl7l' => 'BBC Radio 4 Extra', # radio4extra/programmes/schedules
+			'p02zbmb3' => 'BBC World Service', # worldserviceradio/programmes/schedules/uk
 		},
 		'regional' => {
-			'radioscotland/programmes/schedules/fm'	=> 'BBC Radio Scotland',
-			'radioscotland/programmes/schedules/orkney'	=> 'BBC Radio Scotland',
-			'radioscotland/programmes/schedules/shetland'	=> 'BBC Radio Scotland',
-			'radioscotland/programmes/schedules/highlandsandislands'	=> 'BBC Radio Scotland',
-			'radioscotland/programmes/schedules/mw'	=> 'BBC Radio Scotland',
-			'radionangaidheal/programmes/schedules'	=> 'BBC Radio Nan Gaidheal',
-			'radioulster/programmes/schedules'		=> 'BBC Radio Ulster',
-			'radiofoyle/programmes/schedules'		=> 'BBC Radio Foyle',
-			'radiowales/programmes/schedules/fm'	=> 'BBC Radio Wales',
-			'radiowales/programmes/schedules/mw'	=> 'BBC Radio Wales',
-			'radiocymru/programmes/schedules'		=> 'BBC Radio Cymru',
+			'p00fzl7b' => 'BBC Radio Cymru', # radiocymru/programmes/schedules
+			'p00fzl7m' => 'BBC Radio Foyle', # radiofoyle/programmes/schedules
+			'p00fzl81' => 'BBC Radio Nan Gaidheal', # radionangaidheal/programmes/schedules
+			'p00fzl8d' => 'BBC Radio Scotland', # radioscotland/programmes/schedules/fm
+			'p00fzl8f' => 'BBC Radio Scotland', # radioscotland/programmes/schedules/highlandsandislands
+			'p00fzl8g' => 'BBC Radio Scotland', # radioscotland/programmes/schedules/mw
+			'p00fzl8b' => 'BBC Radio Scotland', # radioscotland/programmes/schedules/orkney
+			'p00fzl8j' => 'BBC Radio Scotland', # radioscotland/programmes/schedules/shetland
+			'p00fzl8w' => 'BBC Radio Ulster', # radioulster/programmes/schedules
+			'p00fzl8y' => 'BBC Radio Wales', # radiowales/programmes/schedules/fm
+			'p00fzl8x' => 'BBC Radio Wales', # radiowales/programmes/schedules/mw
 		},
 		'local' => {
-			'radioberkshire/programmes/schedules'	=> 'BBC Radio Berkshire',
-			'radiobristol/programmes/schedules'		=> 'BBC Radio Bristol',
-			'radiocambridgeshire/programmes/schedules'	=> 'BBC Radio Cambridgeshire',
-			'radiocornwall/programmes/schedules'	=> 'BBC Radio Cornwall',
-			'bbccoventryandwarwickshire/programmes/schedules'	=> 'BBC Coventry & Warwickshire',
-			'radiocumbria/programmes/schedules'		=> 'BBC Radio Cumbria',
-			'radioderby/programmes/schedules'		=> 'BBC Radio Derby',
-			'radiodevon/programmes/schedules'		=> 'BBC Radio Devon',
-			'bbcessex/programmes/schedules'			=> 'BBC Essex',
-			'radiogloucestershire/programmes/schedules'	=> 'BBC Radio Gloucestershire',
-			'radioguernsey/programmes/schedules'		=> 'BBC Radio Guernsey',
-			'bbcherefordandworcester/programmes/schedules'	=> 'BBC Hereford & Worcester',
-			'radiohumberside/programmes/schedules'	=> 'BBC Radio Humberside',
-			'radiojersey/programmes/schedules'		=> 'BBC Radio Jersey',
-			'radiokent/programmes/schedules'		=> 'BBC Radio Kent',
-			'radiolancashire/programmes/schedules'	=> 'BBC Radio Lancashire',
-			'radioleeds/programmes/schedules'		=> 'BBC Radio Leeds',
-			'radioleicester/programmes/schedules'	=> 'BBC Radio Leicester',
-			'radiolincolnshire/programmes/schedules'	=> 'BBC Radio Lincolnshire',
-			'radiolondon/programmes/schedules'		=> 'BBC Radio London',
-			'radiomanchester/programmes/schedules'	=> 'BBC Radio Manchester',
-			'radiomerseyside/programmes/schedules'	=> 'BBC Radio Merseyside',
-			'bbcnewcastle/programmes/schedules'		=> 'BBC Newcastle',
-			'radionorfolk/programmes/schedules'		=> 'BBC Radio Norfolk',
-			'radionorthampton/programmes/schedules'	=> 'BBC Radio Northampton',
-			'radionottingham/programmes/schedules'	=> 'BBC Radio Nottingham',
-			'radiooxford/programmes/schedules'		=> 'BBC Radio Oxford',
-			'radiosheffield/programmes/schedules'	=> 'BBC Radio Sheffield',
-			'radioshropshire/programmes/schedules'	=> 'BBC Radio Shropshire',
-			'radiosolent/programmes/schedules'		=> 'BBC Radio Solent',
-			'bbcsomerset/programmes/schedules'		=> 'BBC Somerset',
-			'radiostoke/programmes/schedules'		=> 'BBC Radio Stoke',
-			'radiosuffolk/programmes/schedules'		=> 'BBC Radio Suffolk',
-			'bbcsurrey/programmes/schedules'		=> 'BBC Surrey',
-			'bbcsussex/programmes/schedules'		=> 'BBC Sussex',
-			'bbctees/programmes/schedules'			=> 'BBC Tees',
-			'threecountiesradio/programmes/schedules'	=> 'BBC Three Counties Radio',
-			'bbcwiltshire/programmes/schedules'		=> 'BBC Wiltshire',
-			'wm/programmes/schedules'				=> 'BBC WM 95.6',
-			'radioyork/programmes/schedules'		=> 'BBC Radio York',
-		}
+			'p00fzl78' => 'BBC Coventry & Warwickshire', # bbccoventryandwarwickshire/programmes/schedules
+			'p00fzl7f' => 'BBC Essex', # bbcessex/programmes/schedules
+			'p00fzl7q' => 'BBC Hereford & Worcester', # bbcherefordandworcester/programmes/schedules
+			'p00fzl82' => 'BBC Newcastle', # bbcnewcastle/programmes/schedules
+			'p00fzl8m' => 'BBC Somerset', # bbcsomerset/programmes/schedules
+			'p00fzl8q' => 'BBC Surrey', # bbcsurrey/programmes/schedules
+			'p00fzl8r' => 'BBC Sussex', # bbcsussex/programmes/schedules
+			'p00fzl93' => 'BBC Tees', # bbctees/programmes/schedules
+			'p00fzl8z' => 'BBC Wiltshire', # bbcwiltshire/programmes/schedules
+			'p00fzl74' => 'BBC Radio Berkshire', # radioberkshire/programmes/schedules
+			'p00fzl75' => 'BBC Radio Bristol', # radiobristol/programmes/schedules
+			'p00fzl76' => 'BBC Radio Cambridgeshire', # radiocambridgeshire/programmes/schedules
+			'p00fzl77' => 'BBC Radio Cornwall', # radiocornwall/programmes/schedules
+			'p00fzl79' => 'BBC Radio Cumbria', # radiocumbria/programmes/schedules
+			'p00fzl7c' => 'BBC Radio Derby', # radioderby/programmes/schedules
+			'p00fzl7d' => 'BBC Radio Devon', # radiodevon/programmes/schedules
+			'p00fzl7n' => 'BBC Radio Gloucestershire', # radiogloucestershire/programmes/schedules
+			'p00fzl7p' => 'BBC Radio Guernsey', # radioguernsey/programmes/schedules
+			'p00fzl7r' => 'BBC Radio Humberside', # radiohumberside/programmes/schedules
+			'p00fzl7s' => 'BBC Radio Jersey', # radiojersey/programmes/schedules
+			'p00fzl7t' => 'BBC Radio Kent', # radiokent/programmes/schedules
+			'p00fzl7v' => 'BBC Radio Lancashire', # radiolancashire/programmes/schedules
+			'p00fzl7w' => 'BBC Radio Leeds', # radioleeds/programmes/schedules
+			'p00fzl7x' => 'BBC Radio Leicester', # radioleicester/programmes/schedules
+			'p00fzl7y' => 'BBC Radio Lincolnshire', # radiolincolnshire/programmes/schedules
+			'p00fzl6f' => 'BBC Radio London', # radiolondon/programmes/schedules
+			'p00fzl7z' => 'BBC Radio Manchester', # radiomanchester/programmes/schedules
+			'p00fzl80' => 'BBC Radio Merseyside', # radiomerseyside/programmes/schedules
+			'p00fzl83' => 'BBC Radio Norfolk', # radionorfolk/programmes/schedules
+			'p00fzl84' => 'BBC Radio Northampton', # radionorthampton/programmes/schedules
+			'p00fzl85' => 'BBC Radio Nottingham', # radionottingham/programmes/schedules
+			'p00fzl8c' => 'BBC Radio Oxford', # radiooxford/programmes/schedules
+			'p00fzl8h' => 'BBC Radio Sheffield', # radiosheffield/programmes/schedules
+			'p00fzl8k' => 'BBC Radio Shropshire', # radioshropshire/programmes/schedules
+			'p00fzl8l' => 'BBC Radio Solent', # radiosolent/programmes/schedules
+			'p00fzl8n' => 'BBC Radio Stoke', # radiostoke/programmes/schedules
+			'p00fzl8p' => 'BBC Radio Suffolk', # radiosuffolk/programmes/schedules
+			'p00fzl90' => 'BBC Radio York', # radioyork/programmes/schedules
+			'p00fzl96' => 'BBC Three Counties Radio', # threecountiesradio/programmes/schedules
+			'p00fzl9f' => 'BBC WM 95.6', # wm/programmes/schedules
+		},
 	};
 }
 
