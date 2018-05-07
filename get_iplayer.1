@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "March 2018" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "May 2018" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -170,8 +170,8 @@ Comma\-separated list of media stream suppliers to skip.  Possible values: akama
 \fB\-\-force
 Ignore programme history (unsets \-\-hide option also).
 .TP
-\fB\-\-fps50
-Prefer 50 fps streams for TV programmes (not available for all video sizes).
+\fB\-\-fps25
+Use only 25fps streams for TV programmes (HD video not available).
 .TP
 \fB\-\-get, \-g
 Start recording matching programmes.  Search terms required unless \-\-pid specified.  Use  \-\-search=.* to force download of all available programmes.
@@ -180,10 +180,7 @@ Start recording matching programmes.  Search terms required unless \-\-pid speci
 Show recording progress as hashes
 .TP
 \fB\-\-hls\-hq\-audio
-Attempt to download higher\-quality audio for 'hls' modes (TV only). Output file may require editing to sync audio and video.
-.TP
-\fB\-\-include\-https
-Allow HTTPS playlist/manifest/segment URLs for media streams.
+Attempt to download higher\-quality audio for 'hlshd' mode (TV only). Output file may require editing to sync audio and video.
 .TP
 \fB\-\-include\-supplier <supplier>,<supplier>,...
 Comma\-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi
@@ -195,7 +192,10 @@ Force HLS/DASH download progress display to be captured when screen output is re
 Mark programmes in search results or specified with \-\-pid/\-\-url as downloaded by inserting records in download history.
 .TP
 \fB\-\-modes <mode>,<mode>,...
-Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvworst,tvworse,tvgood,tvvgood,tvbetter,tvbest,radioworst,radioworse,radiogood,radiovgood,radiobetter,radiobest (default=default for programme type).
+Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type).
+.TP
+\fB\-\-no\-dash\-remux
+Do not perform additional remux to ensure DASH downloads are compatible with iTunes, Windows Media Player, and some others.
 .TP
 \fB\-\-no\-proxy
 Ignore \-\-proxy setting in preferences and/or http_proxy environment variable.
@@ -222,13 +222,16 @@ Record all related episodes if value of \-\-pid is a series or brand PID.  Requi
 Web proxy URL, e.g., http://username:password@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless \-\-proxy is specified. Used for both HTTP and HTTPS. Overridden by \-\-no\-proxy.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlsaachigh,hlsaacstd,hlsaacmed,hlsaaclow. Shortcuts: worst,worse,good,vgood,better,best,daf,haf,hlsaac (default=dafhigh,hafhigh,hlsaachigh,dafstd,hafstd,hlsaacstd,dafmed,hafmed,hlsaacmed,daflow,haflow,hlsaaclow).
+Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow. Shortcuts: best,better,good,worst,haf,daf,hls,dash,high,std,med,low (default=hafhigh,dafhigh,hafstd,dafstd,hafmed,dafmed,haflow,daflow).
 .TP
 \fB\-\-start <secs|hh:mm:ss>
 Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
 .TP
 \fB\-\-stop <secs|hh:mm:ss>
 Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)
+.TP
+\fB\-\-stream\-http
+Use HTTP (instead of HTTPS) media stream playlist URLs.
 .TP
 \fB\-\-subtitles\-required
 Do not download TV programme if subtitles are not available.
@@ -237,7 +240,7 @@ Do not download TV programme if subtitles are not available.
 Test only \- no recording (will show programme type)
 .TP
 \fB\-\-tvmode <mode>,<mode>,...
-TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hlsvhigh,hlsstd,hlsxstd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: worst,worse,vgood,better,best,dvf,hls,hvf (default=hlshd,hvfxsd,hlsvhigh,hvfxhigh,hlsstd,hlsxstd,hvflow).
+TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: best,better,good,worst,dvf,hvf,dash,hls,hd,sd,high,low. 50fps streams (if available) preferred unless \-\-fps25 specified (default=hvfhd,dvfhd,hvfsd,dvfsd,hvfxsd,dvfxsd,hvfhigh,dvfhigh,hvfxhigh,dvfxhigh,hvflow,dvflow).
 .TP
 \fB\-\-url <url>,<url>,...
 Record the embedded media in the specified iPlayer episode URLs.
@@ -254,6 +257,12 @@ Run user command after successful recording of radio programme using substitutio
 .TP
 \fB\-\-command\-tv <command>
 Run user command after successful recording of tv programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides \-\-command.
+.TP
+\fB\-\-credits
+Download programme credits, if available.
+.TP
+\fB\-\-credits\-only
+Only download programme credits (if available), not programme.
 .TP
 \fB\-\-file\-prefix <format>
 The filename prefix (excluding dir and extension) using formatting fields. e.g. '<name>\-<episode>\-<pid>'
@@ -327,8 +336,11 @@ Only download thumbnail image if available, not the programme
 \fB\-\-thumbnail\-series
 Force use of series/brand thumbnail (series preferred) instead of episode thumbnail
 .TP
-\fB\-\-thumbsize <width>
+\fB\-\-thumbnail\-size <width>
 Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192
+.TP
+\fB\-\-thumbnail\-square
+Download square version of thumbnail image.
 .TP
 \fB\-\-tracklist
 Download track list of music played in programme, if available. Track times and durations may be missing or incorrect.
@@ -379,9 +391,6 @@ Runs a named PVR search. Synonyms: \-\-pvrsingle
 .TP
 \fB\-\-cache\-rebuild
 Rebuild cache with full 30\-day programme index. Use \-\-refresh\-limit to restrict cache window.
-.TP
-\fB\-\-cache\-reset
-Reset cache to retain only latest update and discard previous contents.
 .TP
 \fB\-\-expiry, \-e <secs>
 Cache expiry in seconds (default 4hrs)
@@ -484,6 +493,9 @@ Do not embed thumbnail image in output file. Also removes existing artwork. All 
 \fB\-\-no\-tag
 Do not tag downloaded programmes.
 .TP
+\fB\-\-tag\-credits
+Add programme credits (if available) to lyrics field.
+.TP
 \fB\-\-tag\-format\-show
 Format template for programme name in tag metadata (use substitution parameters). Default: <name>
 .TP
@@ -503,7 +515,7 @@ Tag only downloaded radio programmes as iTunes podcasts
 Tag only downloaded tv programmes as iTunes podcasts
 .TP
 \fB\-\-tag\-tracklist
-Add track list of music played in programme (if available) to long description (lyrics).
+Add track list of music played in programme (if available) to lyrics field.
 .TP
 \fB\-\-tag\-utf8
 Use UTF\-8 encoding for non\-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto\-detect fails.
@@ -541,7 +553,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.13, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.14, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.

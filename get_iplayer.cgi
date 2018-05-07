@@ -24,8 +24,8 @@
 # License: GPLv3 (see LICENSE.txt)
 #
 
-my $VERSION = 3.13;
-my $VERSION_TEXT = "3.14-dev";
+my $VERSION = 3.14;
+my $VERSION_TEXT;
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use CGI qw(-utf8 :all);
