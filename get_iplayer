@@ -1669,10 +1669,14 @@ sub display_stream_info {
 		logger "INFO: Getting media stream metadata for $prog->{name} - $prog->{episode}, $verpid ($version)\n" if $prog->{pid};
 		$prog->{streams}->{$version} = $prog->get_stream_data( $verpid, undef, $version );
 	}
-	for my $prog_type ( sort keys %{ $prog->{streams}->{$version} } ) {
-		logger "stream:     $prog_type\n";
-		for my $entry ( sort keys %{ $prog->{streams}->{$version}->{$prog_type} } ) {
-			logger sprintf("%-11s %s\n", $entry.':', $prog->{streams}->{$version}->{$prog_type}->{$entry} );
+	for my $mode ( sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} } ) {	
+		logger sprintf("%-14s %s\n", 'stream:', $mode );
+		for my $key ( sort keys %{ $prog->{streams}->{$version}->{$mode} } ) {
+			my $val = $prog->{streams}->{$version}->{$mode}->{$key};
+			unless ( ref $val || not defined $val ) {
+				$val =~ s/^\s+//;
+				logger sprintf("%-14s %s\n", $key.':', $val );
+			}
 		}
 		logger "\n";
 	}
@@ -5621,6 +5625,10 @@ sub get_stream_data_cdn {
 			$conn->{kind} = $mattribs->{kind};
 			$conn->{audio_media} = $mattribs->{audio_media};
 			$conn->{video_media} = $mattribs->{video_media};
+			if ( $conn->{kind} eq 'video' ) {
+				$conn->{audio_bitrate} = $mattribs->{audio_bitrate};
+				$conn->{video_bitrate} = $mattribs->{video_bitrate};
+			}
 
 		# Unknown CDN
 		} else {
