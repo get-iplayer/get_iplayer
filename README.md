@@ -4,8 +4,8 @@
 
 * Downloads TV and radio programmes from BBC iPlayer
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer catch-up programmes (not BBC Three, Red Button or iPlayer Exclusive)
-* Caching of index with automatic updating
+* Indexing of most available iPlayer catch-up programmes from previous 30 days (not BBC Three, Red Button or iPlayer Exclusive)
+* Caching of programme index with automatic updating
 * Regex search on programme name 
 * Regex search on programme description and episode title
 * Filter search results by channel
@@ -18,7 +18,7 @@
 
 **NOTE:** 
 
-- **get_iplayer can only search for programmes that were broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. Any programmes that are still available after 30 days must be located on the iPlayer site and downloaded directly via PID or URL.**
+- **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. It may be possible to download other content directly via PID or URL, but such use is not supported.**
 - **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content directly via PID or URL, but such use is not supported.**
 
 ## Documentation
@@ -53,7 +53,7 @@
 		210:  Doctor Who: Series 7 Part 2 - 3. Cold War, BBC One, b01s1cz7
 		...
 
-	Format = index: name - episode, channel, pid 
+	Format = `<index>: <name> - <episode>, <channel>, <pid>`
   
 * List all TV programmes with long descriptions:
 
@@ -93,7 +93,7 @@
 
 	`get_iplayer --get 208 --tvmode=best`
 
-* Record TV programme number 208 in lower resolution (640x360):
+* Record TV programme number 208 with lower resolution (704x396):
 
 	`get_iplayer --get 208 --tvmode=good`
 
@@ -124,7 +124,7 @@
 
 	`get_iplayer --pid=b07gcv34 --radiomode=best`
 
-* Record a radio programme using the PID (b07gcv34) from its iPlayer URL in lower quality (96k):
+* Record a radio programme using the PID (b07gcv34) from its iPlayer URL with lower bit rate (96k):
 
 	`get_iplayer --pid=b07gcv34 --radiomode=good`
 
