@@ -4981,8 +4981,9 @@ sub fetch_pid_info {
 			$prog_episode = $doc->{programme}->{display_title}->{subtitle};
 			$prog_channel = $doc->{programme}->{ownership}->{service}->{title};
 			$prog_desc = $doc->{programme}->{short_synopsis};
-			$prog_episode =~ s/(Series \d+)[, :]+//;
-			$prog_name .= ": $1" if $1;
+			if ( $prog_episode =~ s/(Series \d+)[, :]+// ) {
+				$prog_name .= ": $1";
+			}
 		} else {
 			main::logger "ERROR: Could not parse JSON PID info: $url\n";
 		}
