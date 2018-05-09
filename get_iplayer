@@ -6546,10 +6546,10 @@ sub get_links_schedule_mojo {
 		my $html = $tx->res->text;
 		unless ( $code >= 200 and $code < 300 and $html) {
 			if ( $attempts{$url} < 3 ) {
-				main::logger "\nDEBUG: Retrying download of schedule page: $url\n" if $opt->{verbose};
+				main::logger "\nDEBUG: Retrying download of $channel schedule page: $url\n" if $opt->{verbose};
 				unshift @$urls, $url;
 			} else {
-				main::logger "\nWARNING: Failed to download schedule page: $url\n";
+				main::logger "\nWARNING: Failed to download $channel schedule page: $url\n";
 				$rc_mojo = 1;
 				if ( $opt->{verbose} ) {
 					if ( my $err = $tx->error ) {
@@ -6563,12 +6563,16 @@ sub get_links_schedule_mojo {
 			}
 			return;
 		}
-		my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+		my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 		if ( $rc ) {
-			main::logger "\nWARNING: Failed to parse schedule page (JSON): $url\n";
-			$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+			main::logger "\nWARNING: Failed to parse $channel schedule page (JSON): $url\n" if $opt->{verbose};
+			$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 			if ( $rc ) {
-				main::logger "\nWARNING: Failed to parse schedule page (HTML): $url\n";
+				if ( $opt->{verbose} ) {
+					main::logger "\nWARNING: Failed to parse $channel schedule page (HTML): $url\n";
+				} else {
+					main::logger "\nWARNING: Failed to parse $channel schedule page: $url\n";
+				}
 				$rc_mojo = 1;
 			}
 		}
@@ -6613,18 +6617,24 @@ sub get_links_schedule_lwp {
 	my $url = shift;
 	my $limit = shift;
 	my $now = shift || time();
+	my $rc_lwp;
 	main::logger "\nDEBUG: Getting $channel schedule page: $url\n" if $opt->{verbose};
-	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download programme schedule $url\n");
+	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download $channel schedule page: $url\n");
 	return 1 unless $html;
-	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 	if ( $rc ) {
-		main::logger "\nWARNING: Failed to parse schedule page (JSON): $url\n";
-		$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now);
+		main::logger "\nWARNING: Failed to parse $channel schedule page (JSON): $url\n" if $opt->{verbose};
+		$rc = $self->get_links_schedule_html($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 		if ( $rc ) {
-			main::logger "\nWARNING: Failed to parse schedule page (HTML): $url\n";
+			if ( $opt->{verbose} ) {
+				main::logger "\nWARNING: Failed to parse $channel schedule page (HTML): $url\n";
+			} else {
+				main::logger "\nWARNING: Failed to parse $channel schedule page: $url\n";
+			}
+			$rc_lwp = 1;
 		}
 	}
-	return $rc;
+	return $rc_lwp;
 }
 
 sub get_links_schedule_html {
@@ -6637,6 +6647,7 @@ sub get_links_schedule_html {
 	my $future = shift;
 	my $limit = shift;
 	my $now = shift || time();
+	my $url = shift;
 	return 1 unless $html;
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
@@ -6648,7 +6659,8 @@ sub get_links_schedule_html {
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @entries = $dom->findnodes('//li[contains(@class,"week-guide__table__item")]');
-	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel (HTML)\n" if $opt->{verbose};
+	main::logger "\n".(@entries ? "INFO" : "WARNING").": Got ".($#entries + 1)." programmes for $channel schedule page (HTML): $url\n" if $opt->{verbose} || ! @entries;
+	return 1 unless @entries;
 	foreach my $entry (@entries) {
 		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
 		my ($available_str, $until_str);
@@ -6744,6 +6756,7 @@ sub get_links_schedule_json {
 	my $future = shift;
 	my $limit = shift;
 	my $now = shift || time();
+	my $url = shift;
 	return 1 unless $html;
 	my $cache_channel = $channel;
 	if ( $prog_type eq "tv" ) {
@@ -6759,7 +6772,8 @@ sub get_links_schedule_json {
 	return 1 if $@ || ! $json;
 	my $graph = $json->{'@graph'};
 	my @entries = @{$graph} if $graph;
-	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel (JSON)\n" if $opt->{verbose};
+	main::logger "\n".(@entries ? "INFO" : "WARNING").": Got ".($#entries + 1)." programmes for $channel schedule page (JSON): $url\n" if $opt->{verbose} || ! @entries;
+	return 1 unless @entries;
 	for my $entry ( @entries ) {
  		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
  		my ($available_str, $until_str);
