@@ -6757,7 +6757,8 @@ sub get_links_schedule_json {
 	return 1 unless $blob =~ /\w/;
 	my $json = eval { decode_json($blob) };
 	return 1 if $@ || ! $json;
-	my @entries = @{$json->{'@graph'}};
+	my $graph = $json->{'@graph'};
+	my @entries = @{$graph} if $graph;
 	main::logger "\nINFO: Got ".($#entries + 1)." programmes for $channel (JSON)\n" if $opt->{verbose};
 	for my $entry ( @entries ) {
  		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
