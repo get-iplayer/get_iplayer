@@ -1475,7 +1475,7 @@ sub get_links {
 	my $only_load_from_cache = shift;
 	my $now = shift || time();
 	# Define cache file format (this is overridden by the header line of the cache file)
-	my @cache_format = qw/index type name pid available expires episode seriesnum episodenum versions duration desc channel categories thumbnail timeadded guidance web/;
+	my @cache_format = qw/index type name episode seriesnum episodenum pid channel available expires duration desc web timeadded/;
 
 	my $cachefile = "${profile_dir}/${prog_type}.cache";
 
@@ -6666,7 +6666,7 @@ sub get_links_schedule_html {
 	main::logger "\n".(@entries ? "INFO" : "WARNING").": Got ".($#entries + 1)." programmes for $channel schedule page (HTML): $url\n" if $opt->{verbose} || ! @entries;
 	return 1 unless @entries;
 	foreach my $entry (@entries) {
-		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
+		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration );
 		my ($available_str, $until_str);
 		my $pid = $entry->findvalue('.//div[contains(@class,"programme--episode")]/@data-pid');
 		next unless $pid;
@@ -6726,8 +6726,6 @@ sub get_links_schedule_html {
 		# Extract the seriesnum
 		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
-		# only default version in schedules
-		$version = 'default';
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -6735,7 +6733,6 @@ sub get_links_schedule_html {
 		$prog->{$pid} = main::progclass($prog_type)->new(
 			'pid'		=> $pid,
 			'name'		=> $name,
-			'versions'	=> $version,
 			'episode'	=> $episode,
 			'seriesnum'	=> $seriesnum,
 			'episodenum'	=> $episodenum,
@@ -6779,7 +6776,7 @@ sub get_links_schedule_json {
 	main::logger "\n".(@entries ? "INFO" : "WARNING").": Got ".($#entries + 1)." programmes for $channel schedule page (JSON): $url\n" if $opt->{verbose} || ! @entries;
 	return 1 unless @entries;
 	for my $entry ( @entries ) {
- 		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration, $version );
+ 		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration );
  		my ($available_str, $until_str);
  		my $pid = $entry->{identifier};
  		next unless $pid;
@@ -6838,8 +6835,6 @@ sub get_links_schedule_json {
 		# Extract the seriesnum
 		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
-		# only default version in schedules
-		$version = 'default';
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -6847,7 +6842,6 @@ sub get_links_schedule_json {
 		$prog->{$pid} = main::progclass($prog_type)->new(
 			'pid'		=> $pid,
 			'name'		=> $name,
-			'versions'	=> $version,
 			'episode'	=> $episode,
 			'seriesnum'	=> $seriesnum,
 			'episodenum'	=> $episodenum,
