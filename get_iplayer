@@ -4662,7 +4662,6 @@ sub get_metadata {
 				my $grandparent = $parent->{parent}->{programme};
 				my $greatgrandparent = $grandparent->{parent}->{programme};
 				my $pid = $doc->{pid};
-				my $parentpid = $parent->{pid};
 				$prog_type = $doc->{media_type};
 				$prog_type = 'tv' if $prog_type =~ m{video}s;
 				$prog_type = 'radio' if $prog_type eq 'audio';
@@ -4682,7 +4681,9 @@ sub get_metadata {
 				}
 				my $recipe = $prog->thumb_url_recipe();
 				$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
-				$web = "https://www.bbc.co.uk/programmes/$parentpid" if $parentpid;
+				# /programmes page
+				$web = "https://www.bbc.co.uk/programmes/$pid";
+				# player page
 				if ( $prog_type eq "tv" && $doc->{type} eq "episode" ) {
 					$player = "https://www.bbc.co.uk/iplayer/episode/$pid";
 				} else {
@@ -6658,7 +6659,6 @@ sub get_links_schedule_html {
 		# collapse BBC One/Two variants
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
-	my $bbc_prog_page_prefix = "https://www.bbc.co.uk/programmes";
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
@@ -6726,6 +6726,8 @@ sub get_links_schedule_html {
 		# Extract the seriesnum
 		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		# /programmes page
+		my $web = "https://www.bbc.co.uk/programmes/${pid}";
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -6740,7 +6742,7 @@ sub get_links_schedule_html {
 			'duration'	=> $duration,
 			'channel'	=> $cache_channel,
 			'type'		=> $prog_type,
-			'web'		=> "${bbc_prog_page_prefix}/${pid}",
+			'web'		=> $web,
 			'available' => $available_str,
 			'expires' => $expires,
 		);
@@ -6764,7 +6766,6 @@ sub get_links_schedule_json {
 		# collapse BBC One/Two variants
 		$cache_channel =~ s/(BBC (One|Two)).*/$1/;
 	}
-	my $bbc_prog_page_prefix = 'https://www.bbc.co.uk/programmes'; # /$pid
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
 	my $blob = $1 if $html =~ /<script type="application\/ld\+json">(.+?)<\/script>/s;
@@ -6835,6 +6836,8 @@ sub get_links_schedule_json {
 		# Extract the seriesnum
 		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		# /programmes page
+		my $web = "https://www.bbc.co.uk/programmes/${pid}";
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -6849,7 +6852,7 @@ sub get_links_schedule_json {
 			'duration'	=> $duration,
 			'channel'	=> $cache_channel,
 			'type'		=> $prog_type,
-			'web'		=> "${bbc_prog_page_prefix}/${pid}",
+			'web'		=> $web,
 			'available' => $available_str,
 			'expires' => $expires,
 		);
@@ -8772,10 +8775,10 @@ sub tags_from_metadata {
 	$tags->{disk} = $meta->{seriesnum};
 	# generate lyrics text with links if available
 	$tags->{lyrics} = $meta->{desclong};
-	$tags->{lyrics} .= "\n\nEPISODE\n$meta->{player}" if $meta->{player};
-	$tags->{lyrics} .= "\n\nSERIES\n$meta->{web}" if $meta->{web};
 	$tags->{description} = $meta->{descshort};
 	$tags->{longDescription} = $meta->{desclong};
+	$tags->{lyrics} .= "\n\nPLAY: $meta->{player}" if $meta->{player};
+	$tags->{lyrics} .= "\n\nINFO: $meta->{web}" if $meta->{web};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
 	$tags->{TVShowName} = $meta->{show};
 	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
