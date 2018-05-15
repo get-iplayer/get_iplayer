@@ -4754,12 +4754,12 @@ sub get_metadata {
 				# the Doctor Who fudge
 				my ($seriesnum2, $episodenum2);
 				# Extract the seriesnum
-				my $regex = 'Series\s+'.main::regex_numbers();
+				my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 				if ( "$name $episode" =~ m{$regex}i ) {
 					$seriesnum2 = main::convert_words_to_number( $1 );
 				}
 				# Extract the episode num
-				my $regex_1 = 'Episode\s+'.main::regex_numbers();
+				my $regex_1 = '(?:Episode|Pennod)\s+'.main::regex_numbers();
 				my $regex_2 = '^'.main::regex_numbers().'\.\s+';
 				if ( "$name $episode" =~ m{$regex_1}i ) {
 					$episodenum2 = main::convert_words_to_number( $1 );
@@ -4853,11 +4853,11 @@ sub get_metadata {
 	$prog->{episodeshort} = $prog->{episode};
 	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
 	my $no_number = $prog->{episodeshort};
-	$prog->{episodeshort} =~ s/:?\s*Episode\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} =~ s/:?\s*Series\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*(Episode|Pennod)\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*(Series|Cyfres)\s+.+?(:\s*|$)//i;
 	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{brand};
-	$prog->{nameshort} =~ s/:?\s*Series\s+\d.*?(:\s*|$)//i;
+	$prog->{nameshort} =~ s/:?\s*(Series|Cyfres)\s+\d.*?(:\s*|$)//i;
 	$prog->{firstbcast} = $firstbcast;
 	$prog->{firstbcastrel} = Programme::get_time_string( $firstbcast, time() );
 	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
@@ -6715,7 +6715,7 @@ sub get_links_schedule_html {
 		$episodenum = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]/abbr/span[@datatype="xsd:int"]');
 		if ( ! $episodenum ) {
 			# Extract the episode num
-			my $regex_1 = 'Episode\s+'.main::regex_numbers();
+			my $regex_1 = '(?:Episode|Pennod)\s+'.main::regex_numbers();
 			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
 			if ( $episode =~ m{$regex_1}i ) {
 				$episodenum = main::convert_words_to_number( $1 );
@@ -6724,7 +6724,7 @@ sub get_links_schedule_html {
 			}
 		}
 		# Extract the seriesnum
-		my $regex = 'Series\s+'.main::regex_numbers();
+		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		# only default version in schedules
 		$version = 'default';
@@ -6827,7 +6827,7 @@ sub get_links_schedule_json {
 		$episodenum = $entry->{episodeNumber};
 		if ( ! $episodenum ) {
 			# Extract the episode num
-			my $regex_1 = 'Episode\s+'.main::regex_numbers();
+			my $regex_1 = '(?:Episode|Pennod)\s+'.main::regex_numbers();
 			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
 			if ( $episode =~ m{$regex_1}i ) {
 				$episodenum = main::convert_words_to_number( $1 );
@@ -6836,7 +6836,7 @@ sub get_links_schedule_json {
 			}
 		}
 		# Extract the seriesnum
-		my $regex = 'Series\s+'.main::regex_numbers();
+		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		# only default version in schedules
 		$version = 'default';
