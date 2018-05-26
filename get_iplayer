@@ -8775,8 +8775,6 @@ sub tags_from_metadata {
 	$tags->{disk} = $meta->{seriesnum};
 	# generate lyrics text with links if available
 	$tags->{lyrics} = $meta->{desclong};
-	$tags->{description} = $meta->{descshort};
-	$tags->{longDescription} = $meta->{desclong};
 	$tags->{lyrics} .= "\n\nPLAY: $meta->{player}" if $meta->{player};
 	$tags->{lyrics} .= "\n\nINFO: $meta->{web}" if $meta->{web};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
@@ -8828,6 +8826,8 @@ sub tags_from_metadata {
 			main::logger "WARNING: --tag-credits specified but credits file not found: $meta->{credits}\n";
 		}
 	}
+	$tags->{description} = $tags->{comment};
+	$tags->{longDescription} = $tags->{lyrics};
 	while ( my ($key, $val) = each %{$tags} ) {
 		$tags->{$key} = StringUtils::convert_punctuation($val);
 	}
