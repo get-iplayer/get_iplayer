@@ -4316,7 +4316,7 @@ sub download_credits {
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @out;
 	for my $typeof ( "PerformanceRole", "Person" ) {
- 		my @credits = $dom->findnodes('//tr[@typeof="'.$typeof.'"]');
+		my @credits = $dom->findnodes('//tr[@typeof="'.$typeof.'"]');
 		if ( @credits ) {
 			push @out, "\n----------\n";
 			for my $credit ( @credits ) {
@@ -6777,13 +6777,13 @@ sub get_links_schedule_json {
 	main::logger "\n".(@entries ? "INFO" : "WARNING").": Got ".($#entries + 1)." programmes for $channel schedule page (JSON): $url\n" if $opt->{verbose} || ! @entries;
 	return 1 unless @entries;
 	for my $entry ( @entries ) {
- 		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration );
- 		my ($available_str, $until_str);
- 		my $pid = $entry->{identifier};
- 		next unless $pid;
- 		my $available_str = $entry->{publication}->{startDate};
- 		$available = Programme::get_time_string( $available_str );
- 		my $end_date = $entry->{publication}->{endDate};
+		my ( $name, $episode, $episodenum, $seriesnum, $desc, $pid, $available, $expires, $duration );
+		my ($available_str, $until_str);
+		my $pid = $entry->{identifier};
+		next unless $pid;
+		my $available_str = $entry->{publication}->{startDate};
+		$available = Programme::get_time_string( $available_str );
+		my $end_date = $entry->{publication}->{endDate};
 		if ( $end_date ) {
 			my $finish = Programme::get_time_string( $end_date );
 			if ( $finish ) {
