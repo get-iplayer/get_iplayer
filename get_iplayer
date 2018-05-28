@@ -6488,7 +6488,6 @@ sub get_links_schedule_mojo {
 	my $channels = shift;
 	return 1 unless @$urls;
 
-	my $active = 0;
 	my %attempts;
 	my $rc_mojo;
 	my $max_conn = $opt->{indexmaxconn} || 5;
@@ -6540,7 +6539,6 @@ sub get_links_schedule_mojo {
 
 	my $get_callback = sub {
 		my (undef, $tx) = @_;
-		$active--;
 		my $tx0 = $tx;
 		while ( $tx0->previous ) {
 			$tx0 = $tx0->previous;
@@ -6585,28 +6583,26 @@ sub get_links_schedule_mojo {
 	};
 
 	my $delay = Mojo::IOLoop->delay;
-	my $do_next;
-	$do_next = sub {
-		while ( $active < $max_conn and my $url = shift @$urls ) {
-			last if ( $rc_mojo && $opt->{refreshabortonerror} );
-			my $end = $delay->begin;
-			$active++;
-			$attempts{$url}++;
-			main::logger ".";
-			main::logger "\nDEBUG: Downloading $channels->{$url} schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
-			$ua->get($url => sub {
-				my ($ua, $tx) = @_;
-				unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
-					$get_callback->($ua, $tx);
-					$do_next->();
-				}
-				$end->();
-			});
-		}
+	my $fetch;
+	$fetch = sub {
+		return unless my $url = shift @$urls;
+		return if ( $rc_mojo && $opt->{refreshabortonerror} );
+		my $end = $delay->begin;
+		$attempts{$url}++;
+		main::logger ".";
+		main::logger "\nDEBUG: Downloading $channels->{$url} schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
+		$ua->get($url => sub {
+			my ($ua, $tx) = @_;
+			unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
+				$get_callback->($ua, $tx);
+				$fetch->();
+			}
+			$end->();
+		});
 	};
 
-	$do_next->();
-	$delay->wait unless $delay->ioloop->is_running;
+	$fetch->() for 1 .. $max_conn;
+	$delay->wait;
 	undef $ua;
 	return 1 if $rc_mojo;
 }
