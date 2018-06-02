@@ -4101,7 +4101,7 @@ sub get_time_string {
 	# ending in 'Z'
 	($tzhour, $tzmin) = (0, 0) if m{\d\d\d\d\-\d\d\-\d\dT\d\d:\d\d:\d\dZ};
 
-	main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
+	# main::logger "DEBUG: $_ = $year, $mon, $mday, $hour, $min, $sec, $tzhour, $tzmin\n" if $opt->{debug};
 	# Sanity check date data
 	return '' if $year < 1970 || $mon < 1 || $mon > 12 || $mday < 1 || $mday > 31 || $hour < 0 || $hour > 24 || $min < 0 || $min > 59 || $sec < 0 || $sec > 59 || $tzhour < -13 || $tzhour > 13 || $tzmin < -59 || $tzmin > 59;
 	# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
@@ -6795,7 +6795,7 @@ sub get_links_schedule_json {
 		next if $future && $available <= $now;
 		$expires = $available + $thirty_days;
 		if ( defined $prog->{$pid} ) {
-			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{verbose};
+			main::logger "WARNING: '$pid, $prog->{$pid}->{name} - $prog->{$pid}->{episode}, $prog->{$pid}->{channel}' already exists (this channel = $channel $available)\n" if $opt->{debug};
 			# use listing with earliest availability
 			if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
 				$prog->{$pid}->{available} = $available_str;
