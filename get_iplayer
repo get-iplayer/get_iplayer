@@ -6546,9 +6546,8 @@ sub get_links_schedule_mojo {
 		my $url = $tx0->req->url;
 		my $channel_id = $channel_ids->{$url};
 		my $channel = $channels->{$url};
-		my $code = $tx->res->code;
 		my $html = $tx->res->text;
-		unless ( $code >= 200 and $code < 300 and $html) {
+		unless ( $tx->res->is_success && $html =~ /\w/ ) {
 			if ( $attempts{$url} < 3 ) {
 				main::logger "\nDEBUG: Retrying download of $channel schedule page: $url\n" if $opt->{verbose};
 				unshift @$urls, $url;
