@@ -6833,8 +6833,11 @@ sub get_links_schedule_json {
 			}
 		}
 		# Extract the seriesnum
-		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
-		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		$seriesnum = $entry->{partOfSeason}->{position};
+		if ( ! $seriesnum ) {
+			my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
+			$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+		}
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
 		$thumbnail = $entry->{image} || $entry->{partOfSeries}->{image};
