@@ -1752,7 +1752,9 @@ sub request_url_retry {
 	$OPTS{SendTE} = 0;
 	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
 
-	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content) = @_;
+	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content, $ok404) = @_;
+	$failmsg ||= "Failed to download URL";
+	$fail_content ||= '';
 	my $res;
 
 	# Use url prepend if required
@@ -1770,13 +1772,20 @@ sub request_url_retry {
 	# Disable proxy unless mustproxy is flagged
 	main::proxy_disable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	my $i;
-	logger "INFO: Getting URL: $url\n" if $opt->{verbose};
-	for ($i = 0; $i < $retries; $i++) {
+	for ($i = 1; $i <= $retries; $i++) {
+		logger "\nINFO: Downloading URL ($i/$retries): $url\n" if $opt->{verbose};
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
-			if ( $i == $retries - 1 ) {
-				logger $failmsg;
-				logger "ERROR: Response: ${\$res->code()} ${\$res->message()}\n" if $opt->{verbose};
+			if ( $i < $retries ) {
+				if ( $opt->{verbose} ) {
+					logger "\nWARNING: $failmsg ($i/$retries): $url\n";
+					logger "WARNING: Response: ${\$res->code()} ${\$res->message()}\n";
+				}
+			} else {
+				if ( $opt->{verbose} || ! ( $res->code() == 404 && $ok404 ) ) {
+					logger "\nERROR: $failmsg ($i/$retries): $url\n";
+					logger "ERROR: Response: ${\$res->code()} ${\$res->message()}\n";
+				}
 			}
 		} else {
 			logger $succeedmsg;
@@ -1786,8 +1795,7 @@ sub request_url_retry {
 	# Re-enable proxy unless mustproxy is flagged
 	main::proxy_enable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	# Return empty string if we failed and content not required
-	if ( $i == $retries ) {
-		$fail_content ||= '';
+	if ( $i > $retries ) {
 		if ( wantarray ) {
 			return ($fail_content, $res);
 		} else {
@@ -5761,7 +5769,7 @@ sub get_stream_data {
 	my $ms_proto = $opt->{streamhttp} ? "http" : "https";
 	for my $mediaset ( @mediasets ) {
 		my $url = "https://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/$verpid?cb=".( sprintf "%05.0f", 99999*rand(0) );
-		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1 );
+		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, undef, 1 );
 		main::logger "\n$xml\n" if $opt->{debug};
 		$checked_geoblock = 1;
 		next if check_geoblock( $xml );
@@ -6509,6 +6517,7 @@ sub get_links_schedule_mojo {
 	my $channels = shift;
 	return 1 unless @$urls;
 
+	my $retries = 3;
 	my %attempts;
 	my $rc_mojo;
 	my $max_conn = $opt->{indexmaxconn} || 5;
@@ -6569,23 +6578,29 @@ sub get_links_schedule_mojo {
 		my $channel = $channels->{$url};
 		my $html = $tx->res->text;
 		unless ( $tx->res->is_success && $html =~ /\w/ ) {
-			if ( $attempts{$url} < 3 ) {
-				main::logger "\nDEBUG: Retrying download of $channel schedule page: $url\n" if $opt->{verbose};
-				unshift @$urls, $url;
-			} else {
-				main::logger "\nWARNING: Failed to download $channel schedule page: $url\n";
-				$rc_mojo = 1;
-				if ( $opt->{verbose} ) {
-					if ( my $err = $tx->error ) {
-						if ( $err->{code} ) {
-							main::logger "ERROR: Response: $err->{code} $err->{message}\n";
-						} else {
-							main::logger "ERROR: Connection error: $err->{message}\n";
-						}
-					}
+			my $errmsg;
+			if ( my $err = $tx->error ) {
+				if ( $err->{code} ) {
+					$errmsg = "Response: $err->{code} $err->{message}";
+				} else {
+					$errmsg = "Connection error: $err->{message}";
 				}
 			}
+			if ( $attempts{$url} < $retries ) {
+				if ( $opt->{verbose} ) {
+					main::logger "\nWARNING: Failed to download $channel schedule page ($attempts{$url}/$retries): $url\n";
+					main::logger "WARNING: $errmsg\n" if $errmsg;
+					main::logger "INFO: Retrying download of $channel schedule page: $url\n";
+				}
+				unshift @$urls, $url;
+			} else {
+				main::logger "\nERROR: Failed to download $channel schedule page ($attempts{$url}/$retries): $url\n";
+				main::logger "ERROR: $errmsg\n" if $errmsg;
+				$rc_mojo = 1;
+			}
 			return;
+		} else {
+			main::logger ".";
 		}
 		my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 		if ( $rc ) {
@@ -6609,8 +6624,7 @@ sub get_links_schedule_mojo {
 		return if ( $rc_mojo && $opt->{refreshabortonerror} );
 		my $end = $delay->begin;
 		$attempts{$url}++;
-		main::logger ".";
-		main::logger "\nDEBUG: Downloading $channels->{$url} schedule page ($attempts{$url}): $url\n" if $opt->{verbose};
+		main::logger "\nINFO: Downloading $channels->{$url} schedule page ($attempts{$url}/$retries): $url\n" if $opt->{verbose};
 		$ua->get($url => sub {
 			my ($ua, $tx) = @_;
 			unless ( $rc_mojo && $opt->{refreshabortonerror} ) {
@@ -6640,8 +6654,8 @@ sub get_links_schedule_lwp {
 	my $limit = shift;
 	my $now = shift || time();
 	my $rc_lwp;
-	main::logger "\nDEBUG: Getting $channel schedule page: $url\n" if $opt->{verbose};
-	my $html = main::request_url_retry($ua, $url, 3, '.', "\nWARNING: Failed to download $channel schedule page: $url\n");
+	main::logger "\INFO: Downloading $channel schedule page: $url\n" if $opt->{verbose};
+	my $html = main::request_url_retry($ua, $url, 3, '.', "Failed to download $channel schedule page");
 	return 1 unless $html;
 	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
 	if ( $rc ) {
@@ -7457,7 +7471,7 @@ sub parse_playlist {
 			last;
 		}
 	}
-	my $data = main::request_url_retry($ua, $playlist_url, 3, undef, "\nWARNING: Failed to download HLS playlist: $playlist_url\n", 1);
+	my $data = main::request_url_retry($ua, $playlist_url, 3, undef, "Failed to download HLS playlist", 1);
 	return undef if ! $data;
 	my @lines = split(/\r?\n/, $data);
 	if ( @lines < 1 || $lines[0] ne '#EXTM3U' ) {
@@ -7995,8 +8009,10 @@ sub fetch {
 		last if $got404;
 		# bail out on download failure
 		if ( $i == $retries ) {
-			@warnings = ("Failed to download file segment [$sequence]");
-			push @warnings, "Response: ${\$res->code()} ${\$res->message()}" if $opt->{verbose};
+			@warnings = (
+				"Failed to download file segment [$sequence]",
+				"Response: ${\$res->code()} ${\$res->message()}"
+			);
 			$return = 1;
 			last;
 		}
@@ -8008,8 +8024,7 @@ sub fetch {
 				@warnings = (
 					"Unexpected size for file segment [$sequence]",
 					"Expected: $expected  Downloaded: $size_diff",
-					"This indicates a problem with your network connection to the media server",
-					"Retrying download"
+					"This indicates a problem with your network connection to the media server"
 				);
 				$return = 1;
 				last;
@@ -8020,8 +8035,7 @@ sub fetch {
 			if ( ! print $rh "$sequence,$size,$elapsed,$size_diff,$segment_duration,$begin_time\n" ) {
 				close $rh;
 				@warnings = (
-					"Unable to save resume data for file segment [$sequence]",
-					"Retrying download"
+					"Unable to save resume data for file segment [$sequence]"
 				);
 				$return = 1;
 				last;
@@ -8065,12 +8079,12 @@ sub fetch {
 	if ( $return ) {
 		main::logger "WARNING: ".(join "\nWARNING: ", @warnings)."\n" if @warnings;
 		if ( $opt->{verbose} ) {
+			main::logger "WARNING: File segment URL: $curr_segment_url\n";
 			main::logger sprintf("WARNING: Stopped downloading at: %.2f MB (%02d:%02d:%02d) [%d]\n",
 				$prev_size / 1000000.0,
 				(gmtime($prev_elapsed))[2,1,0],
 				$prev_sequence
 			);
-			main::logger "WARNING: File segment URL: $curr_segment_url\n";
 		}
 		return $return > 1 ? 'next' : 'retry';
 	}
