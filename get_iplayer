@@ -6266,6 +6266,7 @@ use Time::Piece;
 use URI;
 use XML::LibXML 1.91;
 use XML::LibXML::XPathContext;
+use constant DEFAULT_THUMBNAIL => "https://ichef.bbci.co.uk/images/ic/480xn/p01tqv8z.png";
 
 # Class vars
 sub index_min { return 1 }
@@ -6724,7 +6725,7 @@ sub get_links_schedule_html {
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
-		$thumbnail = "https://ichef.bbci.co.uk/images/ic/480xn/p01tqv8z.png";
+		$thumbnail = DEFAULT_THUMBNAIL;
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -6840,7 +6841,7 @@ sub get_links_schedule_json {
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
 		$thumbnail = $entry->{image} || $entry->{partOfSeries}->{image};
-		$thumbnail ||= "https://ichef.bbci.co.uk/images/ic/480xn/p01tqv8z.png";
+		$thumbnail ||= DEFAULT_THUMBNAIL;
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);

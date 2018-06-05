@@ -45,6 +45,7 @@ use LWP::UserAgent;
 use PerlIO::encoding;
 use strict;
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
+use constant DEFAULT_THUMBNAIL => "https://ichef.bbci.co.uk/images/ic/480xn/p01tqv8z.png";
 $PerlIO::encoding::fallback = XMLCREF;
 # suppress Perl 5.22/CGI 4 warning
 $CGI::LIST_CONTEXT_WARN = 0;
@@ -1964,6 +1965,7 @@ sub show_info {
 		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
 	}
 	# Show thumb if one exists
+	$prog{$pid}->{thumbnail} ||= DEFAULT_THUMBNAIL;
 	print $fh img( { -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
 	# Set optional output dir for pvr queue if set
 	my $outdir;
@@ -2739,11 +2741,10 @@ sub search_progs {
 		for ( @displaycols ) {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
 			if ( /^thumbnail$/ ) {
-				if ( $prog{$pid}->{$_} =~ m{^https?://} ) {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
-				} else {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, 'Open URL' ) );
+				if ( $prog{$pid}->{$_} !~ m{^https?://} ) {
+					$prog{$pid}->{$_} = DEFAULT_THUMBNAIL;
 				}
+				push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			} elsif ( /^web$/ ) {
 					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{$_}, -target => "_new" }, 'Open URL' ) );
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
