@@ -98,6 +98,7 @@ my $opt_format = {
 	_url		=> [ 2, "", 'Recording', '--url <url>,<url>,...', "Record the embedded media in the specified iPlayer episode URLs."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>,<pid>,...', "Record arbitrary PIDs that do not necessarily appear in the index."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID.  Requires --pid."],
+	pidrecursivelist	=> [ 1, "pidrecursivelist|pid-recursive-list!", 'Recording', '--pid-recursive-list', "If value of --pid is a series or brand PID, list available episodes but do not download. Implies --pid-recursive. Requires --pid."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL, e.g., http://username:password\@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless --proxy is specified. Used for both HTTP and HTTPS. Overridden by --no-proxy."],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
@@ -746,6 +747,11 @@ sub init_search {
 		delete $opt->{metadata};
 	}
 
+	# Set --pid-recursive if --pid-recursive-list is used
+	if ( $opt->{pidrecursivelist} ) {
+		$opt->{pidrecursive} = 1;
+	}
+
 	# Ensure lowercase types
 	$opt->{type} = lc( $opt->{type} ) if $opt->{type};
 	# Expand 'all' type to comma separated list all prog types
@@ -876,6 +882,10 @@ sub find_pid_matches {
 		}
 	}
 	main::logger "INFO: ".(scalar @ep_list)." total programmes\n";
+	# return empty list if not downloading
+	if ( $opt->{pidrecursivelist} ) {
+		return;
+	}
 	return @match_list;
 }
 
