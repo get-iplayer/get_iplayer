@@ -148,7 +148,7 @@ my @headings = qw(
 );
 
 # Default Displayed headings
-my @headings_default = qw( type name episode desc channel timeadded );
+my @headings_default = qw( thumbnail type name episode desc channel timeadded );
 
 # Lookup table for nice field name headings
 my %fieldname = (
@@ -2739,15 +2739,13 @@ sub search_progs {
 		for ( @displaycols ) {
 			# display thumb if defined (will have to use proxy to get file:// thumbs)
 			if ( /^thumbnail$/ ) {
-				# Assume a thumbnail prefix if one is missing for BBC iPlayer
-				if ( ! $prog{$pid}->{$_} && $pid =~ m{^[wpb]0[a-z0-9]{6}$} && $prog{$pid}->{type} =~ /^(tv|radio)$/ ) {
-					$prog{$pid}->{$_} = "http://www.bbc.co.uk/iplayer/images/episode/${pid}_150_84.jpg";
-				}
 				if ( $prog{$pid}->{$_} =~ m{^https?://} ) {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 				} else {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web} }, 'Open URL' ) );
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, 'Open URL' ) );
 				}
+			} elsif ( /^web$/ ) {
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{$_}, -target => "_new" }, 'Open URL' ) );
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
