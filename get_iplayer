@@ -3040,8 +3040,14 @@ sub list_progs {
 	# apply sort
 	@match_list = main::sort_matches(@match_list);
 
-	# De-dup matches and retain order then list matching programmes in history
-	main::list_progs( undef, main::make_array_unique_ordered( @match_list ) );
+	if ( $opt->{info} ) {
+		for my $this ( main::make_array_unique_ordered( @match_list ) ) {
+			$this->display_metadata( sort keys %{ $this } );
+		}
+	} else {
+		# De-dup matches and retain order then list matching programmes in history
+		main::list_progs( undef, main::make_array_unique_ordered( @match_list ) );
+	}
 
 	return 0;
 }

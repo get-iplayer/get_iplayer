@@ -1961,7 +1961,7 @@ sub show_info {
 		$out .= "$key: $val\n";
 		$prog{$pid}->{$key} = $val;
 		# Make into a link if this value is a URL
-		$val = a( { -class=>'info', -title=>'Open URL', -href=>$val }, $val ) if $val =~ m{^https?://.+};
+		$val = a( { -class=>'info', -title=>'Open URL', -href=>$val, -target=>'_new' }, $val ) if $val =~ m{^https?://.+};
 		push @html, Tr( { -class => 'info' }, th( { -class => 'info' }, $key ).td( { -class => 'info' }, $val ) );
 	}
 	# Show thumb if one exists
