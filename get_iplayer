@@ -5045,7 +5045,7 @@ sub fetch_episodes_recursive {
 			$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
 			$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
 		}
-		my @episodes = $dom->findnodes('//div[contains(@typeof,"Episode")]');
+		my @episodes = $dom->findnodes('//div[@data-pid]');
 		if ( @episodes ) {
 			for my $episode ( @episodes ) {
 				my $pid = $episode->findvalue('@data-pid');
@@ -5055,7 +5055,7 @@ sub fetch_episodes_recursive {
 				my $prog_episode = $episode->findvalue('.//span[contains(@class,"programme__title")]/span');
 				my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]/span/span');
 				my $prog_name = $name2 ? "$title: $name2" : $title;
-				my $prog_desc = $episode->findvalue('.//span[contains(@property,"description")]');
+				my $prog_desc = $episode->findvalue('.//p[contains(@class,"programme__synopsis")]/span');
 				unless ( $name2 ) {
 					if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
 						$prog_name .= ": $1";
