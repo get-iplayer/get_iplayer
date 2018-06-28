@@ -353,11 +353,18 @@ if ( $ENV{GETIPLAYER_DEFAULTS} ) {
 mkpath $profile_dir if ! -d $profile_dir;
 
 $ENV{GETIPLAYER_OUTPUT} ||= $ENV{IPLAYER_OUTDIR};
-# default output directory on desktop for Windows
-if ( ! $ENV{GETIPLAYER_OUTPUT} && $^O eq "MSWin32" ) {
+# default output directory on desktop for Windows/macOS
+if ( ! $ENV{GETIPLAYER_OUTPUT} ) {
 	my $desktop;
-	eval 'use Win32 qw(CSIDL_DESKTOPDIRECTORY); $desktop = Win32::GetFolderPath(CSIDL_DESKTOPDIRECTORY);';
-	if ( ! $@ && $desktop ) {
+	if ( $^O eq "MSWin32" ) {
+		eval 'use Win32 qw(CSIDL_DESKTOPDIRECTORY); $desktop = Win32::GetFolderPath(CSIDL_DESKTOPDIRECTORY);';
+		if ( $@ ) {
+			undef $desktop
+		}
+	} elsif ( $^O eq "darwin" ) {
+		$desktop = File::Spec->catfile($ENV{HOME}, "Desktop")
+	}
+	if ( $desktop && -d $desktop) {
 		$ENV{GETIPLAYER_OUTPUT} = File::Spec->catfile($desktop, "iPlayer Recordings");
 	}
 }
