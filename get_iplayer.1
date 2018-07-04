@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "May 2018" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "July 2018" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -98,7 +98,7 @@ Show full programme metadata and availability of modes and subtitles (max 40 mat
 Show a list of distinct element values (with counts) for the selected programme type(s) and exit.  Valid elements are: 'channel'
 .TP
 \fB\-\-listformat <format>
-Display programme data based on a user\-defined format string containing substitution parameters (such as <pid>, <name>, <episode>, etc.)
+Display search results with a custom format. Use substitution parameters in format string (see docs for list).
 .TP
 \fB\-\-long, \-l
 Show extended programme info
@@ -218,6 +218,9 @@ Record arbitrary PIDs that do not necessarily appear in the index.
 \fB\-\-pid\-recursive
 Record all related episodes if value of \-\-pid is a series or brand PID.  Requires \-\-pid.
 .TP
+\fB\-\-pid\-recursive\-list
+If value of \-\-pid is a series or brand PID, list available episodes but do not download. Implies \-\-pid\-recursive. Requires \-\-pid.
+.TP
 \fB\-\-proxy, \-p <url>
 Web proxy URL, e.g., http://username:password@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless \-\-proxy is specified. Used for both HTTP and HTTPS. Overridden by \-\-no\-proxy.
 .TP
@@ -243,14 +246,14 @@ Test only \- no recording (will show programme type)
 TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: best,better,good,worst,dvf,hvf,dash,hls,hd,sd,high,low. 50fps streams (if available) preferred unless \-\-fps25 specified (default=hvfhd,dvfhd,hvfsd,dvfsd,hvfxsd,dvfxsd,hvfhigh,dvfhigh,hvfxhigh,dvfxhigh,hvflow,dvflow).
 .TP
 \fB\-\-url <url>,<url>,...
-Record the embedded media in the specified iPlayer episode URLs.
+Record the PIDs contained in the specified iPlayer episode URLs.
 .TP
 \fB\-\-versions <versions>
 Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '\-\-versions=audiodescribed,default' will prefer audiodescribed programmes if available.
 .SS "Output Options:"
 .TP
 \fB\-\-command, \-c <command>
-Run user command after successful recording of programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc.
+User command to run after successful recording of programme. Use substitution parameters in command string (see docs for list).
 .TP
 \fB\-\-command\-radio <command>
 Run user command after successful recording of radio programme using substitution paramaters such as <dir>, <fileprefix>, <filename>, etc. Overrides \-\-command.
@@ -280,7 +283,7 @@ Create specified metadata info file without any recording or streaming.
 Do not create metadata info file after recording (overrides \-\-metadata).
 .TP
 \fB\-\-no\-sanitise
-Do not sanitise output file and directory names. Implies \-\-whitespace. Invalid characters for Windows ('"*:<>?|') and macOS (':') will be removed.
+Do not sanitise output file and directory names. Implies \-\-whitespace. Invalid characters for Windows ("*:<>?|) and macOS (:) will be removed.
 .TP
 \fB\-\-output, \-o <dir>
 Recording output directory
@@ -298,7 +301,7 @@ Don't remux or change the recording in any way.  Saves output file in native con
 Save recorded files into subdirectory of output directory.  Default: same name as programme (see \-\-subdir\-format).
 .TP
 \fB\-\-subdir\-format <format>
-The format to be used for subdirectory naming.  Use substitution parameters, e.g., '<nameshort>\-<seriesnum>'
+The format to be used for subdirectory naming.  Use substitution parameters in format string (see docs for list).
 .TP
 \fB\-\-suboffset <offset>
 Offset the subtitle timestamps by the specified number of milliseconds
@@ -553,7 +556,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.14, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.15, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
