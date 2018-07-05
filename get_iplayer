@@ -6577,7 +6577,7 @@ sub get_links_schedule_mojo {
 		my $channel_id = $channel_ids->{$url};
 		my $channel = $channels->{$url};
 		my $html = $tx->res->text;
-		unless ( $tx->res->is_success && $html =~ /\w/ ) {
+		unless ( $tx->res->code >= 200 && $tx->res->code < 300 && $html =~ /\w/ ) {
 			my $errmsg;
 			if ( my $err = $tx->error ) {
 				if ( $err->{code} ) {
