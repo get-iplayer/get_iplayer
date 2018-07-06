@@ -881,6 +881,9 @@ sub find_pid_matches {
 	}
 	if ( @ep_list ) {
 		my $show_type = keys %ep_types > 1;
+		if ( $opt->{sortreverse} ) {
+			@ep_list = reverse @ep_list;
+		}
 		main::logger "Episodes:\n";
 		for my $ep ( @ep_list ) {
 			my $ep_desc = " - $ep->{desc}" if $opt->{long} && $ep->{desc};
@@ -892,6 +895,9 @@ sub find_pid_matches {
 	# return empty list if not downloading
 	if ( $opt->{pidrecursivelist} ) {
 		return;
+	}
+	if ( $opt->{sortreverse} ) {
+		@match_list = reverse @match_list;
 	}
 	return @match_list;
 }
