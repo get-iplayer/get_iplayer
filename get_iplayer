@@ -4221,7 +4221,7 @@ sub download_tracklist {
 	main::logger "INFO: Downloading tracklist\n" if $opt->{tracklist} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
 	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
-	my ($html, $res1) = main::request_url_retry($ua , $url1, 3);
+	my ($html, $res1) = main::request_url_retry($ua , $url1, 3, undef, undef, undef, undef, 1);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
 			main::logger "WARNING: Track info not found\n";
@@ -4239,7 +4239,7 @@ sub download_tracklist {
 		my ($url2, $res2);
 		($url2 = $res1->request->uri) =~ s/segments\.inc/segments\.json/;
 		if ( $url2 ) {
-			($json, $res2) = main::request_url_retry($ua , $url2, 3);
+			($json, $res2) = main::request_url_retry($ua , $url2, 3, undef, undef, undef, undef, 1);
 			unless ( $res2 && $res2->is_success ) {
 				if ( $res2 && $res2->code == 404 ) {
 					main::logger "WARNING: Track times not found\n";
@@ -4337,7 +4337,7 @@ sub download_credits {
 	main::logger "INFO: Downloading credits\n" if $opt->{credits} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
 	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/credits.inc";
-	my ($html, $res1) = main::request_url_retry($ua , $url1, 3);
+	my ($html, $res1) = main::request_url_retry($ua , $url1, 3, undef, undef, undef, undef, 1);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
 			main::logger "WARNING: Credits not found\n";
@@ -4464,9 +4464,9 @@ sub get_verpids_json {
 	my $pid = $prog->{pid};
 	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
-	my $json = main::request_url_retry( $ua, $url, 3 );
+	my $json = main::request_url_retry( $ua, $url, 3, undef, undef, undef, undef, 1 );
 	if ( ! $json ) {
-		main::logger "ERROR: Failed to get version PID metadata from iPlayer site (JSON)\n";
+		main::logger "ERROR: Failed to get version PID metadata from iPlayer site (JSON)\n" if $opt->{verbose};
 		return 1;
 	}
 	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
@@ -4556,7 +4556,7 @@ sub get_verpids_html {
 		my $html;
 		my $url = "https://www.bbc.co.uk/iplayer/episode/$pid/$version_map->{$version}";
 		main::logger "INFO: iPlayer metadata URL (HTML) [$version] = $url\n" if $opt->{verbose};
-		$html = main::request_url_retry( $ua, $url, 3 );
+		$html = main::request_url_retry( $ua, $url, 3, undef, undef, undef, undef, 1 );
 		if ( ! $html ) {
 			main::logger "\nINFO: No metadata for '$version' version retrieved from iPlayer site (HTML)\n" if $opt->{verbose};
 			next;
