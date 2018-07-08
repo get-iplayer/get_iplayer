@@ -3429,11 +3429,12 @@ sub cmp_modes($$) {
 	);
 	my %ranks2 = (
 		'^haf' => 10,
-		'^hvf' => 20,
-		'^daf' => 30,
-		'^dvf' => 40,
-		'^hls' => 50,
-		'^subtitle' => 60,
+		'^hla' => 20,
+		'^hvf' => 30,
+		'^hls' => 40,
+		'^daf' => 50,
+		'^dvf' => 60,
+		'^subtitle' => 70,
 	);
 	my ($rank_x, $rank_y);
 	for my $k ( keys %ranks ) {
@@ -5761,9 +5762,9 @@ sub get_stream_data {
 	my @medias;
 	my @mediasets;
 	my @ms_tf;
-	my $unknown_modes = $modelist !~ /(daf|dvf|haf|hvf)/;
+	my $unknown_modes = $modelist !~ /(daf|dvf|haf|hla|hvf)/;
 	my $get_dash = $opt->{info} || $modelist =~ /(daf|dvf)/ || $unknown_modes;
-	my $get_hls = $opt->{info} || $modelist =~ /(haf|hvf)/ || $unknown_modes;
+	my $get_hls = $opt->{info} || $modelist =~ /(haf|hla|hvf)/ || $unknown_modes;
 	if ( $get_dash ) {
 		push @ms_tf, "dash";
 		push @mediasets, "iptv-all", "pc";
@@ -5772,6 +5773,10 @@ sub get_stream_data {
 		push @ms_tf, "hls";
 		push @mediasets, "iptv-all" unless $get_dash;
 		push @mediasets, "apple-ipad-hls";
+		if ( $prog->{type} eq "radio" ) {
+			# for hlalow stream
+			push @mediasets, "apple-iphone4-ipad-hls-3g";
+		}
 	}
 	my $ms_proto = $opt->{streamhttp} ? "http" : "https";
 	for my $mediaset ( @mediasets ) {
@@ -5785,7 +5790,7 @@ sub get_stream_data {
 		my @ms_medias = parse_metadata( $xml );
 		for my $ms_media ( @ms_medias ) {
 			for my $ms_conn ( @{$ms_media->{connections}} ) {
-				next unless $ms_conn->{protocol} eq $ms_proto;
+				next unless $ms_conn->{protocol} eq $ms_proto || $mediaset eq "apple-iphone4-ipad-hls-3g";
 				next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
 				next if $ms_conn->{supplier} =~ /$exclude_regex/;
 				my $stream_key = "$ms_media->{service}-$ms_conn->{protocol}-$ms_conn->{supplier}";
@@ -5806,8 +5811,7 @@ sub get_stream_data {
 					@new_medias = parse_dash_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
 				} elsif ( $ms_conn->{transferFormat} eq "hls" ) {
 					if ( $ms_conn->{supplier} =~ /hls_open/ ) {
-						next unless $prog->{type} eq "tv";
-						$prefix = "hls";
+						$prefix = $prog->{type} eq "tv" ? "hls" : "hla";
 					} else {
 						$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
 						# for 320k tv audio or 320k/96k radio
@@ -5848,6 +5852,16 @@ sub get_stream_data {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hlshd", 'hls', $ext );
+				}
+			}
+
+		} elsif ( $mattribs->{service} =~ /hla/ ) {
+			if ( $mattribs->{kind} =~ 'audio' ) {
+				my $ext = "m4a";
+				if ( $mattribs->{bitrate} >= 120 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlastd', 'hls', $ext );
+				} else {
+					get_stream_data_cdn( $data, $mattribs, 'hlalow', 'hls', $ext );
 				}
 			}
 
@@ -5979,7 +5993,7 @@ sub modelist {
 		$mlist =~ s/hls(?!hd)/hvf/g;
 	} elsif ( $prog->{type} eq "radio" ) {
 		$mlist =~ s/dash/daf/g;
-		$mlist =~ s/hls(?!hd)/haf/g;
+		$mlist =~ s/hls(?!hd)/hlsaudio/g;
 	}
 	# Deal with fallback modes and expansions
 	# Generic aliases
@@ -6032,6 +6046,15 @@ sub modelist {
 		$mlist = main::expand_list($mlist, 'hafgood', 'hafmed,hafworst');
 		$mlist = main::expand_list($mlist, 'hafworst', 'haflow');
 	}
+	# HLS audio clips and archives
+	if ( $prog->{type} eq "radio" && $mlist =~ /hla/ ) {
+		$mlist = main::expand_list($mlist, 'hla', 'hladefault');
+		$mlist = main::expand_list($mlist, 'hladefault', 'hlabest');
+		$mlist = main::expand_list($mlist, 'hlabest', 'hlabetter');
+		$mlist = main::expand_list($mlist, 'hlabetter', 'hlastd,hlagood');
+		$mlist = main::expand_list($mlist, 'hlagood', 'hlaworst');
+		$mlist = main::expand_list($mlist, 'hlaworst', 'hlalow');
+	}
 	# HLS Video Factory on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /hvf/ ) {
 		$mlist = main::expand_list($mlist, 'hvf', 'hvfdefault');
@@ -6047,14 +6070,23 @@ sub modelist {
 		}
 		$mlist = main::expand_list($mlist, 'hvfworst', 'hvflow');
 	}
+	# HLS on-demand radio
+	if ( $prog->{type} eq "radio" && $mlist =~ /hlsaudio/ ) {
+		$mlist = main::expand_list($mlist, 'hlsaudio', 'hlsaudiodefault');
+		$mlist = main::expand_list($mlist, 'hlsaudiodefault', 'hlsaudiobest');
+		$mlist = main::expand_list($mlist, 'hlsaudiobest', 'hafhigh,hlsaudiobetter');
+		$mlist = main::expand_list($mlist, 'hlsaudiobetter', 'hafstd,hlastd,hlsaudiogood');
+		$mlist = main::expand_list($mlist, 'hlsaudiogood', 'hafmed,hlsaudioworst');
+		$mlist = main::expand_list($mlist, 'hlsaudioworst', 'haflow,hlalow');
+	}
 	# default on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
 		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
 		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
 		$mlist = main::expand_list($mlist, 'radiobest', 'hafhigh,dafhigh,radiobetter');
-		$mlist = main::expand_list($mlist, 'radiobetter', 'hafstd,dafstd,radiogood');
+		$mlist = main::expand_list($mlist, 'radiobetter', 'hafstd,hlastd,dafstd,radiogood');
 		$mlist = main::expand_list($mlist, 'radiogood', 'hafmed,dafmed,radioworst');
-		$mlist = main::expand_list($mlist, 'radioworst', 'haflow,daflow');
+		$mlist = main::expand_list($mlist, 'radioworst', 'haflow,hlalow,daflow');
 	}
 	# default on-demand tv
 	if ( $prog->{type} eq "tv" && $mlist =~ /tv/ ) {
@@ -6086,9 +6118,9 @@ sub modelist {
 	# single quality level radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /\bradio(high|std|med|low)\b/ ) {
 		$mlist = main::expand_list($mlist, 'radiohigh', 'hafhigh,dafhigh');
-		$mlist = main::expand_list($mlist, 'radiostd', 'hafstd,dafstd');
+		$mlist = main::expand_list($mlist, 'radiostd', 'hafstd,hlastd,dafstd');
 		$mlist = main::expand_list($mlist, 'radiomed', 'hafmed,dafmed');
-		$mlist = main::expand_list($mlist, 'radiolow', 'haflow,daflow');
+		$mlist = main::expand_list($mlist, 'radiolow', 'haflow,hlalow,daflow');
 	}
 	# remove duplicates
 	my %seen;
@@ -7363,7 +7395,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow. Shortcuts: best,better,good,worst,haf,daf,hls,dash,high,std,med,low (default=hafhigh,dafhigh,hafstd,dafstd,hafmed,dafmed,haflow,daflow)."],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlastd,hlalow. Shortcuts: best,better,good,worst,haf,daf,hls,dash,high,std,med,low (default=hafhigh,dafhigh,hafstd,hlastd,dafstd,hafmed,dafmed,haflow,hlalow,daflow)."],
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "User command to run after successful recording of radio programme. Use substitution parameters in command string (see docs for list). Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 	};
