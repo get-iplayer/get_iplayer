@@ -8986,6 +8986,7 @@ sub tag_file_mp4 {
 	my @cmd = (
 		$bin->{atomicparsley},
 		$meta->{filename},
+		'--metaEnema',
 		'--freefree',
 		'--overWrite',
 		'--stik', $tags->{stik},
@@ -9038,9 +9039,7 @@ sub tag_file_mp4 {
 		);
 	}
 	# add artwork if available
-	if ( $opt->{noartwork} ) {
-		push @cmd, ( '--artwork', "REMOVE_ALL" );
-	} else {
+	unless ( $opt->{noartwork} ) {
 		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 	}
 	# run atomicparsley command
