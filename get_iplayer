@@ -3313,14 +3313,14 @@ sub display_metadata {
 			if ( $data{$_} ) {
 				my @t = gmtime( $now - $data{$_} );
 				my $ts = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($data{$_}));
-				main::logger sprintf "%-15s %s\n", $_.':', "$t[7] days $t[2] hours ago ($ts)";
+				main::logger sprintf "%-16s %s\n", $_.':', "$t[7] days $t[2] hours ago ($ts)";
 			}
 		} elsif ( /^expires$/ ) {
 			if ( $data{$_} && $data{$_} > $now ) {
 				my @t = gmtime( $data{$_} - $now );
 				my $years = ($t[5]-70)."y " if ($t[5]-70) > 0;
 				my $ts = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($data{$_}));
-				main::logger sprintf "%-15s %s\n", $_.':', "in ${years}$t[7] days $t[2] hours ($ts)";
+				main::logger sprintf "%-16s %s\n", $_.':', "in ${years}$t[7] days $t[2] hours ($ts)";
 			}
 		# Streams data
 		} elsif ( /^streams$/ ) {
@@ -3328,7 +3328,7 @@ sub display_metadata {
 		# If hash then list keys
 		} elsif ( ref$data{$_} eq 'HASH' ) {
 			for my $key ( sort keys %{$data{$_}} ) {
-				main::logger sprintf "%-15s ", $_.':';
+				main::logger sprintf "%-16s ", $_.':';
 				if ( ref$data{$_}->{$key} ne 'HASH' ) {
 					main::logger "$key: $data{$_}->{$key}";
 					main::logger " [estimated sizes only]" if $_ eq "modesizes";
@@ -3342,11 +3342,11 @@ sub display_metadata {
 			# strip line breaks
 			if ( $data{$_} ) {
 				(my $data_out = $data{$_}) =~ s|[\n\r]| |g;
-				main::logger sprintf "%-15s %s\n", $_.':', $data_out;
+				main::logger sprintf "%-16s %s\n", $_.':', $data_out;
 			}
 		# else just print out key value pair
 		} else {
-			main::logger sprintf "%-15s %s\n", $_.':', $data{$_} if $data{$_};
+			main::logger sprintf "%-16s %s\n", $_.':', $data{$_} if $data{$_};
 		}
 	}
 	main::logger "\n";
@@ -4898,6 +4898,8 @@ sub get_metadata {
 	$prog->{firstbcast} = $firstbcast;
 	$prog->{firstbcastrel} = Programme::get_time_string( $firstbcast, time() );
 	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
+	($prog->{firstbcasttime} = $firstbcast) =~ s/^.*T([:\d]+).*$/$1/;
+	($prog->{firstbcastyear}, $prog->{firstbcastmonth}, $prog->{firstbcastday}) = split( "-", $prog->{firstbcastdate} );
 
 	my $modes;
 	my $mode_sizes;
