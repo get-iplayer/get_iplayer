@@ -1094,6 +1094,7 @@ sub download_other {
 	my $ua = create_ua( 'desktop', 1 );
 	for my $this ( @match_list ) {
 		print_divider;
+		main::logger "INFO: Processing $this->{type}: '$this->{name} - $this->{episode} ($this->{pid})'\n";
 		$this->get_metadata_general();
 		if ( $this->get_metadata( $ua ) ) {
 			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
@@ -3404,6 +3405,19 @@ sub generate_version_list {
 			push @version_list, $version;
 		}
 	}
+	# prioritise versions with subtitles if --subtitles specified
+	my @subs_versions;
+	my @nosubs_versions;
+	if ( $opt->{subtitles} && $prog->{type} eq 'tv' ) {
+		for my $version ( @version_list ) {
+			if ( $prog->subtitles_available( [ $version ] ) ) {
+				push @subs_versions, $version;
+			} else {
+				push @nosubs_versions, $version;
+			}
+		}
+		@version_list = ( @subs_versions, @nosubs_versions );
+	}
 
 	if ( $got == 0 ) {
 		main::logger "INFO: No versions of this programme were selected (available versions: ".(keys %{ $prog->{verpids} } == 0 ? "none" : join ',', sort keys %{ $prog->{verpids} } ).")\n";
@@ -3623,9 +3637,9 @@ sub mode_ver_download_retry_loop {
 			main::logger "INFO: Skipping all versions of this programme\n";
 			return 3;
 
-		# Try Next prog
+		# Try Next version
 		} elsif ( $retcode eq 'skip' ) {
-			main::logger "INFO: Skipping this programme\n";
+			main::logger "INFO: Skipping '$version' version\n";
 			return 2;
 
 		# Try Next mode
@@ -7005,9 +7019,9 @@ sub download {
 	return 'skip' if $opt->{test};
 
 	# check subtitles if required
-	if ( $opt->{subtitles} && $opt->{subsrequired} && $prog->{type} eq 'tv' ) {
+	if ( $opt->{subtitles} && $prog->{type} eq 'tv'&& $opt->{subsrequired} ) {
 		if ( ! $prog->subtitles_available( [ $version ] ) ) {
-			main::logger "WARNING: Subtitles not available and --subsrequired specified.\n";
+			main::logger "WARNING: Subtitles not available and --subtitles-required specified.\n";
 			return 'skip';
 		}
 	}
@@ -7080,12 +7094,12 @@ sub download_subtitles {
 			my $suburl = $prog->{streams}->{$version}->{$subkey}->{streamurl};
 			if ( $suburl ) {
 				$found = 1;
-				main::logger "INFO: Downloading subtitles\n";
+				main::logger "INFO: Downloading subtitles [$version]\n";
 				$subs = main::request_url_retry($ua, $suburl, 3);
 				if ($subs) {
 					# Dump raw subs into a file if required
 					if ( $opt->{subsraw} && ! $dumped ) {
-						main::logger "INFO: Saving raw subtitles\n" if $opt->{verbose};
+						main::logger "INFO: Saving raw subtitles [$version]\n" if $opt->{verbose};
 						unlink($prog->{subsraw});
 						open( my $fhraw, "> $prog->{subsraw}");
 						print $fhraw $subs;
