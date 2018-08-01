@@ -2548,11 +2548,16 @@ sub add {
 		push @search_args, $this_cmdline->{search};
 	}
 	$this_cmdline->{search} = '('.(join '|', @search_args).')' if @search_args;
-	# do not allow search args in default options file
-	if ( defined $this_cmdline->{search} && $optfile eq $optfile_default ) {
-		main::logger "WARNING: 'search' option is invalid for default options file: $optfile\n";
-		main::logger "WARNING: 'search = $this_cmdline->{search}' will be ignored\n";
-		delete $this_cmdline->{search};
+
+	# ignore certain opts in default options file
+	if ( $optfile eq $optfile_default ) {
+		for my $key ( 'search', 'force', 'overwrite' ) {
+			if ( defined $this_cmdline->{$key}  ) {
+				main::logger "WARNING: '$key' option is invalid in default options file: $optfile\n";
+				main::logger "WARNING: '$key = $this_cmdline->{$key}' will be ignored\n";
+				delete $this_cmdline->{$key};
+			}
+		}
 	}
 
 	# Merge all cmdline opts into $entry except for these
@@ -2730,11 +2735,15 @@ sub load {
 	for my $optfile ( @optfiles ) {
 		# Load opts
 		my $entry = get( $opt, $optfile );
-		# ignore search args in default options file
-		if ( defined $entry->{search} && $optfile eq $optfile_default ) {
-			main::logger "WARNING: 'search' option is invalid for default options file: $optfile\n";
-			main::logger "WARNING: 'search = $entry->{search}' will be ignored\n";
-			delete $entry->{search};
+		# ignore certain opts in default options file
+		if ( $optfile eq $optfile_default ) {
+			for my $key ( 'search', 'force', 'overwrite' ) {
+				if ( defined $entry->{$key}  ) {
+					main::logger "WARNING: '$key' option is invalid in default options file: $optfile\n";
+					main::logger "WARNING: '$key = $entry->{$key}' will be ignored\n";
+					delete $entry->{$key};
+				}
+			}
 		}
 		# Copy to $this_file instance
 		$this_file->copy_set_options_from( $entry );
