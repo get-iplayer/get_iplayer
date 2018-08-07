@@ -6644,11 +6644,15 @@ sub get_links_schedule_mojo {
 		my $html = $tx->res->text;
 		unless ( $tx->res->code >= 200 && $tx->res->code < 300 && $html =~ /\w/ ) {
 			my $errmsg;
-			if ( my $err = $tx->error ) {
-				if ( $err->{code} ) {
-					$errmsg = "Response: $err->{code} $err->{message}";
+ 			if ( my $err = $tx->error ) {
+				if ( ref($err) eq 'HASH') {
+					if ( $err->{code} ) {
+						$errmsg = "Response: $err->{code} $err->{message}";
+					} else {
+						$errmsg = "Connection error: $err->{message}";
+					}
 				} else {
-					$errmsg = "Connection error: $err->{message}";
+					$errmsg = $err;
 				}
 			}
 			if ( $attempts{$url} < $retries ) {
