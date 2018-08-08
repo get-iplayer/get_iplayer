@@ -2109,14 +2109,13 @@ sub StringUtils::sanitize_path {
 		# Includes invalid chars for Windows and macOS
 		$string =~ s/$punct_bad//g;
 		# Replace ellipsis
-		$string =~ s/\.{3}/_/g;
+		$string =~ s/^\.{3,}/_/g;
+		$string =~ s/\.{3,}/ /g;
 		# Remove extra/leading/trailing whitespace
 		$string =~ s/\s+/ /g;
 		$string =~ s/(^\s+|\s+$)//g;
 		# Replace whitespace with underscore unless --whitespace
 		$string =~ s/\s/_/g unless ( $opt->{whitespace} && ! $force_default );
-		# Truncate multiple replacement chars
-		$string =~ s/_+/_/g;
 	}
 	return $string;
 }
