@@ -62,6 +62,7 @@ use strict;
 use Time::Local;
 use Unicode::Normalize;
 use URI;
+use version 0.77;
 use constant DIVIDER => "-==-" x 20;
 use constant FB_EMPTY => sub { '' };
 $PerlIO::encoding::fallback = XMLCREF;
@@ -227,6 +228,7 @@ my $opt_format = {
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
 	purgefiles	=> [ 1, "purgefiles|purge-files!", 'Misc', '--purge-files', "Delete downloaded programmes more than 30 days old"],
+	releasecheck	=> [ 1, "releasecheck|release-check!", 'Misc', '--release-check', "Forces check for new release if used on command line. Checks for new release weekly if saved in preferences."],
 	throttle	=> [ 1, "bw|throttle=f", 'Misc', '--throttle <Mb/s>', "Bandwidth limit (in Mb/s) for media file download. Default: unlimited. Synonym: --bw"],
 	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
@@ -581,6 +583,7 @@ my $pvr = Pvr->new();
 # Set some class-wide values
 $pvr->setvar('pvr_dir', File::Spec->catfile($profile_dir, "pvr"));
 
+release_check();
 my $retcode = 0;
 # Trim history
 if ( defined($opt->{trimhistory}) ) {
@@ -713,6 +716,64 @@ if ( defined($opt->{trimhistory}) ) {
 	purge_warning( $hist, 30 );
 }
 exit $retcode;
+
+sub release_check {
+	my $force_check;
+	if ( $opt_cmdline->{releasecheck} ) {
+		$force_check = 1;
+	} else {
+		return 0 unless $opt->{releasecheck};
+	}
+	my $now = time();
+	my $relchk_file = File::Spec->catfile($profile_dir, "release_check");
+	if ( $force_check || ! -f $relchk_file || $now - stat($relchk_file)->mtime > 7 * 86400 ) {
+		main::logger "INFO: Checking for new release\n";
+		my $repo_suffix;
+		if ( $^O eq "darwin" ) {
+			$repo_suffix = "_macos";
+		} elsif ( $^O eq "MSWin32" ) {
+			$repo_suffix = "_win32";
+		}
+		my $releases_url = "https://github.com/get-iplayer/get_iplayer${repo_suffix}/releases";
+		my $atom_url = "${releases_url}.atom";
+		my $atom = main::request_url_retry( main::create_ua( 'desktop', 1 ), $atom_url, 3 );
+		$atom =~ s/(^\s+|\s+$)//g;
+		unless ( $atom ) {
+			main::logger "ERROR: Failed to download data for release check\n";
+			return 1;
+		}
+		unless ( $atom =~ m{<title>(v?[\d.]+)</title>} ) {
+			main::logger "ERROR: Invalid data downloaded for release check\n";
+			return 1;
+		}
+		my $latest = $1;
+		my $new = $latest;
+		my $old = $version_text;
+		for ( $new, $old ) {
+			$_ =~ s/^v?([\d.]+).*$/$1/g;
+			$_ =~ s/^(\d+\.\d+)$/$1.0/;
+			unless ( $_ =~ /^\d+(\.\d+){2}$/ ) {
+				main::logger "WARNING: Unrecognised version number for release check: $_\n";
+				return 1;
+			}
+		}
+		my $relchk_msg = "release_check: now=$now latest=$latest version_text=$version_text new=$new old=$old";
+		main::logger "INFO: $relchk_msg\n" if $opt->{verbose};
+		if ( version->parse($new) > version->parse($old) ) {
+			main::logger "INFO: New release ($latest) is available\n";
+			main::logger "INFO: ${releases_url}/latest\n";
+			main::logger "INFO: Check for new release with your package management system if appropriate\n" unless $repo_suffix;
+		} else {
+			main::logger "INFO: You have the latest release ($version_text)\n";
+		}
+		if (! open (relchk, "> $relchk_file") ) {
+			main::logger "ERROR: Cannot write to release check file: $relchk_file\n";
+			return 1;
+		}
+		print relchk "$relchk_msg\n";
+		close relchk;
+	}	
+}
 
 sub print_divider {
 	main::logger $opt->{verbose} ? "${\DIVIDER}\n" : "\n";
