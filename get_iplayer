@@ -440,14 +440,13 @@ if ( $opt_cmdline->{presetlist} ) {
 # Show copyright notice
 logger Options->copyright_notice if not $opt->{nocopyright};
 
-# show encodings in use
 if ( $opt->{verbose} ) {
+	my $ct = time();
+	logger "INFO: Start: ".(strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($ct)))." ($ct)\n";
+	# show encodings in use
 	logger "INFO: $_ = $opt->{$_}\n" for @encoding_opts;
 	logger "INFO: \${^UNICODE} = ${^UNICODE}\n" if $opt->{verbose};
-}
-
-# Display prefs dirs if required
-if ( $opt->{verbose} ) {
+	# Display prefs dirs if required
 	main::logger "INFO: Profile dir: $profile_dir\n";
 	main::logger "INFO: User options file: $optfile_default\n";
 	main::logger "INFO: System options file: $optfile_system\n";
@@ -1551,6 +1550,10 @@ sub get_links {
 			}
 		}
 		close (CACHE);
+		if ( $opt->{verbose} ) {
+			my $mra_str = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($mra));
+			logger "INFO: Most recent addition ($prog_type) = $mra_str ($mra)\n";
+		}
 		logger "INFO: Got ".(keys %{ $prog_old })." file cache entries for $prog_type\n" if $opt->{verbose};
 
 	# Else no mem or file cache
@@ -1612,7 +1615,13 @@ sub get_links {
 					}
 					# if the entry was in old cache then retain timestamp from old entry
 					if ( $prog_old->{ $this->{pid} }->{timeadded} ) {
-						$this->{timeadded} = $prog_old->{ $this->{pid} }->{timeadded};
+						my $ta = $prog_old->{ $this->{pid} }->{timeadded};
+						my $available = Programme::get_time_string( $this->{available} );
+						if ( $ta <= $available && $available <= $now ) {
+							$this->{timeadded} = $now;
+						} else {
+							$this->{timeadded} = $ta;
+						}
 					# Else this is a new entry
 					} else {
 						$this->{timeadded} = $now;
