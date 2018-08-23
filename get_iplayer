@@ -102,7 +102,6 @@ my $opt_format = {
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL, e.g., http://username:password\@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless --proxy is specified. Used for both HTTP and HTTPS. Overridden by --no-proxy."],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
-	streamhttp		=> [ 1, "streamhttp|stream-http!", 'Recording', '--stream-http', "Use HTTP (instead of HTTPS) media stream playlist URLs."],
 	subsrequired	=> [ 1, "subsrequired|subtitlesrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
@@ -5807,7 +5806,6 @@ sub get_stream_data {
 			push @mediasets, "apple-iphone4-ipad-hls-3g";
 		}
 	}
-	my $ms_proto = $opt->{streamhttp} ? "http" : "https";
 	for my $mediaset ( @mediasets ) {
 		my $url = "https://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/$verpid?cb=".( sprintf "%05.0f", 99999*rand(0) );
 		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, undef, 1 );
@@ -5818,11 +5816,16 @@ sub get_stream_data {
 		decode_entities($xml);
 		my @ms_medias = parse_metadata( $xml );
 		for my $ms_media ( @ms_medias ) {
+			my $ms_proto = "https";
+			unless ( grep { $_->{protocol} eq $ms_proto } @{$ms_media->{connections}} ) {
+				$ms_proto = "http";
+			}
 			for my $ms_conn ( @{$ms_media->{connections}} ) {
-				next unless $ms_conn->{protocol} eq $ms_proto || $mediaset eq "apple-iphone4-ipad-hls-3g";
+				next unless $ms_conn->{protocol} eq $ms_proto;
 				next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
 				next if $ms_conn->{supplier} =~ /$exclude_regex/;
-				my $stream_key = "$ms_media->{service}-$ms_conn->{protocol}-$ms_conn->{supplier}";
+				(my $supplier = $ms_conn->{supplier}) =~ s/_https?$//;
+				my $stream_key = "$ms_media->{service}-$supplier";
 				next if $seen{$stream_key};
 				$seen{$stream_key}++;
 				($stream_key = $ms_conn->{href}) =~ s/\?.*//;
@@ -5850,7 +5853,8 @@ sub get_stream_data {
 				}
 				for my $new_media ( @new_medias ) {
 					for my $new_conn ( @{$new_media->{connections}} ) {
-						my $stream_key = "$new_media->{service}-$new_conn->{protocol}-$new_conn->{supplier}";
+						(my $supplier = $new_conn->{supplier}) =~ s/_https?$//;
+						my $stream_key = "$new_media->{service}-$supplier";
 						next if $seen{$stream_key};
 						$seen{$stream_key}++;
 						($stream_key = $new_conn->{href}) =~ s/\?.*//;
