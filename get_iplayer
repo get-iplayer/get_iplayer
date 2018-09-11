@@ -87,7 +87,6 @@ my $opt_format = {
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes.  Search terms required unless --pid specified.  Use  --search=.* to force download of all available programmes."],
 	includesupplier	=> [ 1, "includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
-	hlshqaudio	=> [ 1, "hlshqaudio|hls-hq-audio!", 'Recording', '--hls-hq-audio', "Attempt to download higher-quality audio for 'hlshd' mode (TV only). Output file may require editing to sync audio and video."],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	markdownloaded	=> [ 1, "markdownloaded|mark-downloaded!", 'Recording', '--mark-downloaded', "Mark programmes in search results or specified with --pid/--url as downloaded by inserting records in download history."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type)."],
@@ -7632,83 +7631,17 @@ sub get {
 		}
 	}
 
-	# look for higher-quality audio for hls modes
-	my $audio_file;
-	my $audio_raw;
-	my $hq_audio = $prog->{type} eq "tv" && $prog->{mode} =~ /hls/ && $opt->{hlshqaudio};
-	if ( $hq_audio ) {
-		main::logger "INFO: Attempting to download higher-quality audio for '$prog->{mode}' mode\n" if $opt->{verbose};
-		my $audio_prefix = "$prog->{fileprefix}.hqa";
-		my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.ts"));
-		$audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.hls.ts"));
-		$audio_raw = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.ts"));
-		if ( $opt->{overwrite} ) {
-			unlink $audio_file;
-		} else {
-			if ( -f $audio_file ) {
-				main::logger "INFO: Using existing HLS audio file: $audio_file\n";
-				main::logger "INFO: Use --overwrite to re-download\n";
-			}
-		}
-		unless ( -f $audio_file ) {
-			my @hvf_modes = sort Programme::cmp_modes grep /^hvf/, keys %{ $prog->{streams}->{$version} };
-			my @hq_modes = grep { my $abr = $prog->{streams}->{$version}->{$_}->{audio_bitrate}; $abr > 0 && $abr > $streamdata{audio_bitrate} } @hvf_modes;
-			my @modes = sort { $prog->{streams}->{$version}->{$b}->{audio_bitrate} <=> $prog->{streams}->{$version}->{$a}->{audio_bitrate} } @hq_modes;
-			splice @modes, 3;
-			for my $mode ( @modes ) {
-				my $audio_url = $prog->{streams}->{$version}->{$mode}->{streamurl};
-				next unless $audio_url =~ /-video=\d+/;
-				$audio_url =~ s/-video=\d+//;
-				if ( $streamdata{audio_bitrate} ) {
-					$streamdata{media_size} = undef;
-					$streamdata{media_bitrate} = $streamdata{audio_bitrate};
-				}
-				$streamdata{kind} = "audio";
-				$streamdata{mode} = $mode;
-				my $segments = $self->parse_playlist($ua, $audio_url);
-				if ( keys %{$segments} == 0 ) {
-					main::logger "ERROR: No file segments in HLS playlist\n";
-					main::logger "ERROR: HLS playlist URL: $url\n";
-					next;
-				} else {
-					$rc = $self->fetch( $ua, $segments, $audio_tmp, $prog, %streamdata );
-					if ( ! $rc ) {
-						if ( ! move($audio_tmp, $audio_file) ) {
-							main::logger "ERROR: Could not rename file: $audio_tmp\n";
-							main::logger "ERROR: Destination file name: $audio_file\n";
-						}
-						last;
-					}
-				}
-			}
-		}
-		if ( $opt->{verbose} && ! -f $audio_file ) {
-			main::logger "WARNING: Could not record higher-quality audio for '$prog->{mode}' mode - using default audio\n";
-		}
-		if ( -f $audio_file ) {
-			main::logger "WARNING: Output file may require editing to sync audio and video\n";
-		}
-	}
 	if ( $opt->{raw} ) {
 		if ( ! move($media_file, $media_raw) ) {
 			main::logger "ERROR: Could not rename file: $media_file\n";
 			main::logger "ERROR: Destination file name: $media_raw\n";
 			return 'skip';
 		}
-		if ( $hq_audio && -f $audio_file ) {
-			if ( ! move($audio_file, $audio_raw) ) {
-				main::logger "ERROR: Could not rename file: $audio_file\n";
-				main::logger "ERROR: Destination file name: $audio_raw\n";
-			}
-			if ( $opt->{verbose} && ! -f $audio_raw ) {
-				main::logger "WARNING: Could not record raw higher-quality audio for '$prog->{mode}' mode - using default audio\n";
-			}
-		}
 		return 0;
 	}
 
-	if ( $prog->{type} eq "tv") {
-		return $prog->postproc($audio_file, $media_file, $ua);
+	if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
+		return $prog->postproc(undef, $media_file, $ua);
 	} else {
 		return $prog->postproc($media_file, undef, $ua);
 	}
