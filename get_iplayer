@@ -106,6 +106,7 @@ my $opt_format = {
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
 
 	# Search
+	availablebefore		=> [ 0, "availablebefore|available-before=n", 'Search', '--available-before <hours>', "Limit search to programmes that became available before <hours> hours ago"],
 	availablesince		=> [ 0, "availablesince|available-since=n", 'Search', '--available-since <hours>', "Limit search to programmes that have become available in the last <hours> hours"],
 	before		=> [ 1, "before=n", 'Search', '--before <hours>', "Limit search to programmes added to the cache before <hours> hours ago"],
 	category 	=> [ 0, "category=s", 'Search', '--category <string>', "Narrow search to matched categories (comma-separated regex list).  Defaults to substring match.  Only works with --history."],
@@ -1307,6 +1308,7 @@ sub get_regex_matches {
 	my $before = $opt->{before} || -999999;
 	my $now = time();
 	my $available_since = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablesince} * 3600))) if $opt->{availablesince};
+	my $available_before = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablebefore} * 3600))) if $opt->{availablebefore};
 	my $expires_before = $now + ($opt->{expiresbefore} * 3600) if $opt->{expiresbefore};
 
 	if ( $opt->{verbose} ) {
@@ -1319,6 +1321,7 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search since = $since\n";
 		main::logger "DEBUG: Search before = $before\n";
 		main::logger "DEBUG: Search available_since = $available_since\n";
+		main::logger "DEBUG: Search available_before = $available_before\n";
 		main::logger "DEBUG: Search expires_before = $expires_before\n";
 		main::logger "\n";
 	}
@@ -1346,6 +1349,7 @@ sub get_regex_matches {
 			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
 			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
 			&& ( ( not $available_since ) || ( not $this->{available} ) || $this->{available} ge $available_since )
+			&& ( ( not $available_before ) || ( not $this->{available} ) || $this->{available} lt $available_before )
 			&& ( ( not $expires_before ) || ( not $this->{expires} ) || $this->{expires} <= $expires_before )
 		) {
 			# Add included matches
