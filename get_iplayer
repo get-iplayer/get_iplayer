@@ -4945,7 +4945,11 @@ sub get_metadata {
 	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
 	($prog->{firstbcasttime} = $firstbcast) =~ s/^.*T([:\d]+).*$/$1/;
 	($prog->{firstbcastyear}, $prog->{firstbcastmonth}, $prog->{firstbcastday}) = split( "-", $prog->{firstbcastdate} );
-
+	($prog->{sebcast} = substr($firstbcast, 0, 17)) =~ s/\D//g;
+	$prog->{sebcastdate} = substr($prog->{sebcast}, 0, 8);
+	$prog->{sebcasttime} = substr($prog->{sebcast}, 8, 4);
+	$prog->{sesort} = $prog->{senum} || $prog->{sebcast};
+	
 	my $modes;
 	my $mode_sizes;
 	my $first_broadcast;
