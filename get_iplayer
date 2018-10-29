@@ -4853,8 +4853,6 @@ sub get_metadata {
 				$episodenum = $episodenum2 if $episodenum2;
 				# insert episode number in $episode
 				$episode = Programme::bbciplayer::insert_episode_number($episode, $episodenum, $episodepart);
-				# minimum episode number = 1 if not a film and series number == 0
-				$episodenum = 1 if ( $seriesnum == 0 && $episodenum == 0 && $prog_type eq 'tv' && $categories !~ "Films" );
 				# minimum series number = 1 if episode number != 0
 				$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 				# programme versions
@@ -4930,7 +4928,7 @@ sub get_metadata {
 	$prog->{episodepart}	= $episodepart || $prog->{episodepart};
 	$prog->{seriesnum}	= $seriesnum || $prog->{seriesnum};
 	# Conditionally set the senum
-	$prog->{senum} = sprintf "s%02se%02s%s", $prog->{seriesnum}, $prog->{episodenum}, $prog->{episodepart} if $prog->{seriesnum} != 0 || $prog->{episodenum} != 0;
+	$prog->{senum} = sprintf "s%02se%02s%s", $prog->{seriesnum}, $prog->{episodenum}, $prog->{episodepart} if $prog->{seriesnum} != 0 && $prog->{episodenum} != 0;
 	# Create a stripped episode and series with numbers removed + senum s##e## element.
 	$prog->{episodeshort} = $prog->{episode};
 	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
