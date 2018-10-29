@@ -5917,8 +5917,12 @@ sub get_stream_data {
 		} elsif ( $mattribs->{service} =~ /hla/ ) {
 			if ( $mattribs->{kind} =~ 'audio' ) {
 				my $ext = "m4a";
-				if ( $mattribs->{bitrate} >= 120 ) {
+				if ( $mattribs->{bitrate} >= 192 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlahigh', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 120 ) {
 					get_stream_data_cdn( $data, $mattribs, 'hlastd', 'hls', $ext );
+				} elsif ( $mattribs->{bitrate} >= 80 ) {
+					get_stream_data_cdn( $data, $mattribs, 'hlamed', 'hls', $ext );
 				} else {
 					get_stream_data_cdn( $data, $mattribs, 'hlalow', 'hls', $ext );
 				}
@@ -6109,9 +6113,9 @@ sub modelist {
 	if ( $prog->{type} eq "radio" && $mlist =~ /hla/ ) {
 		$mlist = main::expand_list($mlist, 'hla', 'hladefault');
 		$mlist = main::expand_list($mlist, 'hladefault', 'hlabest');
-		$mlist = main::expand_list($mlist, 'hlabest', 'hlabetter');
+		$mlist = main::expand_list($mlist, 'hlabest', 'hlahigh,hlabetter');
 		$mlist = main::expand_list($mlist, 'hlabetter', 'hlastd,hlagood');
-		$mlist = main::expand_list($mlist, 'hlagood', 'hlaworst');
+		$mlist = main::expand_list($mlist, 'hlagood', 'hlamed,hlaworst');
 		$mlist = main::expand_list($mlist, 'hlaworst', 'hlalow');
 	}
 	# HLS Video Factory on-demand tv
@@ -6133,18 +6137,18 @@ sub modelist {
 	if ( $prog->{type} eq "radio" && $mlist =~ /hlsaudio/ ) {
 		$mlist = main::expand_list($mlist, 'hlsaudio', 'hlsaudiodefault');
 		$mlist = main::expand_list($mlist, 'hlsaudiodefault', 'hlsaudiobest');
-		$mlist = main::expand_list($mlist, 'hlsaudiobest', 'hafhigh,hlsaudiobetter');
+		$mlist = main::expand_list($mlist, 'hlsaudiobest', 'hafhigh,hlahigh,hlsaudiobetter');
 		$mlist = main::expand_list($mlist, 'hlsaudiobetter', 'hafstd,hlastd,hlsaudiogood');
-		$mlist = main::expand_list($mlist, 'hlsaudiogood', 'hafmed,hlsaudioworst');
+		$mlist = main::expand_list($mlist, 'hlsaudiogood', 'hafmed,hlsmed,hlsaudioworst');
 		$mlist = main::expand_list($mlist, 'hlsaudioworst', 'haflow,hlalow');
 	}
 	# default on-demand radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /radio/ ) {
 		$mlist = main::expand_list($mlist, 'radio', 'radiodefault');
 		$mlist = main::expand_list($mlist, 'radiodefault', 'radiobest');
-		$mlist = main::expand_list($mlist, 'radiobest', 'hafhigh,dafhigh,radiobetter');
+		$mlist = main::expand_list($mlist, 'radiobest', 'hafhigh,hlahigh,dafhigh,radiobetter');
 		$mlist = main::expand_list($mlist, 'radiobetter', 'hafstd,hlastd,dafstd,radiogood');
-		$mlist = main::expand_list($mlist, 'radiogood', 'hafmed,dafmed,radioworst');
+		$mlist = main::expand_list($mlist, 'radiogood', 'hafmed,hlamed,dafmed,radioworst');
 		$mlist = main::expand_list($mlist, 'radioworst', 'haflow,hlalow,daflow');
 	}
 	# default on-demand tv
@@ -6176,9 +6180,9 @@ sub modelist {
 	}
 	# single quality level radio
 	if ( $prog->{type} eq "radio" && $mlist =~ /\bradio(high|std|med|low)\b/ ) {
-		$mlist = main::expand_list($mlist, 'radiohigh', 'hafhigh,dafhigh');
+		$mlist = main::expand_list($mlist, 'radiohigh', 'hafhigh,hlahigh,dafhigh');
 		$mlist = main::expand_list($mlist, 'radiostd', 'hafstd,hlastd,dafstd');
-		$mlist = main::expand_list($mlist, 'radiomed', 'hafmed,dafmed');
+		$mlist = main::expand_list($mlist, 'radiomed', 'hafmed,hlamed,dafmed');
 		$mlist = main::expand_list($mlist, 'radiolow', 'haflow,hlalow,daflow');
 	}
 	# remove duplicates
@@ -7457,7 +7461,7 @@ sub channels_schedule {
 # Class cmdline Options
 sub opt_format {
 	return {
-		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlastd,hlalow. Shortcuts: best,better,good,worst,haf,daf,hls,dash,high,std,med,low (default=hafhigh,dafhigh,hafstd,hlastd,dafstd,hafmed,dafmed,haflow,hlalow,daflow)."],
+		radiomode	=> [ 1, "radiomode|amode=s", 'Recording', '--radiomode <mode>,<mode>,...', "Radio recording modes (overrides --modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlahigh,hlastd,hlsmed,hlalow. Shortcuts: best,better,good,worst,haf,hla,daf,hls,dash,high,std,med,low (default=hafhigh,hlahigh,dafhigh,hafstd,hlastd,dafstd,hafmed,hlamed,dafmed,haflow,hlalow,daflow)."],
 		commandradio	=> [ 1, "commandradio|command-radio=s", 'Output', '--command-radio <command>', "User command to run after successful recording of radio programme. Use substitution parameters in command string (see docs for list). Overrides --command."],
 		outputradio	=> [ 1, "outputradio=s", 'Output', '--outputradio <dir>', "Output directory for radio recordings (overrides --output)"],
 	};
