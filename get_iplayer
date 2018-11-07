@@ -3422,8 +3422,12 @@ sub generate_version_list {
 	}
 	if ( $opt->{versionlist} ) {
 		@version_search_order = map { /^default$/i ? @version_search_order : $_ } split /,/, $opt->{versionlist};
+		# ignore audiodescribed/signed for radio programmes
+		if ( $prog->{type} eq "radio" ) {
+			@version_search_order = grep !/(audiodescribed|signed)/, @version_search_order;
+			@version_search_order = default_version_list() unless @version_search_order;
+		}
 	}
-
 	# check here for no matching verpids for specified version search list???
 	my $got = 0;
 	my @version_list;
