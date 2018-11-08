@@ -3402,30 +3402,30 @@ sub download_subtitles {
 	return 1;
 }
 
-sub default_version_list {
-	return qw/ default original iplayer technical editorial lengthened shortened podcast opensubtitles other /;
-}
-
 # Usage: generate_version_list ($prog)
 # Returns sorted array of versions
 sub generate_version_list {
 	my $prog = shift;
-
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @version_search_order = default_version_list();
+	my @default_version_list = qw/original iplayer technical editorial lengthened shortened opensubtitles/;
+	# append any unknown versions found with programme
 	for my $key ( keys %{$prog->{verpids}} ) {
-		next if $key =~ /(audiodescribed|signed)/;
+		next if $key =~ /(audiodescribed|signed|podcast)/;
 		$key =~ s/\s+.*$//;
-		if ( ! grep /^${key}$/i, @version_search_order ) {
-			push @version_search_order, lc($key);
+		if ( ! grep /^${key}$/i, @default_version_list ) {
+			push @default_version_list, lc($key);
 		}
 	}
+	# podcast version has lowest priority
+	push @default_version_list, "podcast";
+	my @version_search_order = @default_version_list;
+	# override with --versionlist
 	if ( $opt->{versionlist} ) {
-		@version_search_order = map { /^default$/i ? @version_search_order : $_ } split /,/, $opt->{versionlist};
+		@version_search_order = map { /^default$/i ? @default_version_list : $_ } split /,/, $opt->{versionlist};
 		# ignore audiodescribed/signed for radio programmes
 		if ( $prog->{type} eq "radio" ) {
 			@version_search_order = grep !/(audiodescribed|signed)/, @version_search_order;
-			@version_search_order = default_version_list() unless @version_search_order;
+			@version_search_order = @default_version_list unless @version_search_order;
 		}
 	}
 	# check here for no matching verpids for specified version search list???
