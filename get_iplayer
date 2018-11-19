@@ -2374,6 +2374,10 @@ sub usage {
 	my @usage;
 	my @man;
 	my @dump;
+	my @negate = (
+		'Boolean options can be negated by adding a "no-" prefix, e.g., --no-subtitles or --no-whitespace.',
+		'This applies even if the base option name already begins with "no-", e.g., --no-no-tag or --no-no-artwork',
+	);
 	push @man,
 		'.TH GET_IPLAYER "1" "August 2018" "Phil Lewis" "get_iplayer Manual"',
 		'.SH NAME', 'get_iplayer - Stream Recording tool and PVR for BBC iPlayer',
@@ -2397,7 +2401,9 @@ sub usage {
 		'Use --type=radio for radio programmes. Each available programme has an alphanumeric identifier (\fBPID\fR).',
 		'.PP',
 		'In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes on a schedule.',
-		'.SH "OPTIONS"' if $manpage;
+		'.SH "OPTIONS"',
+		'.PP',
+		@negate if $manpage;
 	push @usage, 'Usage ( Also see https://github.com/get-iplayer/get_iplayer/wiki/documentation ):';
 	push @usage, ' List All Programmes:            get_iplayer [--type=<TYPE>] ".*"';
 	push @usage, ' Search Programmes:              get_iplayer [--type=<TYPE>] <REGEX>';
@@ -2429,6 +2435,7 @@ sub usage {
 		$name_desc{$name} = $desc;
 	}
 
+	push @dump, "    ".join(" ", @negate);
 	# Build the help usage text
 	# Each section
 	for my $section ( 'Search', 'Display', 'Recording', 'Download', 'Output', 'PVR', 'Config', 'External Program', 'Tagging', 'Misc', 'Deprecated' ) {
