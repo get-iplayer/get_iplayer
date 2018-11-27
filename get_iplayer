@@ -847,9 +847,10 @@ sub find_pid_matches {
 	my %ep_types;
 	my ( $type, $prog, $index_prog ) = init_search();
 	my $now = time();
+	my $only_load_from_cache = 1 unless $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
 	# load caches from file only
 	for my $t ( progclass() ) {
-		get_links( $prog, $index_prog, $t, 1, $now );
+		get_links( $prog, $index_prog, $t, $only_load_from_cache, $now );
 	}
 	for my $opt_pid ( @opt_pids ) {
 		my $opt_type = "tv";
