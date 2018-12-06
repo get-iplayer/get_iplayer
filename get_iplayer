@@ -105,7 +105,7 @@ my $opt_format = {
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	streamhttp		=> [ 1, "streamhttp|stream-http!", 'Ignored', '--stream-http', "Use HTTP (instead of HTTPS) media stream playlist URLs."],
 	subsrequired	=> [ 1, "subsrequired|subtitlesrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
-	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (will show programme type)"],
+	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (only shows search results with --pvr)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
 
 	# Search
@@ -694,7 +694,7 @@ if ( defined($opt->{trimhistory}) ) {
 } elsif ( $opt->{pid} ) {
 	my $hist = History->new();
 	my @pids = split( /,/, $opt->{pid} );
-	$retcode += download_pid_matches( $hist, find_pid_matches( $hist, @pids ) );
+	$retcode = download_pid_matches( $hist, find_pid_matches( $hist, @pids ) );
 	purge_warning( $hist, 30 );
 
 # Show history
@@ -910,13 +910,13 @@ sub download_pid_matches {
 	my $failcount = 0;
 	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
-	} else {
+	} elsif ( ! ( ( $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
 		for my $this (@match_list) {
 			print_divider;
 			if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
 				logger "WARNING: Future programme may not yet be available ($this->{pid}): '$this->{index}: $this->{name} - $this->{episode} - $this->{available}'\n";
 			}
-			$failcount = $this->download_retry_loop( $hist );
+			$failcount += $this->download_retry_loop( $hist );
 		}
 	}
 	return $failcount;
@@ -1081,7 +1081,7 @@ sub download_matches {
 	my $failcount = 0;
 	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
-	} elsif ( $opt->{get} ) {
+	} elsif ( $opt->{get} && ! ( ( $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
 		for my $this (@match_list) {
 			print_divider;
 			$failcount += $this->download_retry_loop( $hist );
@@ -8482,18 +8482,18 @@ sub run {
 		# Switch on --hide option
 		$opt->{hide} = 1;
 		# Switch off --future option (no point in checking future programmes)
-		$opt->{future} = '';
+		$opt->{future} = 0;
 		# Don't allow --refresh with --pvr
-		$opt->{refresh} = '';
+		$opt->{refresh} = 0;
 		# Don't allow --info with --pvr
-		$opt->{info} = '';
+		$opt->{info} = 0;
 		# Do the recording (force --get option)
-		$opt->{get} = 1 if ! $opt->{test};
+		$opt->{get} = 1;
 
 		my $failcount = 0;
 		if ( $pvr->{$name}->{pid} ) {
 			my @pids = split( /,/, $pvr->{$name}->{pid} );
-			$failcount += main::download_pid_matches( $hist, main::find_pid_matches( $hist, @pids ) );
+			$failcount = main::download_pid_matches( $hist, main::find_pid_matches( $hist, @pids ) );
 		# Just make recordings of matching progs
 		} else {
 			$failcount = main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
