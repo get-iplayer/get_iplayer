@@ -105,7 +105,7 @@ my $opt_format = {
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	streamhttp		=> [ 1, "streamhttp|stream-http!", 'Ignored', '--stream-http', "Use HTTP (instead of HTTPS) media stream playlist URLs."],
 	subsrequired	=> [ 1, "subsrequired|subtitlesrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
-	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (only shows search results with --pvr)"],
+	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (only shows search results with --pvr and --pid-recursive)"],
 	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
 
 	# Search
@@ -910,7 +910,7 @@ sub download_pid_matches {
 	my $failcount = 0;
 	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
-	} elsif ( ! ( ( $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
+	} elsif ( ! ( ( $opt->{pidrecursive} || $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
 		for my $this (@match_list) {
 			print_divider;
 			if ( $this->{available} && (! $opt->{future}) && Programme::get_time_string( $this->{available} ) > time() ) {
