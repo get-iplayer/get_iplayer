@@ -412,9 +412,8 @@ logger "DEBUG: User preset options file: $optfile_preset\n" if defined $optfile_
 # Parse options if we're not saving/adding/deleting options (system-wide options are overridden by personal options)
 if ( ! ( $opt_pre->{prefsadd} || $opt_pre->{prefsdel} || $opt_pre->{prefsclear} ) ) {
 	# Load options from files into $opt_file
-	# system, Default, './.get_iplayer/options' and Preset options in that order should they exist
-	my $optfile_local = File::Spec->catfile('.', '.get_iplayer', 'options');
-	$opt_file->load( $opt, $optfile_system, $optfile_default, $optfile_local, $optfile_preset );
+	# system, default and preset options in that order should they exist
+	$opt_file->load( $opt, $optfile_system, $optfile_default, $optfile_preset );
 	# Copy these loaded options into $opt
 	$opt->copy_set_options_from( $opt_file );
 }
