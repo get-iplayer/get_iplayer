@@ -1,11 +1,11 @@
-.TH GET_IPLAYER "1" "August 2018" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "December 2018" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
 \fBget_iplayer\fR [<options>] [<regex|index> ...]
 .PP
 \fBget_iplayer\fR \fB\-\-get\fR [<options>] <regex|index> ...
-.br
+.PP
 \fBget_iplayer\fR <url> [\fB\-\-type\fR=<type> <options>]
 .PP
 \fBget_iplayer\fR <pid> [\fB\-\-type\fR=<type> <options>]
@@ -17,12 +17,18 @@ get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 \fBget_iplayer\fR has two modes: recording a complete programme for later playback, and as a Personal Video Recorder (PVR), subscribing to
 search terms and recording programmes automatically.
 .PP
-If given no arguments, \fBget_iplayer\fR updates and displays the list of currently available TV programmes.
-Use \-\-type=radio for radio programmes Each available programme has an alphanumeric identifier (\fBPID\fR).
+If given the regex ".*" (incl. quotes), \fBget_iplayer\fR updates and displays the list of currently available TV programmes.
+Use \-\-type=radio for radio programmes. Each available programme has an alphanumeric identifier (\fBPID\fR).
 .PP
 In PVR mode, \fBget_iplayer\fR can be called from cron to record programmes on a schedule.
 .SH "OPTIONS"
+.PP
+Boolean options can be negated by adding a "no\-" prefix, e.g., \-\-no\-subtitles or \-\-no\-whitespace.
+This applies even if the base option name already begins with "no\-", e.g., \-\-no\-no\-tag or \-\-no\-no\-artwork
 .SS "Search Options:"
+.TP
+\fB\-\-available\-before <hours>
+Limit search to programmes that became available before <hours> hours ago
 .TP
 \fB\-\-available\-since <hours>
 Limit search to programmes that have become available in the last <hours> hours
@@ -174,13 +180,13 @@ Ignore programme history (unsets \-\-hide option also).
 Use only 25fps streams for TV programmes (HD video not available).
 .TP
 \fB\-\-get, \-g
-Start recording matching programmes.  Search terms required unless \-\-pid specified.  Use  \-\-search=.* to force download of all available programmes.
+Start recording matching programmes. Search terms required.
 .TP
 \fB\-\-hash
 Show recording progress as hashes
 .TP
-\fB\-\-hls\-hq\-audio
-Attempt to download higher\-quality audio for 'hlshd' mode (TV only). Output file may require editing to sync audio and video.
+\fB\-\-hls\-lq\-audio
+Use default lower\-quality audio for 'hvf' modes (TV only). Instead of 320k audio, output file will contain 128k or 96k audio, depending on the stream downloaded.
 .TP
 \fB\-\-include\-supplier <supplier>,<supplier>,...
 Comma\-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi
@@ -193,9 +199,6 @@ Mark programmes in search results or specified with \-\-pid/\-\-url as downloade
 .TP
 \fB\-\-modes <mode>,<mode>,...
 Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type).
-.TP
-\fB\-\-no\-dash\-remux
-Do not perform additional remux to ensure DASH downloads are compatible with iTunes, Windows Media Player, and some others.
 .TP
 \fB\-\-no\-proxy
 Ignore \-\-proxy setting in preferences and/or http_proxy environment variable.
@@ -225,7 +228,7 @@ If value of \-\-pid is a series or brand PID, list available episodes but do not
 Web proxy URL, e.g., http://username:password@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless \-\-proxy is specified. Used for both HTTP and HTTPS. Overridden by \-\-no\-proxy.
 .TP
 \fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlastd,hlalow. Shortcuts: best,better,good,worst,haf,daf,hls,dash,high,std,med,low (default=hafhigh,dafhigh,hafstd,hlastd,dafstd,hafmed,dafmed,haflow,hlalow,daflow).
+Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlahigh,hlastd,hlsmed,hlalow. Shortcuts: best,better,good,worst,haf,hla,daf,hls,dash,high,std,med,low (default=hafhigh,hlahigh,dafhigh,hafstd,hlastd,dafstd,hafmed,hlamed,dafmed,haflow,hlalow,daflow).
 .TP
 \fB\-\-start <secs|hh:mm:ss>
 Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
@@ -233,14 +236,11 @@ Recording/streaming start offset (actual start may be several seconds earlier fo
 \fB\-\-stop <secs|hh:mm:ss>
 Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)
 .TP
-\fB\-\-stream\-http
-Use HTTP (instead of HTTPS) media stream playlist URLs.
-.TP
 \fB\-\-subtitles\-required
 Do not download TV programme if subtitles are not available.
 .TP
 \fB\-\-test, \-t
-Test only \- no recording (will show programme type)
+Test only \- no recording (only shows search results with \-\-pvr and \-\-pid\-recursive)
 .TP
 \fB\-\-tvmode <mode>,<mode>,...
 TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: best,better,good,worst,dvf,hvf,dash,hls,hd,sd,high,low. 50fps streams (if available) preferred unless \-\-fps25 specified (default=hvfhd,dvfhd,hvfsd,dvfsd,hvfxsd,dvfxsd,hvfhigh,dvfhigh,hvfxhigh,dvfxhigh,hvflow,dvflow).
@@ -556,7 +556,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.17, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.18, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
