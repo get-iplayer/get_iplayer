@@ -117,7 +117,8 @@ my $opt_format = {
 	exclude		=> [ 0, "exclude=s", 'Search', '--exclude <string>', "Narrow search to exclude matched programme names (comma-separated regex list).  Defaults to substring match."],
 	excludecategory	=> [ 0, "xcat|exclude-category=s", 'Search', '--exclude-category <string>', "Narrow search to exclude matched categories (comma-separated regex list).  Defaults to substring match.  Only works with --history."],
 	excludechannel	=> [ 0, "xchan|exclude-channel=s", 'Search', '--exclude-channel <string>', "Narrow search to exclude matched channel(s) (comma-separated regex list).  Defaults to substring match."],
-	expiresbefore		=> [ 1, "expiresbefore|expires-before=n", 'Search', '--expires-before <hours>', "Limit search to programmes that will expire in the next <hours> hours"],
+	expiresafter		=> [ 1, "expiresafter|expires-after=n", 'Search', '--expires-after <hours>', "Limit search to programmes that will expire after <hours> hours from now"],
+	expiresbefore		=> [ 1, "expiresbefore|expires-before=n", 'Search', '--expires-before <hours>', "Limit search to programmes that will expire before <hours> hours from now"],
 	fields		=> [ 0, "fields=s", 'Search', '--fields <field1>,<field2>,...', "Searches only in the specified fields. The fields are concatenated with spaces in the order specified and the search term is applied to the resulting string."],
 	future		=> [ 1, "future!", 'Search', '--future', "Additionally search future programme schedule if it has been indexed (refresh cache with: --refresh --refresh-future)."],
 	long		=> [ 0, "long|l!", 'Search', '--long, -l', "Additionally search in programme descriptions and episode names (same as --fields=name,episode,desc )"],
@@ -1307,12 +1308,13 @@ sub get_regex_matches {
 	} else {
 		$exclude_regex = '^ROGUE$';
 	}
-	my $since = $opt->{since} || 999999;
-	my $before = $opt->{before} || -999999;
 	my $now = time();
-	my $available_since = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablesince} * 3600))) if $opt->{availablesince};
-	my $available_before = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablebefore} * 3600))) if $opt->{availablebefore};
-	my $expires_before = $now + ($opt->{expiresbefore} * 3600) if $opt->{expiresbefore};
+	my $since = $now - ($opt->{since} * 3600) if defined $opt->{since};
+	my $before = $now - ($opt->{before} * 3600) if defined $opt->{before};
+	my $available_since = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablesince} * 3600))) if defined $opt->{availablesince};
+	my $available_before = strftime('%Y-%m-%dT%H:%M:%S', gmtime($now - ($opt->{availablebefore} * 3600))) if defined $opt->{availablebefore};
+	my $expires_after = $now + ($opt->{expiresafter} * 3600) if defined $opt->{expiresafter};
+	my $expires_before = $now + ($opt->{expiresbefore} * 3600) if defined $opt->{expiresbefore};
 
 	if ( $opt->{verbose} ) {
 		main::logger "DEBUG: Search download_regex = $download_regex\n";
@@ -1325,6 +1327,7 @@ sub get_regex_matches {
 		main::logger "DEBUG: Search before = $before\n";
 		main::logger "DEBUG: Search available_since = $available_since\n";
 		main::logger "DEBUG: Search available_before = $available_before\n";
+		main::logger "DEBUG: Search expires_after = $expires_after\n";
 		main::logger "DEBUG: Search expires_before = $expires_before\n";
 		main::logger "\n";
 	}
@@ -1349,11 +1352,12 @@ sub get_regex_matches {
 			&& $this->{categories} =~ /$category_regex/i
 			&& $this->{channel} !~ /$channel_exclude_regex/i
 			&& $this->{categories} !~ /$category_exclude_regex/i
-			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} >= $now - ($since * 3600) )
-			&& ( ( not defined $this->{timeadded} ) || $this->{timeadded} < $now - ($before * 3600) )
-			&& ( ( not $available_since ) || ( not $this->{available} ) || $this->{available} ge $available_since )
-			&& ( ( not $available_before ) || ( not $this->{available} ) || $this->{available} lt $available_before )
-			&& ( ( not $expires_before ) || ( not $this->{expires} ) || $this->{expires} <= $expires_before )
+			&& ( ( not defined $since ) || ( not $this->{timeadded} ) || $this->{timeadded} >= $since )
+			&& ( ( not defined $before ) || ( not $this->{timeadded} ) || $this->{timeadded} < $before )
+			&& ( ( not defined $available_since ) || ( not $this->{available} ) || $this->{available} ge $available_since )
+			&& ( ( not defined $available_before ) || ( not $this->{available} ) || $this->{available} lt $available_before )
+			&& ( ( not defined $expires_after ) || ( not $this->{expires} ) || $this->{expires} >= $expires_after )
+			&& ( ( not defined $expires_before ) || ( not $this->{expires} ) || $this->{expires} < $expires_before )
 		) {
 			# Add included matches
 			my @compund_fields;
