@@ -488,8 +488,8 @@ for ( progclass() ) {
 $SIG{INT} = $SIG{PIPE} = \&cleanup;
 
 # Other Non option-dependent vars
-my $historyfile		= "${profile_dir}/download_history";
-my $cookiejar		= "${profile_dir}/cookies.";
+my $historyfile		= encode_fs(File::Spec->catfile($profile_dir, "download_history"));
+my $cookiejar		= encode_fs(File::Spec->catfile($profile_dir, "cookies."));
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
 my $proxy_save;
@@ -567,8 +567,7 @@ if ( $opt->{pid} ) {
 }
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
-my $lockfile;
-$lockfile = $profile_dir.'/pvr_lock' if $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler};
+my $lockfile = encode_fs(File::Spec->catfile($profile_dir, 'pvr_lock'));
 
 # Delete cookies each session
 unlink($cookiejar.'desktop');
@@ -579,7 +578,7 @@ unlink($cookiejar.'coremedia');
 # $pvr->{searchname}->{<option>} = <value>;
 my $pvr = Pvr->new();
 # Set some class-wide values
-$pvr->setvar('pvr_dir', "${profile_dir}/pvr/" );
+$pvr->setvar('pvr_dir', File::Spec->catfile($profile_dir, "pvr"));
 
 my $retcode = 0;
 # Trim history
@@ -816,7 +815,7 @@ sub init_search {
 	# Display the ages of the selected caches in seconds
 	if ( $opt->{showcacheage} ) {
 		for ( keys %{ $type } ) {
-			my $cachefile = "${profile_dir}/${_}.cache";
+			my $cachefile = File::Spec->catfile($profile_dir, "${_}.cache");;
 			main::logger "INFO: $_ cache age: ".( time() - stat($cachefile)->mtime )." secs\n" if -f $cachefile;
 		}
 		exit 0;
@@ -1509,7 +1508,7 @@ sub get_links {
 	# Define cache file format (this is overridden by the header line of the cache file)
 	my @cache_format = qw/index type name episode seriesnum episodenum pid channel available expires duration desc web thumbnail timeadded/;
 
-	my $cachefile = "${profile_dir}/${prog_type}.cache";
+	my $cachefile = File::Spec->catfile($profile_dir, "${prog_type}.cache");
 
 	# Read cache into $pid_old and $index_prog_old hashes if cache exists
 	my $prog_old = {};
@@ -1852,7 +1851,8 @@ sub exists_in_path {
 	return 1 if $bin =~ /[\/\\]/ && (-x ${bin} || -x "${bin}.exe");
 	# Search PATH
 	for (@PATH) {
-		return 1 if -x "${_}/${bin}" || -x "${_}/${bin}.exe";
+		my $bin_path = File::Spec->catfile($_, $bin);
+		return 1 if -x $bin_path || -x "${bin_path}.exe";
 	}
 	return 0;
 }
@@ -2539,7 +2539,8 @@ sub preset_list {
 	my $opt = shift;
 	my $dir = shift;
 	main::logger "INFO: Valid presets: ";
-	if ( opendir( DIR, "${profile_dir}/presets/" ) ) {
+	my $presets_dir = File::Spec->catfile($profile_dir, "presets");
+	if ( opendir( DIR, $presets_dir ) ) {
 		my @preset_list = grep !/(^\.|~$)/, readdir DIR;
 		closedir DIR;
 		main::logger join ',', @preset_list;
@@ -6549,7 +6550,7 @@ sub get_links_schedule {
 				if ( $mra ) {
 					$limit = $mra;
 				} else {
-					my $cache_file = "${profile_dir}/${prog_type}.cache";
+					my $cache_file = File::Spec->catfile($profile_dir, "${prog_type}.cache");
 					my $cache_time;
 					if ( -f $cache_file ) {
 						$cache_time = stat($cache_file)->mtime;
@@ -8611,9 +8612,10 @@ sub del {
 		main::logger "ERROR: Invalid PVR search name '$name'\n";
 		return 1;
 	}
+	my $pvr_file = File::Spec->catfile($vars{pvr_dir}, $name);
 	# Delete pvr search file
-	if ( -f $vars{pvr_dir}.$name ) {
-		unlink $vars{pvr_dir}.$name;
+	if ( -f $pvr_file ) {
+		unlink $pvr_file;
 		main::logger "INFO: Deleted PVR search '$name'\n";
 	} else {
 		main::logger "ERROR: PVR search '$name' does not exist\n";
@@ -8666,7 +8668,7 @@ sub load_list {
 	for my $file (@files) {
 		chomp($file);
 		# Re-add the dir
-		$file = "$vars{pvr_dir}/$file";
+		$file = File::Spec->catfile($vars{pvr_dir}, $file);
 		next if ! -f $file;
 		if ( ! open (PVR, "< $file") ) {
 			main::logger "WARNING: Cannot read PVR search file $file\n";
@@ -8707,8 +8709,9 @@ sub save {
 	mkpath $vars{pvr_dir} if ! -d $vars{pvr_dir};
 	main::logger "INFO: Saving PVR search '$name':\n";
 	# Open file
-	if ( ! open (PVR, "> $vars{pvr_dir}/${name}") ) {
-		main::logger "ERROR: Cannot save PVR search to $vars{pvr_dir}.$name\n";
+	my $pvr_file = File::Spec->catfile($vars{pvr_dir}, $name);
+	if ( ! open (PVR, "> $pvr_file") ) {
+		main::logger "ERROR: Cannot save PVR search to $pvr_file\n";
 		return 1;
 	}
 	# Write options array to file
