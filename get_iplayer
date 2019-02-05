@@ -4046,49 +4046,61 @@ sub generate_filenames {
 		&& ( ! $opt->{subsonly} )
 		&& ( ! $opt->{tagonly} )
 	) {
-		if ( $opt->{raw} && $mode ) {
+		my @check_olds = ( 0 );
+		my $file_prefix_format = $opt->{fileprefix} || $format;
+		if ( $file_prefix_format =~ /<episode>/ && $prog->{episode} =~ /^0\d[a-z]?\.\s/ ) {
+			push @check_olds, 1
+		}
+		my $skip;
+		for my $check_old ( @check_olds ) {
 			my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
+			my $prog_file = $prog->{filename};
 			my $media_raw = $prog->{filename};
 			my $audio_raw = $prog->{rawaudio};
 			my $video_raw = $prog->{rawvideo};
-			if ( $opt->{overwrite} ) {
-				# DASH tv output files with --raw
-				if ( $mode =~ /dvf/ ) {
-					unlink ( $audio_raw, $video_raw ) unless $opt->{test};
+			if ( $check_old ) {
+				my $ep_new = StringUtils::sanitize_path( $prog->{episode} );
+				my $ep_old = substr($ep_new, 1);
+				$prog_file =~ s/$ep_new/$ep_old/g;
+				$media_raw =~ s/$ep_new/$ep_old/g;
+				$audio_raw =~ s/$ep_new/$ep_old/g;
+				$video_raw =~ s/$ep_new/$ep_old/g;
+			}
+			if ( $opt->{raw} && $mode ) {
+				if ( $opt->{overwrite} ) {
+					if ( $mode =~ /dvf/ ) {
+						unlink ( $audio_raw, $video_raw ) unless $opt->{test};
+					} else {
+						unlink ( $media_raw ) unless $opt->{test};
+					}
 				} else {
-					unlink ( $media_raw ) unless $opt->{test};
+					if ( $mode =~ /dvf/ ) {
+						if ( -f $audio_raw ) {
+							main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
+							$skip = 1;
+						}
+						if ( -f $video_raw ) {
+							main::logger "WARNING: Raw video file already exists: $video_raw\n";
+							$skip = 1;
+						}
+					} elsif ( -f $media_raw ) {
+						main::logger "WARNING: Raw $media_type file already exists: $media_raw\n";
+						$skip = 1;
+					}
 				}
-			} else {
-				my $skip;
-				# DASH tv output files with --raw
-				if ( $mode =~ /dvf/ ) {
-					if ( -f $audio_raw ) {
-						main::logger "WARNING: Raw audio file already exists: $audio_raw\n";
-						$skip = 1;
-					}
-					if ( -f $video_raw ) {
-						main::logger "WARNING: Raw video file already exists: $video_raw\n";
-						$skip = 1;
-					}
-				} elsif ( -f $media_raw ) {
-					main::logger "WARNING: Raw $media_type file already exists: $media_raw\n";
+			} elsif ( -f $prog_file && stat($prog_file)->size > $min_download_size ) {
+				if ( $opt->{overwrite} ) {
+					unlink $prog_file unless $opt->{test};
+				} else {
+					main::logger("WARNING: File already exists: $prog_file\n");
 					$skip = 1;
 				}
-				if ( $skip ) {
-					main::logger "WARNING: Use --overwrite to replace\n";
-					return 3;
-				}
-			}
-		} elsif ( -f $prog->{filename} && stat($prog->{filename})->size > $min_download_size ) {
-			if ( $opt->{overwrite} ) {
-				unlink $prog->{filename} unless $opt->{test};
-			} else {
-				main::logger("WARNING: File already exists: $prog->{filename}\n");
-				main::logger "WARNING: Use --overwrite to replace\n";
-				return 3;
 			}
 		}
-
+		if ( $skip ) {
+			main::logger "WARNING: Use --overwrite to replace\n";
+			return 3;
+		}
 	}
 
 	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
