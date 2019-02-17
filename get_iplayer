@@ -5124,16 +5124,16 @@ sub fetch_episodes_recursive {
 	my %seen;
 	my $max_page = 1;
 	my $curr_page = 1;
+	my $last_page;
 	my $title;
 	my $channel;
+	my $check_series_nav;
+	my $has_series_nav;
 	{ do {
 		my $url = "https://www.bbc.co.uk/programmes/$parent_pid/episodes/player?page=$curr_page";
 		my $html = main::request_url_retry($ua, $url, 3, '', '');
 		last unless $html;
 		my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-		my $last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/a');
-		$last_page =~ s/(^\s+|\s+$)//g;
-		$max_page = $last_page if $last_page > $max_page;
 		unless ( $channel ) {
 			$channel = $dom->findvalue('//a[contains(@class,"br-masthead__masterbrand")]');
 		}
@@ -5166,59 +5166,79 @@ sub fetch_episodes_recursive {
 				push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $channel, desc => $prog_desc );
 			}
 		}
+		unless ( $last_page ) {
+			$last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/a');
+		}
+		last unless $last_page;
+		$last_page =~ s/(^\s+|\s+$)//g;
+		$max_page = $last_page if $last_page > $max_page;
 		$curr_page++;
 	} while ( $curr_page <= $max_page ) };
 	unless ( $eps && @$eps ) {
 		main::logger "INFO: No episodes found, checking alternate location...\n" if $opt->{verbose};
 		%seen = undef;
-		$max_page = 1;
-		$curr_page = 1;
 		$title = undef;
 		$channel = undef;
-		{ do {
-			my $url = "https://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
-			my $html = main::request_url_retry($ua, $url, 3, '', '');
-			last unless $html;
-			my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-			my $last_page = $dom->findvalue('//div[contains(@class,"list__pagination")]//ol[contains(@class,"pagination__list")]/li[contains(@class,"pagination__number")][last()]//a/span/span[1]');
-			$last_page =~ s/(^\s+|\s+$)//g;
-			$max_page = $last_page if $last_page > $max_page;
-			unless ( $channel ) {
-				$channel = $dom->findvalue('//div[contains(@class,"episodes-available")]/img/@alt');
-			}
-			unless ( $title ) {
-				$title = $dom->findvalue('//h1[contains(@class,"hero-header__title")]');
+		my @urls = ( "https://www.bbc.co.uk/iplayer/episodes/$parent_pid" );
+		for my $url ( @urls ) {
+			$curr_page = 1;
+			$max_page = 1;
+			$last_page = undef;
+			{ do {
+				my $html = main::request_url_retry($ua, $url, 3, '', '');
+				last unless $html;
+				my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
+				if ( ! $check_series_nav ) {
+					my @hrefs = $dom->findnodes('//nav[contains(@class,"series-nav")]/ul/li/a/@href');
+					push @urls, "https://www.bbc.co.uk".$_->findvalue('.') for @hrefs;
+					$has_series_nav = @hrefs;
+					$check_series_nav = 1;
+				}
+				unless ( $channel ) {
+					$channel = $dom->findvalue('//div[contains(@class,"episodes-available")]/img/@alt');
+				}
 				unless ( $title ) {
-					$title = $dom->findvalue('//title');
-				}
-				$title =~ s/(^\s+|\s+$)//g;
-				$title =~ s/[-\s]+(Available now|Ar gael nawr)//gi;
-				$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
-				$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
-			}
-			my @episodes = $dom->findnodes('//div[contains(@class,"list__grid")]/ul/li');
-			if ( @episodes ){
-				for my $episode ( @episodes ) {
-					my $item = $episode->findvalue('.//div[contains(@class,"content-item")]/a/@href');
-					my $pid = $1 if $item =~ m{/episode/([a-z0-9]+)};
-					next unless $pid;
-					next if $seen{$pid};
-					$seen{$pid} = 1;
-					my $prog_episode = $episode->findvalue('.//div[contains(@class,"content-item__title")]');
-					my $name2 = $episode->findvalue('.//div[contains(@class,"content-item__title")]/span[1]');
-					my $prog_name = $name2 ? "$title: $name2" : $title;
-					my $prog_desc = $episode->findvalue('.//div[contains(@class,"content-item__info__secondary")]/div[contains(@class,"content-item__description")]');
-					unless ( $name2 ) {
-						if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
-							$prog_name .= ": $1";
-						}
+					$title = $dom->findvalue('//h1[contains(@class,"hero-header__title")]');
+					unless ( $title ) {
+						$title = $dom->findvalue('//title');
 					}
-					push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $channel, desc => $prog_desc );
+					$title =~ s/(^\s+|\s+$)//g;
+					$title =~ s/[-\s]+(Available now|Ar gael nawr)//gi;
+					$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
+					$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
 				}
-			}
-			$curr_page++;
-		} while ( $curr_page <= $max_page ) };
+				my @episodes = $dom->findnodes('//div[contains(@class,"list__grid")]/ul/li');
+				if ( @episodes ){
+					for my $episode ( @episodes ) {
+						my $item = $episode->findvalue('.//div[contains(@class,"content-item")]/a/@href');
+						my $pid = $1 if $item =~ m{/episode/([a-z0-9]+)};
+						next unless $pid;
+						next if $seen{$pid};
+						$seen{$pid} = 1;
+						my $prog_episode = $episode->findvalue('.//div[contains(@class,"content-item__title")]');
+						my $name2 = $episode->findvalue('.//div[contains(@class,"content-item__title")]/span[1]');
+						my $prog_name = $name2 ? "$title: $name2" : $title;
+						my $prog_desc = $episode->findvalue('.//div[contains(@class,"content-item__info__secondary")]/div[contains(@class,"content-item__description")]');
+						unless ( $name2 ) {
+							if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
+								$prog_name .= ": $1";
+							}
+						}
+						push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $prog_name, episode => $prog_episode, channel => $channel, desc => $prog_desc );
+					}
+				}
+				unless ( $last_page ) {
+					$last_page = $dom->findvalue('//div[contains(@class,"list__pagination")]//ol[contains(@class,"pagination__list")]/li[contains(@class,"pagination__number")][last()]//a/span/span[1]');
+				}
+				last unless $last_page;
+				$last_page =~ s/(^\s+|\s+$)//g;
+				$max_page = $last_page if $last_page > $max_page;
+				$curr_page++;
+				$url = "https://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
+			} while ( $curr_page <= $max_page ) };
+		}
 	}
+	@$eps = reverse @$eps unless $has_series_nav;
 	return $eps;
 }
 
