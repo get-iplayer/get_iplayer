@@ -8535,8 +8535,8 @@ sub run {
 			$failcount = main::download_matches( $hist, main::find_matches( $hist, @search_args ) );
 		}
 		# If this is a one-off queue entry then delete the PVR entry upon successful recording(s)
-		if ( $name =~ /^ONCE_/ ) {
-			$pvr->del( $name ) if not $failcount;
+		if ( $name =~ /^ONCE_/ && ! $failcount && ! $opt->{test} ) {
+			$pvr->del( $name );
 		}
 		if ( $failcount ) {
 			main::logger "WARNING: PVR Run: '$name': $failcount download failure(s)\n";
