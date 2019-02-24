@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "December 2018" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "February 2019" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -51,8 +51,11 @@ Narrow search to exclude matched categories (comma\-separated regex list).  Defa
 \fB\-\-exclude\-channel <string>
 Narrow search to exclude matched channel(s) (comma\-separated regex list).  Defaults to substring match.
 .TP
+\fB\-\-expires\-after <hours>
+Limit search to programmes that will expire after <hours> hours from now
+.TP
 \fB\-\-expires\-before <hours>
-Limit search to programmes that will expire in the next <hours> hours
+Limit search to programmes that will expire before <hours> hours from now
 .TP
 \fB\-\-fields <field1>,<field2>,...
 Searches only in the specified fields. The fields are concatenated with spaces in the order specified and the search term is applied to the resulting string.
@@ -200,6 +203,9 @@ Mark programmes in search results or specified with \-\-pid/\-\-url as downloade
 \fB\-\-modes <mode>,<mode>,...
 Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type).
 .TP
+\fB\-\-no\-merge\-versions
+Do not merge programme versions with same name and duration.
+.TP
 \fB\-\-no\-proxy
 Ignore \-\-proxy setting in preferences and/or http_proxy environment variable.
 .TP
@@ -217,6 +223,9 @@ Only uses web proxy where absolutely required (try this extra option if your pro
 .TP
 \fB\-\-pid <pid>,<pid>,...
 Record arbitrary PIDs that do not necessarily appear in the index.
+.TP
+\fB\-\-pid\-index
+Update (if necessary) and use programme index cache with \-\-pid. Cache is not searched for programme by default with \-\-pid. Synonym: \-\-pid\-refresh.
 .TP
 \fB\-\-pid\-recursive
 Record all related episodes if value of \-\-pid is a series or brand PID.  Requires \-\-pid.
@@ -304,16 +313,16 @@ Save recorded files into subdirectory of output directory.  Default: same name a
 The format to be used for subdirectory naming.  Use substitution parameters in format string (see docs for list).
 .TP
 \fB\-\-suboffset <offset>
-Offset the subtitle timestamps by the specified number of milliseconds
+Offset the subtitle timestamps by the specified number of milliseconds.  Requires \-\-subtitles.
 .TP
 \fB\-\-subs\-embed
-Embed soft subtitles in MP4 output file. Ignored with \-\-audio\-only and \-\-ffmpeg\-obsolete.
+Embed soft subtitles in MP4 output file. Ignored with \-\-audio\-only and \-\-ffmpeg\-obsolete. Requires \-\-subtitles.
 .TP
 \fB\-\-subs\-mono
-Create monochrome titles, with leading hyphen used to denote change of speaker.
+Create monochrome titles, with leading hyphen used to denote change of speaker. Requires \-\-subtitles.
 .TP
 \fB\-\-subs\-raw
-Additionally save the raw subtitles file
+Additionally save the raw subtitles file.  Requires \-\-subtitles.
 .TP
 \fB\-\-subtitles
 Download subtitles into srt/SubRip format if available and supported
@@ -556,7 +565,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.18, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.19, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
