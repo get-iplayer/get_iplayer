@@ -8699,10 +8699,10 @@ sub load_list {
 	# Close the directory
 	closedir DIR;
 	# process each file
-	for my $file (@files) {
-		chomp($file);
+	for my $name (@files) {
+		chomp($name);
 		# Re-add the dir
-		$file = File::Spec->catfile($vars{pvr_dir}, $file);
+		my $file = File::Spec->catfile($vars{pvr_dir}, $name);
 		next if ! -f $file;
 		if ( ! open (PVR, "< $file") ) {
 			main::logger "WARNING: Cannot read PVR search file $file\n";
@@ -8710,9 +8710,6 @@ sub load_list {
 		}
 		my @options = <PVR>;
 		close PVR;
-		# Get search name from filename
-		my $name = $file;
-		$name =~ s/^.*\/([^\/]+?)$/$1/g;
 		for (@options) {
 			/^\s*([\w\-_]+?)\s+(.*)\s*$/;
 			main::logger "DEBUG: PVR search '$name': option $1 = $2\n" if $opt->{debug};
