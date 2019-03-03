@@ -5878,68 +5878,72 @@ sub get_stream_data {
 			push @mediasets, "apple-iphone4-ipad-hls-3g";
 		}
 	}
-	for my $mediaset ( @mediasets ) {
-		my $url = "https://open.live.bbc.co.uk/mediaselector/5/select/version/2.0/mediaset/$mediaset/vpid/$verpid?cb=".( sprintf "%05.0f", 99999*rand(0) );
-		my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, undef, 1 );
-		main::logger "\n$xml\n" if $opt->{debug};
-		$checked_geoblock = 1;
-		next if check_geoblock( $xml );
-		$unblocked = 1;
-		decode_entities($xml);
-		my @ms_medias = parse_metadata( $xml );
-		for my $ms_media ( @ms_medias ) {
-			my $ms_proto = "https";
-			unless ( grep { $_->{protocol} eq $ms_proto } @{$ms_media->{connections}} ) {
-				$ms_proto = "http";
-			}
-			for my $ms_conn ( @{$ms_media->{connections}} ) {
-				next unless $ms_conn->{protocol} eq $ms_proto;
-				next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
-				next if $ms_conn->{supplier} =~ /$exclude_regex/;
-				(my $supplier = $ms_conn->{supplier}) =~ s/_https?$//;
-				my $stream_key = "$ms_media->{service}-$supplier";
-				next if $seen{$stream_key};
-				$seen{$stream_key}++;
-				($stream_key = $ms_conn->{href}) =~ s/\?.*//;
-				next if $seen{$stream_key};
-				$seen{$stream_key}++;
-				if ( $ms_media->{kind} eq "captions" ) {
-					my $media = dclone($ms_media);
-					@{$media->{connections}} = ( $ms_conn );
-					push @medias, $media;
-					next;
+	for my $ms_ver ( 5, 6 ) {
+		for my $mediaset ( @mediasets ) {
+			my $url = "https://open.live.bbc.co.uk/mediaselector/$ms_ver/select/version/2.0/mediaset/$mediaset/vpid/$verpid/format/xml?cb=".( sprintf "%05.0f", 99999*rand(0) );
+			my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, undef, 1 );
+			main::logger "\n$xml\n" if $opt->{debug};
+			$checked_geoblock = 1;
+			next if check_geoblock( $xml );
+			$unblocked = 1;
+			decode_entities($xml);
+			my @ms_medias = parse_metadata( $xml );
+			for my $ms_media ( @ms_medias ) {
+				my $ms_proto = "https";
+				unless ( grep { $_->{protocol} eq $ms_proto } @{$ms_media->{connections}} ) {
+					$ms_proto = "http";
 				}
-				my ( $prefix, $min_bitrate, $max_bitrate, @new_medias );
-				if ( $ms_conn->{transferFormat} eq "dash" ) {
-					$prefix = $prog->{type} eq "tv" ? "dvf" : "daf";
-					@new_medias = parse_dash_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
-				} elsif ( $ms_conn->{transferFormat} eq "hls" ) {
-					if ( $ms_conn->{supplier} =~ /hls_open/ ) {
-						$prefix = $prog->{type} eq "tv" ? "hls" : "hla";
-					} else {
-						$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
-						unless ( $prog->{type} eq "tv" && $opt->{hlslqaudio} ) {
-							# for 320k tv audio or 320k/96k radio
-							$ms_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
-						}
+				for my $ms_conn ( @{$ms_media->{connections}} ) {
+					next unless $ms_conn->{protocol} eq $ms_proto;
+					next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
+					next if $ms_conn->{supplier} =~ /$exclude_regex/;
+					(my $supplier = $ms_conn->{supplier}) =~ s/_https?$//;
+					my $stream_key = "$ms_media->{service}-$supplier";
+					$stream_key =~ s/(\[deprecated\])/$mediaset-$1/;
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					($stream_key = $ms_conn->{href}) =~ s/\?.*//;
+					next if $seen{$stream_key};
+					$seen{$stream_key}++;
+					if ( $ms_media->{kind} eq "captions" ) {
+						my $media = dclone($ms_media);
+						@{$media->{connections}} = ( $ms_conn );
+						push @medias, $media;
+						next;
 					}
-					@new_medias = parse_hls_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
-				}
-				for my $new_media ( @new_medias ) {
-					for my $new_conn ( @{$new_media->{connections}} ) {
-						(my $supplier = $new_conn->{supplier}) =~ s/_https?$//;
-						my $stream_key = "$new_media->{service}-$supplier";
-						next if $seen{$stream_key};
-						$seen{$stream_key}++;
-						($stream_key = $new_conn->{href}) =~ s/\?.*//;
-						next if $seen{$stream_key};
-						$seen{$stream_key}++;
-						push @medias, $new_media;
-						last;
+					my ( $prefix, $min_bitrate, $max_bitrate, @new_medias );
+					if ( $ms_conn->{transferFormat} eq "dash" ) {
+						$prefix = $prog->{type} eq "tv" ? "dvf" : "daf";
+						@new_medias = parse_dash_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+					} elsif ( $ms_conn->{transferFormat} eq "hls" ) {
+						if ( $ms_conn->{supplier} =~ /hls_open/ ) {
+							$prefix = $prog->{type} eq "tv" ? "hls" : "hla";
+						} else {
+							$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
+							unless ( $prog->{type} eq "tv" && $opt->{hlslqaudio} ) {
+								# for 320k tv audio or 320k/96k radio
+								$ms_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
+							}
+						}
+						@new_medias = parse_hls_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+					}
+					for my $new_media ( @new_medias ) {
+						for my $new_conn ( @{$new_media->{connections}} ) {
+							(my $supplier = $new_conn->{supplier}) =~ s/_https?$//;
+							my $stream_key = "$new_media->{service}-$supplier";
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							($stream_key = $new_conn->{href}) =~ s/\?.*//;
+							next if $seen{$stream_key};
+							$seen{$stream_key}++;
+							push @medias, $new_media;
+							last;
+						}
 					}
 				}
 			}
 		}
+		last if @medias;
 	}
 
 	unless ( $unblocked ) {
