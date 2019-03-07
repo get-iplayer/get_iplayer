@@ -3609,9 +3609,9 @@ sub download_retry_loop {
 					main::logger "INFO: Available modes: ".(join ',', sort Programme::cmp_modes keys %available_modes_short)."\n";
 				} else {
 					main::logger "INFO: No other modes are available\n";
-					main::logger "INFO: The programme may no longer be available - check the iPlayer site\n";
-					main::logger "INFO: The programme may only be available in an unsupported format (e.g., Flash) - check the iPlayer site\n";
-					main::logger "INFO: If you use a VPN/VPS/Smart DNS/web proxy, check with the provider to find out if it has been blocked\n";
+					main::logger "INFO: The programme may no longer be available - check the iPlayer or Sounds site\n";
+					main::logger "INFO: The programme may only be available in an unsupported format (e.g., Flash) - check the iPlayer or Sounds site\n";
+					main::logger "INFO: If you use a VPN/VPS/Smart DNS/web proxy, it may have been blocked\n";
 				}
 				next;
 			}
@@ -3733,7 +3733,9 @@ sub mode_ver_download_retry_loop {
 			if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
 				main::logger "WARNING: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping (retry)\n";
 				if ( $prog->{geoblocked} ) {
-					main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK. (retry)\n";
+					main::logger "WARNING: The BBC blocked access to this programme because it determined that you are outside the UK. (retry)\n";
+				} elsif ( $prog->{unavailable} ) {
+					main::logger "WARNING: The BBC lists this programme as unavailable - check the iPlayer or Sounds site (retry)\n";
 				}
 				return 2;
 			}
@@ -5062,11 +5064,13 @@ sub get_metadata {
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		main::logger "WARNING: No media streams found for requested programme versions and recording modes.\n";
 		if ( $prog->{geoblocked} ) {
-			main::logger "WARNING: The BBC has blocked access to this programme because it has determined that you are using get_iplayer outside the UK.\n";
+			main::logger "WARNING: The BBC blocked access to this programme because it determined that you are outside the UK.\n";
+		} elsif ( $prog->{unavailable} ) {
+			main::logger "WARNING: The BBC lists this programme as unavailable - check the iPlayer or Sounds site.\n";
 		} else {
-			main::logger "WARNING: The programme may no longer be available - check the iPlayer site.\n";
-			main::logger "WARNING: The programme may only be available in an unsupported format (e.g., Flash) - check the iPlayer site.\n";
-			main::logger "WARNING: If you use a VPN/VPS/Smart DNS/web proxy, check with the provider to find out if it has been blocked.\n";
+			main::logger "WARNING: The programme may no longer be available - check the iPlayer or Sounds site.\n";
+			main::logger "WARNING: The programme may only be available in an unsupported format (e.g., Flash) - check the iPlayer or Sounds site.\n";
+			main::logger "WARNING: If you use a VPN/VPS/Smart DNS/web proxy, it may have been blocked.\n";
 		}
 		# Return at this stage unless we want metadata/tags only for various reasons
 		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} )
@@ -5840,6 +5844,10 @@ sub check_geoblock {
 	return shift =~ /geolocation|notukerror/;
 }
 
+sub check_unavailable {
+	return shift =~ /selectionunavailable/;
+}
+
 # Generic
 # Gets media streams data for this version pid
 # $media = undef|<modename>
@@ -5866,6 +5874,8 @@ sub get_stream_data {
 	my $ua = main::create_ua( 'desktop' );
 	my $unblocked;
 	my $checked_geoblock;
+	my $isavailable;
+	my $checked_unavailable;
 	my %seen;
 	my @medias;
 	my @mediasets;
@@ -5894,6 +5904,9 @@ sub get_stream_data {
 			$checked_geoblock = 1;
 			next if check_geoblock( $xml );
 			$unblocked = 1;
+			$checked_unavailable = 1;
+			next if check_unavailable( $xml );
+			$isavailable = 1;
 			decode_entities($xml);
 			my @ms_medias = parse_metadata( $xml );
 			for my $ms_media ( @ms_medias ) {
@@ -5956,6 +5969,11 @@ sub get_stream_data {
 
 	unless ( $unblocked ) {
 		$prog->{geoblocked} = 1 if $checked_geoblock;
+		return undef;
+	}
+
+	unless ( $isavailable ) {
+		$prog->{unavailable} = 1 if $checked_unavailable;
 		return undef;
 	}
 
