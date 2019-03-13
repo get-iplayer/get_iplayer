@@ -632,6 +632,7 @@ sub pvr_run {
 	print $fh "<strong><p>The PVR will auto-run every $opt->{AUTOPVRRUN}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOPVRRUN}->{current};
 	if ( IS_WIN32 ) {
 		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOPVRRUN}->{current};
+		print $fh "<strong><p>Windows users: The Web PVR Manager may crash if you leave this window open for a long period of time</p></strong>" if $opt->{AUTOPVRRUN}->{current};
 	}
 	print $se "INFO: Starting PVR Run\n";
 	my @cmd = (
@@ -2535,6 +2536,7 @@ sub refresh {
 	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	if ( IS_WIN32 ) {
 		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
+		print $fh "<strong><p>Windows users: The Web PVR Manager may crash if you leave this window open for a long period of time</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	}
 	print $se "INFO: Refreshing\n";
 	my @cmd = (
