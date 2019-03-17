@@ -4797,6 +4797,7 @@ sub get_metadata {
 				my ($series_position, $subseries_position);
 				$episode = $doc->{title};
 				for my $ancestor ($parent, $grandparent, $greatgrandparent) {
+					$channel ||= $ancestor->{ownership}->{service}->{title};
 					if ( $ancestor->{type} && $ancestor->{title} ) {
 						if ( $ancestor->{type} eq "brand" ) {
 							$brand = $ancestor->{title};
@@ -5086,22 +5087,29 @@ sub fetch_pid_info {
 	my $prog_desc;
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
 	if ( $json ) {
-		my $doc = eval { decode_json($json) };
+		my $dec = eval { decode_json($json) };
 		if ( ! $@ ) {
-			$pid_type = $doc->{programme}->{type};
-			if ( $doc->{programme}->{media_type} eq 'audio' ) {
+			my $doc = $dec->{programme};
+			my $parent = $doc->{parent}->{programme};
+			my $grandparent = $parent->{parent}->{programme};
+			my $greatgrandparent = $grandparent->{parent}->{programme};
+			$pid_type = $doc->{type};
+			if ( $doc->{media_type} eq 'audio' ) {
 				$prog_type = 'radio';
-			} elsif ( $doc->{programme}->{media_type} =~ /video/ )  {
+			} elsif ( $doc->{media_type} =~ /video/ )  {
 				$prog_type = 'tv';
 			} else {
-				$prog_type = $doc->{programme}->{ownership}->{service}->{type};
+				$prog_type = $doc->{ownership}->{service}->{type};
 			}
-			$prog_name = $doc->{programme}->{display_title}->{title};
-			$prog_episode = $doc->{programme}->{display_title}->{subtitle};
-			$prog_channel = $doc->{programme}->{ownership}->{service}->{title};
-			$prog_desc = $doc->{programme}->{short_synopsis};
+			$prog_name = $doc->{display_title}->{title};
+			$prog_episode = $doc->{display_title}->{subtitle};
+			$prog_channel = $doc->{ownership}->{service}->{title};
+			$prog_desc = $doc->{short_synopsis};
 			if ( $prog_episode =~ s/((?:Series|Cyfres) \d+)[, :]+// ) {
 				$prog_name .= ": $1";
+			}
+			for my $ancestor ($parent, $grandparent, $greatgrandparent) {
+				$prog_channel ||= $ancestor->{ownership}->{service}->{title};
 			}
 		} else {
 			main::logger "ERROR: Could not parse JSON PID info: $url\n";
