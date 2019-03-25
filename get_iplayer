@@ -3403,6 +3403,12 @@ sub get_verpids {
 	return 0;
 }
 
+# check existence of subtitle streams
+sub subtitles_available {
+	# return false...
+	return 0;
+}
+
 # Download Subtitles, convert to srt(SubRip) format and apply time offset
 sub download_subtitles {
 	# return failed...
@@ -7153,7 +7159,7 @@ sub download {
 	return 'skip' if $opt->{test};
 
 	# check subtitles if required
-	if ( $opt->{subtitles} && $prog->{type} eq 'tv'&& $opt->{subsrequired} ) {
+	if ( $opt->{subtitles} && $prog->{type} eq 'tv' && $opt->{subsrequired} ) {
 		if ( ! $prog->subtitles_available( [ $version ] ) ) {
 			main::logger "WARNING: Subtitles not available and --subtitles-required specified.\n";
 			return 'skip';
@@ -7576,6 +7582,16 @@ sub get_links {
 sub download {
 	# Delegate to Programme::tv (same function is used)
 	return Programme::tv::download(@_);
+}
+
+sub subtitles_available {
+	# Delegate to Programme::tv (same function is used)
+	return Programme::tv::subtitles_available(@_);
+}
+
+sub download_subtitles {
+	# Delegate to Programme::tv (same function is used)
+	return Programme::tv::download_subtitles(@_);
 }
 
 ################### Streamer class #################
