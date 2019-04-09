@@ -1961,7 +1961,6 @@ sub run_cmd {
 	my $mode = shift;
 	my @cmd = ( @_ );
 	my $rtn;
-	local *DEVNULL;
 
 	my $log_str;
 	my @log_cmd = @cmd;
@@ -1972,28 +1971,7 @@ sub run_cmd {
 	}
 	main::logger "INFO: Command: $log_str\n" if $opt->{verbose};
 
-	# Define what to do with STDOUT and STDERR of the child process
-	my $fh_child_out = ">&STDOUT";
-	my $fh_child_err = ">&STDERR";
-
 	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
-
-	if ( $mode eq 'STDOUT' ) {
-		$fh_child_out = $fh_child_err = ">&STDOUT";
-		#$system_suffix = '2>&1';
-	} elsif ( $mode eq 'STDERR' ) {
-		$fh_child_out = $fh_child_err = ">&STDERR";
-		#$system_suffix = '1>&2';
-	} elsif ( $mode =~ /^QUIET/ ) {
-		open(DEVNULL, ">", File::Spec->devnull()) || die "ERROR: Cannot open null device\n";
-		if ( $mode eq 'QUIET_STDOUT' ) {
-			$fh_child_out = ">&DEVNULL";
-		} elsif ( $mode eq 'QUIET_STDERR' ) {
-			$fh_child_err = ">&DEVNULL";
-		} else {
-			$fh_child_out = $fh_child_err = ">&DEVNULL";
-		}
-	}
 
 	my $procid;
 	# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
@@ -2021,19 +1999,58 @@ sub run_cmd {
 		exit 0;
 	};
 
-	# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
-	$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
+	my $fileno_stdin = fileno(STDIN);
+	my $fileno_stdout = fileno(STDOUT);
+	my $fileno_stderr = fileno(STDERR);
+	{
+		# dupe stdio to local handles to avoid losing PerlIO layers on Windows
+		# reopen on same fileno for QUIET modes to work with external programs
+		local *STDIN;
+		local *STDOUT;
+		local *STDERR;
+		open(STDIN, "<&=", $fileno_stdin);
+		open(STDOUT, ">&=", $fileno_stdout);
+		open(STDERR, ">&=", $fileno_stderr);
 
-	# Wait for child to complete
-	waitpid( $procid, 0 );
-	$rtn = $?;
+		local *DEVNULL;
+		# Define what to do with STDOUT and STDERR of the child process
+		my $fh_child_out = ">&STDOUT";
+		my $fh_child_err = ">&STDERR";
+		if ( $mode eq 'STDOUT' ) {
+			$fh_child_out = $fh_child_err = ">&STDOUT";
+			#$system_suffix = '2>&1';
+		} elsif ( $mode eq 'STDERR' ) {
+			$fh_child_out = $fh_child_err = ">&STDERR";
+			#$system_suffix = '1>&2';
+		} elsif ( $mode =~ /^QUIET/ ) {
+			open(DEVNULL, ">", File::Spec->devnull()) || die "ERROR: Cannot open null device\n";
+			if ( $mode eq 'QUIET_STDOUT' ) {
+				$fh_child_out = ">&DEVNULL";
+			} elsif ( $mode eq 'QUIET_STDERR' ) {
+				$fh_child_err = ">&DEVNULL";
+			} else {
+				$fh_child_out = $fh_child_err = ">&DEVNULL";
+			}
+		}
+
+		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
+		$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
+	
+		# Wait for child to complete
+		waitpid( $procid, 0 );
+		$rtn = $?;
+
+		close(DEVNULL);
+		close(STDERR);
+		close(STDOUT);
+		close(STDIN);
+	}
 
 	# Restore old signal handlers
 	$SIG{TERM} = $SIGORIG{TERM};
 	$SIG{PIPE} = $SIGORIG{PIPE};
 	$SIG{INT} = $SIGORIG{INT};
 	#$SIG{CHLD} = $SIGORIG{CHLD};
-	close(DEVNULL);
 
 	# Interpret return code	and force return code 2 upon error
 	my $return = $rtn >> 8;
