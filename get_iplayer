@@ -4447,30 +4447,33 @@ sub download_credits {
 	for my $typeof ( "PerformanceRole", "Person" ) {
 		my @credits = $dom->findnodes('//tr[@typeof="'.$typeof.'"]');
 		if ( @credits ) {
-			push @out, "\n----------\n";
+			if ( ! @out ) {
+				push @out, $prog->{name};
+				push @out, $prog->{episode};
+				push @out, $prog->{firstbcastdate} if $prog->{firstbcastdate};
+				push @out, $prog->{player} || $prog->{web} || $prog->{pid};
+			}
+			push @out, "----------";
 			for my $credit ( @credits ) {
 				my $role = $credit->findvalue('./td[1]');
 				my $contributor = $credit->findvalue('./td[2]');
+				for my $item ( $role, $contributor ) {
+					$item =~ s/(\s){2,}/$1/g;
+					$item =~ s/(^\s+|[\s\.]+$)//g;
+					$item =~ s/\n+/ /g;
+				}
 				push @out, "$role: $contributor"
 			}
 		}
 	}
 	if ( @out ) {
-		my $heading = "$prog->{name}\n$prog->{episode}\n";
-		$heading .= "$prog->{firstbcastdate}\n" if $prog->{firstbcastdate};
-		$heading .= $prog->{player} ? "$prog->{player}\n" : "PID: $prog->{pid}\n";
-		unshift @out, $heading;
-		$credits = join "\n", @out;
-		$credits =~ s/([ \t]){2,}/$1/g;
-		$credits =~ s/(^[ \t]+|[ \t\.]+$)//gm;
-		$credits =~ s/\n{2,}/\n/g;
+		open( my $fh, "> $file" );
+		print $fh $_, "\n" for @out;
+		close $fh;
 	} else {
-		main::logger "WARNING: Credits info not found\n";
+		main::logger "WARNING: Credits not available\n";
 		return 1;
 	}
-	open( my $fh, "> $file" );
-	print $fh $credits, "\n";
-	close $fh;
 	return 0;
 }
 
