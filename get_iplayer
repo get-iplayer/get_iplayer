@@ -5020,25 +5020,13 @@ sub get_metadata {
 
 	my @fields1 = qw(verpids streams durations);
 
-	# remove versions with no media streams
-	for my $version ( sort keys %{ $prog->{verpids} } ) {
-		my @version_modes = sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
-		if ( ! grep !/^subtitles\d+$/, @version_modes ) {
-			main::logger "INFO: No media streams found for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
-			for my $key ( @fields1 ) {
-				delete $prog->{$key}->{$version};
-			}
-		}
-	}
-
 	unless ( $opt->{nomergeversions} ) {
-		# merge versions with same name and duration
+		# merge versions with same name and duration or if base version empty
 		for my $version ( sort keys %{ $prog->{verpids} } ) {
 			next if $version !~ /\d+$/;
 			(my $base_version = $version) =~ s/\d+$//;
-			next unless $prog->{durations}->{$base_version} && $prog->{durations}->{$version};
-			if ( $prog->{durations}->{$base_version} == $prog->{durations}->{$version} ) {
-				main::logger "INFO: Merging '$version' version ($prog->{verpids}->{$version}) into '$base_version' version ($prog->{verpids}->{$base_version})\n" if $opt->{verbose};
+			next unless keys %{ $prog->{streams}->{$base_version} } == 0 || ( $prog->{durations}->{$base_version} > 0 && $prog->{durations}->{$version} > 0 );
+			if ( keys %{ $prog->{streams}->{$base_version} } == 0 || $prog->{durations}->{$base_version} == $prog->{durations}->{$version} ) {
 				my @version_modes = sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
 				for my $mode ( @version_modes ) {
 					if ( ! $prog->{streams}->{$base_version}->{$mode} ) {
@@ -5048,6 +5036,17 @@ sub get_metadata {
 				for my $key ( @fields1 ) {
 					delete $prog->{$key}->{$version};
 				}
+			}
+		}
+	}
+
+	# remove versions with no media streams
+	for my $version ( sort keys %{ $prog->{verpids} } ) {
+		my @version_modes = sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} };
+		if ( ! grep !/^subtitles\d+$/, @version_modes ) {
+			main::logger "INFO: No media streams found for '$version' version ($prog->{verpids}->{$version}) - deleting\n" if $opt->{verbose};
+			for my $key ( @fields1 ) {
+				delete $prog->{$key}->{$version};
 			}
 		}
 	}
