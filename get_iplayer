@@ -3169,6 +3169,7 @@ use HTTP::Headers;
 use IO::Seekable;
 use IO::Socket;
 use JSON::PP;
+use List::Util qw(first);
 use LWP::ConnCache;
 use LWP::UserAgent;
 use POSIX qw(strftime);
@@ -3437,18 +3438,8 @@ sub download_subtitles {
 sub generate_version_list {
 	my $prog = shift;
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @default_version_list = qw/original iplayer technical editorial lengthened shortened opensubtitles/;
-	# append any unknown versions found with programme
-	for my $key ( keys %{$prog->{verpids}} ) {
-		next if $key =~ /(audiodescribed|signed|podcast)/;
-		$key =~ s/\s+.*$//;
-		if ( ! grep /^${key}$/i, @default_version_list ) {
-			push @default_version_list, lc($key);
-		}
-	}
-	# podcast version has lowest priority
-	push @default_version_list, "podcast";
-	my @version_search_order = @default_version_list;
+	my @default_version_list = qw/original iplayer technical editorial lengthened shortened opensubtitles podcast/;
+	my @version_search_order;
 	# override with --versionlist
 	if ( $opt->{versionlist} ) {
 		@version_search_order = map { /^default$/i ? @default_version_list : $_ } split /,/, $opt->{versionlist};
@@ -3457,6 +3448,36 @@ sub generate_version_list {
 			@version_search_order = grep !/(audiodescribed|signed)/, @version_search_order;
 			@version_search_order = @default_version_list unless @version_search_order;
 		}
+	} else {
+		@version_search_order = @default_version_list;
+	}
+	# splice related versions into version search list
+ 	for my $key ( sort keys %{$prog->{verpids}} ) {
+		next if $key =~ /(audiodescribed|signed)/;
+		$key =~ s/\s+.*$//;
+		if ( ! grep /^$key$/, @version_search_order ) {
+			(my $base = $key) =~ s/\d+$//;
+			my $idx = first { $version_search_order[$_] =~ /^$base/ && $version_search_order[$_] lt $key } reverse(0..$#version_search_order);
+			if ( defined($idx) ) {
+				splice @version_search_order, $idx+1, 0, lc($key);
+			} else {
+				my $idx = first { $version_search_order[$_] =~ /^$base/ && $version_search_order[$_] gt $key } 0..$#version_search_order;
+				if ( defined($idx) ) {
+					my $ver = $version_search_order[$_];
+					$idx++ if $opt->{versionlist} =~ /\b$ver\b/;
+					splice @version_search_order, $idx, 0, lc($key);
+				} else {
+					# append any unknown versions found with programme unless --versionlist used
+					push @version_search_order, lc($key) unless ( $opt->{versionlist} );
+				}
+			}
+		}
+	}
+	# podcast version has lowest priority by default
+	unless ( $opt->{versionlist} ) {
+		my @podcast = grep /^podcast/i, @version_search_order;
+		@version_search_order = grep !/^podcast/i, @version_search_order;
+		push @version_search_order, @podcast;
 	}
 	# check here for no matching verpids for specified version search list???
 	my $got = 0;
@@ -3480,7 +3501,6 @@ sub generate_version_list {
 		}
 		@version_list = ( @subs_versions, @nosubs_versions );
 	}
-
 	if ( $got == 0 ) {
 		main::logger "INFO: No versions of this programme were selected (available versions: ".(keys %{ $prog->{verpids} } == 0 ? "none" : join ',', sort keys %{ $prog->{verpids} } ).")\n";
 	} else {
