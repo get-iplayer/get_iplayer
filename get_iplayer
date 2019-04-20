@@ -131,7 +131,9 @@ my $opt_format = {
 	# Output
 	command		=> [ 1, "c|command=s", 'Output', '--command, -c <command>', "User command to run after successful recording of programme. Use substitution parameters in command string (see docs for list)."],
 	credits		=> [ 1, "credits!", 'Output', '--credits', "Download programme credits, if available."],
-	creditsonly		=> [ 1, "creditsonly|credits-only!", 'Output', '--credits-only', "Only download programme credits (if available), not programme."],
+	creditsonly		=> [ 1, "creditsonly|credits-only!", 'Output', '--credits-only', "Only download programme credits, if available."],
+	cuesheet		=> [ 1, "cuesheet|cue-sheet!", 'Output', '--cuesheet', "Create cue sheet (.cue file) for programme, if data available. Radio programmes only. Cue sheet will be very inaccurate and will required further editing. Cue sheet may require addition of UTF-8 BOM (byte-order mark) for some applications to identify encoding."],
+	cuesheetonly		=> [ 1, "cuesheetonly||cuesheet-only!", 'Output', '--cuesheet-only', "Only create cue sheet (.cue file) for programme, if data available. Radio programmes only."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix template (excluding dir and extension). Use substitution parameters in template (see docs for list). Default: <name> - <episode> <pid> <version>"],
 	limitprefixlength => [ 1, "limit-prefix-length|limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
 	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording. Valid values: generic,json. XML generated for 'generic', JSON for 'json'. If no value specified, 'generic' is used."],
@@ -156,8 +158,8 @@ my $opt_format = {
 	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
 	thumbsize	=> [ 1, "thumbsize|thumb-size|thumbsizemeta|thumbnailsize|thumbnail-size=n", 'Output', '--thumbnail-size <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192"],
 	thumbsquare	=> [ 1, "thumbsquare|thumbnailsquare|thumb-square|thumbnail-square!", 'Output', '--thumbnail-square', "Download square version of thumbnail image."],
-	tracklist		=> [ 1, "tracklist!", 'Output', '--tracklist', "Download track list of music played in programme, if available. Track times and durations may be missing or incorrect."],
-	tracklistonly		=> [ 1, "tracklistonly|tracklist-only!", 'Output', '--tracklist-only', "Only download track list of music played in programme (if available), not programme."],
+	tracklist		=> [ 1, "tracklist!", 'Output', '--tracklist', "Create track list of music played in programme, if data available. Track times and durations may be missing or incorrect."],
+	tracklistonly		=> [ 1, "tracklistonly|tracklist-only!", 'Output', '--tracklist-only', "Only create track list of music played in programme, if data available."],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
 
 	# Config
@@ -802,6 +804,11 @@ sub init_search {
 		$opt->{thumb} = 1;
 	}
 
+	# Set --cue-sheet if --cue-sheet-only is used
+	if ( $opt->{cuesheetonly} ) {
+		$opt->{cuesheet} = 1;
+	}
+
 	# Set --tracklist if --tracklist-only is used
 	if ( $opt->{tracklistonly} ) {
 		$opt->{tracklist} = 1;
@@ -834,7 +841,7 @@ sub init_search {
 	$opt->{type} = join( ',', progclass() ) if $opt->{type} =~ /(all|any)/i;
 
 	# Force nowrite if metadata/subs/thumb-only
-	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} ) {
+	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
 	}
 	
@@ -976,7 +983,7 @@ sub download_pid_matches {
 	my $hist = shift;
 	my @match_list = @_;
 	my $failcount = 0;
-	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
 	} elsif ( ! ( ( $opt->{pidrecursive} || $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
 		for my $this (@match_list) {
@@ -1147,7 +1154,7 @@ sub download_matches {
 	my $hist = shift;
 	my @match_list = @_;
 	my $failcount = 0;
-	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		download_other( $hist, @match_list );
 	} elsif ( $opt->{get} && ! ( ( $opt->{pvr} || $opt->{pvrsingle} || $opt->{pvrscheduler} ) && $opt->{test} ) ) {
 		for my $this (@match_list) {
@@ -1187,8 +1194,9 @@ sub download_other {
 			$this->create_dir();
 			$this->download_thumbnail();
 		}
-		# tracklist
-		if ( $opt->{tracklistonly} && $this->{tracklist} ) {
+		# cuesheet/tracklist
+		my $tracklist_found = -f $this->{tracklist};
+		if ( ( $opt->{cuesheetonly} && $this->{cuesheet} ) || ( $opt->{tracklistonly} && $this->{tracklist} ) ) {
 			$this->create_dir();
 			$this->download_tracklist();
 		}
@@ -1202,6 +1210,8 @@ sub download_other {
 			$this->create_dir();
 			$this->tag_file;
 		}
+		# remove tracklist if not required
+		unlink( $this->{tracklist} ) if ! $tracklist_found && $opt->{cuesheetonly} && ! $opt->{tracklistonly};
 		# subs (only for tv)
 		if ( $opt->{subsonly} && $this->{type} eq 'tv') {
 			$this->create_dir();
@@ -3209,7 +3219,7 @@ sub list_progs {
 	@match_list = main::make_array_unique_ordered( @match_list );
 	main::list_progs( undef, @match_list );
 
-	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
+	if ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{subsonly} || $opt->{tagonly} || $opt->{streaminfo} ) {
 		main::download_other( $hist, @match_list );
 	}
 	return 0;
@@ -3267,6 +3277,8 @@ use strict;
 use Time::Local;
 use URI;
 use XML::LibXML 1.91;
+
+my $ffmpeg_check;
 
 # Class vars
 # Global options
@@ -3828,18 +3840,23 @@ sub mode_ver_download_retry_loop {
 
 		# Success
 		} elsif ( $retcode eq '0' ) {
+			# metadata
 			if ( $opt->{metadata} ) {
 				$prog->create_dir();
 				$prog->create_metadata_file();
 			}
+			# thumbnail
 			if ( $opt->{thumb} ) {
 				$prog->create_dir();
 				$prog->download_thumbnail();
 			}
-			if ( $opt->{tracklist} ) {
+			# cuesheet/tracklist
+			my $tracklist_found = -f $prog->{tracklist};
+			if ( $opt->{cuesheet} || $opt->{tracklist} ) {
 				$prog->create_dir();
 				$prog->download_tracklist();
 			}
+			# credits
 			if ( $opt->{credits} ) {
 				$prog->create_dir();
 				$prog->download_credits();
@@ -3849,6 +3866,8 @@ sub mode_ver_download_retry_loop {
 				$hist->add( $prog );
 				$prog->tag_file if ! $opt->{notag} && ! $opt->{raw};
 			}
+			# remove tracklist if not required
+			unlink( $prog->{tracklist} ) if ! $tracklist_found && $opt->{cuesheet} && ! $opt->{tracklist};
 			# Get subtitles if they exist and are required and media download succeeded
 			if ( $opt->{subtitles} && $prog->{type} eq 'tv' && ( ! $opt->{subsembed} || $opt->{raw} ) ) {
 				unless ( $prog->download_subtitles( $ua, $prog->{subspart}, [ $version ] ) ) {
@@ -4203,6 +4222,8 @@ sub generate_filenames {
 		$prog->{thumbfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}") );
 	}
 
+	# Determine cue sheet filename
+	$prog->{cuesheet} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.cue") );
 	# Determine tracklist filename
 	$prog->{tracklist} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.tracks.txt") );
 	# Determine credits filename
@@ -4221,6 +4242,7 @@ sub generate_filenames {
 		( ! $opt->{nowrite} )
 		&& ( ! $opt->{metadataonly} )
 		&& ( ! $opt->{thumbonly} )
+		&& ( ! $opt->{cuesheetonly} )
 		&& ( ! $opt->{tracklistonly} )
 		&& ( ! $opt->{creditsonly} )
 		&& ( ! $opt->{subsonly} )
@@ -4464,117 +4486,202 @@ sub download_thumbnail {
 
 sub download_tracklist {
 	my $prog = shift;
-	my ($times, $durations, $tracklist);
-	my $file = $prog->{tracklist};
-	if ( -f $file && ! $opt->{overwrite} ) {
-		main::logger "INFO: Tracklist file already exists: $file\n";
-		main::logger "INFO: Use --overwrite to re-download\n";
-		return 0;
+	my ($times_trk, $durations_trk, $times_cue, $durations_cue);
+	my @trk;
+	my @cue;
+	my $do_cue = $opt->{cuesheet} && $prog->{type} eq "radio";
+	my $file_trk = $prog->{tracklist};
+	if ( $opt->{tracklist} || $opt->{tag_tracklist} ) {
+		if ( -f $file_trk && ! $opt->{overwrite} ) {
+			main::logger "INFO: Track list already exists: $file_trk\n";
+			main::logger "INFO: Use --overwrite and --tracklist-only to re-download\n";
+			return 0;
+		}
 	}
-	main::logger "INFO: Downloading tracklist\n" if $opt->{tracklist} || $opt->{verbose};
+	my $file_cue = $prog->{cuesheet};
+	if ( $do_cue ) {
+		if ( -f $file_cue && ! $opt->{overwrite} ) {
+			main::logger "INFO: Cue sheet already exists: $file_cue\n";
+			main::logger "INFO: Use --overwrite and --cuesheet-only to re-download\n";
+			return 0;
+		}
+	}
+	main::logger "INFO: Downloading track data\n" if $do_cue || $opt->{tracklist} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
 	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
 	my ($html, $res1) = main::request_url_retry($ua , $url1, 3, undef, undef, undef, undef, 1);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
-			main::logger "WARNING: Track info not found\n";
+			main::logger "WARNING: Track data not found\n";
 		} else {
-			main::logger "WARNING: Track info download failed\n";
+			main::logger "WARNING: Track data download failed\n";
 		}
 		return 1;
 	}
 	unless ( $html =~ /\w/ ) {
-		main::logger "WARNING: Track info not defined\n";
+		main::logger "WARNING: Track data not defined\n";
 		return 1;
 	}
-	my $json;
-	if ( $res1 && $res1->request ) {
-		my ($url2, $res2);
-		($url2 = $res1->request->uri) =~ s/segments\.inc/segments\.json/;
-		if ( $url2 ) {
-			($json, $res2) = main::request_url_retry($ua , $url2, 3, undef, undef, undef, undef, 1);
-			unless ( $res2 && $res2->is_success ) {
-				if ( $res2 && $res2->code == 404 ) {
-					main::logger "WARNING: Track times not found\n";
-				} else {
-					main::logger "WARNING: Track times download failed\n";
+	unless ( $res1 && $res1->request ) {
+		main::logger "WARNING: Track data response invalid\n";
+		return 1;
+	}
+	(my $url2 = $res1->request->uri) =~ s/segments\.inc/segments\.json/;
+	unless ( $url2 ) {
+		main::logger "WARNING: Track times URL invalid\n";
+		return 1;
+	}
+	my ($json, $res2) = main::request_url_retry($ua , $url2, 3, undef, undef, undef, undef, 1);
+	unless ( $res2 && $res2->is_success ) {
+		if ( $res2 && $res2->code == 404 ) {
+			main::logger "WARNING: Track times not found\n";
+		} else {
+			main::logger "WARNING: Track times download failed\n";
+		}
+		undef $json;
+	}
+	unless ( $json =~ /\w/ ) {
+		main::logger "WARNING: Track times not defined\n";
+		return 1;
+	}
+	my $jom = eval { decode_json($json) };
+	undef $jom if ( $@ );
+	unless ( $jom && @{$jom->{segment_events}} ) {
+		main::logger "WARNING: Track times invalid\n";
+		return 1;
+	}
+	my $tracknum = 0;
+	my $start = $opt->{mysubstart} > 0 ? $opt->{mysubstart}/1000 : 0;
+	my $stop = $opt->{mysubstop} > 0 ? $opt->{mysubstop}/1000 : 0;
+	my $elapsed;
+	my $filename_cue;
+	my $name = $prog->{name};
+	my $episode = $prog->{episode} eq "-" ? $prog->{name} : $prog->{episode};
+	my $date = $prog->{firstbcastdate};
+	my $info = $prog->{player} || $prog->{web} || $prog->{pid};
+	my $categories = $prog->{categories} || $prog->{category};
+	for my $sei ( 0..$#{$jom->{segment_events}} ) {
+		my ($time_trk, $duration_trk, $time_cue, $duration_cue);
+		my $se = @{$jom->{segment_events}}[$sei];
+		my $se_next = @{$jom->{segment_events}}[$sei+1];
+		my $segment = $se->{segment};
+		my $begin = $se->{version_offset};
+		if ( defined($begin) ) {
+			my $begin_next = $se_next->{version_offset};
+			$duration_cue = $begin_next - $begin if $begin_next > $begin;
+			my $end = $begin + $duration_cue;
+			unless ( ( $stop > 0 && $begin > $stop ) || ( $start > 0 && $end < $start ) ) {
+				$begin = $start if ( $start > 0 && $begin < $start );
+				$end = $stop if ( $stop > 0 && $end > $stop );
+				if ( $begin >= $start ) {
+					$time_cue = $begin - $start;
+					$time_trk = sprintf("%02d:%02d:%02d", (gmtime($time_cue))[2,1,0]);
 				}
-				undef $json;
+				$duration_trk = sprintf("%02d:%02d:%02d", (gmtime($segment->{duration}))[2,1,0]) if $segment->{duration};
+ 			}
+		}
+		my $artist = $segment->{artist} || $segment->{primary_contributor}->{name};
+		my $title = $segment->{title} || $segment->{track_title};
+		if ( !@trk ) {
+			push @trk, $name;
+			push @trk, $episode;
+			push @trk, $date if $date;
+			push @trk, $info if $info;
+			push @trk, $categories if $categories;
+		}
+		push @trk, "--------";
+		push @trk, $time_trk if defined($time_trk);
+		push @trk, $artist if $artist;
+		push @trk, $title if $title;
+		my @other;
+		for my $contrib ( @{$segment->{contributions}} ) {
+			next if $contrib->{role} eq "Performer" && $contrib->{name} eq $artist;
+			my $other = ( $contrib->{role} ? "$contrib->{role}: " : undef ) . $contrib->{name};
+			push @other, $other if $other;
+		}
+		for my $key ( "release_title", "record_label", "track_number" ) {
+			my $val = $segment->{$key};
+			if ( $val ) {
+				(my $lbl = $key) =~ s/_/ /g;
+				$lbl =~ s/\b(\w)/uc($1)/ge;
+				push @other, "$lbl: $val";
 			}
-			if ( $json ) {
-				my $jom = eval { decode_json($json) };
-				undef $jom if ( $@ );
-				if ( $jom && @{$jom->{segment_events}} ) {
-					my $start = $opt->{mysubstart} > 0 ? $opt->{mysubstart}/1000 : 0;
-					my $stop = $opt->{mysubstop} > 0 ? $opt->{mysubstop}/1000 : 0;
-					for my $se ( @{$jom->{segment_events}} ) {
-						my $rec_id = $se->{segment}->{record_id};
-						next unless $rec_id;
-						my $begin = $se->{version_offset};
-						next unless defined $begin;
-						my $duration = $se->{segment}->{duration};
-						my $end = $begin + $duration;
-						unless ( ( $stop > 0 && $begin > $stop ) || ( $start > 0 && $end < $start ) ) {
-							$begin = $start if ( $start > 0 && $begin < $start );
-							$end = $stop if ( $stop > 0 && $end > $stop );
-							if ( $begin >= $start ) {
-								my $ts = sprintf("%02d:%02d:%02d", (gmtime($begin - $start))[2,1,0]);
-								$times->{$rec_id} = $ts;
-							}
-							if ( $end > 0 && $end > $begin ) {
-								my $td = sprintf("%02d:%02d:%02d", (gmtime($end - $begin))[2,1,0]);
-								if ( $end - $begin < $duration ) {
-									#$td .= sprintf(" (truncated from %02d:%02d:%02d)", (gmtime($duration))[2,1,0]);
-									$td .= " (partial)";
-								}
-								$durations->{$rec_id} = $td;
-							}
+		}
+		push @trk, @other;
+		push @trk, "Duration: $duration_trk" if defined($duration_trk);
+		if ( $do_cue && defined($time_cue) && ( defined($duration_cue) || $sei == $#{$jom->{segment_events}} ) ) {
+			if ( !@cue ) {
+				my $filename_rel;
+				if ( $opt->{cuesheetonly} ) {
+					for my $ext ( ".m4a", ".mp4", ".ts" ) {
+						my $fr = "$prog->{fileprefix}${ext}";
+						my $fc = File::Spec->catfile($prog->{dir}, $fr);
+						if ( -f $fc ) {
+							$filename_rel = $fr;
+							$filename_cue = $fc;
+							last;
 						}
 					}
+					if ( ! $filename_rel ) {
+						$filename_rel = "$prog->{fileprefix}.m4a";
+						$filename_cue = File::Spec->catfile($prog->{dir}, $filename_rel);;
+						main::logger "WARNING: Could not locate media file for cue sheet, using '$filename_cue'\n";
+					}
 				}
+				$filename_rel ||= "$prog->{fileprefix}.$prog->{ext}";
+				$filename_cue ||= File::Spec->catfile($prog->{dir}, $filename_rel);;
+				for my $item ( $name, $episode ) {
+					$item  =~ s/"//g;
+				}
+				push @cue, "FILE \"${filename_rel}\" WAVE";
+				push @cue, "PERFORMER \"${name}\"";
+				push @cue, "TITLE \"${episode}\"" if $episode;
+				push @cue, "REM Date: ${date}" if $date;
+				push @cue, "REM Info: ${info}" if $info;
+				push @cue, "REM Categories: ${categories}" if $categories;
 			}
+			for my $item ( $artist, $title ) {
+				$item  =~ s/"//g;
+			}
+			if ( $time_cue > $elapsed ) {
+				my $ts_elapsed = sprintf("%02d:%02d:00", int($elapsed / 60), $elapsed % 60);
+				my $duration_break = sprintf("%02d:%02d:%02d", (gmtime($time_cue - $elapsed))[2,1,0]);
+				push @cue, sprintf("  TRACK %02d AUDIO", ++$tracknum);
+				push @cue, "    INDEX 01 $ts_elapsed";
+				push @cue, "    PERFORMER \"${name}\"";
+				push @cue, "    TITLE \"${episode}\"";
+				push @cue, "    REM Duration: $duration_break";
+			}
+			my $ts_begin = sprintf("%02d:%02d:00", int($time_cue / 60), $time_cue % 60);
+			push @cue, sprintf("  TRACK %02d AUDIO", ++$tracknum);
+			push @cue, "    INDEX 01 $ts_begin";
+			push @cue, "    PERFORMER \"${artist}\"";
+			push @cue, "    TITLE \"${title}\"";
+			push @cue, "    REM $_" for @other;
+			push @cue, "    REM Duration: $duration_trk" if defined($duration_trk);
+			$elapsed = $time_cue + $duration_cue;
 		}
 	}
-	if ( $json && keys %$times == 0 ) {
-		main::logger "WARNING: Track times not defined\n";
-	}
-	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
-	my @tracks = $dom->findnodes('//li[contains(@class,"segments-list__item")]//div[contains(@class,"segment__track")]');
-	if ( @tracks ) {
-		my @out;
-		for my $track ( @tracks ) {
-			push @out, "\n--------\n";
-			my $rec_id = $track->findvalue('ancestor::li//bbc-snippet/@data-record-id');
-			my $ts = $times->{$rec_id} if $rec_id;
-			push @out, $ts if $ts;
-			my $artist = $track->findvalue('h3');
-			push @out, $artist if $artist;
-			my $title = $track->findvalue('p');
-			push @out, $title if $title;
-			for my $e ( $track->findnodes('ul/li') ) {
-				unless ( $e->findnodes('./abbr[@title="Track Number"]') ) {
-					my $item = $e->findvalue('.');
-					push @out, $item if $item;
-				}
-			}
-			my $td = $durations->{$rec_id} if $rec_id;
-			push @out, "Duration: $td" if $td;
+	if ( $opt->{tracklist} || $opt->{tag_tracklist} ) {
+		if ( @trk ) {
+			open( my $fh, "> $file_trk" );
+			print $fh $_, "\n" for @trk;
+			close $fh;
+		} else {
+			main::logger "WARNING: Track list not available\n";
+			return 1;
 		}
-		my $heading = "$prog->{name}\n$prog->{episode}\n";
-		$heading .= "$prog->{firstbcastdate}\n" if $prog->{firstbcastdate};
-		$heading .= $prog->{player} ? "$prog->{player}\n" : "PID: $prog->{pid}\n";
-		unshift @out, $heading;
-		$tracklist = join "\n", @out;
-		$tracklist =~ s/([ \t]){2,}/$1/g;
-		$tracklist =~ s/(^[ \t]+|[ \t\.]+$)//gm;
-		$tracklist =~ s/\n{2,}/\n/g;
-	} else {
-		main::logger "WARNING: Track info not found\n";
-		return 1;
 	}
-	open( my $fh, "> $file" );
-	print $fh $tracklist, "\n";
-	close $fh;
+	if ( $do_cue ) {
+		if ( @cue ) {
+			open( my $fh_cue, "> $file_cue" );
+			print $fh_cue $_, "\n" for @cue;
+			close $fh_cue;
+		} else {
+			main::logger "WARNING: Cue sheet not available\n";
+			return 1;
+		}
+	}
 	return 0;
 }
 
@@ -4638,6 +4745,83 @@ sub download_credits {
 	return 0;
 }
 
+sub ffmpeg_init {
+	return if $ffmpeg_check;
+	$bin->{ffmpeg} = $opt->{ffmpeg} || 'ffmpeg';
+	if (! main::exists_in_path('ffmpeg') ) {
+		if ( $bin->{ffmpeg} ne 'ffmpeg' ) {
+			$bin->{ffmpeg} = 'ffmpeg';
+			if (! main::exists_in_path('ffmpeg') ) {
+				$ffmpeg_check = 1;
+				return;
+			}
+		} else {
+			$ffmpeg_check = 1;
+			return;
+		}
+	}
+	# ffmpeg checks
+	my ($ffvs, $ffvn);
+	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
+	my $ffout = `$ffcmd`;
+	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
+		$ffvs = $1;
+		if ( $ffvs =~ /^n?(\d+\.\d+)/i ) {
+			$ffvn = $1;
+			if ( $ffvn >= 3.0 ) {
+				$opt->{myffmpeg30} = 1;
+				$opt->{myffmpeg25} = 1;
+			} elsif ( $ffvn >= 2.5 ) {
+				$opt->{myffmpeg25} = 1;
+			} elsif ( $ffvn < 1.0 ) {
+				$opt->{ffmpegobsolete} = 1 unless defined $opt->{ffmpegobsolete};
+			}
+		}
+	}
+	if ( $opt->{verbose} ) {
+		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
+		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
+	}
+	$opt->{myffmpegversion} = $ffvn;
+	unless ( $opt->{myffmpegversion} ) {
+		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
+			delete $opt->{ffmpegobsolete};
+			$opt->{myffmpegav} = 1;
+		}
+		$opt->{myffmpegxx} = 1;
+	}
+	# override ffmpeg checks
+	if ( $opt->{ffmpegforce} ) {
+		$opt->{myffmpeg30} = 1;
+		$opt->{myffmpeg25} = 1;
+		delete $opt->{myffmpegav};
+		delete $opt->{myffmpegxx};
+	}
+	delete $binopts->{ffmpeg};
+	push @{ $binopts->{ffmpeg} }, ();
+	if ( ! $opt->{ffmpegobsolete} ) {
+		if ( $opt->{quiet} || $opt->{silent} ) {
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
+		} elsif ( $opt->{ffmpegloglevel} ) {
+			if ( $opt->{ffmpegloglevel} =~ /^(quiet|-8|panic|0|fatal|8|error|16|warning|24|info|32|verbose|40|debug|48|trace|56)$/ ) {
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', $opt->{ffmpegloglevel});
+			} else {
+				main::logger "WARNING: invalid value for --ffmpeg-loglevel ('$opt->{ffmpegloglevel}') - using default\n";
+				push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
+			}
+		} else {
+			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
+		}
+		if ( main::hide_progress() || ! $opt->{verbose} ) {
+			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
+		} else {
+			push @{ $binopts->{ffmpeg} }, ( '-stats' );
+		}
+	}
+	$ffmpeg_check = 1;
+	return;
+}
+
 ################### iPlayer Programme parent class #################
 package Programme::bbciplayer;
 
@@ -4665,8 +4849,6 @@ use URI;
 use XML::LibXML 1.91;
 use XML::LibXML::XPathContext;
 use constant REGEX_PID => qr/^[b-df-hj-np-tv-z0-9]{8,}$/;
-
-my $ffmpeg_check;
 
 sub opt_format {
 	return {
@@ -5110,7 +5292,7 @@ sub get_metadata {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version PIDs and metadata\n" if $opt->{verbose};
 			# Return at this stage unless we want metadata/tags only for various reasons
-			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{tagonly} )
+			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} )
 		}
 	}
 
@@ -5260,7 +5442,7 @@ sub get_metadata {
 			main::logger "WARNING: If you use a VPN/VPS/Smart DNS/web proxy, it may have been blocked.\n";
 		}
 		# Return at this stage unless we want metadata/tags only for various reasons
-		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} )
+		return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} )
 	}
 
 	return 0;
@@ -6456,83 +6638,6 @@ sub modelist {
 	my %seen;
 	$mlist = join( ",", grep { my $seen = $seen{$_}; $seen{$_} = 1; !$seen } split( ",", $mlist ) );
 	return $mlist;
-}
-
-sub ffmpeg_init {
-	return if $ffmpeg_check;
-	$bin->{ffmpeg} = $opt->{ffmpeg} || 'ffmpeg';
-	if (! main::exists_in_path('ffmpeg') ) {
-		if ( $bin->{ffmpeg} ne 'ffmpeg' ) {
-			$bin->{ffmpeg} = 'ffmpeg';
-			if (! main::exists_in_path('ffmpeg') ) {
-				$ffmpeg_check = 1;
-				return;
-			}
-		} else {
-			$ffmpeg_check = 1;
-			return;
-		}
-	}
-	# ffmpeg checks
-	my ($ffvs, $ffvn);
-	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
-	my $ffout = `$ffcmd`;
-	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
-		$ffvs = $1;
-		if ( $ffvs =~ /^n?(\d+\.\d+)/i ) {
-			$ffvn = $1;
-			if ( $ffvn >= 3.0 ) {
-				$opt->{myffmpeg30} = 1;
-				$opt->{myffmpeg25} = 1;
-			} elsif ( $ffvn >= 2.5 ) {
-				$opt->{myffmpeg25} = 1;
-			} elsif ( $ffvn < 1.0 ) {
-				$opt->{ffmpegobsolete} = 1 unless defined $opt->{ffmpegobsolete};
-			}
-		}
-	}
-	if ( $opt->{verbose} ) {
-		main::logger "INFO: ffmpeg version string = ".($ffvs || "not found")."\n";
-		main::logger "INFO: ffmpeg version number = ".($ffvn || "unknown")."\n";
-	}
-	$opt->{myffmpegversion} = $ffvn;
-	unless ( $opt->{myffmpegversion} ) {
-		if ( $bin->{ffmpeg} =~ /avconv/ || $ffout =~ /avconv/ ) {
-			delete $opt->{ffmpegobsolete};
-			$opt->{myffmpegav} = 1;
-		}
-		$opt->{myffmpegxx} = 1;
-	}
-	# override ffmpeg checks
-	if ( $opt->{ffmpegforce} ) {
-		$opt->{myffmpeg30} = 1;
-		$opt->{myffmpeg25} = 1;
-		delete $opt->{myffmpegav};
-		delete $opt->{myffmpegxx};
-	}
-	delete $binopts->{ffmpeg};
-	push @{ $binopts->{ffmpeg} }, ();
-	if ( ! $opt->{ffmpegobsolete} ) {
-		if ( $opt->{quiet} || $opt->{silent} ) {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'quiet');
-		} elsif ( $opt->{ffmpegloglevel} ) {
-			if ( $opt->{ffmpegloglevel} =~ /^(quiet|-8|panic|0|fatal|8|error|16|warning|24|info|32|verbose|40|debug|48|trace|56)$/ ) {
-				push @{ $binopts->{ffmpeg} }, ('-loglevel', $opt->{ffmpegloglevel});
-			} else {
-				main::logger "WARNING: invalid value for --ffmpeg-loglevel ('$opt->{ffmpegloglevel}') - using default\n";
-				push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
-			}
-		} else {
-			push @{ $binopts->{ffmpeg} }, ('-loglevel', 'fatal');
-		}
-		if ( main::hide_progress() || ! $opt->{verbose} ) {
-			push @{ $binopts->{ffmpeg} }, ( '-nostats' );
-		} else {
-			push @{ $binopts->{ffmpeg} }, ( '-stats' );
-		}
-	}
-	$ffmpeg_check = 1;
-	return;
 }
 
 sub postproc {
@@ -8850,7 +8955,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|^purge|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|^purge|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
