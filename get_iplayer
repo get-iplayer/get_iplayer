@@ -1803,6 +1803,9 @@ sub request_url_retry {
 				if ( $opt->{verbose} || ! ( $res->code() == 404 && $ok404 ) ) {
 					logger "\nERROR: $failmsg ($i/$retries): $url\n";
 					logger "ERROR: Response: ${\$res->code()} ${\$res->message()}\n";
+					if ( $res->code() == 403 ) {
+						logger "ERROR: Access to this resource was blocked by the BBC\n";
+					}
 					logger "ERROR: Ignore this error if programme download is successful\n";
 				}
 			}
