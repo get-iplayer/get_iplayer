@@ -132,7 +132,7 @@ my $opt_format = {
 	creditsonly		=> [ 1, "creditsonly|credits-only!", 'Output', '--credits-only', "Only download programme credits (if available), not programme."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix template (excluding dir and extension). Use substitution parameters in template (see docs for list). Default: <name> - <episode> <pid> <version>"],
 	limitprefixlength => [ 1, "limit-prefix-length|limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
-	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording."],
+	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording. Valid values: generic,json. XML generated for 'generic', JSON for 'json'. If no value specified, 'generic' is used."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Output', '--metadata-only', "Create specified metadata info file without any recording or streaming."],
 	nometadata	=> [ 1, "nometadata|no-metadata!", 'Output', '--no-metadata', "Do not create metadata info file after recording (overrides --metadata)."],
 	nosanitise	=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid characters for Windows (\"*:<>?|) and macOS (:) will be removed."],
@@ -388,7 +388,9 @@ foreach ('start', 'stop') {
 
 # ensure --metadata value
 if ( defined $opt_cmdline->{metadata} ) {
-	$opt_cmdline->{metadata} = "generic";
+	if ( $opt_cmdline->{metadata} ne "json" ) {
+		$opt_cmdline->{metadata} = "generic";
+	}
 }
 
 # Set the personal options according to the specified preset
@@ -750,7 +752,9 @@ sub init_search {
 
 	# Set --metadata if --metadata-only is used
 	if ( defined $opt->{metadata} || $opt->{metadataonly} ) {
-		$opt->{metadata} = "generic";
+		if ( $opt->{metadata} ne "json" ) {
+			$opt->{metadata} = "generic";
+		}
 	}
 	
 	if ( $opt->{nometadata} && ! $opt->{metadataonly} ) {
@@ -3856,6 +3860,9 @@ sub create_metadata_file {
 	$template->{generic} .= '<program_meta_data xmlns="http://linuxcentre.net/xmlstuff/get_iplayer" revision="1">'."\n";
 	$template->{generic} .= "\t<$_>[$_]</$_>\n" for ( sort keys %{$prog} );
 	$template->{generic} .= "</program_meta_data>\n";
+	# JSON template for all info (ignored)
+	$filename->{json} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.json"));
+	$template->{json} = '';
 
 	return if ! -d $prog->{dir};
 	if ( not defined $template->{ $opt->{metadata} } ) {
@@ -3864,17 +3871,60 @@ sub create_metadata_file {
 	}
 
 	main::logger "INFO: Writing metadata\n";
-
-	if ( open(XML, "> $filename->{ $opt->{metadata} }") ) {
-		my $text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
+	
+	my $text;
+	if ( $opt->{metadata} eq "json" ) {
+		my $jom = $prog->json_metadata();
+		eval {
+			$text = JSON::PP->new->pretty->canonical->encode($jom);
+		};
+		if ( $@ ) {
+			main::logger "ERROR: JSON metadata encoding failed: $!\n";
+			return;
+		}
+	} else {
+		$text = $prog->substitute( $template->{ $opt->{metadata} }, 3, '\[', '\]' );
 		# Strip out unsubstituted tags
 		$text =~ s/<.+?>\[.+?\]<.+?>[\s\n\r]*//g;
-		print XML $text;
-		close XML;
+	}
+	if ( open(META, "> $filename->{ $opt->{metadata} }") ) {
+		print META $text;
+		close META;
 	} else {
 		main::logger "ERROR: Couldn't write to metadata file: $filename->{ $opt->{metadata} }\n";
 		main::logger "ERROR: Use --metadata-only to retry\n";
 	}
+}
+
+sub json_metadata {
+	my ( $self ) = ( @_ );
+	my $version = $self->{version} || 'unknown';
+	# Make 'duration' == 'length' for the selected version
+	$self->{duration} = $self->{durations}->{$version} if $self->{durations}->{$version};
+	$self->{runtime} = int($self->{duration} / 60);
+	my $jom = {};
+	for my $key ( keys %{$self} ) {
+		my $value = $self->{$key};
+		# Get version specific value if this key is a hash
+		if ( ref$value eq 'HASH' ) {
+			if ( ref$value->{$version} ne 'HASH' ) {
+				$value = $value->{$version};
+			} else {
+				next;
+			}
+		}
+		# Join array elements if value is ARRAY type
+		if ( ref$value eq 'ARRAY' ) {
+			$value = join ',', @{ $value };
+		}
+		$value = '' if not defined $value;
+		if ( $key =~ /^(expires|timeadded)$/ ) {
+			$value = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($value));
+		}
+		$value = '' if $value eq '-' && $key =~ /episode/i;
+		$jom->{$key} = $value;
+	}
+	return $jom;
 }
 
 # Usage: print $prog{$pid}->substitute('<name>-<pid>-<episode>', [mode], [begin regex tag], [end regex tag]);
@@ -3909,7 +3959,7 @@ sub substitute {
 			if ( ref$value->{$version} ne 'HASH' ) {
 				$value = $value->{$version};
 			} else {
-				$value = 'unprintable';
+				next;
 			}
 		}
 
