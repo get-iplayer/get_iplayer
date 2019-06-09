@@ -5022,6 +5022,7 @@ sub get_metadata {
 	$prog->{sebcastdate} = substr($prog->{sebcast}, 0, 8);
 	$prog->{sebcasttime} = substr($prog->{sebcast}, 8, 4);
 	$prog->{sesort} = $prog->{senum} || $prog->{sebcast};
+	$prog->{sesortx} = $prog->{senumx} || $prog->{sebcast};
 	
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
@@ -8991,7 +8992,7 @@ sub tags_from_metadata {
 	$tags->{lyrics} .= "\n\nINFO: $meta->{web}" if $meta->{web};
 	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
 	$tags->{TVShowName} = $meta->{show};
-	$tags->{TVEpisode} = $meta->{senum} ? $meta->{senum} : $meta->{pid};
+	$tags->{TVEpisode} = $meta->{sesort} || $meta->{pid};
 	$tags->{TVSeasonNum} = $tags->{disk};
 	$tags->{TVEpisodeNum} = $tags->{tracknum};
 	$tags->{TVNetwork} = $meta->{channel};
