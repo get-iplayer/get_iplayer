@@ -141,8 +141,8 @@ my $opt_format = {
 	subdir		=> [ 1, "subdirs|subdir|s!", 'Output', '--subdir, -s', "Save recorded files into subdirectory of output directory.  Default: same name as programme (see --subdir-format)."],
 	subdirformat	=> [ 1, "subdirformat|subdirsformat|subdirs-format|subdir-format=s", 'Output', '--subdir-format <format>', "The format to be used for subdirectory naming.  Use substitution parameters in format string (see docs for list)."],
 	suboffset	=> [ 1, "suboffset=n", 'Output', '--suboffset <offset>', "Offset the subtitle timestamps by the specified number of milliseconds.  Requires --subtitles."],
-	subsembed	=> [ 1, "subtitlesembed|subsembed|subtitles-embed|subs-embed!", 'Output', '--subs-embed', "Embed soft subtitles in MP4 output file. Ignored with --audio-only and --ffmpeg-obsolete. Requires --subtitles."],
-	subsmono	=> [ 1, "subtitlesmono|subsmono|subtitles-mono|subs-mono!", 'Output', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker. Requires --subtitles."],
+	subsembed	=> [ 1, "subtitlesembed|subsembed|subtitles-embed|subs-embed!", 'Output', '--subs-embed', "Embed soft subtitles in MP4 output file. Ignored with --audio-only and --ffmpeg-obsolete. Requires --subtitles. Implies --subs-mono."],
+	subsmono	=> [ 1, "subtitlesmono|subsmono|subtitles-mono|subs-mono!", 'Output', '--subs-mono', "Create monochrome titles, with leading hyphen used to denote change of speaker. Requires --subtitles. Not required with --subs-embed."],
 	subsonly	=> [ 1, "subtitlesonly|subsonly|subtitles-only|subs-only!", 'Output', '--subtitles-only', "Only download the subtitles, not the programme"],
 	subsraw		=> [ 1, "subtitlesraw|subsraw|subtitles-raw|subs-raw!", 'Output', '--subs-raw', "Additionally save the raw subtitles file.  Requires --subtitles."],
 	subtitles	=> [ 2, "subtitles|subs!", 'Output', '--subtitles', "Download subtitles into srt/SubRip format if available and supported"],
@@ -727,6 +727,10 @@ sub init_search {
 	# Set --subtitles if --subsonly is used
 	if ( $opt->{subsonly} ) {
 		$opt->{subtitles} = 1;
+	}
+
+	if ( $opt->{subsembed} ) {
+		$opt->{subsmono} = 1;
 	}
 
 	# Set --thumbnail if --thumbonly is used
@@ -7354,7 +7358,7 @@ sub ttml_to_srt {
 	);
 
 	use Text::Wrap qw(fill $columns $huge);
-	$columns = 37;
+	$columns = $mono ? 39 : 37;
 	$huge = 'overflow';
 
 	$ttml =~ tr/\x00//d;
