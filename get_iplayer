@@ -5956,13 +5956,12 @@ sub get_stream_data {
 	if ( $get_hls ) {
 		push @ms_tf, "hls";
 		push @mediasets, "iptv-all" unless $get_dash;
-		push @mediasets, "apple-ipad-hls";
 		if ( $prog->{type} eq "radio" ) {
-			# for hlalow stream
+			push @mediasets, "apple-ipad-hls";
 			push @mediasets, "apple-iphone4-ipad-hls-3g";
 		}
 	}
-	for my $ms_ver ( 5, 6 ) {
+	for my $ms_ver ( 6, 5 ) {
 		for my $mediaset ( @mediasets ) {
 			my $url = "https://open.live.bbc.co.uk/mediaselector/$ms_ver/select/version/2.0/mediaset/$mediaset/vpid/$verpid/format/xml?cb=".( sprintf "%05.0f", 99999*rand(0) );
 			my $xml = main::request_url_retry( $ua, $url, 3, undef, undef, 1, undef, 1 );
@@ -5985,8 +5984,10 @@ sub get_stream_data {
 					next unless grep(/^$ms_conn->{transferFormat}$/, @ms_tf) || $ms_media->{kind} eq "captions";
 					next if $ms_conn->{supplier} =~ /$exclude_regex/;
 					(my $supplier = $ms_conn->{supplier}) =~ s/_https?$//;
-					my $stream_key = "$ms_media->{service}-$supplier";
-					$stream_key =~ s/(\[deprecated\])/$mediaset-$1/;
+					if ( $ms_media->{service} =~ /deprecated/ ) {
+						$ms_media->{service} = $ms_media->{kind};
+					}
+					my $stream_key = "$mediaset-$ms_media->{kind}-$ms_media->{bitrate}-$ms_conn->{transferFormat}-$supplier";
 					next if $seen{$stream_key};
 					$seen{$stream_key}++;
 					($stream_key = $ms_conn->{href}) =~ s/\?.*//;
