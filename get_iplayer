@@ -95,7 +95,7 @@ my $opt_format = {
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences and/or http_proxy environment variable."],
 	overwrite	=> [ 1, "overwrite|over-write!", 'Recording', '--overwrite', "Overwrite recordings if they already exist"],
 	partialproxy	=> [ 1, "partial-proxy!", 'Recording', '--partial-proxy', "Only uses web proxy where absolutely required (try this extra option if your proxy fails)."],
-	_url		=> [ 2, "", 'Recording', '--url <url>,<url>,...', "Record the PIDs contained in the specified iPlayer episode URLs."],
+	_url		=> [ 2, "", 'Recording', '--url <url>,<url>,...', "Record the PIDs contained in the specified iPlayer episode URLs. Alias for --pid."],
 	pid		=> [ 2, "pid|url=s@", 'Recording', '--pid <pid>,<pid>,...', "Record arbitrary PIDs that do not necessarily appear in the index."],
 	pidindex	=> [ 1, "pidrefresh|pid-refresh|pidindex|pid-index!", 'Recording', '--pid-index', "Update (if necessary) and use programme index cache with --pid. Cache is not searched for programme by default with --pid. Synonym: --pid-refresh."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID.  Requires --pid."],
@@ -2590,10 +2590,16 @@ sub add {
 
 	# ignore certain opts in default options file
 	if ( $optfile eq $optfile_default ) {
-		for my $key ( 'search', 'force', 'overwrite' ) {
+		for my $key ( 'search', 'force', 'overwrite', 'pid' ) {
 			if ( defined $this_cmdline->{$key}  ) {
+				my $optval;
+				if ( ref($this_cmdline->{$key}) eq "ARRAY" ) {
+					$optval = join(',', @{$this_cmdline->{$key}});
+				} else {
+					$optval = $this_cmdline->{$key};
+				}
 				main::logger "WARNING: '$key' option is not allowed in default options file: $optfile\n";
-				main::logger "WARNING: '$key = $this_cmdline->{$key}' will be ignored\n";
+				main::logger "WARNING: '$key = $optval' will be ignored\n";
 				main::logger "WARNING: Use a preset instead\n";
 				delete $this_cmdline->{$key};
 			}
@@ -2605,9 +2611,15 @@ sub add {
 	for ( grep !/$regex/, keys %{ $this_cmdline } ) {
 		# if this option is on the cmdline
 		if ( defined $this_cmdline->{$_} ) {
-			main::logger "INFO: Changed option '$_' from '$entry->{$_}' to '$this_cmdline->{$_}'\n" if defined $entry->{$_} && $this_cmdline->{$_} ne $entry->{$_};
-			main::logger "INFO: Added option '$_' = '$this_cmdline->{$_}'\n" if not defined $entry->{$_};
-			$entry->{$_} = $this_cmdline->{$_};
+			my $optval;
+			if ( ref($this_cmdline->{$_}) eq "ARRAY" ) {
+				$optval = join(',', @{$this_cmdline->{$_}});
+			} else {
+				$optval = $this_cmdline->{$_};
+			}
+			main::logger "INFO: Changed option '$_' from '$entry->{$_}' to '$optval'\n" if defined $entry->{$_} && $optval ne $entry->{$_};
+			main::logger "INFO: Added option '$_' = '$optval'\n" if not defined $entry->{$_};
+			$entry->{$_} = $optval;
 		}
 	}
 
