@@ -101,6 +101,7 @@ my $opt_format = {
 	pidindex	=> [ 1, "pidrefresh|pid-refresh|pidindex|pid-index!", 'Recording', '--pid-index', "Update (if necessary) and use programme index cache with --pid. Cache is not searched for programme by default with --pid. Synonym: --pid-refresh."],
 	pidrecursive	=> [ 1, "pidrecursive|pid-recursive!", 'Recording', '--pid-recursive', "Record all related episodes if value of --pid is a series or brand PID.  Requires --pid."],
 	pidrecursivelist	=> [ 1, "pidrecursivelist|pid-recursive-list!", 'Recording', '--pid-recursive-list', "If value of --pid is a series or brand PID, list available episodes but do not download. Implies --pid-recursive. Requires --pid."],
+	pidrecursivetype	=> [ 1, "pidrecursivetype|pid-recursive-type=s", 'Recording', '--pid-recursive-type <type>', "Download only programmes of <type> (radio or tv) with --pid-recursive. Requires --pid-recursive."],
 	proxy		=> [ 0, "proxy|p=s", 'Recording', '--proxy, -p <url>', "Web proxy URL, e.g., http://username:password\@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless --proxy is specified. Used for both HTTP and HTTPS. Overridden by --no-proxy."],
 	start		=> [ 1, "start=s", 'Recording', '--start <secs|hh:mm:ss>', "Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)"],
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
@@ -875,6 +876,11 @@ sub init_search {
 			logger "ERROR: Invalid type '$_' specified. Valid types are: ".( join ',', progclass() )."\n";
 			exit 3;
 		}
+	}
+
+	if ( $opt->{pidrecursive} && defined $opt->{pidrecursivetype} and not is_prog_type($opt->{pidrecursivetype}) ) {
+		logger "ERROR: Invalid --pid-recursive-type '$opt->{pidrecursivetype}' specified. Valid value is one of: ".( join ',', progclass() )."\n";
+		exit 3;
 	}
 
 	# exit if only showing options
@@ -3655,6 +3661,11 @@ sub download_retry_loop {
 		main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
 		return 1;
 	}
+
+	if ( $opt->{pidrecursive} && $opt->{pidrecursivetype} && $opt->{pidrecursivetype} ne $prog->{type} ) {
+		main::logger "INFO: --pid-recursive-type=$opt->{pidrecursivetype} excluded $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+		return 0;
+	};
 
 	# Look up version pids for this prog - this does nothing if above get_metadata has alredy completed
 	if ( keys %{ $prog->{verpids} } == 0 ) {
