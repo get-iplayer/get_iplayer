@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "February 2019" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "July 2019" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -233,6 +233,9 @@ Record all related episodes if value of \-\-pid is a series or brand PID.  Requi
 \fB\-\-pid\-recursive\-list
 If value of \-\-pid is a series or brand PID, list available episodes but do not download. Implies \-\-pid\-recursive. Requires \-\-pid.
 .TP
+\fB\-\-pid\-recursive\-type <type>
+Download only programmes of <type> (radio or tv) with \-\-pid\-recursive. Requires \-\-pid\-recursive.
+.TP
 \fB\-\-proxy, \-p <url>
 Web proxy URL, e.g., http://username:password@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless \-\-proxy is specified. Used for both HTTP and HTTPS. Overridden by \-\-no\-proxy.
 .TP
@@ -255,7 +258,7 @@ Test only \- no recording (only shows search results with \-\-pvr and \-\-pid\-r
 TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hlshd,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: best,better,good,worst,dvf,hvf,dash,hls,hd,sd,high,low. 50fps streams (if available) preferred unless \-\-fps25 specified (default=hvfhd,dvfhd,hvfsd,dvfsd,hvfxsd,dvfxsd,hvfhigh,dvfhigh,hvfxhigh,dvfxhigh,hvflow,dvflow).
 .TP
 \fB\-\-url <url>,<url>,...
-Record the PIDs contained in the specified iPlayer episode URLs.
+Record the PIDs contained in the specified iPlayer episode URLs. Alias for \-\-pid.
 .TP
 \fB\-\-versions <versions>
 Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '\-\-versions=audiodescribed,default' will prefer audiodescribed programmes if available.
@@ -274,7 +277,13 @@ User command to run after successful recording of TV programme. Use substitution
 Download programme credits, if available.
 .TP
 \fB\-\-credits\-only
-Only download programme credits (if available), not programme.
+Only download programme credits, if available.
+.TP
+\fB\-\-cuesheet
+Create cue sheet (.cue file) for programme, if data available. Radio programmes only. Cue sheet will be very inaccurate and will required further editing. Cue sheet may require addition of UTF\-8 BOM (byte\-order mark) for some applications to identify encoding.
+.TP
+\fB\-\-cuesheet\-only
+Only create cue sheet (.cue file) for programme, if data available. Radio programmes only.
 .TP
 \fB\-\-file\-prefix <format>
 The filename prefix template (excluding dir and extension). Use substitution parameters in template (see docs for list). Default: <name> \- <episode> <pid> <version>
@@ -283,7 +292,7 @@ The filename prefix template (excluding dir and extension). Use substitution par
 The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit.
 .TP
 \fB\-\-metadata
-Create metadata info file after recording.
+Create metadata info file after recording. Valid values: generic,json. XML generated for 'generic', JSON for 'json'. If no value specified, 'generic' is used.
 .TP
 \fB\-\-metadata\-only
 Create specified metadata info file without any recording or streaming.
@@ -316,10 +325,10 @@ The format to be used for subdirectory naming.  Use substitution parameters in f
 Offset the subtitle timestamps by the specified number of milliseconds.  Requires \-\-subtitles.
 .TP
 \fB\-\-subs\-embed
-Embed soft subtitles in MP4 output file. Ignored with \-\-audio\-only and \-\-ffmpeg\-obsolete. Requires \-\-subtitles.
+Embed soft subtitles in MP4 output file. Ignored with \-\-audio\-only and \-\-ffmpeg\-obsolete. Requires \-\-subtitles. Implies \-\-subs\-mono.
 .TP
 \fB\-\-subs\-mono
-Create monochrome titles, with leading hyphen used to denote change of speaker. Requires \-\-subtitles.
+Create monochrome titles, with leading hyphen used to denote change of speaker. Requires \-\-subtitles. Not required with \-\-subs\-embed.
 .TP
 \fB\-\-subs\-raw
 Additionally save the raw subtitles file.  Requires \-\-subtitles.
@@ -355,10 +364,10 @@ Thumbnail size to use for the current recording and metadata. Specify width: 192
 Download square version of thumbnail image.
 .TP
 \fB\-\-tracklist
-Download track list of music played in programme, if available. Track times and durations may be missing or incorrect.
+Create track list of music played in programme, if data available. Track times and durations may be missing or incorrect.
 .TP
 \fB\-\-tracklist\-only
-Only download track list of music played in programme (if available), not programme.
+Only create track list of music played in programme, if data available.
 .TP
 \fB\-\-whitespace, \-w
 Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores.
@@ -551,6 +560,9 @@ Maximum number of connections to use for concurrent programme indexing.  Default
 \fB\-\-purge\-files
 Delete downloaded programmes more than 30 days old
 .TP
+\fB\-\-release\-check
+Forces check for new release if used on command line. Checks for new release weekly if saved in preferences.
+.TP
 \fB\-\-throttle <Mb/s>
 Bandwidth limit (in Mb/s) for media file download. Default: unlimited. Synonym: \-\-bw
 .TP
@@ -565,7 +577,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.20, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.21, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
