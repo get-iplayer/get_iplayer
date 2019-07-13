@@ -25,7 +25,7 @@
 #
 
 my $VERSION = 3.21;
-my $VERSION_TEXT;
+my $VERSION_TEXT = "3.22-dev";
 $VERSION_TEXT = sprintf("v%.2f", $VERSION) unless $VERSION_TEXT;
 
 use CGI qw(-utf8 :all);
