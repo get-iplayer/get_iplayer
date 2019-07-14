@@ -1171,12 +1171,16 @@ sub download_other {
 	my $ua = create_ua( 'desktop', 1 );
 	for my $this ( @match_list ) {
 		print_divider;
-		main::logger "INFO: Processing $this->{type}: '$this->{name} - $this->{episode} ($this->{pid})'\n";
 		$this->get_metadata_general();
 		if ( $this->get_metadata( $ua ) ) {
 			main::logger "ERROR: Could not get programme metadata\n" if $opt->{verbose};
 			next;
 		}
+		main::logger "INFO: Processing $this->{type}: '$this->{name} - $this->{episode} ($this->{pid})'\n";
+		if ( $opt->{pidrecursive} && $opt->{pidrecursivetype} && $opt->{pidrecursivetype} ne $this->{type} ) {
+			main::logger "INFO: --pid-recursive-type=$opt->{pidrecursivetype} excluded $this->{type}: '$this->{name} - $this->{episode} ($this->{pid})'\n";
+			next;
+		};
 		# Search versions for versionlist versions
 		my @versions = $this->generate_version_list;
 		# Use first version in list if a version list is not specified
