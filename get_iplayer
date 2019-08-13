@@ -3544,7 +3544,15 @@ sub download_subtitles {
 sub generate_version_list {
 	my $prog = shift;
 	# Default Order with which to search for programme versions (can be overridden by --versionlist option)
-	my @default_version_list = qw/original iplayer technical editorial lengthened shortened opensubtitles podcast/;
+	my @default_version_list = qw/original iplayer technical editorial legal lengthened shortened opensubtitles podcast/;
+	# append any unknown/unspecified versions found to default version list
+ 	for my $key ( sort keys %{$prog->{verpids}} ) {
+		next if $key =~ /(audiodescribed|signed)/;
+		$key =~ s/\s+.*$//;
+		if ( ! grep(/^$key$/, @default_version_list) && $opt->{versionlist} !~ /\b$key\b/) {
+			push @default_version_list, lc($key);
+		}
+	}
 	my @version_search_order;
 	# override with --versionlist
 	if ( $opt->{versionlist} ) {
