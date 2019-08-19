@@ -5517,7 +5517,7 @@ sub fetch_episodes_recursive {
 		unless ( $title ) {
 			$title = $dom->findvalue('//div[contains(@class,"br-masthead__title")]/a');
 			unless ( $title ) {
-				$title = $dom->findvalue('//title');
+				$title = $dom->findvalue('/html/head/title');
 			}
 			$title =~ s/(^\s+|\s+$)//g;
 			$title =~ s/[-\s]+(Available now|Ar gael nawr)//gi;
@@ -5532,7 +5532,7 @@ sub fetch_episodes_recursive {
 				next if $seen{$pid};
 				$seen{$pid} = 1;
 				my $prog_episode = $episode->findvalue('.//span[contains(@class,"programme__title")]/span');
-				my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]/span');
+				my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]');
 				my $prog_name = $name2 ? "$title: $name2" : $title;
 				my $prog_desc = $episode->findvalue('.//p[contains(@class,"programme__synopsis")]/span');
 				unless ( $name2 ) {
