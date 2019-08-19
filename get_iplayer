@@ -7194,7 +7194,7 @@ sub get_links_schedule_html {
 		my ($available_str, $until_str);
 		my $pid = $entry->findvalue('.//div[contains(@class,"programme--episode")]/@data-pid');
 		next unless $pid;
-		my $available_str = $entry->findvalue('.//h3[contains(@class,"broadcast__time")]/@content');
+		my $available_str = $entry->findvalue('.//*[contains(@class,"broadcast__time")]/@content');
 		$available = Programme::get_time_string( $available_str );
 		my $end_date = $entry->findvalue('.//meta[@property="endDate"]/@content');
 		if ( $end_date ) {
@@ -7224,7 +7224,7 @@ sub get_links_schedule_html {
 		}
 		$desc = $entry->findvalue('.//p[contains(@class,"programme__synopsis")]/span');
 		$desc =~ s/[\r\n]/ /g;
-		my @title_nodes = $entry->findnodes('.//h4[contains(@class,"programme__titles")]//span/span');
+		my @title_nodes = $entry->findnodes('.//*[contains(@class,"programme__titles")]//span/span');
 		my @titles = map {$_->findvalue('.')} @title_nodes;
 		if ( $#titles == 2 ) {
 			$name = "$titles[0]: $titles[1]";
@@ -7294,7 +7294,15 @@ sub get_links_schedule_json {
 	}
 	my $thirty_days = 30 * 86400;
 	my $min_available = $limit || ( $now - $thirty_days );
-	my $blob = $1 if $html =~ /<script type="application\/ld\+json">(.+?)<\/script>/s;
+	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
+	my @scripts = $dom->findnodes('//script[contains(@type,"application/ld+json")]');
+	my $blob;
+	for my $script ( @scripts ) {
+		if ( $script->findvalue('.') =~ /\@graph/ ) {
+			$blob = $script->findvalue('.');
+			last;
+		}
+	}
 	return 1 unless $blob =~ /\w/;
 	my $json = eval { decode_json($blob) };
 	return 1 if $@ || ! $json;
