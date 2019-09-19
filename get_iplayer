@@ -775,7 +775,7 @@ sub release_check {
 		}
 		print relchk "$relchk_msg\n";
 		close relchk;
-	}	
+	}
 }
 
 sub print_divider {
@@ -825,7 +825,7 @@ sub init_search {
 			$opt->{metadata} = "generic";
 		}
 	}
-	
+
 	if ( $opt->{nometadata} && ! $opt->{metadataonly} ) {
 		delete $opt->{metadata};
 	}
@@ -844,7 +844,7 @@ sub init_search {
 	if ( $opt->{metadataonly} || $opt->{subsonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} ) {
 		$opt->{nowrite} = 1;
 	}
-	
+
 	# use --force with --audio-only so audio stream for previous download can be retrieved
 	if ( $opt->{audioonly} ) {
 		$opt->{force} = 1;
@@ -1036,7 +1036,7 @@ sub find_matches {
 		}
 		return;
 	}
-	
+
 	# Parse remaining args
 	my @match_list;
 	my @index_search_args;
@@ -1799,7 +1799,7 @@ sub display_stream_info {
 		logger "INFO: Getting media stream metadata for $prog->{name} - $prog->{episode}, $verpid ($version)\n" if $prog->{pid};
 		$prog->{streams}->{$version} = $prog->get_stream_data( $verpid, undef, $version );
 	}
-	for my $mode ( sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} } ) {	
+	for my $mode ( sort Programme::cmp_modes keys %{ $prog->{streams}->{$version} } ) {
 		logger sprintf("%-14s %s\n", 'stream:', $mode );
 		for my $key ( sort keys %{ $prog->{streams}->{$version}->{$mode} } ) {
 			my $val = $prog->{streams}->{$version}->{$mode}->{$key};
@@ -2129,7 +2129,7 @@ sub run_cmd {
 
 		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
 		$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
-	
+
 		# Wait for child to complete
 		waitpid( $procid, 0 );
 		$rtn = $?;
@@ -3976,7 +3976,7 @@ sub create_metadata_file {
 	}
 
 	main::logger "INFO: Writing metadata\n";
-	
+
 	my $text;
 	if ( $opt->{metadata} eq "json" ) {
 		my $jom = $prog->json_metadata();
@@ -4227,7 +4227,7 @@ sub generate_filenames {
 	# set final/partial file names
 	$prog->{filename} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}")) unless $prog->{filename};
 	$prog->{filepart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}")) unless $prog->{filepart};
-	
+
 	# Determine thumbnail filename
 	if ( $prog->{thumbnail} =~ /^http/i ) {
 		my $ext;
@@ -4242,7 +4242,7 @@ sub generate_filenames {
 	$prog->{tracklist} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.tracks.txt") );
 	# Determine credits filename
 	$prog->{credits} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.credits.txt") );
-	
+
 	# Determine subtitle filenames
 	if ( $prog->{type} eq "tv" ) {
 		$prog->{subsraw} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttml"));
@@ -5360,7 +5360,7 @@ sub get_metadata {
 	$prog->{sebcasttime} = substr($prog->{sebcast}, 8, 4);
 	$prog->{sesort} = $prog->{senum} || $prog->{sebcast};
 	$prog->{sesortx} = $prog->{senumx} || $prog->{sebcast};
-	
+
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
 		# Try to get stream data for this version if it isn't already populated
