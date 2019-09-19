@@ -1733,9 +1733,11 @@ sub get_links {
 
 		# Copy new progs into memcache
 		for my $index ( keys %{ $index_prog } ) {
-			my $pid = $index_prog->{ $index }->{pid};
-			# Update fields in memcache from %prog hash for $pid
-			$memcache->{$prog_type}->{$pid}->{$_} = $index_prog->{$index}->{$_} for @cache_format;
+			if ( $index_prog->{$index}->{type} eq $prog_type ) {
+				my $pid = $index_prog->{ $index }->{pid};
+				# Update fields in memcache from %prog hash for $pid
+				$memcache->{$prog_type}->{$pid}->{$_} = $index_prog->{$index}->{$_} for @cache_format;
+			}
 		}
 
 		# purge pids in memcache that aren't in %prog
