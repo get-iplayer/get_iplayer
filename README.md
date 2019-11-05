@@ -2,9 +2,9 @@
 
 ## Features
 
-* Downloads TV and radio programmes from BBC iPlayer
+* Downloads TV and radio programmes from BBC iPlayer/Sounds
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer catch-up programmes from previous 30 days (not BBC Three, Red Button or iPlayer Exclusive)
+* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button or iPlayer Exclusive)
 * Caching of programme index with automatic updating
 * Regex search on programme name 
 * Regex search on programme description and episode title
@@ -14,7 +14,7 @@
 * HTTP proxy support
 * Perl 5.10.1+ required, plus LWP, LWP::Protocol::https, XML::LibXML and Mojolicious modules
 * Requires ffmpeg for conversion to MP4 and AtomicParsley for metadata tagging
-* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.10+), Windows (7/8/10 - XP/Vista not supported)
+* Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.10+), Windows (7/8/10)
 
 **NOTE:** 
 
@@ -27,7 +27,7 @@
 	
 ## Support
 
-<https://squarepenguin.co.uk/forums/>
+<https://forums.squarepenguin.co.uk>
 
 ## Installation
 
@@ -107,16 +107,16 @@
 
 * Record a TV programme using its iPlayer URL:
 
-	`get_iplayer http://www.bbc.co.uk/iplayer/episode/b01sc0wf/Doctors_Series_15_Perfect/`
+	`get_iplayer https://www.bbc.co.uk/iplayer/episode/b01sc0wf/Doctors_Series_15_Perfect/`
 
 * Record a TV programme using the PID (b01sc0wf) from its iPlayer URL:
 
 	`get_iplayer --pid=b01sc0wf`
 	
-* Record a radio programme using its iPlayer URL:
+* Record a radio programme using its Sounds URL:
 
-    `get_iplayer http://www.bbc.co.uk/programmes/b07gcv34`	
-* Record a radio programme using the PID (b07gcv34) from its iPlayer URL in highest quality (320k), with fallback to lower quality if not available:
+    `get_iplayer https://www.bbc.co.uk/sounds/play/b07gcv34`	
+* Record a radio programme using the PID (b07gcv34) from its Sounds URL in highest quality (320k), with fallback to lower quality if not available:
 
 	`get_iplayer --pid=b07gcv34` [default is to download best available]
 	
@@ -124,11 +124,11 @@
 
 	`get_iplayer --pid=b07gcv34 --radiomode=best`
 
-* Record a radio programme using the PID (b07gcv34) from its iPlayer URL with lower bit rate (96k):
+* Record a radio programme using the PID (b07gcv34) from its Sounds URL with lower bit rate (96k):
 
 	`get_iplayer --pid=b07gcv34 --radiomode=good`
 
-* Record multiple radio programmes (using PIDs from iPlayer URLs): 
+* Record multiple radio programmes (using PIDs from Sounds URLs): 
 
 	`get_iplayer --pid=b07gcv34,b07h60ld` [comma-separated list]
 
