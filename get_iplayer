@@ -5269,24 +5269,24 @@ sub get_metadata {
 				for my $ver ( @{$doc->{versions}} ) {
 					my @ver_types = @{$ver->{types}};
 					next unless @ver_types;
-					my $type;
-					if ( grep /(described|description)/i, @ver_types ) {
-						$type = "audiodescribed";
-					} elsif ( grep /sign/i, @ver_types ) {
-						$type = "signed";
-					} elsif ( grep /open subtitles/i, @ver_types ) {
-						$type = "opensubtitles";
-					} else {
-						my @other_types = grep !/(described|description|sign|open subtitles)/i, @ver_types;
-						next unless @other_types;
-						($type = lc($other_types[0])) =~ s/\s+.*$//;
-						$type =~ s/\W//g;
-					}
-					if ( $type ) {
-						my $version = $type;
-						$version .= $found{$type} if ++$found{$type} > 1;
-						$prog->{verpids}->{$version} = $ver->{pid};
-						$prog->{durations}->{$version} = $ver->{duration};
+					for my $ver_type (@ver_types) {
+						my $type;
+						if ( $ver_type =~ /(described|description)/i ) {
+							$type = "audiodescribed";
+						} elsif ( $ver_type =~ /sign/i ) {
+							$type = "signed";
+						} elsif ( $ver_type =~ /open subtitles/i ) {
+							$type = "opensubtitles";
+						} else {
+							($type = lc($ver_type)) =~ s/\s+.*$//;
+							$type =~ s/\W//g;
+						}
+						if ( $type ) {
+							my $version = $type;
+							$version .= $found{$type} if ++$found{$type} > 1;
+							$prog->{verpids}->{$version} = $ver->{pid};
+							$prog->{durations}->{$version} = $ver->{duration};
+						}
 					}
 				}
 				$got_metadata = 1 if $pid;
