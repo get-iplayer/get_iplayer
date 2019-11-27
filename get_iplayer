@@ -5856,14 +5856,30 @@ sub parse_attributes {
 
 # from https://github.com/osklil/hls-fetch
 sub parse_hls_connection {
+	my $ua = shift;
 	my $media = shift;
 	my $conn = shift;
 	my $min_bitrate = shift;
 	my $max_bitrate = shift;
 	my $prefix = shift || "hls";
-	decode_entities($conn->{href});
 	my @hls_medias;
-	my $data = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
+	decode_entities($conn->{href});
+	my $variant_url = $conn->{href};
+	main::logger "DEBUG: HLS variant playlist URL: $variant_url\n" if $opt->{verbose};
+	# resolve manifest redirect
+	for (my $i = 0; $i < 3; $i++) {
+		my $request = HTTP::Request->new( HEAD => $variant_url );
+		my $response = $ua->request($request);
+		if ( $response->is_success ) {
+			if ( $response->previous ) {
+				$variant_url = $response->request->uri;
+				main::logger "DEBUG: HLS variant playlist URL (actual): $variant_url\n" if $opt->{verbose};
+			}
+			last;
+		}
+	}
+	$conn->{href} = $variant_url;
+	my $data = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1 );
 	if ( ! $data ) {
 		main::logger "WARNING: No HLS playlist returned ($conn->{href})\n" if $opt->{verbose};
 		return;
@@ -5965,6 +5981,7 @@ sub parse_m3u_attribs {
 }
 
 sub parse_dash_connection {
+	my $ua = shift;
 	my $media = shift;
 	my $conn = shift;
 	my $min_bitrate = shift;
@@ -5973,7 +5990,22 @@ sub parse_dash_connection {
 	my $now = time();
 	my @dash_medias;
 	decode_entities($conn->{href});
-	my $xml = main::request_url_retry( main::create_ua( 'desktop' ), $conn->{href}, 3, undef, undef, 1 );
+	my $manifest_url = $conn->{href};
+	main::logger "DEBUG: DASH manifest URL: $manifest_url\n" if $opt->{verbose};
+	# resolve manifest redirect
+	for (my $i = 0; $i < 3; $i++) {
+		my $request = HTTP::Request->new( HEAD => $manifest_url );
+		my $response = $ua->request($request);
+		if ( $response->is_success ) {
+			if ( $response->previous ) {
+				$manifest_url = $response->request->uri;
+				main::logger "DEBUG: DASH manifest URL (actual): $manifest_url\n" if $opt->{verbose};
+			}
+			last;
+		}
+	}
+	$conn->{href} = $manifest_url;
+	my $xml = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1 );
 	if ( ! $xml ) {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
@@ -6320,14 +6352,14 @@ sub get_stream_data {
 					my ( $prefix, $min_bitrate, $max_bitrate, @new_medias );
 					if ( $ms_conn->{transferFormat} eq "dash" ) {
 						$prefix = $prog->{type} eq "tv" ? "dvf" : "daf";
-						@new_medias = parse_dash_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+						@new_medias = parse_dash_connection( $ua, $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
 					} elsif ( $ms_conn->{transferFormat} eq "hls" ) {
 						if ( $ms_conn->{supplier} =~ /hls_open/ ) {
 							$prefix = $prog->{type} eq "tv" ? "hls" : "hla";
 						} else {
 							$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
 						}
-						@new_medias = parse_hls_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
+						@new_medias = parse_hls_connection( $ua, $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
 					}
 					for my $new_media ( @new_medias ) {
 						for my $new_conn ( @{$new_media->{connections}} ) {
