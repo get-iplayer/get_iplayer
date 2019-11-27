@@ -88,7 +88,7 @@ my $opt_format = {
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required."],
 	includesupplier	=> [ 1, "includecdn|include-cdn|includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi"],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
-	hlslqaudio	=> [ 1, "hlslqaudio|hls-lq-audio!", 'Recording', '--hls-lq-audio', "Use default lower-quality audio for 'hvf' modes (TV only). Instead of 320k audio, output file will contain 128k or 96k audio, depending on the stream downloaded."],
+	hlslqaudio	=> [ 1, "hlslqaudio|hls-lq-audio!", 'Ignored', '--hls-lq-audio', "Use default lower-quality audio for 'hvf' modes (TV only). Instead of 320k audio, output file will contain 128k or 96k audio, depending on the stream downloaded."],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	markdownloaded	=> [ 1, "markdownloaded|mark-downloaded!", 'Recording', '--mark-downloaded', "Mark programmes in search results or specified with --pid/--url as downloaded by inserting records in download history."],
 	modes		=> [ 0, "modes=s", 'Recording', '--modes <mode>,<mode>,...', "Recording modes.  See --tvmode and --radiomode (with --long-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type)."],
@@ -6326,10 +6326,6 @@ sub get_stream_data {
 							$prefix = $prog->{type} eq "tv" ? "hls" : "hla";
 						} else {
 							$prefix = $prog->{type} eq "tv" ? "hvf" : "haf";
-							unless ( $prog->{type} eq "tv" && $opt->{hlslqaudio} ) {
-								# for 320k tv audio or 320k/96k radio
-								$ms_conn->{href} =~ s!([^/]+)\.ism(?:\.hlsv2\.ism)?/[^/]+\.m3u8!$1.ism/$1.m3u8!;
-							}
 						}
 						@new_medias = parse_hls_connection( $ms_media, $ms_conn, $min_bitrate, $max_bitrate, $prefix );
 					}
