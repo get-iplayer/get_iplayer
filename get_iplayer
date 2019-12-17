@@ -137,6 +137,7 @@ my $opt_format = {
 	limitprefixlength => [ 1, "limit-prefix-length|limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
 	metadata	=> [ 1, "metadata:s", 'Output', '--metadata', "Create metadata info file after recording. Valid values: generic,json. XML generated for 'generic', JSON for 'json'. If no value specified, 'generic' is used."],
 	metadataonly	=> [ 1, "metadataonly|metadata-only!", 'Output', '--metadata-only', "Create specified metadata info file without any recording or streaming."],
+	mpegts		=> [ 1, "mpegts|mpeg-ts!", 'Output', '--mpeg-ts', "Ensure raw audio and video files are re-muxed into MPEG-TS file regardless of stream format. Overrides --raw."],
 	nometadata	=> [ 1, "nometadata|no-metadata!", 'Output', '--no-metadata', "Do not create metadata info file after recording (overrides --metadata)."],
 	nosanitise	=> [ 1, "nosanitize|nosanitise|no-sanitize|no-sanitise!", 'Output', '--no-sanitise', "Do not sanitise output file and directory names. Implies --whitespace. Invalid characters for Windows (\"*:<>?|) and macOS (:) will be removed."],
 	output		=> [ 2, "output|o=s", 'Output', '--output, -o <dir>', "Recording output directory"],
@@ -847,6 +848,11 @@ sub init_search {
 	# use --force with --audio-only so audio stream for previous download can be retrieved
 	if ( $opt->{audioonly} ) {
 		$opt->{force} = 1;
+	}
+
+	# ensure --raw set with --mpeg-ts
+	if ( $opt->{mpegts} ) {
+		$opt->{raw} = 1;
 	}
 
 	# List all options and where they are set from then exit
@@ -4205,6 +4211,10 @@ sub generate_filenames {
 			$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v"));
 		}
 	}
+	# output files with --mpeg-ts
+	if ( $opt->{mpegts} ) {
+			$prog->{ext} = "ts";
+	}
 
 	# force filename with --tag-only-filename
 	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
@@ -7450,25 +7460,28 @@ sub download {
 			}
 		}
 		# require ffmpeg for DASH
-		if ( $mode =~ /^(daf|dvf)/ && ! $opt->{raw} && ! main::exists_in_path('ffmpeg') ) {
+		if ( $mode =~ /^(daf|dvf)/ && ( ! $opt->{raw} || $opt->{mpegts} ) && ! main::exists_in_path('ffmpeg') ) {
 			main::logger "WARNING: Required ffmpeg utility not found - not converting .m4a and .m4v files\n";
 			$opt->{raw} = 1;
+			delete $opt->{mpegts};
 		}
 		# cannot convert dvf with avconv or ffmpeg < 3.0
-		if ( $mode =~ /^dvf/ && ! $opt->{raw} ) {
+		if ( $mode =~ /^dvf/ && ( ! $opt->{raw} || $opt->{mpegts} ) ) {
 			if ( $opt->{myffmpegav} ) {
-				main::logger "WARNING: avconv does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+				main::logger "WARNING: avconv does not support conversion of dvf downloads to MPEG-TS/MP4 - not converting .m4a and .m4v files\n";
 				$opt->{raw} = 1;
+				delete $opt->{mpegts};
 			} elsif ( $opt->{myffmpegxx} ) {
-				main::logger "WARNING: Unable to determine ffmpeg version - MP4 conversion for dvf downloads may fail\n";
+				main::logger "WARNING: Unable to determine ffmpeg version - MPEG-TS/MP4 conversion for dvf downloads may fail\n";
 			} elsif ( ! $opt->{myffmpeg30} ) {
-				main::logger "WARNING: Your version of ffmpeg ($opt->{myffmpegversion}) does not support conversion of dvf downloads to MP4 - not converting .m4a and .m4v files\n";
+				main::logger "WARNING: Your version of ffmpeg ($opt->{myffmpegversion}) does not support conversion of dvf downloads to MPEG-TS/MP4 - not converting .m4a and .m4v files\n";
 				$opt->{raw} = 1;
+				delete $opt->{mpegts};
 			}
 			if ( $opt->{myffmpegav} || $opt->{myffmpegxx} || ! $opt->{myffmpeg30} ) {
-				main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MP4\n";
-				main::logger "WARNING: Use --raw to bypass MP4 conversion and retain .m4a and .m4v files\n";
-				main::logger "WARNING: Use --ffmpeg-force to override checks and force MP4 conversion attempt\n";
+				main::logger "WARNING: ffmpeg 3.0 or higher is required to convert dvf downloads to MPEG-TS/MP4\n";
+				main::logger "WARNING: Use --raw to bypass MPEG-TS/MP4 conversion and retain .m4a and .m4v files\n";
+				main::logger "WARNING: Use --ffmpeg-force to override checks and force MPEG-TS/MP4 conversion attempt\n";
 			}
 		}
 	}
@@ -8673,7 +8686,7 @@ sub get {
 		unlink ( $video_tmp, $video_file );
 	}
 
-	if ( $opt->{raw} ) {
+	if ( $opt->{raw} && ! $opt->{mpegts} ) {
 		if ( ! move($audio_file, $audio_raw) ) {
 			main::logger "ERROR: Could not rename file: $audio_file\n";
 			main::logger "ERROR: Destination file name: $audio_raw\n";
@@ -8747,6 +8760,14 @@ sub postproc {
 		main::logger "ERROR: Conversion failed - retaining audio file: $audio_file\n" if $audio_ok;
 		main::logger "ERROR: Conversion failed - retaining video file: $video_file\n" if $video_ok;
 		return 'stop';
+	}
+	if ( $opt->{mpegts} ) {
+		if ( ! move($media_file, $prog->{filename}) ) {
+			main::logger "ERROR: Could not rename file: $media_file\n";
+			main::logger "ERROR: Destination file name: $prog->{filename}\n";
+			return 'stop';
+		}
+		return 0;
 	}
 	if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
 		return $prog->postproc(undef, $media_file, $ua);
