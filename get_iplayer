@@ -4531,29 +4531,7 @@ sub download_tracklist {
 	}
 	main::logger "INFO: Downloading track data\n" if $do_cue || $opt->{tracklist} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
-	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/segments.inc";
-	my ($html, $res1) = main::request_url_retry($ua , $url1, 3, undef, undef, undef, undef, 1);
-	unless ( $res1 && $res1->is_success ) {
-		if ( $res1 && $res1->code == 404 ) {
-			main::logger "WARNING: Track data not found\n";
-		} else {
-			main::logger "WARNING: Track data download failed\n";
-		}
-		return 1;
-	}
-	unless ( $html =~ /\w/ ) {
-		main::logger "WARNING: Track data not defined\n";
-		return 1;
-	}
-	unless ( $res1 && $res1->request ) {
-		main::logger "WARNING: Track data response invalid\n";
-		return 1;
-	}
-	(my $url2 = $res1->request->uri) =~ s/segments\.inc/segments\.json/;
-	unless ( $url2 ) {
-		main::logger "WARNING: Track times URL invalid\n";
-		return 1;
-	}
+	my $url2 = "https://www.bbc.co.uk/programmes/$prog->{pid}/segments.json";
 	my ($json, $res2) = main::request_url_retry($ua , $url2, 3, undef, undef, undef, undef, 1);
 	unless ( $res2 && $res2->is_success ) {
 		if ( $res2 && $res2->code == 404 ) {
