@@ -1,10 +1,10 @@
-## get_iplayer: BBC iPlayer Indexing Tool and PVR
+## get_iplayer: BBC iPlayer/BBC Sounds Indexing Tool and PVR
 
 ## Features
 
-* Downloads TV and radio programmes from BBC iPlayer/Sounds
+* Downloads TV and radio programmes from BBC iPlayer/BBC Sounds
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button or iPlayer Exclusive)
+* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button, iPlayer Exclusive, or Podcast-only)
 * Caching of programme index with automatic updating
 * Regex search on programme name 
 * Regex search on programme description and episode title
@@ -18,14 +18,14 @@
 
 **NOTE:** 
 
-- **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer site. It may be possible to download other content directly via PID or URL, but such use is not supported.**
-- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content directly via PID or URL, but such use is not supported.**
+- **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer/Sounds sites. BBC Three programmes, red button programmes, iPlayer box sets, iPlayer exclusives, and BBC podcasts are not searchable. Old programmes that are still available after 30 days must be located on the iPlayer/Sounds sites and downloaded directly via PID or URL, but such use is not supported.**.
+- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content such as red button programmes or iPlayer box sets directly via PID or URL, but such use is not supported. get_iplayer DOES NOT support live recording from BBC channels.**
 
 ## Documentation
 
 <https://github.com/get-iplayer/get_iplayer/wiki>
 	
-## Support
+## Forums
 
 <https://forums.squarepenguin.co.uk>
 
@@ -87,13 +87,13 @@
 
 * Record TV programme number 208 (index from search results) in HD, with SD fallback if HD not available:
 
-	`get_iplayer --get 208` [default is to download best available]
+	`get_iplayer --get 208` [default is to download best available (max 1280x720)]
 	
 	OR	
 
 	`get_iplayer --get 208 --tvmode=best`
 
-* Record TV programme number 208 with lower resolution (704x396):
+* Record TV programme number 208 with lower resolution (max 704x396):
 
 	`get_iplayer --get 208 --tvmode=good`
 
@@ -136,4 +136,4 @@
 
 	`get_iplayer --pid=b07gcv34 --pid=b07h60ld` [multiple arguments]
 
-NOTE: Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC programmes may not be available from iPlayer.
+NOTE: Sometimes you may not be able to download a listed programme immediately after broadcast (usually available within 24hrs of airing). Some BBC programmes may not be available from iPlayer/Sounds.
