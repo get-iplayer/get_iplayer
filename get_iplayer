@@ -4697,7 +4697,7 @@ sub download_credits {
 	}
 	main::logger "INFO: Downloading credits\n" if $opt->{credits} || $opt->{verbose};
 	my $ua = main::create_ua( 'desktop', 1 );
-	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}/credits.inc";
+	my $url1 = "https://www.bbc.co.uk/programmes/$prog->{pid}";
 	my ($html, $res1) = main::request_url_retry($ua , $url1, 3, undef, undef, undef, undef, 1);
 	unless ( $res1 && $res1->is_success ) {
 		if ( $res1 && $res1->code == 404 ) {
@@ -4713,26 +4713,23 @@ sub download_credits {
 	}
 	my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 	my @out;
-	for my $typeof ( "PerformanceRole", "Person" ) {
-		my @credits = $dom->findnodes('//tr[@typeof="'.$typeof.'"]');
-		if ( @credits ) {
-			if ( ! @out ) {
-				push @out, $prog->{name};
-				push @out, $prog->{episode};
-				push @out, $prog->{firstbcastdate} if $prog->{firstbcastdate};
-				push @out, $prog->{player} || $prog->{web} || $prog->{pid};
+	my @credits = $dom->findnodes('//div[@id="credits"]//tr');
+	if ( @credits ) {
+		push @out, $prog->{name};
+		push @out, $prog->{episode};
+		push @out, $prog->{firstbcastdate} if $prog->{firstbcastdate};
+		push @out, $prog->{player} || $prog->{web} || $prog->{pid};
+		push @out, "----------";
+		for my $credit ( @credits ) {
+			my $role = $credit->findvalue('./td[1]');
+			my $contributor = $credit->findvalue('./td[2]');
+			for my $item ( $role, $contributor ) {
+				$item =~ s/(\s){2,}/$1/g;
+				$item =~ s/(^\s+|[\s\.]+$)//g;
+				$item =~ s/\n+/ /g;
 			}
-			push @out, "----------";
-			for my $credit ( @credits ) {
-				my $role = $credit->findvalue('./td[1]');
-				my $contributor = $credit->findvalue('./td[2]');
-				for my $item ( $role, $contributor ) {
-					$item =~ s/(\s){2,}/$1/g;
-					$item =~ s/(^\s+|[\s\.]+$)//g;
-					$item =~ s/\n+/ /g;
-				}
-				push @out, "$role: $contributor"
-			}
+			next unless $role && $contributor;
+			push @out, "$role: $contributor"
 		}
 	}
 	if ( @out ) {
