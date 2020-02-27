@@ -154,8 +154,8 @@ my @headings_default = qw( thumbnail type name episode desc channel timeadded );
 # Lookup table for nice field name headings
 my %fieldname = (
 	index			=> 'Index',
-	pid			=> 'Pid',
-	available		=> 'Availability',
+	pid			=> 'PID',
+	available		=> 'Available',
 	expires		=> 'Expires',
 	type			=> 'Type',
 	name			=> 'Name',
@@ -4032,25 +4032,25 @@ sub insert_stylesheet {
 	img	{
 		border: 0;
 	}
-	
+
 	input, select {
-		background: #ddd; 
-		border: 0; 
+		background: #ddd;
+		border: 0;
 	}
-	
+
 	input {
 		font-size: 1em;
 	}
 
-	a { 
-		color: #fff; 
-		text-decoration: none; 
+	a {
+		color: #fff;
+		text-decoration: none;
 	}
 
 	a[href], a[onclick], label[onclick], :link, :visited {
 		cursor: pointer;
 	}
-	
+
 	ul.nav,
 	ul.options_tab,
 	ul.action {
@@ -4058,7 +4058,7 @@ sub insert_stylesheet {
 		margin: 8px 0;
 		padding: 0;
 	}
-	
+
 	ul.nav, ul.action {
 		font-size: 1em;
 	}
@@ -4070,7 +4070,7 @@ sub insert_stylesheet {
 	ul.options_tab {
 		border-bottom: 2px solid #888;
 	}
-	
+
 	ul.nav > li,
 	ul.options_tab > li,
 	ul.action > li {
@@ -4079,12 +4079,12 @@ sub insert_stylesheet {
 		vertical-align: bottom;
 		margin: 0 4px;
 	}
-	
-	ul.nav > li, 
+
+	ul.nav > li,
 	ul.action > li {
 		padding: 4px 16px;
 	}
-	
+
 	ul.options_tab > li {
 		padding: 2px 8px;
 	}
@@ -4094,19 +4094,19 @@ sub insert_stylesheet {
 	ul.action > li:hover {
 		background: #666;
 	}
-	
+
 	ul.nav > li.nav_tab_sel,
 	ul.options_tab > li.options_tab_sel {
 		background: #888;
 	}
-	
+
 	table.options_outer > tbody > tr {
 		font-size: 0.875em;
 	}
 
-	table.options_outer td, 
+	table.options_outer td,
 	table.options_outer th,
-	table.info td, 
+	table.info td,
 	table.info th {
 		vertical-align: top;
 		text-align: left;
@@ -4123,15 +4123,15 @@ sub insert_stylesheet {
 		margin-top: 8px;
 		margin-bottom: 8px;
 		font-size: 1em;
-		font-weight: bold; 
-		border-spacing: 10px 0; 
+		font-weight: bold;
+		border-spacing: 10px 0;
 		padding: 0px;
 	}
-	
+
 	label.pagetrail-current	{
 		color: #F54997;
 	}
-	
+
 	table.search,
 	table.info {
 		border: 2px solid #333;
@@ -4152,30 +4152,30 @@ sub insert_stylesheet {
 
 	table.search > tbody > tr > th,
 	table.info > tbody > tr > th {
-		background: #000; 
-		text-align: center; 
+		background: #000;
+		text-align: center;
 	}
-	
-	table.search > tbody > tr > td, 
+
+	table.search > tbody > tr > td,
 	table.search > tbody > tr > th,
-	table.info > tbody > tr > td, 
+	table.info > tbody > tr > td,
 	table.info > tbody > tr > th {
 		border: 1px solid #333;
 		padding: 4px 8px;
 	}
-	
+
 	table.searchhead {
-		width: 100%; 
+		width: 100%;
 	}
 
 	label.sorted {
 		color: #CFC;
 	}
-	
+
 	label.sorted_reverse {
 		color: #FCC;
 	}
-	
+
 	b.footer {
 		color: #777;
 		font-size: 0.75em;
@@ -4190,7 +4190,7 @@ sub insert_stylesheet {
 		background: none;
 		margin: 0;
 	}
-	
+
 	#logo .logotext {
 		color: #F54997;
 		font-family: "Courier New", monospace;
