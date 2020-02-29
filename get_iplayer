@@ -132,6 +132,7 @@ my $opt_format = {
 	credits		=> [ 1, "credits!", 'Output', '--credits', "Download programme credits, if available."],
 	creditsonly		=> [ 1, "creditsonly|credits-only!", 'Output', '--credits-only', "Only download programme credits, if available."],
 	cuesheet		=> [ 1, "cuesheet|cue-sheet!", 'Output', '--cuesheet', "Create cue sheet (.cue file) for programme, if data available. Radio programmes only. Cue sheet will be very inaccurate and will required further editing. Cue sheet may require addition of UTF-8 BOM (byte-order mark) for some applications to identify encoding."],
+	cuesheetoffset	=> [ 1, "tracklistoffset|tracklist-offset|track-list-offset|cuesheetoffset|cuesheet-offset|cue-sheet-offset=n", 'Output', '--cuesheet-offset [-]<offset>', "Offset track times in cue sheet and track list by the specified number of seconds. Synonym: --tracklist-offset"],
 	cuesheetonly		=> [ 1, "cuesheetonly|cuesheet-only|cue-sheet-only!", 'Output', '--cuesheet-only', "Only create cue sheet (.cue file) for programme, if data available. Radio programmes only."],
 	fileprefix	=> [ 1, "file-prefix|fileprefix=s", 'Output', '--file-prefix <format>', "The filename prefix template (excluding dir and extension). Use substitution parameters in template (see docs for list). Default: <name> - <episode> <pid> <version>"],
 	limitprefixlength => [ 1, "limit-prefix-length|limitprefixlength=n", "Output", '--limitprefixlength <length>', "The maximum length for a file prefix.  Defaults to 240 to allow space within standard 256 limit."],
@@ -4568,7 +4569,9 @@ sub download_tracklist {
 		my $segment = $se->{segment};
 		my $begin = $se->{version_offset};
 		if ( defined($begin) ) {
+			$begin += $opt->{cuesheetoffset};
 			my $begin_next = $se_next->{version_offset};
+			$begin_next += $opt->{cuesheetoffset};
 			$duration_cue = $begin_next - $begin if $begin_next > $begin;
 			my $end = $begin + $duration_cue;
 			unless ( ( $stop > 0 && $begin > $stop ) || ( $start > 0 && $end < $start ) ) {
