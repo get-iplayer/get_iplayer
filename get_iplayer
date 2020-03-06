@@ -2275,7 +2275,7 @@ sub lockfile {
 		close LOCKFILE;
 
 		# If the process is still running and the lockfile is newer than $stale_time seconds
-		if ( kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
+		if ( scalar @lines > 0 && kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
 				main::logger "ERROR: Quitting - process is already running ($lockfile)\n";
 				# redefine cleanup sub so that it doesn't delete $lockfile
 				$lockfile = '';
