@@ -63,6 +63,7 @@ use Time::Local;
 use Unicode::Normalize;
 use URI;
 use version 0.77;
+use if $^O eq 'MSWin32', "Win32::Unicode::Process" => qw();
 use constant DIVIDER => "-==-" x 20;
 use constant FB_EMPTY => sub { '' };
 $PerlIO::encoding::fallback = XMLCREF;
@@ -2050,27 +2051,51 @@ sub list_unique_element_counts {
 	return 0;
 }
 
+# after Win32::ShellQuote::quote_literal
+sub quote_arg {
+	my ($arg) = @_;
+	if ( $arg eq '' || $arg =~ /[^\w\-]/ ) {
+		$arg = escape_arg($arg);
+		$arg = qq{"$arg"};
+	}
+	return $arg;
+}
+
+sub escape_arg {
+	my ($arg) = @_;
+	my $r = $^O eq "MSWin32" ? '"' : '["`$]';
+	$arg =~ s{(\\*)(?=$r|\z)}{$1$1}g;
+	$arg =~ s{($r)}{\\$1}g;
+	return $arg;
+}
+
 # Invokes command in @args as a system call (hopefully) without using a shell
 # Can also redirect all stdout and stderr to either: STDOUT, STDERR or unchanged
 # Usage: run_cmd( <normal|STDERR|STDOUT>, @args )
 # Returns: exit code
 sub run_cmd {
+	#if ( $^O eq "MSWin32" && ! grep /[\r\n]/, @_ ) {
+	#	return run_cmd_win32( @_ );
+	#}
 	my $mode = shift;
-	my @cmd = ( @_ );
-	my $rtn;
-
-	my $log_str;
-	my @log_cmd = @cmd;
-	if ( $#log_cmd > 0 ) {
-		$log_str = (join ' ', map {s/\"/\\\"/g; "\"$_\"";} @log_cmd)
-	} else {
-		$log_str = $log_cmd[0]
-	}
-	main::logger "INFO: Command: $log_str\n" if $opt->{verbose};
-
 	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
-
+	my @cmd;
+	if ( $^O eq "MSWin32" && @_ > 1 ) {
+		@cmd = map { quote_arg( $_ ); } @_;
+	} else {
+		@cmd = ( @_ );
+	}
+	if ( $opt->{verbose} ) {
+		my $log_str;
+		if ( ( $^O eq "MSWin32" && @cmd > 1 ) || @cmd == 1 ) {
+			$log_str = join ' ', @cmd;
+		} else {
+			$log_str = join( ' ',  map { quote_arg($_) } @cmd );
+		}
+		main::logger "INFO: Command: $log_str\n";
+	}
 	my $procid;
+	my $rtn;
 	# Don't create zombies - unfortunately causes open3 to return -1 exit code regardless!
 	##### local $SIG{CHLD} = 'IGNORE';
 	# Setup signal handler for SIGTERM/INT/KILL - kill, kill, killlllll
@@ -2095,7 +2120,6 @@ sub run_cmd {
 		main::logger "\n";
 		exit 0;
 	};
-
 	my $fileno_stdin = fileno(STDIN);
 	my $fileno_stdout = fileno(STDOUT);
 	my $fileno_stderr = fileno(STDERR);
@@ -2105,20 +2129,17 @@ sub run_cmd {
 		local *STDIN;
 		local *STDOUT;
 		local *STDERR;
+		local *DEVNULL;
 		open(STDIN, "<&=", $fileno_stdin);
 		open(STDOUT, ">&=", $fileno_stdout);
 		open(STDERR, ">&=", $fileno_stderr);
-
-		local *DEVNULL;
 		# Define what to do with STDOUT and STDERR of the child process
 		my $fh_child_out = ">&STDOUT";
 		my $fh_child_err = ">&STDERR";
 		if ( $mode eq 'STDOUT' ) {
 			$fh_child_out = $fh_child_err = ">&STDOUT";
-			#$system_suffix = '2>&1';
 		} elsif ( $mode eq 'STDERR' ) {
 			$fh_child_out = $fh_child_err = ">&STDERR";
-			#$system_suffix = '1>&2';
 		} elsif ( $mode =~ /^QUIET/ ) {
 			open(DEVNULL, ">", File::Spec->devnull()) || die "ERROR: Cannot open null device\n";
 			if ( $mode eq 'QUIET_STDOUT' ) {
@@ -2129,27 +2150,78 @@ sub run_cmd {
 				$fh_child_out = $fh_child_err = ">&DEVNULL";
 			}
 		}
-
 		# Don't use NULL for the 1st arg of open3 otherwise we end up with a messed up STDIN once it returns
 		$procid = open3( 0, $fh_child_out, $fh_child_err, @cmd );
-
 		# Wait for child to complete
 		waitpid( $procid, 0 );
 		$rtn = $?;
-
 		close(DEVNULL);
 		close(STDERR);
 		close(STDOUT);
 		close(STDIN);
 	}
-
 	# Restore old signal handlers
 	$SIG{TERM} = $SIGORIG{TERM};
 	$SIG{PIPE} = $SIGORIG{PIPE};
 	$SIG{INT} = $SIGORIG{INT};
 	#$SIG{CHLD} = $SIGORIG{CHLD};
+	return interpret_return_code( $rtn );
+}
 
-	# Interpret return code	and force return code 2 upon error
+# run command with Win32::Unicode::Process
+# supports Unicode parameters (but not embedded newlines)
+sub run_cmd_win32 {
+	# monkey patch to work around quoting bugs
+	local *Win32::Unicode::Process::_create_process = sub {
+		my $cmd_str = join ' ',  @_;
+		my $cmd = Win32::Unicode::Util::utf8_to_utf16('/x /c "' . $cmd_str . '"') . Win32::Unicode::Constant::NULL();
+		my $path = File::Spec->catfile($ENV{ComSpec} || 'C:/WINDOWS/system32/cmd.exe');
+		my $shell = Win32::Unicode::Util::utf8_to_utf16($path) . Win32::Unicode::Constant::NULL();
+		return Win32::Unicode::Process::create_process($shell, $cmd);
+	};
+	my $mode = shift;
+	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
+	my @cmd;
+	if ( @_ > 1 ) {
+		@cmd = map { quote_arg( $_ ); } @_;
+	} else {
+		@cmd = ( @_ );
+	}
+	if ( $opt->{verbose} ) {
+		my $log_str = join ' ',  @cmd;
+		main::logger "INFO: Win32 Command: $log_str\n";
+	}
+	open(XSTDOUT, ">&STDOUT");
+	open(XSTDERR, ">&STDERR");
+	my $redir;
+	if ( $mode eq 'STDOUT' ) {
+		$redir = '2>&1';
+	} elsif ( $mode eq 'STDERR' ) {
+		$redir = '1>&2';
+	} elsif ( $mode =~ /^QUIET/ ) {
+		open(DEVNULL, ">", File::Spec->devnull()) || die "ERROR: Cannot open null device\n";
+		if ( $mode eq 'QUIET_STDOUT' ) {
+			open(STDOUT, ">&DEVNULL");
+		} elsif ( $mode eq 'QUIET_STDERR' ) {
+			open(STDERR, ">&DEVNULL");
+		} else {
+			open(STDOUT, ">&DEVNULL");
+			open(STDERR, ">&DEVNULL");
+		}
+	}
+	push @cmd, $redir if $redir;
+	my $rtn = Win32::Unicode::Process::systemW(@cmd);
+	open(STDOUT, ">&XSTDOUT");
+	open(STDERR, ">&XSTDERR");
+	close(DEVNULL);
+	close(XSTDOUT);
+	close(XSTDERR);
+	return interpret_return_code( $rtn );
+}
+
+sub interpret_return_code {
+	my $rtn = shift;
+	# Interpret return code and force return code 2 upon error
 	my $return = $rtn >> 8;
 	if ( $rtn == -1 ) {
 		main::logger "ERROR: Command failed to execute: $!\n" if $opt->{verbose};
@@ -4095,10 +4167,12 @@ sub substitute {
 			}
 		# escape these chars: ! ` \ "
 		} elsif ($sanitize_mode == 4) {
-			$replace = $value;
 			# Don't escape file paths
-			if ( $key !~ /(filename|filepart|thumbfile|tracklist|credits|cuesheet|subsfile|susbspart|subsraw|^dir)/ ) {
-				$replace =~ s/([\!"\\`])/\\$1/g;
+			if ( $key =~ /(filename|filepart|thumbfile|tracklist|credits|cuesheet|subsfile|susbspart|subsraw|^dir)/ ) {
+				$replace = $value;
+			} else {
+				#$replace =~ s/([\!"\\`])/\\$1/g;
+				$replace = main::escape_arg($value);
 			}
 		} else {
 			$replace = $value;
