@@ -9292,9 +9292,8 @@ sub enable {
 ############# Tagger Class ##############
 package Tagger;
 
-use Encode;
+use Encode qw(:default :fallback_all);
 use File::stat;
-use constant FB_EMPTY => sub { '' };
 
 # already in scope
 # my ($opt, $bin);
@@ -9314,14 +9313,16 @@ sub opt_format {
 		noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 		notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes."],
 		tag_credits => [ 1, "tagcredits|tag-credits!", 'Tagging', '--tag-credits', "Add programme credits (if available) to lyrics field."],
+		tag_encoding	=> [ 1, "tagencoding|tag-encoding=s", 'Tagging', '--tag-encoding <name>', "(Windows only) Single-byte character encoding for non-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: cp1252 (Windows code page 1252)"],
 		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in tag metadata. Use substitution parameters in template (see docs for list). Default: <name>"],
 		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in tag metadata. Use substitution parameters in template (see docs for list). Default: <episodeshort>"],
 		tag_isodate		=> [ 1, "tagisodate|tag-isodate!", 'Tagging', '--tag-isodate', "Use ISO8601 dates (YYYY-MM-DD) in album/show names and track titles"],
+		tag_nounicode	=> [ 1, "tagnoutf8|tag-noutf8|tag-no-utf8|tagnounicode|tag-nounicode|tag-no-unicode!", 'Tagging', '--tag-no-unicode', "(Windows only) Do not attempt to perform Unicode tagging and use single-byte character encoding instead (see --tag-encoding)"],
 		tag_podcast => [ 1, "tagpodcast|tag-podcast!", 'Tagging', '--tag-podcast', "Tag downloaded radio and tv programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)"],
-		tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts(incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)"],
+		tag_podcast_radio => [ 1, "tagpodcastradio|tag-podcast-radio!", 'Tagging', '--tag-podcast-radio', "Tag only downloaded radio programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)"],
 		tag_podcast_tv => [ 1, "tagpodcasttv|tag-podcast-tv!", 'Tagging', '--tag-podcast-tv', "Tag only downloaded tv programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)"],
 		tag_tracklist => [ 1, "tagtracklist|tag-tracklist!", 'Tagging', '--tag-tracklist', "Add track list of music played in programme (if available) to lyrics field."],
-		tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Tagging', '--tag-utf8', "Use UTF-8 encoding for non-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto-detect fails."],
+		tag_utf8 => [ 1, "tagutf8|tag-utf8!", 'Ignored', '--tag-utf8', "Use UTF-8 encoding for non-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto-detect fails."],
 	};
 }
 
@@ -9344,8 +9345,8 @@ sub tags_from_metadata {
 	($tags->{albumArtist} = "BBC " . ucfirst($meta->{type})) =~ s/tv/TV/i;
 	$tags->{album} = $meta->{show};
 	$tags->{grouping} = $meta->{categories};
-	# composer references iPlayer
-	$tags->{composer} = "BBC iPlayer";
+	# composer references iPlayer/Sounds
+	$tags->{composer} = "BBC" . ( $meta->{type} eq "tv" ? " iPlayer" : $meta->{type} eq "radio" ? " Sounds" : "" );
 	# extract genre as first category, use second if first too generic
 	$tags->{genre} = $meta->{category};
 	$tags->{comment} = $meta->{descshort};
@@ -9412,6 +9413,8 @@ sub tags_from_metadata {
 			main::logger "WARNING: --tag-credits specified but credits file not found: $meta->{credits}\n";
 		}
 	}
+	# normalise line endings to CRLF
+	$tags->{lyrics} =~ s/(\r\n?|\n)/\r\n/g;
 	$tags->{description} = $tags->{comment};
 	$tags->{longDescription} = $tags->{lyrics};
 	while ( my ($key, $val) = each %{$tags} ) {
@@ -9420,26 +9423,16 @@ sub tags_from_metadata {
 	return $tags;
 }
 
-# in-place escape/enclose embedded quotes in command line parameters
-sub tags_escape_quotes {
-	my ($tags) = @_;
-	# only necessary for Windows
-	if ( $^O =~ /^MSWin32$/ ) {
-		while ( my ($key, $val) = each %$tags ) {
-			if ($val =~ /"/) {
-				$val =~ s/"/\\"/g;
-				$tags->{$key} = '"'.$val.'"';
-			}
-		}
-	}
-}
-
-# in-place encode metadata values to iso-8859-1
+# in-place encode metadata values
 sub tags_encode {
-	my ($tags) = @_;
-	while ( my ($key, $val) = each %{$tags} ) {
-		$tags->{$key} = encode("iso-8859-1", $val, FB_EMPTY);
+	my ($tags, $encoding) = @_;
+	if ( ! $encoding || $encoding =~ /(UTF|UCS)/i || ! find_encoding($encoding) ) {
+		main::logger "WARNING: Encoding '$encoding' is not supported for metadata tags and will be ignored\n";
+		return;
 	}
+	while ( my ($key, $val) = each %{$tags} ) {
+		$tags->{$key} = encode($encoding, $val, FB_XMLCREF);
+ 	}
 }
 
 # add metadata tag to programme
@@ -9484,7 +9477,7 @@ sub tag_prog {
 	return $rc;
 }
 
-sub ap_init {
+sub tag_init {
 	return if $ap_check;
 	$bin->{atomicparsley} = $opt->{atomicparsley} || 'AtomicParsley';
 	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
@@ -9504,25 +9497,16 @@ sub ap_init {
 	$opt->{myaphdvideo} = 1 if $ap_help =~ /--hdvideo/;
 	$opt->{myaplongdesc} = 1 if $ap_help =~ /--longdesc/;
 	$opt->{myaplongdescription} = 1 if $ap_help =~ /--longDescription/;
-	$opt->{myaputf8} = 1 if ! defined($opt->{tag_utf8}) and ( $^O ne "MSWin32" or $bin->{atomicparsley} =~ /-utf8/i );
+	$opt->{myaplongdescfile} = 1 if $ap_help =~ /--longdescFile/;
+	$opt->{myaplyricsfile} = 1 if $ap_help =~ /--lyricsFile/;
+	if ( $opt->{verbose} && $ap_help =~ /(AtomicParsley version:.*)/i ) {
+		main::logger "INFO: $1\n";
+	}
 	$ap_check = 1;
 }
 
-# add MP4 tag with atomicparsley
-sub tag_file_mp4 {
-	my ($self, $meta, $tags) = @_;
-	ap_init();
-	# Only tag if the required tool exists
-	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
-		main::logger "WARNING: Required AtomicParsley utility not found - cannot tag \U$meta->{ext}\E file\n";
-		return 1;
-	}
-	main::logger "INFO: Tagging \U$meta->{ext}\E\n";
-	# handle embedded quotes
-	tags_escape_quotes($tags);
-	# encode metadata for atomicparsley
-	tags_encode($tags) unless $opt->{tag_utf8} || $opt->{myaputf8};
-	# build atomicparsley command
+sub tag_cmd {
+	my ($meta, $tags, $desc_file) = @_;
 	my @cmd = (
 		$bin->{atomicparsley},
 		$meta->{filename},
@@ -9543,17 +9527,7 @@ sub tag_file_mp4 {
 		'--year', $tags->{year},
 		'--tracknum', $tags->{tracknum},
 		'--disk', $tags->{disk},
-		'--lyrics', $tags->{lyrics},
 	);
-	# add descriptions to audio podcasts and video
-	if ( $tags->{is_video} || $tags->{is_podcast}) {
-		push @cmd, ('--description', $tags->{description} );
-		if ( $opt->{myaplongdescription} ) {
-			push @cmd, ( '--longDescription', $tags->{longDescription} );
-		} elsif ( $opt->{myaplongdesc} ) {
-			push @cmd, ( '--longdesc', $tags->{longDescription} );
-		}
-	}
 	# video only
 	if ( $tags->{is_video} ) {
 		# all video
@@ -9582,9 +9556,74 @@ sub tag_file_mp4 {
 	unless ( $opt->{noartwork} ) {
 		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
 	}
-	# run atomicparsley command
+	# add descriptions to audio podcasts and video
+	if ( $tags->{is_video} || $tags->{is_podcast} ) {
+		push @cmd, ( '--description', $tags->{description} );
+		if ( $opt->{myaplongdescfile} && -f $desc_file ) {
+				push @cmd, ( '--longdescFile', $desc_file );
+		} else {
+			if ( $opt->{myaplongdescription} ) {
+				push @cmd, ( '--longDescription', $tags->{longDescription} );
+			} elsif ( $opt->{myaplongdesc} ) {
+				push @cmd, ( '--longdesc', $tags->{longDescription} );
+			}
+		}
+	}
+	if ( $opt->{myaplyricsfile} && -f $desc_file ) {
+		push @cmd, ( '--lyricsFile', $desc_file );
+	} else {
+		push @cmd, ( '--lyrics', $tags->{lyrics} );
+	}
+	for ( @cmd ) {
+		$_ = "" unless defined $_;
+	}
+	return @cmd;
+}
+
+# add MP4 tag with atomicparsley
+sub tag_file_mp4 {
+	my ($self, $meta, $tags) = @_;
+	tag_init();
+	# Only tag if the required tool exists
+	if ( ! main::exists_in_path( 'atomicparsley' ) ) {
+		main::logger "WARNING: Required AtomicParsley utility not found - cannot tag \U$meta->{ext}\E file\n";
+		return 1;
+	}
+	main::logger "INFO: Tagging \U$meta->{ext}\E\n";
+	my @cmd;
+	my $rc;
 	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';
-	if ( main::run_cmd( $run_mode, @cmd ) ) {
+	if ( $^O eq "MSWin32" && ! $opt->{tag_nounicode} ) {
+		if ( $opt->{myaplongdescfile} && $opt->{myaplyricsfile} ) {
+			my $desc_file = main::encode_fs(File::Spec->catfile($meta->{dir}, "$meta->{fileprefix}.desc.txt") );
+			unlink $desc_file;
+			if ( open( DESC, ">:raw:utf8", $desc_file ) ) {
+				print DESC $tags->{longDescription};
+				close DESC;
+				@cmd = tag_cmd($meta, $tags, $desc_file);
+				$rc = main::run_cmd_win32( $run_mode, @cmd );
+				if ( $rc ) {
+					main::logger "WARNING: Unicode tagging failed - falling back to non-Unicode\n";
+				}
+			} else {
+				main::logger "WARNING: Could not create temp description file: $desc_file\n";
+				main::logger "WARNING: Unicode tagging unavailable - falling back to non-Unicode\n";
+				$rc = 1;
+			}
+			unlink $desc_file;
+		} else {
+			main::logger "WARNING: Unicode tagging unsupported - falling back to non-Unicode\n";
+			$rc = 1;
+		}
+	}
+	if ( $^O ne "MSWin32" || $opt->{tag_nounicode} || $rc ) {
+		if ( $^O eq "MSWin32" ) {
+			tags_encode($tags, $opt->{tag_encoding} || "cp1252");
+		}
+		@cmd = tag_cmd( $meta, $tags );
+		$rc = main::run_cmd( $run_mode, @cmd );
+	}
+	if ( $rc ) {
 		main::logger "WARNING: Failed to tag \U$meta->{ext}\E file\n";
 		return 2;
 	}
