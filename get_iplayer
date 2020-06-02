@@ -2274,6 +2274,14 @@ sub lockfile {
 		}
 		my @lines = <LOCKFILE>;
 		close LOCKFILE;
+		# remove lockfile if does not contain numeric process ID and exit
+		if ( ! @lines || $lines[0] !~ /^\d+$/ ) {
+				main::logger "ERROR: Quitting - invalid PVR lockfile detected: '$lockfile'\n";
+				main::logger "ERROR: Ensure PVR is not already running and restart.\n";
+				unlink $lockfile;
+				$lockfile = '';
+				exit 1;
+		}
 
 		# If the process is still running and the lockfile is newer than $stale_time seconds
 		if ( kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
