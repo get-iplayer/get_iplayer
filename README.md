@@ -6,7 +6,7 @@
 * Allows multiple programmes to be downloaded using a single command
 * Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button, iPlayer Exclusive, or Podcast-only)
 * Caching of programme index with automatic updating
-* Regex search on programme name 
+* Regex search on programme name
 * Regex search on programme description and episode title
 * Filter search results by channel
 * Direct download via programme ID or URL
@@ -16,7 +16,7 @@
 * Requires ffmpeg for conversion to MP4 and AtomicParsley for metadata tagging
 * Runs on Linux/BSD (Ubuntu, Fedora, OpenBSD and others), macOS (10.10+), Windows (7/8/10)
 
-**NOTE:** 
+**NOTE:**
 
 - **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer/Sounds sites. BBC Three programmes, red button programmes, iPlayer box sets, iPlayer exclusives, and BBC podcasts are not searchable. Old programmes that are still available after 30 days must be located on the iPlayer/Sounds sites and downloaded directly via PID or URL, but such use is not supported.**.
 - **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It may be possible to download other content such as red button programmes or iPlayer box sets directly via PID or URL, but such use is not supported. get_iplayer DOES NOT support live recording from BBC channels.**
@@ -24,17 +24,13 @@
 ## Documentation
 
 <https://github.com/get-iplayer/get_iplayer/wiki>
-	
-## Forums
-
-<https://forums.squarepenguin.co.uk>
 
 ## Installation
 
 <https://github.com/get-iplayer/get_iplayer/wiki/installation>
 
-## Usage 
-  
+## Usage
+
 	get_iplayer --help
 	get_iplayer --basic-help
 	get_iplayer --long-help
@@ -54,7 +50,7 @@
 		...
 
 	Format = `<index>: <name> - <episode>, <channel>, <pid>`
-  
+
 * List all TV programmes with long descriptions:
 
 	`get_iplayer --long ".*"`
@@ -78,7 +74,7 @@
 * List Radio 4 and Radio 4 Extra programmes with "Book at Bedtime" in the title:
 
 	`get_iplayer --type=radio --channel="Radio 4" "Book at Bedtime"`
-	
+
 * List only Radio 4 programmes with "Book at Bedtime" in the title:
 
 	`get_iplayer --type=radio --channel="Radio 4$" "Book at Bedtime"`
@@ -88,8 +84,8 @@
 * Record TV programme number 208 (index from search results) in HD, with SD fallback if HD not available:
 
 	`get_iplayer --get 208` [default is to download best available (max 1280x720)]
-	
-	OR	
+
+	OR
 
 	`get_iplayer --get 208 --tvmode=best`
 
@@ -101,7 +97,7 @@
 
 	`get_iplayer --get 208 --subtitles`
 
-* Record multiple TV programmes (using index numbers from search results): 
+* Record multiple TV programmes (using index numbers from search results):
 
 	`get_iplayer --get 208 209 210`
 
@@ -112,15 +108,15 @@
 * Record a TV programme using the PID (b01sc0wf) from its iPlayer URL:
 
 	`get_iplayer --pid=b01sc0wf`
-	
+
 * Record a radio programme using its Sounds URL:
 
-    `get_iplayer https://www.bbc.co.uk/sounds/play/b07gcv34`	
+    `get_iplayer https://www.bbc.co.uk/sounds/play/b07gcv34`
 * Record a radio programme using the PID (b07gcv34) from its Sounds URL in highest quality (320k), with fallback to lower quality if not available:
 
 	`get_iplayer --pid=b07gcv34` [default is to download best available]
-	
-	OR	
+
+	OR
 
 	`get_iplayer --pid=b07gcv34 --radiomode=best`
 
@@ -128,11 +124,11 @@
 
 	`get_iplayer --pid=b07gcv34 --radiomode=good`
 
-* Record multiple radio programmes (using PIDs from Sounds URLs): 
+* Record multiple radio programmes (using PIDs from Sounds URLs):
 
 	`get_iplayer --pid=b07gcv34,b07h60ld` [comma-separated list]
 
-	OR	
+	OR
 
 	`get_iplayer --pid=b07gcv34 --pid=b07h60ld` [multiple arguments]
 
