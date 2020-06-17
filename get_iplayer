@@ -157,8 +157,8 @@ my $opt_format = {
 	thumbext	=> [ 1, "thumbext|thumb-ext=s", 'Output', '--thumb-ext <ext>', "Thumbnail filename extension to use"],
 	thumbonly	=> [ 1, "thumbonly|thumbnailonly|thumbnail-only|thumb-only!", 'Output', '--thumbnail-only', "Only download thumbnail image if available, not the programme"],
 	thumbseries	=> [ 1, "thumbseries|thumbnailseries|thumb-series|thumbnail-series!", 'Output', '--thumbnail-series', "Force use of series/brand thumbnail (series preferred) instead of episode thumbnail"],
-	thumbsize	=> [ 1, "thumbsize|thumb-size|thumbsizemeta|thumbnailsize|thumbnail-size=n", 'Output', '--thumbnail-size <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 1920"],
-	thumbsquare	=> [ 1, "thumbsquare|thumbnailsquare|thumb-square|thumbnail-square!", 'Output', '--thumbnail-square', "Download square version of thumbnail image."],
+	thumbsize	=> [ 1, "thumbsize|thumb-size|thumbsizemeta|thumbnailsize|thumbnail-size=n", 'Output', '--thumbnail-size <width>', "Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 1920 (1280 with --thumbnail-square)"],
+	thumbsquare	=> [ 1, "thumbsquare|thumbnailsquare|thumb-square|thumbnail-square!", 'Output', '--thumbnail-square', "Download square version of thumbnail image. Limits --thumbnail-size to 1280."],
 	tracklist		=> [ 1, "tracklist!", 'Output', '--tracklist', "Create track list of music played in programme, if data available. Track times and durations may be missing or incorrect."],
 	tracklistonly		=> [ 1, "tracklistonly|tracklist-only!", 'Output', '--tracklist-only', "Only create track list of music played in programme, if data available."],
 	whitespace	=> [ 1, "whitespace|ws|w!", 'Output', '--whitespace, -w', "Keep whitespace in file and directory names.  Default behaviour is to replace whitespace with underscores."],
@@ -5701,6 +5701,10 @@ sub thumb_url_recipe {
 	my $prog = shift;
 	my $defsize = 1920;
 	my $thumbsize = $opt->{thumbsize} || $defsize;
+	if ( $opt->{thumbsquare} && $opt->{thumbsize} > 1280 ) {
+			main::logger "WARNING: Thumbnail size is limited to 1280 with --thumbnail-square\n";
+	}
+	$thumbsize = 1280 if $opt->{thumbsquare} && $thumbsize > 1280;
 	my $recipe = $prog->thumb_url_recipes->{ $thumbsize };
 	if ( ! $recipe ) {
 		if ( $thumbsize >= 1 && $thumbsize <= 11 ) {
@@ -5724,7 +5728,7 @@ sub thumb_url_recipe {
 			}
 			$newsize = $size;
 		}
-		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using nearest available ($newsize)\n";
+		main::logger "WARNING: Invalid thumbnail size: $thumbsize - using nearest available size ($newsize)\n";
 		$recipe = $prog->thumb_url_recipes->{ $newsize };
 	}
 	if ( $opt->{thumbsquare} ) {
