@@ -7619,11 +7619,9 @@ sub ttml_to_srt {
 		'yellow'  => '#ffff00',
 		'white'   => '#ffffff'
 	);
-
 	use Text::Wrap qw(fill $columns $huge);
 	$columns = $mono ? 39 : 37;
 	$huge = 'overflow';
-
 	$ttml =~ tr/\x00//d;
 	my $dom;
 	eval { $dom = XML::LibXML->load_xml(string => $ttml); };
@@ -7644,14 +7642,19 @@ sub ttml_to_srt {
 	eval { $fps = $xpc->findvalue('/*/@ttp:frameRate') };
 	my %style_colors;
 	foreach my $style ($xpc->findnodes('//tt:styling/tt:style')) {
-		my $style_id = $style->findvalue('@id');
+		my $style_id = $style->findvalue('@xml:id');
+		$style_id ||= $style->findvalue('@id');
 		if ($style_id) {
 			my $style_color;
 			eval { $style_color = $style->findvalue('@tts:color') };
 			if ($style_color) {
-				my $style_hex = $hex_colors{$style_color};
-				if ($style_hex) {
-					$style_colors{$style_id} = $style_hex;
+				if ($style_color =~ /^#/) {
+					$style_colors{$style_id} = substr($style_color, 0, 7);
+				} else {
+					my $style_hex = $hex_colors{$style_color};
+					if ($style_hex) {
+						$style_colors{$style_id} = $style_hex;
+					}
 				}
 			}
 		}
@@ -7659,12 +7662,13 @@ sub ttml_to_srt {
 	my ($body) = $xpc->findnodes('//tt:body');
 	my $body_style = $body->findvalue('@style');
 	my $body_color = $style_colors{$body_style} || $hex_colors{'white'};
+	$body_color = substr($body_color, 0, 7);
 	my $curr_color = $body_color;
-
 	open( my $fh, "> $srt" );
 	for my $div ($xpc->findnodes('tt:div', $body)) {
 		my $div_style = $div->findvalue('@style');
 		my $div_color = $style_colors{$div_style} || $body_color;
+		$div_color = substr($div_color, 0, 7);
 		$curr_color = $div_color;
 		for my $p ($xpc->findnodes('tt:p', $div)) {
 			my (@times, @ts);
@@ -7697,6 +7701,7 @@ sub ttml_to_srt {
 			if ( $p_color && $p_color !~ /^#/ ) {
 				$p_color = $hex_colors{$p_color};
 			}
+			$p_color = substr($p_color, 0, 7);
 			$p_color ||= $div_color;
 			for my $p_child ($p->childNodes) {
 				if ($p_child->nodeName eq "br") {
@@ -7727,6 +7732,7 @@ sub ttml_to_srt {
 					if ( $span_color && $span_color !~ /^#/ ) {
 						$span_color = $hex_colors{$span_color};
 					}
+					$span_color = substr($span_color, 0, 7);
 					$span_color ||= $p_color;
 					for my $span_child ($span->childNodes) {
 						if ($span_child->nodeName eq "br") {
