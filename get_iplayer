@@ -66,6 +66,8 @@ use version 0.77;
 use if $^O eq 'MSWin32', "Win32::Unicode::Process" => qw();
 use constant DIVIDER => "-==-" x 20;
 use constant FB_EMPTY => sub { '' };
+use constant IS_MACOS => $^O eq 'darwin' ? 1 : 0;
+use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 $PerlIO::encoding::fallback = XMLCREF;
 
 # Save default SIG actions
@@ -336,7 +338,7 @@ $ENV{GETIPLAYER_PROFILE} ||= $ENV{GETIPLAYERUSERPREFS};
 if ( $ENV{GETIPLAYER_PROFILE} ) {
 	$profile_dir = $opt_pre->{profiledir} || $ENV{GETIPLAYER_PROFILE};
 # Otherwise look for windows style file locations
-} elsif ( $ENV{USERPROFILE} && $^O eq "MSWin32" ) {
+} elsif ( $ENV{USERPROFILE} && IS_WIN32 ) {
 	$profile_dir = $opt_pre->{profiledir} || File::Spec->catfile($ENV{USERPROFILE}, '.get_iplayer');
 # Options on unix-like systems
 } elsif ( $ENV{HOME} ) {
@@ -352,7 +354,7 @@ $ENV{GETIPLAYER_DEFAULTS} ||= $ENV{GETIPLAYERSYSPREFS};
 if ( $ENV{GETIPLAYER_DEFAULTS} ) {
 	$optfile_system = $ENV{GETIPLAYER_DEFAULTS};
 # Otherwise look for windows style file locations
-} elsif ( $ENV{ALLUSERSPROFILE} && $^O eq "MSWin32" ) {
+} elsif ( $ENV{ALLUSERSPROFILE} && IS_WIN32 ) {
 	$optfile_system = File::Spec->catfile($ENV{ALLUSERSPROFILE}, 'get_iplayer', 'options');
 # System options on unix-like systems
 } else {
@@ -365,12 +367,12 @@ $ENV{GETIPLAYER_OUTPUT} ||= $ENV{IPLAYER_OUTDIR};
 # default output directory on desktop for Windows/macOS
 if ( ! $ENV{GETIPLAYER_OUTPUT} ) {
 	my $desktop;
-	if ( $^O eq "MSWin32" ) {
+	if ( IS_WIN32 ) {
 		eval 'use Win32 qw(CSIDL_DESKTOPDIRECTORY); $desktop = Win32::GetFolderPath(CSIDL_DESKTOPDIRECTORY);';
 		if ( $@ ) {
 			undef $desktop
 		}
-	} elsif ( $^O eq "darwin" ) {
+	} elsif ( IS_MACOS ) {
 		$desktop = File::Spec->catfile($ENV{HOME}, "Desktop")
 	}
 	if ( $desktop && -d $desktop) {
@@ -731,9 +733,9 @@ sub release_check {
 	if ( $force_check || ! -f $relchk_file || $now - stat($relchk_file)->mtime > 7 * 86400 ) {
 		main::logger "INFO: Checking for new release\n";
 		my $repo_suffix;
-		if ( $^O eq "darwin" ) {
+		if ( IS_MACOS ) {
 			$repo_suffix = "_macos";
-		} elsif ( $^O eq "MSWin32" ) {
+		} elsif ( IS_WIN32 ) {
 			$repo_suffix = "_win32";
 		}
 		my $releases_url = "https://github.com/get-iplayer/get_iplayer${repo_suffix}/releases";
@@ -2063,7 +2065,7 @@ sub quote_arg {
 
 sub escape_arg {
 	my ($arg) = @_;
-	my $r = $^O eq "MSWin32" ? '"' : '["`$]';
+	my $r = IS_WIN32 ? '"' : '["`$]';
 	$arg =~ s{(\\*)(?=$r|\z)}{$1$1}g;
 	$arg =~ s{($r)}{\\$1}g;
 	return $arg;
@@ -2074,20 +2076,20 @@ sub escape_arg {
 # Usage: run_cmd( <normal|STDERR|STDOUT>, @args )
 # Returns: exit code
 sub run_cmd {
-	#if ( $^O eq "MSWin32" && ! grep /[\r\n]/, @_ ) {
+	#if ( IS_WIN32 && ! grep /[\r\n]/, @_ ) {
 	#	return run_cmd_win32( @_ );
 	#}
 	my $mode = shift;
 	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
 	my @cmd;
-	if ( $^O eq "MSWin32" && @_ > 1 ) {
+	if ( IS_WIN32 && @_ > 1 ) {
 		@cmd = map { quote_arg( $_ ); } @_;
 	} else {
 		@cmd = ( @_ );
 	}
 	if ( $opt->{verbose} ) {
 		my $log_str;
-		if ( ( $^O eq "MSWin32" && @cmd > 1 ) || @cmd == 1 ) {
+		if ( ( IS_WIN32 && @cmd > 1 ) || @cmd == 1 ) {
 			$log_str = join ' ', @cmd;
 		} else {
 			$log_str = join( ' ',  map { quote_arg($_) } @cmd );
@@ -2283,13 +2285,13 @@ sub StringUtils::sanitize_path {
 	# Replace forward slashes with underscore if not path
 	$string =~ s|\/|_|g unless $is_path;
 	# Replace backslashes with underscore if not Windows path
-	$string =~ s|\\|_|g unless $^O eq "MSWin32" && $is_path;
+	$string =~ s|\\|_|g unless IS_WIN32 && $is_path;
 	# Do not sanitise if specified
 	if ( $opt->{nosanitise} && ! $force_default ) {
 		# Remove invalid chars for Windows
-		$string =~ s/$win_bad//g if $^O eq "MSWin32";
+		$string =~ s/$win_bad//g if IS_WIN32;
 		# Remove invalid chars for macOS
-		$string =~ s/$mac_bad//g if $^O eq "darwin";
+		$string =~ s/$mac_bad//g if IS_MACOS;
 	} else {
 		# use ISO8601 dates
 		$string =~ s|(\d\d)[/_](\d\d)[/_](20\d\d)|$3-$2-$1|g;
@@ -2448,12 +2450,12 @@ sub regex_numbers {
 
 sub default_encodinglocale {
 	return 'UTF-8' if (${^UNICODE} & 32);
-	return ($^O eq "MSWin32" ? 'cp1252' : 'UTF-8');
+	return (IS_WIN32 ? 'cp1252' : 'UTF-8');
 }
 
 sub default_encodingconsoleout {
 	return 'UTF-8' if (${^UNICODE} & 6);
-	return ($^O eq "MSWin32" ? 'cp850' : 'UTF-8');
+	return (IS_WIN32 ? 'cp850' : 'UTF-8');
 }
 
 sub encode_fs {
@@ -3363,6 +3365,7 @@ use strict;
 use Time::Local;
 use URI;
 use XML::LibXML 1.91;
+use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 
 my $ffmpeg_check;
 
@@ -4414,7 +4417,7 @@ sub generate_filenames {
 	main::logger "DEBUG: Raw Mode:           $opt->{raw}\n" if $opt->{debug};
 
 	# Check path length is < 256 chars (Windows only)
-	if ( length( $prog->{filepart} ) > 255 && $^O eq "MSWin32" ) {
+	if ( length( $prog->{filepart} ) > 255 && IS_WIN32 ) {
 		main::logger("ERROR: Generated file path is too long, please use --fileprefix, --subdir-format, --subdir and --output options to shorten it to below 256 characters\n");
 		main::logger("ERROR: Generated file path: $prog->{filepart}\n");
 		return 1;
@@ -9294,6 +9297,7 @@ package Tagger;
 
 use Encode qw(:default :fallback_all);
 use File::stat;
+use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 
 # already in scope
 # my ($opt, $bin);
@@ -9593,7 +9597,7 @@ sub tag_file_mp4 {
 	my @cmd;
 	my $rc;
 	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';
-	if ( $^O eq "MSWin32" && ! $opt->{tag_nounicode} ) {
+	if ( IS_WIN32 && ! $opt->{tag_nounicode} ) {
 		if ( $opt->{myaplongdescfile} && $opt->{myaplyricsfile} ) {
 			my $desc_file = main::encode_fs(File::Spec->catfile($meta->{dir}, "$meta->{fileprefix}.desc.txt") );
 			unlink $desc_file;
@@ -9616,8 +9620,8 @@ sub tag_file_mp4 {
 			$rc = 1;
 		}
 	}
-	if ( $^O ne "MSWin32" || $opt->{tag_nounicode} || $rc ) {
-		if ( $^O eq "MSWin32" ) {
+	if ( ! IS_WIN32 || $opt->{tag_nounicode} || $rc ) {
+		if ( IS_WIN32 ) {
 			tags_encode($tags, $opt->{tag_encoding} || "cp1252");
 		}
 		@cmd = tag_cmd( $meta, $tags );
