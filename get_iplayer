@@ -681,19 +681,16 @@ if ( defined($opt->{trimhistory}) ) {
 		unlink $lockfile;
 		exit 5;
 	};
-	# PVR Lockfile detection (with 12 hrs stale lockfile check)
-	lockfile( 43200 ) if ! $opt->{test};
+	lockfile() if ! $opt->{test};
 	$pvr->run_scheduler();
 
 } elsif ( $opt->{pvr} ) {
-	# PVR Lockfile detection (with 12 hrs stale lockfile check)
-	lockfile( 43200 ) if ! $opt->{test};
+	lockfile() if ! $opt->{test};
 	$retcode = $pvr->run( @search_args );
 	unlink $lockfile;
 
 } elsif ( $opt->{pvrsingle} ) {
-	# PVR Lockfile detection (with 12 hrs stale lockfile check)
-	lockfile( 43200 ) if ! $opt->{test};
+	lockfile() if ! $opt->{test};
 	$retcode = $pvr->run( '^'.$opt->{pvrsingle}.'$' );
 	unlink $lockfile;
 
@@ -2264,12 +2261,11 @@ sub cleanup {
 # Lock file detection (<stale_secs>)
 # Global $lockfile
 sub lockfile {
-	my $stale_time = shift || 86400;
 	my $now = time();
 	# if lockfile exists then quit as we are already running
 	if ( -T $lockfile ) {
 		if ( ! open (LOCKFILE, $lockfile) ) {
-			main::logger "ERROR: Cannot read lockfile '$lockfile'\n";
+			main::logger "ERROR: Cannot read PVR lockfile: '$lockfile'\n";
 			exit 1;
 		}
 		my @lines = <LOCKFILE>;
@@ -2282,21 +2278,19 @@ sub lockfile {
 				$lockfile = '';
 				exit 1;
 		}
-
-		# If the process is still running and the lockfile is newer than $stale_time seconds
-		if ( kill(0,$lines[0]) > 0 && $now < ( stat($lockfile)->mtime + $stale_time ) ) {
-				main::logger "ERROR: Quitting - process is already running ($lockfile)\n";
-				# redefine cleanup sub so that it doesn't delete $lockfile
+		# exit if the process is still running
+		if ( kill( 0, $lines[0] ) ) {
+				main::logger "ERROR: Quitting - PVR is already running (process ID: $lines[0])\n";
 				$lockfile = '';
-				exit 0;
+				exit 1;
 		} else {
-			main::logger "INFO: Removing stale lockfile\n" if $opt->{verbose};
-			unlink ${lockfile};
+			main::logger "INFO: Removing orphaned PVR lockfile: '$lockfile'\n" if $opt->{verbose};
+			unlink $lockfile;
 		}
 	}
-	# write our PID into this lockfile
+	# write our process ID into new lockfile
 	if (! open (LOCKFILE, "> $lockfile") ) {
-		main::logger "ERROR: Cannot write to lockfile '${lockfile}'\n";
+		main::logger "ERROR: Cannot write to PVR lockfile '$lockfile'\n";
 		exit 1;
 	}
 	print LOCKFILE $$;
