@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "February 2020" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "June 2020" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer
 .SH SYNOPSIS
@@ -174,7 +174,7 @@ Only download audio stream for TV programme. 'hls' recording modes are not suppo
 Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked.
 .TP
 \fB\-\-exclude\-supplier <supplier>,<supplier>,...
-Comma\-separated list of media stream suppliers to skip.  Possible values: akamai,limelight,bidi
+Comma\-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi. Synonym: \-\-exclude\-cdn.
 .TP
 \fB\-\-force
 Ignore programme history (unsets \-\-hide option also).
@@ -189,7 +189,7 @@ Start recording matching programmes. Search terms required.
 Show recording progress as hashes
 .TP
 \fB\-\-include\-supplier <supplier>,<supplier>,...
-Comma\-separated list of media stream suppliers to use if not included by default.  Possible values: akamai,limelight,bidi
+Comma\-separated list of media stream suppliers (CDNs) to use if not included by default or if previously excluded by \-\-exclude\-supplier. Possible values: akamai,limelight,bidi. Synonym: \-\-include\-cdn.
 .TP
 \fB\-\-log\-progress
 Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal.
@@ -279,6 +279,9 @@ Only download programme credits, if available.
 \fB\-\-cuesheet
 Create cue sheet (.cue file) for programme, if data available. Radio programmes only. Cue sheet will be very inaccurate and will required further editing. Cue sheet may require addition of UTF\-8 BOM (byte\-order mark) for some applications to identify encoding.
 .TP
+\fB\-\-cuesheet\-offset [\-]<offset>
+Offset track times in cue sheet and track list by the specified number of seconds. Synonym: \-\-tracklist\-offset
+.TP
 \fB\-\-cuesheet\-only
 Only create cue sheet (.cue file) for programme, if data available. Radio programmes only.
 .TP
@@ -358,10 +361,10 @@ Only download thumbnail image if available, not the programme
 Force use of series/brand thumbnail (series preferred) instead of episode thumbnail
 .TP
 \fB\-\-thumbnail\-size <width>
-Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 192
+Thumbnail size to use for the current recording and metadata. Specify width: 192,256,384,448,512,640,704,832,960,1280,1920. Invalid values will be mapped to nearest available. Default: 1920 (1280 with \-\-thumbnail\-square)
 .TP
 \fB\-\-thumbnail\-square
-Download square version of thumbnail image.
+Download square version of thumbnail image. Limits \-\-thumbnail\-size to 1280.
 .TP
 \fB\-\-tracklist
 Create track list of music played in programme, if data available. Track times and durations may be missing or incorrect.
@@ -517,6 +520,9 @@ Do not tag downloaded programmes.
 \fB\-\-tag\-credits
 Add programme credits (if available) to lyrics field.
 .TP
+\fB\-\-tag\-encoding <name>
+(Windows only) Single\-byte character encoding for non\-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: cp1252 (Windows code page 1252)
+.TP
 \fB\-\-tag\-format\-show
 Format template for programme name in tag metadata. Use substitution parameters in template (see docs for list). Default: <name>
 .TP
@@ -526,20 +532,20 @@ Format template for episode title in tag metadata. Use substitution parameters i
 \fB\-\-tag\-isodate
 Use ISO8601 dates (YYYY\-MM\-DD) in album/show names and track titles
 .TP
+\fB\-\-tag\-no\-unicode
+(Windows only) Do not attempt to perform Unicode tagging and use single\-byte character encoding instead (see \-\-tag\-encoding)
+.TP
 \fB\-\-tag\-podcast
 Tag downloaded radio and tv programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)
 .TP
 \fB\-\-tag\-podcast\-radio
-Tag only downloaded radio programmes as iTunes podcasts(incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)
+Tag only downloaded radio programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)
 .TP
 \fB\-\-tag\-podcast\-tv
 Tag only downloaded tv programmes as iTunes podcasts (incompatible with Music/Podcasts/TV apps on macOS 10.15 and higher)
 .TP
 \fB\-\-tag\-tracklist
 Add track list of music played in programme (if available) to lyrics field.
-.TP
-\fB\-\-tag\-utf8
-Use UTF\-8 encoding for non\-ASCII characters in AtomicParsley parameter values (Linux/Unix/macOS only). Use only if auto\-detect fails.
 .SS "Misc Options:"
 .TP
 \fB\-\-encoding\-console\-in <name>
@@ -577,7 +583,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.25, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.26, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
