@@ -1,0 +1,22 @@
+on:
+  issues:
+    types:
+      - opened
+jobs:
+  auto-close-lock-issue-action_job:
+    runs-on: ubuntu-latest
+    name: auto-close-lock-issue-action_job
+    steps:
+      - name: auto-close-lock-issue-action_close-step
+        id: auto-close-lock-issue-action_close-step
+        uses: maxkomarychev/octions/octions/issues/update@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue_number: ${{ github.event.issue.number }}
+          state: closed
+      - name: auto-close-lock-issue-action_lock-step
+        id: auto-close-lock-issue-action_lock-step
+        uses: maxkomarychev/octions/octions/issues/lock@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue_number: ${{ github.event.issue.number }}
