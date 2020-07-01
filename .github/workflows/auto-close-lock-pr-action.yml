@@ -1,0 +1,22 @@
+on:
+  pull_request:
+    types:
+      - opened
+jobs:
+  auto-close-lock-pr-action_job:
+    runs-on: ubuntu-latest
+    name: auto-close-lock-pr-action_job
+    steps:
+      - name: auto-close-lock-pr-action_close-step
+        id: auto-close-lock-pr-action_close-step
+        uses: maxkomarychev/octions/octions/pulls/update@master
+        with:
+          token: ${{ secrets.MAINTAINER_CAN_MODIFY }}
+          pull_number: ${{ github.event.number }}
+          state: closed
+      - name: auto-close-lock-pr-action_lock-step
+        id: auto-close-lock-pr-action_lock-step
+        uses: maxkomarychev/octions/octions/issues/lock@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue_number: ${{ github.event.number }}
