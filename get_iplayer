@@ -3160,10 +3160,12 @@ sub load {
 		# Create new history entry
 		if ( defined $hist->{ $record_entries->{pid} } ) {
 			main::logger "WARNING: duplicate pid $record_entries->{pid} in history\n" if $opt->{debug};
-			# Append filename and modes
-			$hist->{ $record_entries->{pid} }->{mode} .= ','.$record_entries->{mode} if defined $record_entries->{mode};
-			$hist->{ $record_entries->{pid} }->{filename} .= ','.$record_entries->{filename} if defined $record_entries->{filename};
-			main::logger "DEBUG: Loaded and merged '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+			# Replace filename and mode with latest entry if file exists
+			if ( -f $record_entries->{filename} ) {
+				$hist->{ $record_entries->{pid} }->{mode} = $record_entries->{mode};
+				$hist->{ $record_entries->{pid} }->{filename} = $record_entries->{filename};
+				main::logger "DEBUG: Loaded and replaced '$record_entries->{pid}' = '$record_entries->{name} - $record_entries->{episode}' from history\n" if $opt->{debug};
+			}
 		} else {
 			# workaround empty names
 			#$record_entries->{name} = 'pid:'.$record_entries->{pid} if ! $record_entries->{name};
