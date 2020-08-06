@@ -833,11 +833,11 @@ sub build_ffmpeg_args {
 			push @cmd_vopts, ( '-s', "${vsize}" ) if $vsize =~ m{^\d+x\d+$};
 
 			# Apply video framerate - caveat - bitrate defaults to 200k if only vfr is set
-			push @cmd_vopts, ( '-r', $vfr ) if $vfr =~ m{^\d$};
+			push @cmd_vopts, ( '-r', $vfr ) if $vfr =~ m{^\d+$};
 
 			# -sameq is bad
 			## Apply sameq if framerate only and no bitrate
-			#push @cmd_vopts, '-sameq' if $vfr =~ m{^\d$} && $vsize !~ m{^\d+x\d+$};
+			#push @cmd_vopts, '-sameq' if $vfr =~ m{^\d+$} && $vsize !~ m{^\d+x\d+$};
 
 			# Add in the codec if we are transcoding and not remuxing the stream
 			if ( @cmd_vopts ) {
