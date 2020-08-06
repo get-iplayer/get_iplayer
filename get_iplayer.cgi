@@ -347,7 +347,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 			print $se "$data{_method}: $request{URL}\n";
 
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(iplayer|recordings_delete|playlist.*|genplaylist.*|opml|)\/?$/ ) {
+			if ( $request{URL} =~ /^\/?(recordings_delete|playlist.+|genplaylist.+|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
@@ -480,24 +480,16 @@ sub run_cgi {
 	my $action = $cgi->param( 'ACTION' ) || $request_uri;
 	# Strip the leading '/' to get the action
 	$action =~ s|^\/||g;
-	# rewrite short-form backwards compatible URIs
-	# e.g. http://server/stream?args -> http://server/get_iplayer.cgi?ACTION=stream&args
 
-	# Stream from get_iplayer STDOUT (optionally transcoding if required)
+	# Stream from file (optionally transcoding if required)
 	if ( $action eq 'direct' ) {
 		binmode $fh, ':raw';
 		# get filename first
 		my $progtype = $cgi->param( 'PROGTYPES' );
 		my $pid = $cgi->param( 'PID' );
-		# If the modes list f set to nothing
-		#my $mode = $opt->{MODES}->{current} || $opt->{MODES}->{default};
 		my $mode = $cgi->param( 'MODES' );
 		my $filename = get_direct_filename( $pid, $mode, $progtype );
-		# Use OUTTYPE for transcoding if required - get output ext
-		# $cgi->param('STREAMTYPE') || $cgi->param('OUTTYPE') || 'flv' if $action eq 'playlistdirect';
 		my $ext = lc( $cgi->param('STREAMTYPE') || $cgi->param( 'OUTTYPE' ) );
-		# Remove fileprefix
-		$ext =~ s/^.*\.//g;
 		# get file source ext
 		my $src_ext = $filename;
 		$src_ext =~ s/^.*\.//g;
@@ -555,9 +547,11 @@ sub run_cgi {
 		}
 
 	# Get a playlist for a specified 'PROGTYPES'
-	} elsif ( $action eq 'playlist' || $action eq 'playlistdirect' || $action eq 'playlistfiles' ) {
+	} elsif ( $action eq 'playlistdirect' || $action eq 'playlistfiles' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
+		# To save file
+		#my $headers = $cgi->header( -type => 'audio/x-mpegurl', -attachment => 'get_iplayer.m3u' );
 
 		# Send the headers to the browser
 		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
@@ -570,19 +564,8 @@ sub run_cgi {
 		# ( host, outtype, modes, progtype, bitrate, search, searchfields, action )
 		print $fh create_playlist_m3u_single( $request_host, $outtype, $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name', $opt->{VERSIONLIST}->{current}, $action );
 
-	# Get a playlist for a specified 'PROGTYPES'
-	} elsif ( $action eq 'opml' ) {
-		# Output headers
-		my $headers = $cgi->header( -type => 'text/xml' );
-
-		# Send the headers to the browser
-		print $se "\r\nHEADERS:\n$headers\n"; #if $opt_cmdline->{debug};
-		print $fh $headers;
-		# ( host, outtype, modes, type, bitrate )
-		print $fh get_opml( $request_host, $cgi->param('OUTTYPE') || 'flv', $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $cgi->param('LIST') || '' );
-
 	# Get a playlist for a selected progs in form
-	} elsif ( $action eq 'genplaylist' || $action eq 'genplaylistdirect' || $action eq 'genplaylistfile' ) {
+	} elsif ( $action eq 'genplaylistdirect' || $action eq 'genplaylistfile' ) {
 		# Output headers
 		my $headers = $cgi->header( -type => 'audio/x-mpegurl' );
 		# To save file
@@ -880,14 +863,8 @@ sub create_playlist_m3u_single {
 	$outtype =~ s/^.*\.//g;
 
 	my $searchterm = $search;
-	# this is already a wildcard default regex...
-	if ( $search eq '.*' ) {
-		$searchterm = '.*';
-	# if it's a URL then bypass regex stuff
-	} elsif ( $search =~ m{^http} ) {
-		$searchterm = $search;
 	# make search term regex friendly
-	} else {
+	if ( $searchterm ne '.*' && $searchterm !~ m{^http} ) {
 		$searchterm =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
 	}
 
@@ -899,12 +876,9 @@ sub create_playlist_m3u_single {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm", "versionlist=$versionlist" ),
+		get_iplayer_webrequest_args( 'history=1', 'skipdeleted=1', 'nopurge=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm", "versionlist=$versionlist" ),
 	);
-	# Only add history search if the request is of this type or is a PlayFile from localfiles type
-	if ( ( $request eq 'playlistfiles' || $request eq 'playlistdirect' ) && ! ( $search =~ m{^/} && $searchfields eq 'pid' ) ) {
-		push @cmd, '--history', '--skipdeleted';
-	}
+
 	my @out = get_cmd_output( @cmd );
 
 	push @playlist, "#EXTM3U\n";
@@ -923,27 +897,15 @@ sub create_playlist_m3u_single {
 		# playlist with direct streaming for files through webserver
 		if ( $request eq 'playlistdirect' ) {
 			next if ! ( $pid && $type && $mode );
-			$url = build_url_direct( $request_host, $type, $pid, $mode, basename( $filename ), $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} );
-
-		# If pid is actually a filename then use it cos this is a local file type programme
-		} elsif ( $request eq 'playlistfiles' && $pid =~ m{^/} ) {
-			next if ! $pid;
-			$url = search_absolute_path( $pid ) if $pid;
+			$url = build_url_direct( $request_host, $type, $pid, $mode, $outtype, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} );
 
 		# playlist with local files
 		} elsif ( $request eq 'playlistfiles' ) {
 			next if ! $filename;
 			$url = search_absolute_path( $filename );
 
-		# playlist of proxied urls for streaming online prog via web server
-		} else {
-			next if ! ( $type && $pid );
-			my $suffix = "${pid}.${outtype}";
-			$url = build_url_stream( $request_host, $type, $pid, $mode || $modes, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} );
 		}
 
-		# Format required, e.g.
-		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
 		push @playlist, "#EXTINF:-1,$type - $channel - $name - $episode - $desc";
 		push @playlist, "$url\n";
 
@@ -961,11 +923,6 @@ sub create_playlist_m3u_multi {
 
 	my @record = ( $cgi->param( 'PROGSELECT' ) );
 
-	# If a URL was specified by the User (assume auto mode list is OK):
-	if ( $opt->{URL}->{current} =~ m{^https?://} ) {
-		push @record, "$opt->{PROGTYPES}->{current}|$opt->{URL}->{current}|$opt->{URL}->{current}|-";
-	}
-
 	# Create m3u from all selected 'TYPE|PID|NAME|EPISODE|MODE|CHANNEL' entries in the PVR
 	for (@record) {
 		my $url;
@@ -979,148 +936,20 @@ sub create_playlist_m3u_multi {
 
 		# playlist with local files
 		} elsif ( $request eq 'genplaylistfile' ) {
-			# If pid is actually a filename then use it cos this is a local file type programme
-			if ( $pid =~ m{^/} ) {
-				my $filename = search_absolute_path( $pid );
-				$url = $filename if $filename;
-			} else {
-				# Lookup filename (add it if defined - even if relative)
-				# check for -f $filename if you want to exclude files that cannot be found
-				my $filename = get_direct_filename( $pid, $mode, $type );
-				$url = $filename if $filename;
-			}
-
-		# Uncomment this to make all playlists local for localfiles types
-		# If pid is actually a filename then use it cos this is a local file type programme
-		#} elsif ( $pid =~ m{^/} ) {
-		#	my $filename = search_absolute_path( $pid );
-		#	$url = $filename if $filename;
-
-		# playlist of proxied urls for streaming online prog via web server
-		} else {
-			my $suffix = "${pid}.${outtype}";
-			$url = build_url_stream( $request_host, $type, $pid, $mode || $opt->{MODES}->{current}, $suffix, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} );
+			# Lookup filename (add it if defined - even if relative)
+			# check for -f $filename if you want to exclude files that cannot be found
+			my $filename = get_direct_filename( $pid, $mode, $type );
+			$url = $filename if -f $filename;
 		}
 
 		# Skip empty urls
 		next if ! $url;
 
-		# Format required, e.g.
-		##EXTINF:-1,BBC Radio - BBC Radio One (High Quality Stream)
-		#http://localhost:1935/stream?PID=liveradio:bbc_radio_one&MODES=flashaac&OUTTYPE=bbc_radio_one.wav
 		push @playlist, "#EXTINF:-1,$type - $channel - $name - $episode";
 		push @playlist, "$url\n";
 
 	}
 	print $se join ("\n", @playlist);
-	return join ("\n", @playlist);
-}
-
-
-
-sub get_opml {
-	my ( $request_host, $outtype, $modes, $type, $bitrate, $search, $list ) = ( @_ );
-	my @playlist;
-	$outtype =~ s/^.*\.//g;
-
-	#<?xml version="1.0" encoding="UTF-8"?>
-	#<opml version="1.1">
-	#  <head>
-	#    <title>Grateful Dead - 1995-07-09-Chicago, IL</title>
-	#  </head>
-	#  <body>
-	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t01_vbr.mp3" bitrate="200" source="Soundboard" text="Touch Of Grey" type="audio" />
-	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t02_vbr.mp3" bitrate="203" source="Soundboard" text="Little Red Rooster" type="audio" />
-	#    <outline URL="http://www.archive.org/.../gd1995-07-09d1t03_vbr.mp3" bitrate="194" source="Soundboard" text="Lazy River Road" type="audio" />
-	#  </body>
-	#</opml>
-
-	print $se "INFO: Getting playlist for type '$type' using modes '$modes', bitrate '$bitrate', search='$search' and list '$list'\n";
-
-	# Header
-	push @playlist, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<opml version=\"1.1\">";
-
-	# Programmes
-	if (! $list) {
-
-		# Header
-		push @playlist, "\t<head>\n\t\t\n\t</head>";
-		push @playlist, "\t<body>";
-
-		# Extract and rewrite into playlist format
-		my @out = get_cmd_output(
-			$opt_cmdline->{getiplayer},
-			'--encoding-locale=UTF-8',
-			'--encoding-console-out=UTF-8',
-			'--nocopyright',
-			'--expiry=999999999',
-			'--webrequest',
-			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", 'listformat=<pid>|<name>|<episode>|<desc>', "search=$search" ),
-		);
-		for ( grep !/^(Added:|Matches|$)/, @out ) {
-			chomp();
-			# Strip unprinatble chars
-			s/(.)/(ord($1) > 127) ? "" : $1/egs;
-			my ($pid, $name, $episode, $desc) = (split /\|/)[0,1,2,3];
-			next if ! ( $pid && $name );
-			push @playlist, "\t\t<outline URL=\"".encode_entities( build_url_stream( $request_host, $type, $pid, $modes, $outtype ) )."\"  bitrate=\"${bitrate}\" source=\"get_iplayer\" title=\"".encode_entities("$name - $episode - $desc")."\" text=\"".encode_entities("$name - $episode - $desc")."\" type=\"audio\" />";
-		}
-
-	# Top-level Menu
-	} elsif ( lc($list) eq 'menu' ) {
-		my %menu = (
-			'BBC iPlayer Radio Listen Again'=> "${request_host}?ACTION=opml&PROGTYPES=radio&LIST=channel",
-		);
-
-		# Header
-		push @playlist, "\t<head title=\"GetIplayer\">\n\t\t\n\t</head>";
-		push @playlist, "\t<body>";
-		for my $item ( sort keys %menu ) {
-			my $item_url = $menu{ $item };
-			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
-			push @playlist, "\t\t<outline URL=\"".encode_entities( $item_url )."\" text=\"".encode_entities( "$item" )."\" />";
-		}
-
-	# Channels/Names etc
-	} elsif ($list) {
-
-		# Header
-		push @playlist, "\t<head>\n\t\t\n\t</head>";
-		push @playlist, "\t<body>";
-
-		# Extract and rewrite into playlist format
-		my @out = get_cmd_output(
-			$opt_cmdline->{getiplayer},
-			'--encoding-locale=UTF-8',
-			'--encoding-console-out=UTF-8',
-			'--nocopyright',
-			'--expiry=999999999',
-			'--webrequest',
-			get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "list=$list", "channel=$search" ),
-		);
-		for ( grep !/^(Added:|Matches|$)/, @out ) {
-			my $suffix;
-			chomp();
-			# Strip unprinatble chars
-			s/(.)/(ord($1) > 127) ? "" : $1/egs;
-			next if ! m{^.+\(\d+\)$};
-			my $item = $_;
-			s/\s*\(\d+\)$//g;
-			my $itemregex = '^'.$_.'$';
-			# URL encode it
-			$itemregex =~ s/([^A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
-			# Stateful addition of search terms
-			$suffix = '&LIST=name' if $list eq 'channel';
-			# Format required, e.g.
-			#http://localhost:1935/opml?PROGTYPES=<type>SEARCH=bbc+radio+1&MODES=${modes}&OUTTYPE=a.wav
-			push @playlist, "\t\t<outline URL=\"".encode_entities("${request_host}?ACTION=opml&PROGTYPES=${type}&SEARCH=${itemregex}${suffix}&MODES=${modes}&OUTTYPE=a.wav")."\" text=\"".encode_entities("$item")."\" title=\"".encode_entities("$item")."\" type=\"playlist\" />";
-		}
-
-	}
-
-	# Footer
-	push @playlist, "\t</body>\n</opml>";
-
 	return join ("\n", @playlist);
 }
 
@@ -1136,19 +965,6 @@ sub build_url_direct {
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}  BITRATE=${bitrate}  VSIZE=${vsize}  VFR=${vfr}\n";
 	# Build URL
 	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}&VERSIONLIST=${versionlist}";
-}
-
-
-# "${request_host}?ACTION=stream&PROGTYPES=${type}&PID=${pid}&MODES=${modes}&OUTTYPE=${suffix}";
-sub build_url_stream {
-	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype, $bitrate, $vsize, $vfr, $versionlist ) = ( @_ );
-	# Sanity check
-	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
-	# CGI::escape
-	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $streamtype, $bitrate, $vsize, $vfr );
-	#print $se "DEBUG: building stream playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
-	# Build URL
-	return "${request_host}?ACTION=stream&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}&VERSIONLIST=${versionlist}";
 }
 
 
@@ -1996,33 +1812,14 @@ sub show_info {
 # If the PID is a filename then filename is still searched using PID and TYPE
 sub get_direct_filename {
 	my ( $pid, $mode, $type ) = ( @_ );
-	my $out;
-	my @html;
-	my %prog;
-	my $pidisfile;
 	my $history = 1;
 
 	print $se "DEBUG: Looking up filename for MODE=$mode TYPE=$type PID=$pid\n";
 
-	# set this flag if required and unset history if pid is a file
-	if ( -f $pid ) {
-		print $se "DEBUG: PID is a valid filename\n";
-		$pidisfile = 1;
-		$history = 0;
-	}
-
-	# Skip if not defined or, if pid is a file and no type defined
-	if ( $pidisfile && ! $type ) {
-		print $se "ERROR: Cannot lookup filename for PID which is a filename if type is not set\n";
-		return '';
-	}
-	if ( ( ! $pidisfile ) && ! ( $pid && $mode && $type ) ) {
+	if ( ! ( $pid && $mode && $type ) ) {
 		print $se "ERROR: Cannot lookup filename unless PID, MODE and TYPE are set\n";
 		return '';
 	}
-
-	# make the pid regex friendly
-	$pid =~ s|([\/\.\?\+\-\*\^\(\)\[\]\{\}])|\\$1|g;
 
 	# Get the 'filename' entry from --history --info for this pid
 	my @cmd = (
@@ -2041,11 +1838,7 @@ sub get_direct_filename {
 	# Extract the filename
 	my $match = ( grep /^filename:/, @cmdout )[0];
 	my $filename;
-	if ( $pidisfile ) {
-		$filename = $1 if $match =~ m{^filename: (\/.+?)\|<filename>\|<mode>\s*$};
-	} else {
-		$filename = $1 if $match =~ m{^filename: .+?\|\s*(.+?)\|$mode\s*$};
-	}
+	$filename = $1 if $match =~ m{^filename: .+?\|\s*(.+?)\|$mode\s*$};
 	if ( $filename && $opt_cmdline->{encodinglocalefs} !~ /UTF-?8/i ) {
 		$filename = encode($opt_cmdline->{encodinglocalefs}, $filename, sub { '' });
 	}
@@ -2696,22 +2489,11 @@ sub search_progs {
 				-override	=> 1,
 			)
 		);
-		# Record and stream links
+		# Record links
 
 		my $links;
-		# 'Play'
-		# Search mode with filename as pid
-		if ( $pid =~ m{^/} ) {
-			if ( -f $pid ) {
-				# Play
- 				$links .= a( { -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlist', 'pid', $pid, $opt->{MODES}->{current} || $default_modes, $prog{$pid}->{type}, basename( $pid ) , $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
-				# PlayFile
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef, undef ) }, 'Play File' ).'<br />';
-				# PlayDirect
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play Direct' ).'<br />';
-			}
 		# History mode
-		} elsif ( $opt->{HISTORY}->{current} ) {
+		if ( $opt->{HISTORY}->{current} ) {
 			if ( $opt->{HIDEDELETED}->{current} || -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
