@@ -2826,7 +2826,8 @@ sub pagetrail {
 	my ( $page, $pagesize, $count, $trailsize ) = ( @_ );
 
 	# How many pages
-	my $pages = int( $count / $pagesize ) + 1;
+	my $pages = int( $count / $pagesize );
+	$pages++ if $count % $pagesize;
 	# If we request a page that is too high
 	$page = $pages if $page > $pages;
 	# Calc first and last programme numbers
