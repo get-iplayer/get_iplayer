@@ -2532,9 +2532,9 @@ sub search_progs {
 				if ( $prog{$pid}->{$_} !~ m{^https?://} ) {
 					$prog{$pid}->{$_} = DEFAULT_THUMBNAIL;
 				}
-				push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_new" }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
+				push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{web}, -target => "_blank" }, img( { -class=>$search_class, -height=>40, -src=>$prog{$pid}->{$_} } ) ) );
 			} elsif ( /^web$/ ) {
-					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{$_}, -target => "_new" }, 'Open URL' ) );
+					push @row, td( {-class=>$search_class}, a( { -title=>"Open original web URL", -class=>$search_class, -href=>$prog{$pid}->{$_}, -target => "_blank" }, 'Open URL' ) );
 			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
 			} elsif ( /^timeadded$/ ) {
 				my @t = gmtime( $time - $prog{$pid}->{$_} );
@@ -3041,7 +3041,7 @@ sub form_header {
 			li( { -class=>$class->{recordings} }, a( { -class=>'nav', -title=>'History search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);" }, 'Recordings' ) ).
 			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
 			li( { -class=>$class->{pvrrun} }, a( { -class=>'nav', -title=>'Run the PVR now - wait for the PVR to complete', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_run'; formheader.target='_newtab_pvrrun'; formheader.submit(); RestoreFormVars(formheader); formheader.target='';" }, 'Run PVR' ) ).
-			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "https://github.com/get-iplayer/get_iplayer/wiki/webpvr", -target => "_new" }, 'Help' ) )
+			li( { -class=>'nav_tab' }, a( { -class=>'nav', -title=>'Show help and instructions', -href => "https://github.com/get-iplayer/get_iplayer/wiki/webpvr", -target => "_newtab_help" }, 'Help' ) )
 		),
 	);
 	print $fh hidden( -name => 'AUTOPVRRUN', -value => $opt->{AUTOPVRRUN}->{current}, -override => 1 );
