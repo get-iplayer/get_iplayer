@@ -482,7 +482,7 @@ sub run_cgi {
 	$action =~ s|^\/||g;
 
 	# Stream from file (optionally transcoding if required)
-	if ( $action eq 'direct' ) {
+	if ( $action eq 'direct' || $action eq 'playdirect' ) {
 		binmode $fh, ':raw';
 		# get filename first
 		my $progtype = $cgi->param( 'PROGTYPES' );
@@ -495,34 +495,37 @@ sub run_cgi {
 		$src_ext =~ s/^.*\.//g;
 		# Stream mime types
 		my %mimetypes = (
-			wav 	=> 'audio/x-wav',
+			aac	=> 'audio/aac',
+			adts	=> 'audio/aac',
 			flac	=> 'audio/x-flac',
-			aac	=> 'audio/mpeg',
-			m4a	=> 'audio/mpeg',
+			m4a	=> 'audio/mp4',
 			mp3 	=> 'audio/mpeg',
-			rm	=> 'audio/x-pn-realaudio',
+			oga => 'audio/vorbis',
+			wav 	=> 'audio/x-wav',
+			asf	=> 'video/x-ms-asf',
+			avi	=> 'video/avi',
+			flv	=> 'video/x-flv',
+			matroska => 'video/x-matroska',
+			mkv => 'video/x-matroska',
 			mov 	=> 'video/quicktime',
 			mp4	=> 'video/mp4',
-			avi	=> 'video/x-flv',
-			flv	=> 'video/x-flv',
-			asf	=> 'video/x-ms-asf',
+			mpegts	=> 'video/MP2T',
+			rm	=> 'audio/x-pn-realaudio',
+			ts	=> 'video/MP2T',
 		);
 
-		# default recipies
-		# Disable transcoding if none is specified as OUTTYPE/STREAMTYPE
+		# default recipes
 		my $notranscode = 0;
+		# Disable transcoding if none is specified as OUTTYPE/STREAMTYPE
+		# Or if streaming MP4 via play direct
 		if ( $ext =~ /none/i ) {
-			print $se "INFO: Transcoding disabled (OUTTYPE=none)\n";
-			$ext = $src_ext;
-			$notranscode = 1;
-
-		# cannot stream mp4/avi so transcode to flv
-		# Add types here which you want re-muxed into flv
-		#if ( $src_ext =~ m{^(mp4|avi|mov|mp3|aac)$} && ! $ext ) {
-		} elsif ( $src_ext =~ m{^(mp4|m4a|aac|avi|mov)$} && ! $ext ) {
+				print $se "INFO: Transcoding disabled (OUTTYPE=$ext)\n";
+				$ext = $src_ext;
+				$notranscode = 1;
+		# Else known types re-mux into flv unless play direct
+		} elsif ( $action ne 'playdirect' && ! $ext && $src_ext =~ m{^(m4a|mp4|mp3|aac|avi|mkv|mov|ts)$} ) {
 			$ext = 'flv';
-
-		# Else Default to no transcoding
+		# Else default to no transcoding
 		} elsif ( ! $ext ) {
 			$ext = $src_ext;
 		}
@@ -558,8 +561,8 @@ sub run_cgi {
 		print $fh $headers;
 
 		# determine output type
-		my $outtype = $cgi->param('OUTTYPE') || 'flv';
-		$outtype = $cgi->param('STREAMTYPE') || $cgi->param('OUTTYPE') || 'flv' if $action eq 'playlistdirect';
+		my $outtype = $cgi->param('OUTTYPE');
+		$outtype = $cgi->param('STREAMTYPE') || $cgi->param('OUTTYPE') if $action eq 'playlistdirect';
 
 		# ( host, outtype, modes, progtype, bitrate, search, searchfields, action )
 		print $fh create_playlist_m3u_single( $request_host, $outtype, $opt->{MODES}->{current}, $opt->{PROGTYPES}->{current} , $cgi->param('BITRATE') || '', $opt->{SEARCH}->{current}, $opt->{SEARCHFIELDS}->{current} || 'name', $opt->{VERSIONLIST}->{current}, $action );
@@ -576,7 +579,7 @@ sub run_cgi {
 		print $fh $headers;
 
 		# determine output type
-		my $outtype = $cgi->param('OUTTYPE') || 'flv';
+		my $outtype = $cgi->param('OUTTYPE');
 		$outtype = $cgi->param('STREAMTYPE') || $cgi->param('OUTTYPE') if $action eq 'genplaylistdirect';
 
 		# ( host, outtype, modes, bitrate, action )
@@ -785,72 +788,41 @@ sub stream_file {
 
 sub build_ffmpeg_args {
 		my ( $filename, $mimetype, $ext, $abitrate, $vsize, $vfr, $src_ext ) = ( @_ );
-		my @cmd_aopts;
-		my $src_mimetype = $mimetype;
-		# mime type override for audio->flv conversion
-		if ( lc( $src_ext ) =~ m{^(aac|m4a|mp3)$} ) {
-			$src_mimetype = 'audio/mpeg';
-		}
-
-		if ( $abitrate =~ m{^\d+$} ) {
-			if ( lc( $ext ) eq 'flv' ) {
-				push @cmd_aopts, ( '-ar', '44100', '-ab', "${abitrate}k" );
-			} else {
-				push @cmd_aopts, ( '-ab', "${abitrate}k" );
-			}
-		} else {
-			if ( lc( $ext ) eq 'flv' ) {
-				push @cmd_aopts, ( '-ar', '44100' );
-			}
-			# cannot copy code if for example we have an aac stream output as WAV (e.g. squeezebox flashaac)
-			#push @cmd_aopts, ( '-acodec', 'copy' );
-		}
-
 		my @cmd;
+		my @cmd_vopts;
+		my @cmd_aopts;
+		if ( $abitrate =~ m{^\d+$} ) {
+			push @cmd_aopts, ( '-ab', "${abitrate}k" );
+		}
+		if ( lc( $ext ) eq 'flv' ) {
+			push @cmd_aopts, ( '-ar', '44100' );
+		}
 		# If conversion is necessary
 		# Video
-		if ( $src_mimetype =~ m{^video} ) {
-			my @cmd_vopts;
-
+		if ( $mimetype =~ m{^video} && $filename !~ m{\.(aac|m4a|mp3)$} ) {
 			# Apply video size
 			push @cmd_vopts, ( '-s', "${vsize}" ) if $vsize =~ m{^\d+x\d+$};
-
 			# Apply video framerate - caveat - bitrate defaults to 200k if only vfr is set
 			push @cmd_vopts, ( '-r', $vfr ) if $vfr =~ m{^\d+$};
-
-			# -sameq is bad
-			## Apply sameq if framerate only and no bitrate
-			#push @cmd_vopts, '-sameq' if $vfr =~ m{^\d+$} && $vsize !~ m{^\d+x\d+$};
-
 			# Add in the codec if we are transcoding and not remuxing the stream
 			if ( @cmd_vopts ) {
 				push @cmd_vopts, ( '-vcodec', 'libx264' );
 			} else {
 				push @cmd_vopts, ( '-vcodec', 'copy' );
 			}
-
-			@cmd = (
-				$opt_cmdline->{ffmpeg},
-				#'-f', $src_ext, # not required?
-				'-i', $filename,
-				@cmd_aopts,
-				@cmd_vopts,
-				'-f', $ext,
-				'-',
-			);
 		# Audio
 		} else {
-			@cmd = (
-				$opt_cmdline->{ffmpeg},
-				#'-f', $src_ext, # not required?
-				'-i', $filename,
-				'-vn',
-				@cmd_aopts,
-				'-ac', 2,
-				'-f', $ext,
-				'-',
-			);
+				push @cmd_vopts, ( '-vn' );
 		}
+		@cmd = (
+			$opt_cmdline->{ffmpeg},
+			'-i', $filename,
+			@cmd_vopts,
+			@cmd_aopts,
+			'-ac', 2,
+			'-f', $ext,
+			'-',
+		);
 		print $se "DEBUG: Command args: ".(join ' ', @cmd)."\n";
 		return @cmd;
 }
@@ -957,14 +929,15 @@ sub create_playlist_m3u_multi {
 
 ### Playlist URL builders
 sub build_url_direct {
-	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype, $history, $bitrate, $vsize, $vfr, $versionlist ) = ( @_ );
+	my ( $request_host, $progtypes, $pid, $modes, $outtype, $streamtype, $history, $bitrate, $vsize, $vfr, $versionlist, $action ) = ( @_ );
 	# Sanity check
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}\n";
 	# CGI::escape
 	$_ = CGI::escape($_) for ( $progtypes, $pid, $modes, $outtype, $streamtype, $history, $bitrate, $vsize );
 	#print $se "DEBUG: building direct playback request using:  PROGTYPES=${progtypes}  PID=${pid}  MODES=${modes}  OUTTYPE=${outtype}  BITRATE=${bitrate}  VSIZE=${vsize}  VFR=${vfr}\n";
 	# Build URL
-	return "${request_host}?ACTION=direct&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}&VERSIONLIST=${versionlist}";
+	$action ||= 'direct';
+	return "${request_host}?ACTION=$action&PROGTYPES=${progtypes}&PID=${pid}&MODES=${modes}&HISTORY=${history}&OUTTYPE=${outtype}&STREAMTYPE=${streamtype}&BITRATE=${bitrate}&VSIZE=${vsize}&VFR=${vfr}&VERSIONLIST=${versionlist}";
 }
 
 
@@ -2500,11 +2473,13 @@ sub search_progs {
 		if ( $opt->{HISTORY}->{current} ) {
 			if ( -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
+				$links .= a( { -id=>'nowrap', -target=>'_blank', -class=>$search_class, -title=>"Stream from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'Play File' ).'<br />';
+				$links .= a( { -id=>'nowrap', -target=>'_blank', -class=>$search_class, -title=>"Play from local file", -href=>build_url_playlist( '', 'playlistfiles', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, undef ) }, 'Play File' ).'<br />';
 				# PlayDirect - depends on browser support
-				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play Direct' ).'<br />';
+				if ( $prog{$pid}->{filename} =~ m{\.(m4a|mp4|mp3)$} ) {
+					$links .= a( { -id=>'nowrap', -target=>'_blank', -class=>$search_class, -title=>"Stream file into browser", -href=>build_url_direct( '', $prog{$pid}->{type}, $pid, $prog{$pid}->{mode}, $opt->{STREAMTYPE}->{current}, $opt->{STREAMTYPE}->{current}, $opt->{HISTORY}->{current}, $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current}, 'playdirect' ) }, 'Play Direct' ).'<br />';
+				}
 			}
 		# Search mode
 		} else {
@@ -3403,7 +3378,7 @@ sub process_params {
 	my %vsize_labels = ( ''=>'Native', '1280x720'=>'1280x720', '960x540'=>'960x540', '832x468'=>'832x468', '704x396'=>'704x396', '640x360'=>'640x360', '512x288'=>'512x288', '448x252'=>'448x252', '384x216'=>'384x216', '256x144'=>'256x144', '192x108'=>'192x108' );
 	$opt->{VSIZE} = {
 		title	=> 'Remote Streaming Video Size', # Title
-		tooltip	=> "Video size '<width>x<height>' to transcode remotely played files - leave blank for native size", # Tooltip
+		tooltip	=> "Video size '<width>x<height>' to transcode remotely played files - specify 'Native' for native size", # Tooltip
 		webvar	=> 'VSIZE', # webvar
 		type	=> 'popup', # type
 		label	=> , \%vsize_labels, # labels
@@ -3431,16 +3406,15 @@ sub process_params {
 		default => '',
 		save	=> 1,
 	};
-
-	my %streamtype_labels = ( ''=>'Auto', 'none'=>'Disable Transcoding', 'flv'=>'Flash Video (flv)', 'mov'=>'Quicktime (mov)', 'asf'=>'Advanced Streaming Format (asf)', 'avi'=>'AVI', 'mp3'=>'MP3 (Audio Only)', 'aac'=>'AAC (Audio Only)', 'wav'=>'WAV (Audio Only)', 'flac'=>'FLAC (Audio Only)' );
+	my %streamtype_labels = ( ''=>'Auto', 'none'=>'Disable Transcoding', 'flv'=>'Flash Video (H.264/MP3)', 'mpegts'=>'MPEG Transport Stream (H.264/MP2)', 'matroska'=>'Matroska (H.264/Vorbis)', 'asf'=>'Advanced Systems Format (H.264/WMA)', 'mp3'=>'MP3 (Audio Only)', 'adts'=>'AAC (Audio Only)', 'oga'=>'Vorbis (Audio Only)', 'wav'=>'WAV (Audio Only)', 'flac'=>'FLAC (Audio Only)' );
 	$opt->{STREAMTYPE} = {
 		title	=> "Remote Streaming type", # Title
-		tooltip	=> "Force the output to be this type when using 'Play Remote' for 'PlayDirect' streaming(e.g. flv, mov). Specify 'none' to disable transcoding/remuxing.  Leave blank for auto-detection", # Tooltip
+		tooltip	=> "Force the output to be this type when using 'Play' streaming. Specify 'Native' to disable transcoding/remuxing.", # Tooltip
 		webvar	=> 'STREAMTYPE', # webvar
 		type	=> 'popup', # type
 		label	=> , \%streamtype_labels, # labels
 		default	=> '', # default
-		value	=> [ '', 'none', 'flv', 'mov', 'asf', 'avi', 'mp3', 'aac', 'wav', 'flac' ], # values
+		value	=> [ '', 'none', 'flv', 'mpegts', 'matroska', 'asf', 'mp3', 'adts', 'oga', 'wav', 'flac' ], # values
 		onChange=> "form1.submit();",
 		save	=> 1,
 	};
