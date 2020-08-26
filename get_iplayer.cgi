@@ -2479,22 +2479,26 @@ sub search_progs {
 		}
 
 		# Format of PROGSELECT: TYPE|PID|NAME|EPISODE|MODE|CHANNEL
-		push @row, td( {-class=>$search_class},
-			checkbox(
-				-class		=> $search_class,
-				-name		=> 'PROGSELECT',
-				-label		=> '',
-				-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}|$prog{$pid}->{channel}",
-				-checked	=> 0,
-				-override	=> 1,
-			)
-		);
+		if ( $opt->{HISTORY}->{current} && ! -f $prog{$pid}->{filename} ) {
+			push @row, td( {-class=>$search_class} );
+		} else {
+			push @row, td( {-class=>$search_class},
+					checkbox(
+						-class		=> $search_class,
+						-name		=> 'PROGSELECT',
+						-label		=> '',
+						-value 		=> "$prog{$pid}->{type}|$pid|$prog{$pid}->{name}|$prog{$pid}->{episode}|$prog{$pid}->{mode}|$prog{$pid}->{channel}",
+						-checked	=> 0,
+						-override	=> 1,
+					)
+			);
+		}
 		# Record links
 
 		my $links;
 		# History mode
 		if ( $opt->{HISTORY}->{current} ) {
-			if ( $opt->{HIDEDELETED}->{current} || -f $prog{$pid}->{filename} ) {
+			if ( -f $prog{$pid}->{filename} ) {
 				# Play (Play Remote)
 				$links .= a( { -id=>'nowrap', -class=>$search_class, -title=>"Play from file on web server", -href=>build_url_playlist( '', 'playlistdirect', 'pid', $pid, $prog{$pid}->{mode}, $prog{$pid}->{type}, 'flv', 'flv', $opt->{BITRATE}->{current}, $opt->{VSIZE}->{current}, $opt->{VFR}->{current}, $opt->{VERSIONLIST}->{current} ) }, 'Play' ).'<br />';
 				# PlayFile
