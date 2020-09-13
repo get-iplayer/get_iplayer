@@ -1967,7 +1967,7 @@ sub show_info {
 	}
 	# Show thumb if one exists
 	$prog{$pid}->{thumbnail} ||= DEFAULT_THUMBNAIL;
-	print $fh img( { -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
+	print $fh img( { -height=>216, -class=>'action', -src=>$prog{$pid}->{thumbnail} } ) if $prog{$pid}->{thumbnail};
 	# Set optional output dir for pvr queue if set
 	my $outdir;
 	$outdir = '&OUTPUT='.CGI::escape("$opt->{OUTPUT}->{current}") if $opt->{OUTPUT}->{current};
