@@ -8683,6 +8683,22 @@ sub get {
 	my ( $self, $ua, $url, $prog, $version, %streamdata ) = @_;
 	my $rc;
 
+	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts"));
+	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
+	if ( $opt->{overwrite} ) {
+		unlink $media_file;
+	} else {
+		if ( -f $media_file ) {
+			main::logger "INFO: Using existing DASH $media_type file: $media_file\n";
+			main::logger "INFO: Use --overwrite to re-download\n";
+			if ( $prog->{type} eq "tv" && ! $opt->{audioonly} ) {
+				return $prog->postproc(undef, $media_file, $ua);
+			} else {
+				return $prog->postproc($media_file, undef, $ua);
+			}
+		}
+	}
+
 	# audio files
 	my $audio_prefix = $prog->{fileprefix};
 	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.m4a"));
