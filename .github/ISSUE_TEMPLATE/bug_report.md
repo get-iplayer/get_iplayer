@@ -10,7 +10,8 @@ assignees: ''
 
 #### Read first
 
-- Do not request help with using get_iplayer. No user support is provided.
+- Do not request help with using get_iplayer. No user support will be provided.
+- Do not request new features. Feature requests will not be accepted.
 - All bug reports will automatically be closed and locked upon receipt.
 - If your report identifies a reproducible bug in get_iplayer, it will be re-opened until a fix is released.
 - You will receive no communication from the developers, so provide all the information required.
