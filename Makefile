@@ -8,8 +8,8 @@ release:
 	@if git diff-index --name-only HEAD | grep ^ ; then \
 		echo Uncommitted changes in above files; exit 1; fi
 	@git checkout master
-	@sed -i.bak -e 's/^\(my $$version = \).*/\1$(VERSION);/' -e 's/^\(my $$version_text\) = .*/\1;/' get_iplayer
-	@sed -i.bak -e 's/^\(my $$VERSION = \).*/\1$(VERSION);/' -e 's/^\(my $$VERSION_TEXT\) = .*/\1;/' get_iplayer.cgi
+	@sed -i.bak -e 's/^\(my $$version = \).*/\1$(VERSION);/' get_iplayer
+	@sed -i.bak -e 's/^\(my $$VERSION = \).*/\1$(VERSION);/' get_iplayer.cgi
 	@rm -f get_iplayer.bak get_iplayer.cgi.bak
 	@./get_iplayer --nocopyright --manpage get_iplayer.1
 	@git diff --exit-code get_iplayer.1 > /dev/null || \
@@ -18,13 +18,10 @@ release:
 	@git log --format='%aN' | sort -u > CONTRIBUTORS; git add CONTRIBUTORS
 	@git commit -m "Release $(VERSION)" get_iplayer get_iplayer.cgi get_iplayer.1 CONTRIBUTORS
 	@git tag v$(VERSION)
-	@git checkout contribute
-	@git merge master
-	@sed -i.bak -e 's/^\(my $$version_text\);/\1 = "$(next_ver)-dev";/' get_iplayer
-	@sed -i.bak -e 's/^\(my $$VERSION_TEXT\);/\1 = "$(next_ver)-dev";/' get_iplayer.cgi
+	@sed -i.bak -e 's/^\(my $$version = \).*/\1$(next_ver);/' get_iplayer
+	@sed -i.bak -e 's/^\(my $$VERSION = \).*/\1$(next_ver);/' get_iplayer.cgi
 	@rm -f get_iplayer.bak get_iplayer.cgi.bak
-	@git commit -m "bump dev version" get_iplayer get_iplayer.cgi
-	@git checkout master
+	@git commit -m "bump version" get_iplayer get_iplayer.cgi
 
 tarball:
 	@git update-index --refresh --unmerged
