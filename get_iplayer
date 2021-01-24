@@ -7202,13 +7202,26 @@ sub get_links_schedule_mojo {
 			}
 		}
 	};
-
-	my $delay = Mojo::IOLoop->delay;
+	my $promise;
+	my $delay;
+	my $use_delay;
+	eval {
+		$promise = Mojo::Promise->new;
+	};
+	if ( $@ ) {
+		main::logger "DEBUG: Mojo::Promise not available, using Mojo::IOLoop->delay\n" if $opt->{verbose};
+		$delay = Mojo::IOLoop->delay;
+		$use_delay = 1;
+	}
+	my $count = 0;
 	my $fetch;
 	$fetch = sub {
 		return unless my $url = shift @$urls;
 		return if ( $rc_mojo && $opt->{refreshabortonerror} );
-		my $end = $delay->begin;
+		my $end;
+		if ( $use_delay ) {
+			$end = $delay->begin;
+		}
 		$attempts{$url}++;
 		main::logger "\nINFO: Downloading $channels->{$url} schedule page ($attempts{$url}/$retries): $url\n" if $opt->{verbose};
 		$ua->get($url => sub {
@@ -7217,12 +7230,20 @@ sub get_links_schedule_mojo {
 				$get_callback->($ua, $tx);
 				$fetch->();
 			}
-			$end->();
+			if ( $use_delay ) {
+				$end->();
+			} else {
+				$promise->resolve if --$count == 0;
+			}
 		});
+		$count++;
 	};
-
 	$fetch->() for 1 .. $max_conn;
-	$delay->wait;
+	if ( $use_delay ) {
+		$delay->wait;
+	} else {
+		$promise->wait;
+	}
 	undef $ua;
 	return 1 if $rc_mojo;
 }
