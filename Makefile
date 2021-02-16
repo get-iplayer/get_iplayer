@@ -2,7 +2,6 @@ dummy:
 	@echo No need to make anything.
 
 ifdef VERSION
-next_ver := $(shell echo $(VERSION) + 0.01 | bc)
 release:
 	@git update-index --refresh --unmerged
 	@if git diff-index --name-only HEAD | grep ^ ; then \
@@ -18,10 +17,6 @@ release:
 	@git log --format='%aN' | sort -u > CONTRIBUTORS; git add CONTRIBUTORS
 	@git commit -m "Release $(VERSION)" get_iplayer get_iplayer.cgi get_iplayer.1 CONTRIBUTORS
 	@git tag v$(VERSION)
-	@sed -i.bak -e 's/^\(my $$version = \).*/\1$(next_ver);/' get_iplayer
-	@sed -i.bak -e 's/^\(my $$VERSION = \).*/\1$(next_ver);/' get_iplayer.cgi
-	@rm -f get_iplayer.bak get_iplayer.cgi.bak
-	@git commit -m "bump version" get_iplayer get_iplayer.cgi
 
 tarball:
 	@git update-index --refresh --unmerged
