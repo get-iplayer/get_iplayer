@@ -85,11 +85,11 @@ my $opt_format = {
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
 	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies --force."],
 	downloadabortonfail	=> [ 1, "downloadabortonfail|download-abortonfail!", 'Recording', '--download-abortonfail', "Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked."],
-	excludesupplier	=> [ 1, "excludecdn|exclude-cdn|excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi. Synonym: --exclude-cdn."],
+	excludesupplier	=> [ 1, "excludecdn|exclude-cdn|excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi,cloudfront. Synonym: --exclude-cdn."],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps25		=> [ 1, "fps25!", 'Recording', '--fps25', "Use only 25fps streams for TV programmes (HD video not available)."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required."],
-	includesupplier	=> [ 1, "includecdn|include-cdn|includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to use if not included by default or if previously excluded by --exclude-supplier. Possible values: akamai,limelight,bidi. Synonym: --include-cdn."],
+	includesupplier	=> [ 1, "includecdn|include-cdn|includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to use if not included by default or if previously excluded by --exclude-supplier. Possible values: akamai,limelight,bidi,cloudfront. Synonym: --include-cdn."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	markdownloaded	=> [ 1, "markdownloaded|mark-downloaded!", 'Recording', '--mark-downloaded', "Mark programmes in search results or specified with --pid/--url as downloaded by inserting records in download history."],
@@ -8245,8 +8245,8 @@ sub fetch {
 	my $rate_percent;
 	my $eta_str;
 	my $prog_cdn;
-	($prog_cdn = "$streamdata{type} ak ll bi") =~ s/^.*akamai(?=.*\b(ak)\b).*$|^.*limelight(?=.*\b(ll)\b).*$|^.*bidi(?=.*\b(bi)\b).*$/$1$2$3/;
-	$prog_cdn = "un" unless $prog_cdn =~ /^(ak|ll|bi)$/;
+	($prog_cdn = "$streamdata{type} ak ll bi cf") =~ s/^.*akamai(?=.*\b(ak)\b).*$|^.*limelight(?=.*\b(ll)\b).*$|^.*bidi(?=.*\b(bi)\b).*$|^.*cloudfront(?=.*\b(cf)\b).*$/$1$2$3$4/;
+	$prog_cdn = "un" unless $prog_cdn =~ /^(ak|ll|bi|cf)$/;
 
 	# LWP download callback
 	my $callback = sub {
