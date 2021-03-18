@@ -3925,6 +3925,10 @@ sub insert_stylesheet {
 		padding: 4px 8px;
 	}
 
+	table.info > tbody > tr > td {
+		word-break: break-all
+	}
+
 	table.searchhead {
 		width: 100%;
 	}
