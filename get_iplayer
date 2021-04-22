@@ -1867,7 +1867,7 @@ sub request_url_retry {
 	$OPTS{SendTE} = 0;
 	@LWP::Protocol::http::EXTRA_SOCK_OPTS = %OPTS;
 
-	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content, $ok404) = @_;
+	my ($ua, $url, $retries, $succeedmsg, $failmsg, $mustproxy, $fail_content, $ok4xx) = @_;
 	$failmsg ||= "Failed to download URL";
 	$fail_content ||= '';
 	my $res;
@@ -1887,25 +1887,22 @@ sub request_url_retry {
 	# Disable proxy unless mustproxy is flagged
 	main::proxy_disable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	my $i;
+	my $is4xx;
 	for ($i = 1; $i <= $retries; $i++) {
 		logger "\nINFO: Downloading URL ($i/$retries): $url\n" if $opt->{verbose};
+		$is4xx = 0;
 		$res = $ua->request( HTTP::Request->new( GET => $url ) );
 		if ( ! $res->is_success ) {
-			if ( $i < $retries ) {
-				if ( $opt->{verbose} ) {
-					logger "\nWARNING: $failmsg ($i/$retries): $url\n";
-					logger "WARNING: Response: ${\$res->code()} ${\$res->message()}\n";
+			$is4xx = $res->code() == 403 || $res->code() == 404;
+			if ( $opt->{verbose} || ! ( $is4xx && $ok4xx ) ) {
+				logger "\nWARNING: $failmsg ($i/$retries): $url\n";
+				logger "WARNING: Response: ${\$res->code()} ${\$res->message()}\n";
+				if ( $res->code() == 403 ) {
+					logger "WARNING: Access to this resource was blocked by the BBC\n";
 				}
-			} else {
-				if ( $opt->{verbose} || ! ( $res->code() == 404 && $ok404 ) ) {
-					logger "\nERROR: $failmsg ($i/$retries): $url\n";
-					logger "ERROR: Response: ${\$res->code()} ${\$res->message()}\n";
-					if ( $res->code() == 403 ) {
-						logger "ERROR: Access to this resource was blocked by the BBC\n";
-					}
-					logger "ERROR: Ignore this error if programme download is successful\n";
-				}
+				logger "WARNING: Ignore this warning if programme download is successful\n";
 			}
+			last if $is4xx;
 		} else {
 			logger $succeedmsg;
 			last;
@@ -1914,7 +1911,7 @@ sub request_url_retry {
 	# Re-enable proxy unless mustproxy is flagged
 	main::proxy_enable($ua) if $opt->{partialproxy} && ! $mustproxy;
 	# Return empty string if we failed and content not required
-	if ( $i > $retries ) {
+	if ( ( $is4xx && ! $ok4xx ) || $i > $retries ) {
 		if ( wantarray ) {
 			return ($fail_content, $res);
 		} else {
@@ -5951,7 +5948,7 @@ sub parse_hls_connection {
 		}
 	}
 	$conn->{href} = $variant_url;
-	my $data = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1 );
+	my $data = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1, undef, 1 );
 	if ( ! $data ) {
 		main::logger "WARNING: No HLS playlist returned ($conn->{href})\n" if $opt->{verbose};
 		return;
@@ -6077,7 +6074,7 @@ sub parse_dash_connection {
 		}
 	}
 	$conn->{href} = $manifest_url;
-	my $xml = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1 );
+	my $xml = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1, undef, 1 );
 	if ( ! $xml ) {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
