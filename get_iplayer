@@ -6343,6 +6343,7 @@ sub get_stream_data {
 	main::logger "INFO: Getting stream data for version: '$version'\n" if $opt->{verbose};
 	# filter CDN suppliers
 	my @exclude_supplier = split(/,/, $opt->{excludesupplier});
+	push @exclude_supplier, 'vbidi';
 	if ( $opt->{includesupplier} ) {
 		@exclude_supplier = grep { $opt->{includesupplier} !~ /\b$_\b/ } @exclude_supplier;
 	}
@@ -6351,7 +6352,7 @@ sub get_stream_data {
 	}
 	my $exclude_regex = '^ROGUEVALUE$';
 	if ( @exclude_supplier ) {
-		$exclude_regex = '('.(join('|', @exclude_supplier)).')';
+		$exclude_regex = '_('.(join('|', @exclude_supplier)).')';
 	}
 
 	# retrieve stream data
