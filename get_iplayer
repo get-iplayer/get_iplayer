@@ -6567,6 +6567,25 @@ sub get_stream_data {
 		}
 	}
 
+	# keep max audio bitrate if more than one for given video resolution
+	my %seen = ();
+	my @modes = sort Programme::cmp_modes grep { not $seen{$_}++ } map { $_ =~ s/\d+$//; $_; } keys %$data;
+	for my $m ( @modes ) {
+		my $n = 0;
+		my $xbr;
+		while ( my $strm = $data->{$m . ++$n} ) {
+			if ( $strm->{audio_bitrate} > $xbr ) {
+				$xbr = $strm->{audio_bitrate};
+			}
+		}
+		$n = 0;
+		while ( my $strm = $data->{$m . ++$n} ) {
+			if ( $strm->{audio_bitrate} < $xbr ) {
+				delete $data->{$m . $n};
+			}
+		}
+	}
+
 	# Report modes found
 	if ( $opt->{verbose} ) {
 		main::logger sprintf("INFO: Found mode %10s: %s\n", $_, $data->{$_}->{type}) for sort Programme::cmp_modes keys %{ $data };
