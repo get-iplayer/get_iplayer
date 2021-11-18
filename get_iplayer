@@ -3574,8 +3574,15 @@ sub display_metadata {
 			for my $key ( sort keys %{$data{$_}} ) {
 				main::logger sprintf "%-16s ", $_.':';
 				if ( ref$data{$_}->{$key} ne 'HASH' ) {
-					main::logger "$key: $data{$_}->{$key}";
-					main::logger " [estimated sizes only]" if $_ eq "modesizes";
+					if ( $_ eq "modes" || $_ eq "modesizes" )	{
+						my %seen = ();
+						my @vals = sort Programme::cmp_modes grep { not $seen{$_}++ } map { $_ =~ s/([a-z])\d+/$1/; $_; } split(",", $data{$_}->{$key});
+ 						my $val = join(",", @vals);
+						main::logger "$key: $val";
+						main::logger " [estimated sizes]" if $_ eq "modesizes";
+					} else {
+						main::logger "$key: $data{$_}->{$key}";
+					}
 				# This is the same as 'modes' list
 				#} else {
 				#	main::logger "$key: ".(join ',', sort keys %{ $data{$_}->{$key} } );
@@ -4045,7 +4052,22 @@ sub create_metadata_file {
 	$filename->{generic} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.xml"));
 	$template->{generic}  = '<?xml version="1.0" encoding="UTF-8" ?>'."\n";
 	$template->{generic} .= '<program_meta_data xmlns="http://linuxcentre.net/xmlstuff/get_iplayer" revision="1">'."\n";
-	$template->{generic} .= "\t<$_>[$_]</$_>\n" for ( sort keys %{$prog} );
+	my $version = $prog->{version} || 'unknown';
+	for my $key ( sort keys %{$prog} ) {
+		my $subst = "[$key]";
+		my $value = $prog->{$key};
+		if ( ref$value eq 'HASH' ) {
+			if ( ref$value->{$version} ne 'HASH' ) {
+				# abbreviate mode lists
+				if ( $key eq "modes" || $key eq "modesizes" )	{
+					my %seen = ();
+					my @vals = sort Programme::cmp_modes grep { not $seen{$_}++ } map { $_ =~ s/([a-z])\d+/$1/; $_; } split(",", $value->{$version});
+					$subst = join(",", @vals);
+				}
+			}
+		}
+		$template->{generic} .= "\t<$key>$subst</$key>\n";
+	}
 	$template->{generic} .= "</program_meta_data>\n";
 	# JSON template for all info (ignored)
 	$filename->{json} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.json"));
@@ -4090,12 +4112,19 @@ sub json_metadata {
 	$self->{duration} = $self->{durations}->{$version} if $self->{durations}->{$version};
 	$self->{runtime} = int($self->{duration} / 60);
 	my $jom = {};
-	for my $key ( keys %{$self} ) {
+	for my $key ( sort keys %{$self} ) {
 		my $value = $self->{$key};
 		# Get version specific value if this key is a hash
 		if ( ref$value eq 'HASH' ) {
 			if ( ref$value->{$version} ne 'HASH' ) {
-				$value = $value->{$version};
+				# abbreviate mode lists
+				if ( $key eq "modes" || $key eq "modesizes" )	{
+					my %seen = ();
+					my @vals = sort Programme::cmp_modes grep { not $seen{$_}++ } map { $_ =~ s/([a-z])\d+/$1/; $_; } split(",", $value->{$version});
+					$value = join(",", @vals);
+				} else {
+					$value = $value->{$version};
+				}
 			} else {
 				next;
 			}
