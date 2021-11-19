@@ -23,7 +23,7 @@ assignees: ''
 - The PID or URL of the programme you attempted to download, if applicable. **Only provide one programme**.
 - A complete verbose log. Add logs as attachments. Do not paste logs into your bug report. Create a verbose log [e.g., log.txt] with:
 
-        get_iplayer [...options...] --verbose > log.txt 2>&1 
+        get_iplayer [your options here] --verbose > log.txt 2>&1 
 
 - Screenshots, if the bug appears to be in the Web PVR Manager user interface.
 - OS and version [e.g. Windows 10 2004, macOS 10.15.5, Ubuntu 20.04.1]
