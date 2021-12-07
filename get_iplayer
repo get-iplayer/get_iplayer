@@ -5666,11 +5666,12 @@ sub fetch_episodes_recursive {
 		$channel = undef;
 		my @urls = ( "https://www.bbc.co.uk/iplayer/episodes/$parent_pid" );
 		for my $url ( @urls ) {
+			my $curr_url = $url;
 			$curr_page = 1;
 			$max_page = 1;
 			$last_page = undef;
 			{ do {
-				my $html = main::request_url_retry($ua, $url, 3, '', '');
+				my $html = main::request_url_retry($ua, $curr_url, 3, '', '');
 				last unless $html;
 				my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 				if ( ! $check_series_nav ) {
@@ -5719,7 +5720,10 @@ sub fetch_episodes_recursive {
 				$last_page =~ s/(^\s+|\s+$)//g;
 				$max_page = $last_page if $last_page > $max_page;
 				$curr_page++;
-				$url = "https://www.bbc.co.uk/iplayer/episodes/$parent_pid?page=$curr_page";
+				$curr_url = $url;
+				$curr_url .= "&" if $curr_url =~ /\?/;
+				$curr_url .= "?" unless $curr_url =~ /\?/;
+				$curr_url = "${curr_url}page=$curr_page";
 			} while ( $curr_page <= $max_page ) };
 		}
 	}
