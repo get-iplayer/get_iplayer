@@ -29,7 +29,3 @@ assignees: ''
 - OS and version [e.g. Windows 10 2004, macOS 10.15.5, Ubuntu 20.04.1]
 - Browser and version [e.g. Chrome 83.0.4103, Edge 83.0.478.56, Firefox 78.0.1, Safari 13.1.1]
 - get_iplayer version [e.g. 3.26, 3.26.0-MSWin32, 3.26.1-darwin] - use `get_iplayer -V`
-
-#### Documentation changes
-
-If you would like to contribute documentation changes, submit a bug report with your suggested changes and provide the full URL for the wiki page you wish to change. Direct editing of the wiki has been restricted to project developers due to attempted link hijacking by spambots.
