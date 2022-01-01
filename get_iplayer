@@ -6108,14 +6108,14 @@ sub parse_dash_connection {
 	}
 	$conn->{href} = $manifest_url;
 	my $xml = main::request_url_retry( $ua, $conn->{href}, 3, undef, undef, 1, undef, 1 );
-	if ( ! $xml ) {
+	if ( $xml !~ /<\?xml.*?<MPD/si ) {
 		main::logger "WARNING: No DASH manifest returned ($conn->{href})\n" if $opt->{verbose};
 		return;
 	}
 	my $dom;
 	eval { $dom = XML::LibXML->load_xml(string => $xml); };
 	if ( $@ ) {
-		main::logger "ERROR: Failed to load DASH manifest:\n$@";
+		main::logger "ERROR: Failed to load DASH manifest:\n$@" if $opt->{verbose};
 		return;
 	}
 	my $xpc = XML::LibXML::XPathContext->new($dom);
