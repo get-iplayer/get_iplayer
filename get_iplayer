@@ -87,7 +87,7 @@ my $opt_format = {
 	downloadabortonfail	=> [ 1, "downloadabortonfail|download-abortonfail!", 'Recording', '--download-abortonfail', "Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked."],
 	excludesupplier	=> [ 1, "excludecdn|exclude-cdn|excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi,cloudfront. Synonym: --exclude-cdn."],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
-	fps25		=> [ 1, "fps25!", 'Recording', '--fps25', "Use only 25fps streams for TV programmes (HD video not available)."],
+	fps25		=> [ 1, "reducedbitrate|reduced-bitrate|fps25!", 'Recording', '--fps25', "Use only 25fps (or equivalent reduced-bitrate 50fps) streams for TV programmes (HD video not available). Synonym: --reduced-bitrate."],
 	get		=> [ 2, "get|record|g!", 'Recording', '--get, -g', "Start recording matching programmes. Search terms required."],
 	includesupplier	=> [ 1, "includecdn|include-cdn|includesupplier|include-supplier=s", 'Recording', '--include-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to use if not included by default or if previously excluded by --exclude-supplier. Possible values: akamai,limelight,bidi,cloudfront. Synonym: --include-cdn."],
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
@@ -6517,22 +6517,30 @@ sub get_stream_data {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
 				if ( $mattribs->{height} > 1000 ) {
-					# full HD streams do not exist yet
+					# full HD streams TBD
 				} elsif ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "hvfhd", 'hls', $ext );
 				} elsif ( $mattribs->{height} > 500 ) {
 					if ( $mattribs->{fps} > 25 ) {
-						get_stream_data_cdn( $data, $mattribs, "hvfsd", 'hls', $ext );
+						if ( $mattribs->{bitrate} >= 2500 ) {
+							get_stream_data_cdn( $data, $mattribs, "hvfsd", 'hls', $ext );
+						} else {
+							get_stream_data_cdn( $data, $mattribs, "hvfxsd", 'hls', $ext );
+						}
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "hvfxsd", 'hls', $ext );
 					}
-				} elsif ( $mattribs->{height} > 360 ) {
+				} elsif ( $mattribs->{height} > 350 ) {
 					if ( $mattribs->{fps} > 25 ) {
-						get_stream_data_cdn( $data, $mattribs, "hvfhigh", 'hls', $ext );
+						if ( $mattribs->{bitrate} >= 1250 ) {
+							get_stream_data_cdn( $data, $mattribs, "hvfhigh", 'hls', $ext );
+						} else {
+							get_stream_data_cdn( $data, $mattribs, "hvfxhigh", 'hls', $ext );
+						}
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "hvfxhigh", 'hls', $ext );
 					}
-				} elsif ( $mattribs->{height} > 260  && $mattribs->{height} < 300 ) {
+				} elsif ( $mattribs->{height} > 250 ) {
 					get_stream_data_cdn( $data, $mattribs, "hvflow", 'hls', $ext );
 				}
 			}
@@ -6554,17 +6562,27 @@ sub get_stream_data {
 		} elsif ( $mattribs->{service} =~ /dvf/ ) {
 			if ( $mattribs->{kind} =~ 'video' ) {
 				my $ext = "mp4";
-				if ( $mattribs->{height} > 700 ) {
+				if ( $mattribs->{height} > 1000 ) {
+					# full HD streams TBD
+				} elsif ( $mattribs->{height} > 700 ) {
 					get_stream_data_cdn( $data, $mattribs, "dvfhd", 'dash', $ext );
 				} elsif ( $mattribs->{height} > 500 ) {
-					if ( $mattribs->{bitrate} > 2500 ) {
-						get_stream_data_cdn( $data, $mattribs, "dvfsd", 'dash', $ext );
+					if ( $mattribs->{fps} > 25 ) {
+						if ( $mattribs->{bitrate} >= 2500 ) {
+							get_stream_data_cdn( $data, $mattribs, "dvfsd", 'dash', $ext );
+						} else {
+							get_stream_data_cdn( $data, $mattribs, "dvfxsd", 'dash', $ext );
+						}
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "dvfxsd", 'dash', $ext );
 					}
 				} elsif ( $mattribs->{height} > 350 ) {
-					if ( $mattribs->{bitrate} > 1500 ) {
-						get_stream_data_cdn( $data, $mattribs, "dvfhigh", 'dash', $ext );
+					if ( $mattribs->{fps} > 25 ) {
+						if ( $mattribs->{bitrate} >= 1250 ) {
+							get_stream_data_cdn( $data, $mattribs, "dvfhigh", 'dash', $ext );
+						} else {
+							get_stream_data_cdn( $data, $mattribs, "dvfxhigh", 'dash', $ext );
+						}
 					} else {
 						get_stream_data_cdn( $data, $mattribs, "dvfxhigh", 'dash', $ext );
 					}
