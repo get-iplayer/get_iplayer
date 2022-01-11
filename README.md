@@ -4,7 +4,7 @@
 
 * Downloads TV and radio programmes from BBC iPlayer/BBC Sounds
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button, iPlayer Exclusive, or Podcast-only)
+* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not Red Button, iPlayer Exclusive, or Podcast-only)
 * Caching of programme index with automatic updating
 * Regex search on programme name
 * Regex search on programme description and episode title
