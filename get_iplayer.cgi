@@ -70,6 +70,7 @@ GetOptions(
 	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
 	"debug"				=> \$opt_cmdline->{debug},
 	"baseurl|base-url|b=s"		=> \$opt_cmdline->{baseurl},
+	"basepath|base-path|bp=s"		=> \$opt_cmdline->{basepath},
 ) || die usage();
 
 # Display usage if old method of invocation is used or --help
@@ -93,6 +94,7 @@ Options:
  --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
  --debug            Debug mode
  --baseurl,-b       Base URL for link generation. Set to full proxy URL if running behind reverse proxy.
+ --basepath,-bp     Base path for incoming requests. Set to the subpath a reverse proxy is using (e.g. /get_iplayer).
  --help,-h          This help text
 EOF
 	print $text;
@@ -279,6 +281,7 @@ if ( $opt_cmdline->{port} > 0 ) {
 		print $se "INFO: Listening on $opt_cmdline->{listen}:$opt_cmdline->{port}\n";
 		print $se "WARNING: Insecure Remote access is allowed, use --listen=127.0.0.1 to limit to this host only\n" if $opt_cmdline->{listen} ne '127.0.0.1';
 		print $se "INFO: Using base URL $opt_cmdline->{baseurl}\n" if $opt_cmdline->{baseurl};
+		print $se "INFO: Using base path $opt_cmdline->{basepath}\n" if $opt_cmdline->{basepath};
 		# Await requests and handle them as they arrive
 		while (my $client = $server->accept()) {
 			my $procid = fork();
@@ -346,8 +349,17 @@ if ( $opt_cmdline->{port} > 0 ) {
 			# Log Request
 			print $se "$data{_method}: $request{URL}\n";
 
+			# If a basepath is defined redirect requests for "/" to the basepath
+			if ($opt_cmdline->{basepath} and $request{URL} =~ /^\/$/ ) {
+				print $se "Basepath redirect\n";
+				print $client "HTTP/1.1 302 Redirect", Socket::CRLF;
+				print $client "Location: $opt_cmdline->{basepath}", Socket::CRLF;
+				print $client Socket::CRLF;
+				print $client "<html><body>302 Redirect</body></html>";
+				$data{"_status"} = "302";
+
 			# Is this the CGI or some other file request?
-			if ( $request{URL} =~ /^\/?(recordings_delete|playlist.+|genplaylist.+|)\/?$/ ) {
+			} elsif ( $request{URL} =~ /^$opt_cmdline->{basepath}\/?(recordings_delete|playlist.+|genplaylist.+|)\/?$/ ) {
 				# remove any vars that might affect the CGI
 				#%ENV = ();
 				@ARGV = ();
