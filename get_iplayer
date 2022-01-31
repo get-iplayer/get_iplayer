@@ -83,8 +83,8 @@ STDERR->autoflush(1);
 my $opt_format = {
 	# Recording
 	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
-	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies --force."],
 	downloadabortonfail	=> [ 1, "downloadabortonfail|download-abortonfail!", 'Recording', '--download-abortonfail', "Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked."],
+	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. Produces .m4a file. Implies --force."],
 	excludesupplier	=> [ 1, "excludecdn|exclude-cdn|excludesupplier|exclude-supplier=s", 'Recording', '--exclude-supplier <supplier>,<supplier>,...', "Comma-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi,cloudfront. Synonym: --exclude-cdn."],
 	force		=> [ 1, "force|force-download!", 'Recording', '--force', "Ignore programme history (unsets --hide option also)."],
 	fps25		=> [ 1, "reducedbitrate|reduced-bitrate|fps25!", 'Recording', '--fps25', "Use only 25fps (or equivalent reduced-bitrate 50fps) streams for TV programmes (HD video not available). Synonym: --reduced-bitrate."],
@@ -3836,7 +3836,7 @@ sub download_retry_loop {
 			my @modes;
 			my @available_modes = sort keys %{ $prog->{streams}->{$version} };
 			for my $modename ( split /,/, $modelist ) {
-				next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
+				# next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
 				# find all numbered modes starting with this modename
 				push @modes, sort { $a cmp $b } grep /^$modename(\d+)?$/, @available_modes;
 			}
@@ -3848,20 +3848,20 @@ sub download_retry_loop {
 				my %available_modes_short;
 				# Strip the number from the end of the mode name and make a unique array
 				for my $modename ( @available_modes ) {
-					next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
+					# next if $opt->{audioonly} && $prog->{type} eq "tv" && $modename =~ /^hls/;
 					next if $modename =~ /subtitle/;
 					$modename =~ s/\d+$//g;
 					$available_modes_short{$modename}++;
 				}
-				my $msg = "No supported modes";
+				my $msg = "No supported recording modes";
 				if ( $opt->{$prog->{type}."mode"} || $opt->{modes} ) {
-					$msg = "No specified modes";
+					$msg = "No specified recording modes";
 				}
 				main::logger "INFO: $msg ".($modelist ? "($modelist) " : "")."available for this programme with version '$version'\n";
 				if ( keys %available_modes_short ) {
 					main::logger "INFO: Available modes: ".(join ',', sort Programme::cmp_modes keys %available_modes_short)."\n";
 				} else {
-					main::logger "INFO: No other modes are available\n";
+					main::logger "INFO: No other recording modes are available\n";
 					main::logger "INFO: The programme may no longer be available - check the iPlayer or Sounds site\n";
 					main::logger "INFO: The programme may only be available in an unsupported format (e.g., Flash) - check the iPlayer or Sounds site\n";
 					main::logger "INFO: If you use a VPN/VPS/Smart DNS/web proxy, it may have been blocked\n";
