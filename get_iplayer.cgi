@@ -3130,8 +3130,8 @@ sub process_params {
 	};
 
 	$opt->{MODES} = {
-		title	=> 'Recording Modes', # Title
-		tooltip	=> 'Comma separated list of recording modes which should be tried in order. Default is "best" for HD TV (if available, with fallback to SD TV). Set to "better" (without quotes) for best available SD TV.  Set to "good" (without quotes) for lower-quality SD TV.', # Tooltip
+		title	=> 'Recording Quality', # Title
+		tooltip	=> 'Comma separated list of recording quality settings which should be tried in order', # Tooltip
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
@@ -3259,8 +3259,8 @@ sub process_params {
 	};
 
 	$opt->{FPS25} = {
-		title	=> 'Use only 25fps streams',
-		tooltip	=> "Use only 25fps media streams. HD video not available.",
+		title	=> 'Prefer lower-bitrate TV streams',
+		tooltip	=> "Prefer lower-bitrate TV streams",
 		webvar	=> 'FPS25',
 		optkey	=> 'fps25',
 		type	=> 'radioboolean',

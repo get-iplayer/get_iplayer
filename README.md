@@ -81,17 +81,17 @@
 
 	*(The `$` regular expression metacharacter matches "Radio 4" only at the end of the channel name, thus avoiding matches against "Radio 4 Extra")*
 
-* Record TV programme number 208 (index from search results) in HD, with SD fallback if HD not available:
+* Record TV programme number 208 (index from search results) in HD, with fallback to lower quality if not available:
 
-	`get_iplayer --get 208` [default is to download best available (max 1280x720)]
+	`get_iplayer --get 208` [default setting]
 
-	OR
+	or
+	
+	`get_iplayer --get 208 --tv-quality=hd,sd,web,mobile` [explicit setting]
 
-	`get_iplayer --get 208 --tvmode=best`
+* Record TV programme number 208 in lower resolution only (704x396@50):
 
-* Record TV programme number 208 with lower resolution (max 704x396):
-
-	`get_iplayer --get 208 --tvmode=good`
+	`get_iplayer --get 208 --tv-quality=web`
 
 * Record TV programme number 208 and download subtitles in SubRip (SRT) format:
 
@@ -112,17 +112,18 @@
 * Record a radio programme using its Sounds URL:
 
     `get_iplayer https://www.bbc.co.uk/sounds/play/b07gcv34`
-* Record a radio programme using the PID (b07gcv34) from its Sounds URL in highest quality (320k), with fallback to lower quality if not available:
 
-	`get_iplayer --pid=b07gcv34` [default is to download best available]
+* Record a radio programme using the PID (b07gcv34) from its Sounds URL in high quality (320k), with fallback to lower quality if not available (default setting):
+
+	`get_iplayer --pid=b07gcv34` [default setting]
 
 	OR
 
-	`get_iplayer --pid=b07gcv34 --radiomode=best`
+	`get_iplayer --pid=b07gcv34 --radio-quality=high,std,med,low` [explicit setting]
 
-* Record a radio programme using the PID (b07gcv34) from its Sounds URL with lower bit rate (96k):
+* Record a radio programme using the PID (b07gcv34) from its Sounds URL with lower bit rate only (96k):
 
-	`get_iplayer --pid=b07gcv34 --radiomode=good`
+	`get_iplayer --pid=b07gcv34 --radio-quality=med`
 
 * Record multiple radio programmes (using PIDs from Sounds URLs):
 
