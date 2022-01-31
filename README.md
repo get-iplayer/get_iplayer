@@ -4,7 +4,7 @@
 
 * Downloads TV and radio programmes from BBC iPlayer/BBC Sounds
 * Allows multiple programmes to be downloaded using a single command
-* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three, Red Button, iPlayer Exclusive, or Podcast-only)
+* Indexing of most available iPlayer/Sounds catch-up programmes from previous 30 days (not BBC Three (before the 1st February 2022), Red Button, iPlayer Exclusive, or Podcast-only)
 * Caching of programme index with automatic updating
 * Regex search on programme name
 * Regex search on programme description and episode title
@@ -18,7 +18,7 @@
 
 **NOTE:**
 
-- **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer/Sounds sites. BBC Three programmes, red button programmes, iPlayer box sets, web-only content, and BBC podcasts are not searchable. Old programmes that are still available after 30 days must be located on the iPlayer/Sounds sites and downloaded directly via PID or URL.**
+- **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer/Sounds sites. BBC Three programmes (aired before the 1st February 2022), red button programmes, iPlayer box sets, web-only content, and BBC podcasts are not searchable. Old programmes that are still available after 30 days must be located on the iPlayer/Sounds sites and downloaded directly via PID or URL.**
 - **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes broadcast on BBC linear services within the previous 30 days, plus episodes of BBC Three programmes posted within the same period. It is often possible to download other content such as red button programmes or iPlayer box sets directly via PID or URL. get_iplayer DOES NOT support live recording from BBC channels.**
 
 ## Documentation
