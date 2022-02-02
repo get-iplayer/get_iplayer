@@ -3992,9 +3992,9 @@ sub mode_ver_download_retry_loop {
 			$prog->{streams}->{$version} = $prog->get_stream_data( $version_pid, undef, $version );
 			if ( keys %{ $prog->{streams}->{$version} } == 0 ) {
 				main::logger "WARNING: No streams available for '$version' version ($prog->{verpids}->{$version}) - skipping (retry)\n";
-				if ( $prog->{geoblocked} ) {
+				if ( $prog->{geoblocked}->{$version} ) {
 					main::logger "WARNING: The BBC blocked access to this programme because it determined that you are outside the UK. (retry)\n";
-				} elsif ( $prog->{unavailable} ) {
+				} elsif ( $prog->{unavailable}->{$version} ) {
 					main::logger "WARNING: The BBC lists this programme as unavailable - check the iPlayer or Sounds site (retry)\n";
 				}
 				return 2;
@@ -5540,9 +5540,9 @@ sub get_metadata {
 	# check at least one version available
 	if ( keys %{ $prog->{verpids} } == 0 ) {
 		main::logger "WARNING: No media streams found for requested programme versions and recording modes.\n";
-		if ( $prog->{geoblocked} ) {
+		if ( $prog->{geoblocked}->{$version} ) {
 			main::logger "WARNING: The BBC blocked access to this programme because it determined that you are outside the UK.\n";
-		} elsif ( $prog->{unavailable} ) {
+		} elsif ( $prog->{unavailable}->{$version} ) {
 			main::logger "WARNING: The BBC lists this programme as unavailable - check the iPlayer or Sounds site.\n";
 		} else {
 			main::logger "WARNING: The programme may no longer be available - check the iPlayer or Sounds site.\n";
@@ -6483,12 +6483,12 @@ sub get_stream_data {
 	}
 
 	unless ( $unblocked ) {
-		$prog->{geoblocked} = 1 if $checked_geoblock;
+		$prog->{geoblocked}->{$version} = 1 if $checked_geoblock;
 		return undef;
 	}
 
 	unless ( $isavailable ) {
-		$prog->{unavailable} = 1 if $checked_unavailable;
+		$prog->{unavailable}->{$version} = 1 if $checked_unavailable;
 		return undef;
 	}
 
