@@ -3718,17 +3718,18 @@ sub generate_version_list {
 sub cmp_modes($$) {
 	my ($x, $y) = @_;
 	my %ranks = (
-		'(\b|[^f])hd(\d+)?' => 1000,
-		'(\b|[^x])sd(\d+)?' => 2000,
-		'xsd(\d+)?' => 3000,
-		'(\b|[^x])web(\d+)?' => 4000,
-		'xweb(\d+)?' => 5000,
-		'mobile(\d+)?' => 6000,
-		'high(\d+)?' => 7000,
-		'std(\d+)?' => 8000,
-		'med(\d+)?' => 9000,
-		'low(\d+)?' => 10000,
-		'subtitles(\d+)?' => 11000,
+		'fhd(\d+)?' => 1000,
+		'(\b|[^f])hd(\d+)?' => 2000,
+		'(\b|[^x])sd(\d+)?' => 3000,
+		'xsd(\d+)?' => 4000,
+		'(\b|[^x])web(\d+)?' => 5000,
+		'xweb(\d+)?' => 6000,
+		'mobile(\d+)?' => 7000,
+		'high(\d+)?' => 8000,
+		'std(\d+)?' => 9000,
+		'med(\d+)?' => 10000,
+		'low(\d+)?' => 11000,
+		'subtitles(\d+)?' => 12000,
 	);
 	my %ranks2 = (
 		'^hls' => 10,
@@ -6583,6 +6584,37 @@ sub get_stream_data {
 		}
 	}
 
+	# generate FHD streams
+	for my $key (keys %{$data}) {
+		if ( $key =~ m/(hls|dash)hd/ ) {
+			my $xvi = 12000;
+			my $xvb = 8490;
+			my $xvw = 1920;
+			my $xvh = 1080;
+			my $xvr = 50;
+			my $stm2 = dclone($data->{$key});
+			(my $key2 = $key) =~ s/(hls|dash)hd/${1}fhd/;
+			$stm2->{streamurl} =~ s/video=\d+/video=${xvi}000/;
+			$stm2->{video_bitrate} = $xvb;
+			$stm2->{bitrate} = $stm2->{video_bitrate} + $stm2->{audio_bitrate};
+			$stm2->{type} =~ s/^(.*?gip_.vf_)\d+(.*?)\d+x\d+(.*?)\d+(fps.*?)\d+(kbps.*)$/$1${xvb}$2${xvw}x${xvh}$3${xvr}$4${xvb}$5/;
+			$stm2->{type} = sprintf("%12s %4s %4s %9s %5s %8s %7s %s", split(" ", $stm2->{type}));
+			if ( $key2 =~ /dashfhd/ ) {
+				$stm2->{size} = int($stm2->{audio_media}->{programme_duration} * $stm2->{bitrate} * 1000.0 / 8.0);
+				$stm2->{video_media}->{height} = $xvh;
+				$stm2->{video_media}->{width} = $xvw;
+				$stm2->{video_media}->{bitrate} = $xvb;
+				$stm2->{video_media}->{file_size} = int($stm2->{video_media}->{programme_duration} * $stm2->{video_media}->{bitrate} * 1000.0 / 8.0);
+				$stm2->{video_media}->{service} =~ s/(gip_dvf_)\d+/$1${xvb}/;
+				$stm2->{video_media}->{id} = "video=${xvi}000";
+			}
+			my $xvs = main::request_url_retry( $ua, $stm2->{streamurl}, 3, undef, undef, 1, undef, 1 );
+			if ( $xvs && $xvs !~ /<html/i ) {
+				$data->{$key2} = $stm2;
+			}
+		}
+	}
+
 	# Report modes found
 	if ( $opt->{verbose} ) {
 		main::logger sprintf("INFO: Found mode %10s: %s\n", $_, $data->{$_}->{type}) for sort Programme::cmp_modes keys %{ $data };
@@ -6600,9 +6632,10 @@ sub get_stream_data {
 
 sub modelist {
 	my $prog = shift;
-	my $regex_quality = qr/(hd|sd|web|mobile|high|std|med|low|default)/;
-	my $regex_alias = qr/(720p?|540p?|396p?|288p?|320k?|128k?|96k?|48k?)/;
+	my $regex_quality = qr/(fhd|hd|sd|web|mobile|high|std|med|low|default)/;
+	my $regex_alias = qr/(1080p?|720p?|540p?|396p?|288p?|320k?|128k?|96k?|48k?)/;
 	my $replace_alias = {
+		"1080p" => "fhd",
 		"720p" => "hd",
 		"540p" => "sd",
 		"396p" => "web",
@@ -6611,6 +6644,7 @@ sub modelist {
 		"128k" => "std",
 		 "96k" => "med",
 		 "48k" => "low",
+		"1080" => "fhd",
 		"720" => "hd",
 		"540" => "sd",
 		"396" => "web",
@@ -6693,6 +6727,7 @@ sub modelist {
 	my %seen;
 	$mlist = join( ",", grep { my $seen = $seen{$_}; $seen{$_} = 1; !$seen } split( /,/, $mlist ) );
 	# tv
+	$mlist = main::expand_list($mlist, 'fhd', "dashfhd,hlsfhd");
 	$mlist = main::expand_list($mlist, 'hd', "hlshd,dashhd");
 	if ( $tvlbr ) {
 		$mlist = main::expand_list($mlist, 'sd', "hlsxsd,dashxsd,hlssd,dashsd");
@@ -6713,7 +6748,7 @@ sub modelist {
 sub qualities_from_modes {
 	my $prog = shift;
 	my $modelist = shift;
-	my $regex_quality = qr/(hd|sd|web|mobile|high|std|med|low)/;
+	my $regex_quality = qr/(fhd|hd|sd|web|mobile|high|std|med|low)/;
 	my @q1 = map { $_ =~ s/^(hls|dash)x?${regex_quality}.*?$/$2/; $_; } split( /,/, $modelist );
 	my @q2 = grep(/^${regex_quality}$/, @q1);
 	my %seen;
@@ -6724,7 +6759,7 @@ sub qualities_from_modes {
 sub qualitysizes_from_modesizes {
 	my $prog = shift;
 	my $modesizes = shift;
-	my $regex_quality = qr/(hd|sd|web|mobile|high|std|med|low)/;
+	my $regex_quality = qr/(fhd|hd|sd|web|mobile|high|std|med|low)/;
 	my %sizes;
 	my %units;
 	my @q1 = map {
