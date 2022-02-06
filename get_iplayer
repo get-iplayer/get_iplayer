@@ -171,7 +171,7 @@ my $opt_format = {
 	cacherebuild	=> [ 1, "rebuildcache|rebuild-cache|cacherebuild|cache-rebuild!", 'Config', '--cache-rebuild', "Rebuild cache with full 30-day programme index. Use --refresh-limit to restrict cache window."],
 	expiry		=> [ 1, "expiry|e=n", 'Config', '--expiry, -e <secs>', "Cache expiry in seconds (default 4hrs)"],
 	limitmatches	=> [ 1, "limitmatches|limit-matches=n", 'Config', '--limit-matches <number>', "Limits the number of matching results for any search (and for every PVR search)"],
-	nopurge		=> [ 1, "no-purge|nopurge!", 'Config', '--nopurge', "Don't show warning about programmes recorded over 30 days ago"],
+	nopurge		=> [ 1, "no-purge|nopurge!", 'Hidden', '--nopurge', "Don't show warning about programmes recorded over 30 days ago"],
 	prefsadd	=> [ 0, "addprefs|add-prefs|prefsadd|prefs-add!", 'Config', '--prefs-add', "Add/Change specified saved user or preset options"],
 	prefsdel	=> [ 0, "del-prefs|delprefs|prefsdel|prefs-del!", 'Config', '--prefs-del', "Remove specified saved user or preset options"],
 	prefsclear	=> [ 0, "clear-prefs|clearprefs|prefsclear|prefs-clear!", 'Config', '--prefs-clear', "Remove *ALL* saved user or preset options"],
@@ -235,10 +235,9 @@ my $opt_format = {
 	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
-	purgefiles	=> [ 1, "purgefiles|purge-files!", 'Misc', '--purge-files', "Delete downloaded programmes more than 30 days old"],
 	releasecheck	=> [ 1, "releasecheck|release-check!", 'Misc', '--release-check', "Forces check for new release if used on command line. Checks for new release weekly if saved in preferences."],
 	throttle	=> [ 1, "bw|throttle=f", 'Misc', '--throttle <Mb/s>', "Bandwidth limit (in Mb/s) for media file download. Default: unlimited. Synonym: --bw"],
-	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Misc', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
+	trimhistory	=> [ 1, "trimhistory|trim-history=s", 'Hidden', '--trim-history <# days to retain>', "Remove download history entries older than number of days specified in option value.  Cannot specify 0 - use 'all' to completely delete download history"],
 
 };
 
@@ -631,16 +630,8 @@ $pvr->setvar('pvr_dir', File::Spec->catfile($profile_dir, "pvr"));
 
 release_check();
 my $retcode = 0;
-# Trim history
-if ( defined($opt->{trimhistory}) ) {
-	my $hist = History->new();
-	$hist->trim();
-# purge files
-} elsif ( $opt->{purgefiles} ) {
-	my $hist = History->new();
-	purge_downloaded_files( $hist, 30 );
 # mark downloaded
-} elsif ( $opt->{markdownloaded} ) {
+if ( $opt->{markdownloaded} ) {
 	if ( ! $opt->{pid} && $no_search_args ) {
 		main::logger "ERROR: Search term(s) or --pid or --url required with --mark-downloaded\n";
 		exit 1;
@@ -741,7 +732,6 @@ if ( defined($opt->{trimhistory}) ) {
 	my $hist = History->new();
 	my @pids = split( /,/, $opt->{pid} );
 	$retcode = download_pid_matches( $hist, find_pid_matches( $hist, @pids ) );
-	purge_warning( $hist, 30 );
 
 # Show history
 } elsif ( $opt->{history} ) {
@@ -756,7 +746,6 @@ if ( defined($opt->{trimhistory}) ) {
 	}
 	my $hist = History->new();
 	$retcode = download_matches( $hist, find_matches( $hist, @search_args ) );
-	purge_warning( $hist, 30 );
 }
 exit $retcode;
 
@@ -1988,67 +1977,6 @@ sub exists_in_path {
 }
 
 # Generic
-# Checks history for files that are over 30 days old and asks user if they should be deleted
-# "$prog->{pid}|$prog->{name}|$prog->{episode}|$prog->{type}|".time()."|$prog->{mode}|$prog->{filename}\n";
-sub purge_downloaded_files {
-	my $hist = shift;
-	my @delete;
-	my @proglist;
-	my $days = shift;
-
-	for my $pid ( $hist->get_pids() ) {
-		my $record = $hist->get_record( $pid );
-		if ( $record->{timeadded} < (time() - $days*86400) && $record->{filename} && -f $record->{filename} ) {
-			# Calculate the seconds difference between epoch_now and epoch_datestring and convert back into array_time
-			my @t = gmtime( time() - $record->{timeadded} );
-			push @proglist, "$record->{name} - $record->{episode}, Recorded: $t[7] days $t[2] hours ago";
-			push @delete, $record->{filename};
-		}
-	}
-
-	if ( @delete ) {
-		main::logger "\nThese programmes are over 30 days old and should be deleted:\n";
-		main::logger "-----------------------------------\n";
-		main::logger join "\n", @proglist;
-		main::logger "\n-----------------------------------\n";
-		main::logger "Do you wish to delete them now (Yes/No) ?\n";
-		my $answer = <STDIN>;
-		if ($answer =~ /^yes$/i ) {
-			for ( @delete ) {
-				main::logger "INFO: Deleting $_\n";
-				unlink $_;
-			}
-			main::logger "Programmes deleted\n";
-		} else {
-			main::logger "No Programmes deleted\n";
-		}
-	}
-
-	return 0;
-}
-
-sub purge_warning {
-	my $hist = shift;
-	my $days = shift;
-	my $overdue;
-	return 0 if $opt->{nopurge} || $opt->{nowrite};
-	for my $pid ( $hist->get_pids() ) {
-		my $record = $hist->get_record( $pid );
-		if ( $record->{timeadded} < (time() - $days*86400) && $record->{filename} && -f $record->{filename} ) {
-			$overdue = 1;
-			last;
-		}
-	}
-	if ( $overdue ) {
-		print STDOUT "WARNING: You have programmes over 30 days old that should be deleted.\n";
-		print STDOUT "WARNING: Find them with 'get_iplayer --history --before=720 \".*\"'\n";
-		print STDOUT "WARNING: or use the 'Recordings' tab in the Web PVR Manager.\n";
-		print STDOUT "WARNING: Use 'get_iplayer --purge-files' to delete all programmes over 30 days old.\n";
-		print STDOUT "WARNING: Use 'get_iplayer --prefs-add --no-purge' to suppress this warning.\n";
-	}
-	return 0;
-}
-
 # Returns url decoded string
 sub url_decode {
 	my $str = shift;
@@ -2754,7 +2682,7 @@ sub copy_set_options_from {
 
 # specify regex of options that cannot be saved
 sub excludeopts {
-	return '^(cache|profiledir|encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions|dumpoptions|comment|purge|markdownloaded)';
+	return '^(cache|profiledir|encoding|silent|help|debug|get|pvr|prefs|preset|warranty|conditions|dumpoptions|comment|markdownloaded)';
 }
 
 # List all available presets in the specified dir
@@ -3079,55 +3007,6 @@ sub opt {
 sub add_opt_object {
 	my $self = shift;
 	$History::optref = shift;
-}
-
-sub trim {
-	my $oldhistoryfile = "$historyfile.old";
-	my $newhistoryfile = "$historyfile.new";
-	if ( $opt->{trimhistory} =~ /^all$/i ) {
-		if ( ! copy($historyfile, $oldhistoryfile) ) {
-			die "ERROR: Cannot copy $historyfile to $oldhistoryfile: $!\n";
-		}
-		if ( ! unlink($historyfile) ) {
-			die "ERROR: Cannot delete $historyfile: $! \n";
-		}
-		main::logger "INFO: Deleted all entries from download history\n";
-		return;
-	}
-	if ( $opt->{trimhistory} !~ /^\d+$/ ) {
-		die "ERROR: --trim-history option must have a positive integer value, or use 'all' to completely delete download history.\n";
-	}
-	if ( $opt->{trimhistory} =~ /^0+$/ ) {
-		die "ERROR: Cannot specify 0 for --trim-history option.  Use 'all' to completely delete download history.\n";
-	}
-	if ( ! open(HIST, "< $historyfile") ) {
-		die "ERROR: Cannot read from $historyfile\n";
-	}
-	if ( ! open(NEWHIST, "> $newhistoryfile") ) {
-		die "ERROR: Cannot write to $newhistoryfile\n";
-	}
-	my $trim_limit = time() - ($opt->{trimhistory} * 86400);
-	my $deleted_count = 0;
-	while (<HIST>) {
-		chomp();
-		next if /^[\#\s]/;
-		my @record = split /\|/;
-		my $timeadded = $record[4];
-		if ( $timeadded >= $trim_limit ) {
-			print NEWHIST "$_\n";
-		} else {
-			$deleted_count++;
-		}
-	}
-	close HIST;
-	close NEWHIST;
-	if ( ! copy($historyfile, $oldhistoryfile) ) {
-		die "ERROR: Cannot copy $historyfile to $oldhistoryfile: $!\n";
-	}
-	if ( ! move($newhistoryfile, $historyfile) ) {
-		die "ERROR: Cannot move $newhistoryfile to $historyfile: $!\n";
-	}
-	main::logger "INFO: Deleted $deleted_count entries from download history\n";
 }
 
 # Uses global @history_format
@@ -9114,7 +8993,6 @@ sub run {
 		}
 		$retcode += $failcount;
 	}
-	main::purge_warning( $hist, 30 );
 	return $retcode;
 }
 
@@ -9190,7 +9068,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|^purge|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
