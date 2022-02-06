@@ -3856,6 +3856,7 @@ sub download_retry_loop {
 				main::logger "INFO: Regenerate filename for version change: $prog->{version} -> $version\n" if ( $prog->{version} && $opt->{verbose} );
 			}
 			$prog->{version} = $version;
+			$prog->{verpid} = $prog->{verpids}->{$version};
 			main::logger "INFO: Found version: '$prog->{version}'\n" if $opt->{verbose};
 
 			# Try to get stream data for this version if not already populated
@@ -4094,18 +4095,10 @@ sub create_metadata_file {
 	$template->{generic} .= '<program_meta_data xmlns="http://linuxcentre.net/xmlstuff/get_iplayer" revision="1">'."\n";
 	my $version = $prog->{version} || 'unknown';
 	for my $key ( sort keys %{$prog} ) {
+		next if $key eq "versions";
 		my $subst = "[$key]";
 		my $value = $prog->{$key};
-		if ( ref$value eq 'HASH' ) {
-			if ( ref$value->{$version} ne 'HASH' ) {
-				# skip mode lists
-				if ( $key eq "modes" || $key eq "modesizes" || $key eq "qualities" || $key eq "qualitysizes" )	{
-					next;
-				}
-			} else {
-				next;
-			}
-		}
+		next if ( ref$value eq 'HASH' );
 		$template->{generic} .= "\t<$key>$subst</$key>\n";
 	}
 	$template->{generic} .= "</program_meta_data>\n";
@@ -4153,20 +4146,9 @@ sub json_metadata {
 	$self->{runtime} = int($self->{duration} / 60);
 	my $jom = {};
 	for my $key ( sort keys %{$self} ) {
+		next if $key eq "versions";
 		my $value = $self->{$key};
-		# Get version specific value if this key is a hash
-		if ( ref$value eq 'HASH' ) {
-			if ( ref$value->{$version} ne 'HASH' ) {
-				# skip mode lists
-				if ( $key eq "modes" || $key eq "modesizes" || $key eq "qualities" || $key eq "qualitysizes" )	{
-					next;
-				} else {
-					$value = $value->{$version};
-				}
-			} else {
-				next;
-			}
-		}
+		next if ( ref$value eq 'HASH' );
 		# Join array elements if value is ARRAY type
 		if ( ref$value eq 'ARRAY' ) {
 			$value = join ',', @{ $value };
