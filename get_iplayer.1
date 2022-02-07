@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "December 2021" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "February 2022" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer and BBC Sounds
 .SH SYNOPSIS
@@ -168,10 +168,13 @@ Show get_iplayer version and exit.
 Number of attempts to make or resume a failed connection.  \-\-attempts is applied per\-stream, per\-mode.  Many modes have two or more streams available.
 .TP
 \fB\-\-audio\-only
-Only download audio stream for TV programme. 'hls' recording modes are not supported and ignored. Produces .m4a file. Implies \-\-force.
+Only download audio stream for TV programme. Produces .m4a file. Implies \-\-force.
 .TP
-\fB\-\-download\-abortonfail
-Exit immediately if stream for any recording mode fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked.
+\fB\-\-download\-abort\-onfail
+Exit immediately if any stream to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked.
+.TP
+\fB\-\-exclude\-format <format>,<format>,...
+Comma\-separated list of media stream formats to ignore when recording. Valid values: hls,dash.
 .TP
 \fB\-\-exclude\-supplier <supplier>,<supplier>,...
 Comma\-separated list of media stream suppliers (CDNs) to skip. Possible values: akamai,limelight,bidi,cloudfront. Synonym: \-\-exclude\-cdn.
@@ -179,14 +182,14 @@ Comma\-separated list of media stream suppliers (CDNs) to skip. Possible values:
 \fB\-\-force
 Ignore programme history (unsets \-\-hide option also).
 .TP
-\fB\-\-fps25
-Use only 25fps streams for TV programmes (HD video not available).
-.TP
 \fB\-\-get, \-g
 Start recording matching programmes. Search terms required.
 .TP
 \fB\-\-hash
 Show recording progress as hashes
+.TP
+\fB\-\-include\-format <format>,<format>,...
+Comma\-separated list of media stream to use when recording. Overrides \-\-exclude\-format. Valid values: hls,dash
 .TP
 \fB\-\-include\-supplier <supplier>,<supplier>,...
 Comma\-separated list of media stream suppliers (CDNs) to use if not included by default or if previously excluded by \-\-exclude\-supplier. Possible values: akamai,limelight,bidi,cloudfront. Synonym: \-\-include\-cdn.
@@ -196,9 +199,6 @@ Force HLS/DASH download progress display to be captured when screen output is re
 .TP
 \fB\-\-mark\-downloaded
 Mark programmes in search results or specified with \-\-pid/\-\-url as downloaded by inserting records in download history.
-.TP
-\fB\-\-modes <mode>,<mode>,...
-Recording modes.  See \-\-tvmode and \-\-radiomode (with \-\-long\-help) for available modes and defaults.  Shortcuts: tvbest,tvbetter,tvgood,tvworst,radiobest,radiobetter,radiogood,radioworst (default=default for programme type).
 .TP
 \fB\-\-no\-merge\-versions
 Do not merge programme versions with same name and duration.
@@ -236,8 +236,11 @@ Download only programmes of <type> (radio or tv) with \-\-pid\-recursive. Requir
 \fB\-\-proxy, \-p <url>
 Web proxy URL, e.g., http://username:password@server:port or http://server:port.  Value of http_proxy environment variable (if present) will be used unless \-\-proxy is specified. Used for both HTTP and HTTPS. Overridden by \-\-no\-proxy.
 .TP
-\fB\-\-radiomode <mode>,<mode>,...
-Radio recording modes (overrides \-\-modes): dafhigh,dafstd,dafmed,daflow,hafhigh,hafstd,hafmed,haflow,hlahigh,hlastd,hlsmed,hlalow. Shortcuts: best,better,good,worst,haf,hla,daf,hls,dash,high,std,med,low (default=hafhigh,hlahigh,dafhigh,hafstd,hlastd,dafstd,hafmed,hlamed,dafmed,haflow,hlalow,daflow).
+\fB\-\-quality <quality>,<quality>,...
+TV and radio recording quality preference.  See \-\-tv\-quality and \-\-radio\-quality for available values and defaults. Default: default for programme type.
+.TP
+\fB\-\-radio\-quality <quality>,<quality>,...
+Radio recording quality preference (overrides \-\-quality): high,std,med,low,default (Aliases: 320k,128k,96k,48k). Comma\-delimited list in descending order of preference. Default: high,std,med,low.
 .TP
 \fB\-\-start <secs|hh:mm:ss>
 Recording/streaming start offset (actual start may be several seconds earlier for HLS and DASH streams)
@@ -251,8 +254,11 @@ Do not download TV programme if subtitles are not available.
 \fB\-\-test, \-t
 Test only \- no recording (only shows search results with \-\-pvr and \-\-pid\-recursive)
 .TP
-\fB\-\-tvmode <mode>,<mode>,...
-TV recording modes (overrides \-\-modes): dvfhd,dvfsd,dvfxsd,dvfhigh,dvfxhigh,dvflow,hvfhd,hvfsd,hvfxsd,hvfhigh,hvfxhigh,hvflow. Shortcuts: best,better,good,worst,dvf,hvf,dash,hls,hd,sd,high,low. 50fps streams (if available) preferred unless \-\-fps25 specified (default=hvfhd,dvfhd,hvfsd,dvfsd,hvfxsd,dvfxsd,hvfhigh,dvfhigh,hvfxhigh,dvfxhigh,hvflow,dvflow).
+\fB\-\-tv\-lower\-bitrate
+Prefer 25fps (or lower\-bitrate 50fps) streams for TV programmes if available.
+.TP
+\fB\-\-tv\-quality <quality>,<quality>,...
+TV recording quality preference (overrides \-\-quality): fhd,hd,sd,web,mobile,default (Aliases: 1080p,720p,540p,396p,288p). Comma\-delimited list in descending order of preference. Default: hd,sd,web,mobile
 .TP
 \fB\-\-url <url>,<url>,...
 Record the PIDs contained in the specified iPlayer episode URLs. Alias for \-\-pid.
@@ -422,9 +428,6 @@ Cache expiry in seconds (default 4hrs)
 \fB\-\-limit\-matches <number>
 Limits the number of matching results for any search (and for every PVR search)
 .TP
-\fB\-\-nopurge
-Don't show warning about programmes recorded over 30 days ago
-.TP
 \fB\-\-prefs\-add
 Add/Change specified saved user or preset options
 .TP
@@ -563,17 +566,11 @@ Character encoding used to encode file and directory names.  Encoding name must 
 \fB\-\-index\-maxconn <number>
 Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10
 .TP
-\fB\-\-purge\-files
-Delete downloaded programmes more than 30 days old
-.TP
 \fB\-\-release\-check
 Forces check for new release if used on command line. Checks for new release weekly if saved in preferences.
 .TP
 \fB\-\-throttle <Mb/s>
 Bandwidth limit (in Mb/s) for media file download. Default: unlimited. Synonym: \-\-bw
-.TP
-\fB\-\-trim\-history <# days to retain>
-Remove download history entries older than number of days specified in option value.  Cannot specify 0 \- use 'all' to completely delete download history
 .SS "Deprecated Options:"
 .TP
 \fB\-\-no\-index\-concurrent
@@ -583,7 +580,7 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.28, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.29, Copyright (C) 2008\-2010 Phil Lewis
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
