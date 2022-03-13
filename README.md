@@ -19,7 +19,7 @@
 **NOTE:**
 
 - **get_iplayer can only search for programmes that were scheduled for broadcast on BBC linear services within the previous 30 days, even if some are available for more than 30 days on the iPlayer/Sounds sites. Red button programmes, iPlayer box sets, web-only content, and BBC podcasts are not searchable. Programmes that are still available after 30 days must be located on the iPlayer/Sounds sites and downloaded directly via PID or URL.**
-- **get_iplayer does not support downloading news/sport videos, other embedded media, archive sites, special collections, educational material, programme clips or any content other than whole episodes of programmes scheduled for broadcast on BBC linear services within the previous 30 days. However, it is generally possible to download other content such as red button programmes or iPlayer box sets directly via PID or URL. get_iplayer DOES NOT support live recording from BBC channels.**
+- **get_iplayer does not support downloading news/sport videos, other embedded media, archive programmes, special collections, educational material, programme clips or any content other than whole episodes of programmes scheduled for broadcast on BBC linear services within the previous 30 days. However, it is generally possible to download other content such as red button programmes, iPlayer box sets, or podcasts directly via PID or URL. get_iplayer DOES NOT support live recording from BBC channels.**
 
 ## Documentation
 
