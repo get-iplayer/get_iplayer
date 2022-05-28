@@ -8204,6 +8204,16 @@ sub fetch {
 		}
 		$size = tell $fh;
 		return if $opt->{quiet} || $opt->{silent};
+		if ( $prog_mode =~ /fhd/ && $curr_sequence - $start_sequence > 0 ) {
+			my $sequence_size = int($size / ($curr_sequence - $start_sequence));
+			if ( $stop_sequence - $start_sequence > 0 ) {
+				my $new_size = $sequence_size * ($stop_sequence - $start_sequence);
+				if ( abs($new_size - $file_size) > 0.05 * $file_size ) {
+					$file_size = $new_size;
+					$file_size_mb = $file_size / 1000000.0;
+				}
+			}
+		}
 		$percent = $file_size ? 100.0 * $curr_size / $file_size : 0;
 		# limit progress display to 99.9%
 		if ( $percent > 99.9 ) {
