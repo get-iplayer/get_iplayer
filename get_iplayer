@@ -5123,13 +5123,15 @@ sub parse_title {
 	$prog->{episodenum} ||= $episodenum;
 }
 
+# determine the thumbnail extension by querying playlist.json
+# some programmes are now using .png thumbnails
 sub get_thumbnail_ext {
 	my $prog = shift;
 	my $image_pid = shift;
 	my $ua = shift;
 	my $pid = $prog->{pid};
 
-	main::logger "DEBUG:: Using pid '$pid' and image pid '$image_pid' and ua '$ua'\n";
+	main::logger "DEBUG: Attempting to determine thumbnail extension using pid '$pid' and image pid '$image_pid'\n" if $opt->{debug};
 
 	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
 	my $json = main::request_url_retry($ua, $url, 3, '', '');
@@ -5139,9 +5141,17 @@ sub get_thumbnail_ext {
 			my $holding_image = $dec->{holdingImage};
 			my $holding_image_filename = (split "/", $holding_image)[6];
 			my $holding_image_ext = (split /(\.)/, $holding_image_filename)[2];
-			main::logger "DEBUG:: Found extension '$holding_image_ext'\n";
+			main::logger "DEBUG: Found thumbnail extension '$holding_image_ext'\n" if $opt->{debug};
 			return $holding_image_ext;
+		} else {
+			main::logger "WARNING: Could not parse playlist metadata from $url\n";
+			main::logger "WARNING: Could not determine thumbnail extension. Falling back to '.jpg'\n";
+			return "jpg";
 		}
+	} else {
+		main::logger "WARNING: Could not download playlist metadata from $url\n";
+		main::logger "WARNING: Could not determine thumbnail extension. Falling back to '.jpg'\n";
+		return "jpg";
 	}
 }
 
