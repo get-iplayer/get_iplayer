@@ -5123,6 +5123,28 @@ sub parse_title {
 	$prog->{episodenum} ||= $episodenum;
 }
 
+sub get_thumbnail_ext {
+	my $prog = shift;
+	my $image_pid = shift;
+	my $ua = shift;
+	my $pid = $prog->{pid};
+
+	main::logger "DEBUG:: Using pid '$pid' and image pid '$image_pid' and ua '$ua'\n";
+
+	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
+	my $json = main::request_url_retry($ua, $url, 3, '', '');
+	if ( $json ) {
+		my $dec = eval { decode_json($json) };
+		if ( ! $@ ) {
+			my $holding_image = $dec->{holdingImage};
+			my $holding_image_filename = (split "/", $holding_image)[6];
+			my $holding_image_ext = (split /(\.)/, $holding_image_filename)[2];
+			main::logger "DEBUG:: Found extension '$holding_image_ext'\n";
+			return $holding_image_ext;
+		}
+	}
+}
+
 # get full episode metadata given pid and ua. Uses two different urls to get data
 sub get_metadata {
 	my $prog = shift;
@@ -5162,7 +5184,8 @@ sub get_metadata {
 					}
 				}
 				my $recipe = $prog->thumb_url_recipe();
-				$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
+				my $thumbnail_ext = $prog->get_thumbnail_ext($image_pid, $ua);
+				$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.${thumbnail_ext}";
 				# /programmes page
 				$web = "https://www.bbc.co.uk/programmes/$pid";
 				# player page
