@@ -3991,6 +3991,13 @@ sub create_metadata_file {
 		return;
 	}
 
+	# Don't recreate metadata file if the file already exists
+	if ( -f $filename->{ $opt->{metadata} } && ! $opt->{overwrite} ) {
+		main::logger "INFO: Metadata file already exists: $filename->{ $opt->{metadata} }\n";
+		main::logger "INFO: Use --overwrite to re-download\n";
+		return 0;
+	}
+
 	main::logger "INFO: Writing metadata\n";
 
 	my $text;
