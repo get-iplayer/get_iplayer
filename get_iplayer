@@ -1670,7 +1670,7 @@ sub get_links {
 			$prog_old->{ $record_entries->{pid} } = $record_entries;
 			# Copy pid into index_prog_old hash
 			$index_prog_old->{ $record_entries->{index} } = $record_entries->{pid};
-			if ( ! $opt->{cacherebuild} && $record_entries->{timeadded} > $mra )
+			if ( ! $opt->{cacherebuild} && $record_entries->{timeadded} > $mra && $record_entries->{timeadded} <= $now)
 			{
 				$mra = $record_entries->{timeadded};
 			}
@@ -1742,6 +1742,9 @@ sub get_links {
 					# if the entry was in old cache then retain timestamp from old entry
 					if ( $prog_old->{ $this->{pid} }->{timeadded} ) {
 						my $ta = $prog_old->{ $this->{pid} }->{timeadded};
+						if ( $ta > $now || $ta < 0 ) {
+							$ta = $now;
+						}
 						my $available = Programme::get_time_string( $this->{available} );
 						if ( $ta <= $available && $available <= $now ) {
 							$this->{timeadded} = $now;
