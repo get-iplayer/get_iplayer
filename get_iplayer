@@ -9373,7 +9373,7 @@ sub tags_from_metadata {
 	$tags->{lyrics} = $meta->{desclong};
 	$tags->{lyrics} .= "\n\nPLAY: $meta->{player}" if $meta->{player};
 	$tags->{lyrics} .= "\n\nINFO: $meta->{web}" if $meta->{web};
-	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? 'true' : 'false';
+	$tags->{hdvideo} = $meta->{mode} =~ /hd/i ? ( $meta->{mode} =~ /fhd/i ? 2 : 1 ) : 0;
 	$tags->{TVShowName} = $meta->{show};
 	$tags->{TVEpisode} = $meta->{sesort} || $meta->{pid};
 	$tags->{TVSeasonNum} = $tags->{disk};
@@ -9504,6 +9504,7 @@ sub tag_init {
 	# determine AtomicParsley features
 	my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
 	$opt->{myaphdvideo} = 1 if $ap_help =~ /--hdvideo/;
+	$opt->{myap1080p} = 1 if $opt->{myaphdvideo} && $ap_help =~ /1080p/;
 	$opt->{myaplongdesc} = 1 if $ap_help =~ /--longdesc/;
 	$opt->{myaplongdescription} = 1 if $ap_help =~ /--longDescription/;
 	$opt->{myaplongdescfile} = 1 if $ap_help =~ /--longdescFile/;
@@ -9540,7 +9541,12 @@ sub tag_cmd {
 	# video only
 	if ( $tags->{is_video} ) {
 		# all video
-		push @cmd, ( '--hdvideo', $tags->{hdvideo} ) if $opt->{myaphdvideo};
+		if ( $opt->{myaphdvideo} ) {
+			if ( ! $opt->{myap1080p} ) {
+				$tags->{hdvideo} = $tags->{hdvideo} > 0 ? "true" : "false";
+			}
+			push @cmd, ( '--hdvideo', $tags->{hdvideo} );
+		}
 		# tv only
 		if ( $tags->{is_tvshow} ) {
 			push @cmd, (
