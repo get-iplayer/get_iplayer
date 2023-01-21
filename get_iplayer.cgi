@@ -3063,7 +3063,7 @@ sub process_params {
 
 	$opt->{URL} = {
 		title	=> 'Quick URL', # Title
-		tooltip	=> "Enter your URL for Recording (then click 'Record' or 'Play')", # Tooltip
+		tooltip	=> "Enter your URL for recording (then click 'Record' or 'Queue')", # Tooltip
 		webvar	=> 'URL', # webvar
 		type	=> 'text', # type
 		default	=> '', # default
