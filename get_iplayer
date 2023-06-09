@@ -5346,7 +5346,6 @@ sub get_metadata {
 	$prog->{name} 		= $name || $prog->{name};
 	$prog->{episode} 	= $episode || $prog->{episode} || $prog->{name};
 	$prog->{brand} 	= $brand || $prog->{name};
-	$prog->{series} 	= $series;
 	$prog->{type}		= $prog_type || $prog->{type};
 	$prog->{channel}	= $channel || $prog->{channel};
 	$prog->{expires}	= $expires || $prog->{expires};
@@ -5375,8 +5374,6 @@ sub get_metadata {
 	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{brand};
 	$prog->{nameshort} =~ s/:?\s*(Series|Cyfres)\s+\d.*?(:\s*|$)//i;
-	$prog->{series} = "Series $seriesnum" if $seriesnum && $prog->{series} && $prog->{nameshort} && $prog->{series} eq $prog->{nameshort};
-	$prog->{series} ||= "Series $seriesnum" if $seriesnum;
 	$prog->{firstbcast} = $firstbcast;
 	$prog->{firstbcastrel} = Programme::get_time_string( $firstbcast, time() );
 	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
@@ -5387,6 +5384,10 @@ sub get_metadata {
 	$prog->{sebcasttime} = substr($prog->{sebcast}, 8, 4);
 	$prog->{sesort} = $prog->{senum} || $prog->{sebcast};
 	$prog->{sesortx} = $prog->{senumx} || $prog->{sebcast};
+	$prog->{series} 	= $series || $prog->{series};
+	$prog->{series} = "Series $seriesnum" if $seriesnum && $prog->{series} && $prog->{nameshort} && $prog->{series} eq $prog->{nameshort};
+	$prog->{series} ||= "Series $seriesnum" if $seriesnum;
+	$prog->{seriessort} = $prog->{series} || $prog->{firstbcastyear};
 
 	# Do this for each version tried in this order (if they appeared in the content)
 	for my $version ( sort keys %{ $prog->{verpids} } ) {
