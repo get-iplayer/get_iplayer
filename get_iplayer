@@ -2144,7 +2144,7 @@ sub run_cmd_win32 {
 	local *Win32::Unicode::Process::_create_process = sub {
 		my $cmd_str = join ' ',  @_;
 		my $cmd = Win32::Unicode::Util::utf8_to_utf16('/x /c "' . $cmd_str . '"') . Win32::Unicode::Constant::NULL();
-		my $path = File::Spec->catfile($ENV{ComSpec} || 'C:/WINDOWS/system32/cmd.exe');
+		my $path = Win32::Unicode::Util::catfile($ENV{ComSpec} || 'C:/WINDOWS/system32/cmd.exe');
 		my $shell = Win32::Unicode::Util::utf8_to_utf16($path) . Win32::Unicode::Constant::NULL();
 		return Win32::Unicode::Process::create_process($shell, $cmd);
 	};
