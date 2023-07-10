@@ -3492,6 +3492,7 @@ sub display_metadata {
 			# skip these
 		# If hash then list keys
 		} elsif ( ref$data{$_} eq 'HASH' ) {
+			next if ( /^(geoblocked|unavailable)$/ && ! $opt->{verbose} );
 			next if ( $_ eq "modes" || $_ eq "modesizes") && ! $opt->{verbose};
 			for my $key ( sort keys %{$data{$_}} ) {
 				main::logger sprintf "%-16s ", $_.':';
@@ -6410,11 +6411,15 @@ sub get_stream_data {
 	unless ( $unblocked ) {
 		$prog->{geoblocked}->{$version} = 1 if $checked_geoblock;
 		return undef;
+	} else {
+		$prog->{geoblocked}->{$version} = 0;
 	}
 
 	unless ( $isavailable ) {
 		$prog->{unavailable}->{$version} = 1 if $checked_unavailable;
 		return undef;
+	} else {
+		$prog->{unavailable}->{$version} = 0;
 	}
 
 	# Parse and dump structure
