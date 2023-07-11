@@ -9330,7 +9330,7 @@ sub opt_format {
 		noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 		notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes."],
 		tag_credits => [ 1, "tagcredits|tag-credits!", 'Tagging', '--tag-credits', "Add programme credits (if available) to lyrics field."],
-		tag_encoding	=> [ 1, "tagencoding|tag-encoding=s", 'Tagging', '--tag-encoding <name>', "(Windows only) Single-byte character encoding for non-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: cp1252 (Windows code page 1252)"],
+		tag_encoding	=> [ 1, "tagencoding|tag-encoding=s", 'Tagging', '--tag-encoding <name>', "(Windows only) Single-byte character encoding for non-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: active code page or cp1252 (Windows code page 1252)"],
 		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in tag metadata. Use substitution parameters in template (see docs for list). Default: <name>"],
 		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in tag metadata. Use substitution parameters in template (see docs for list). Default: <episodeshort>"],
 		tag_isodate		=> [ 1, "tagisodate|tag-isodate!", 'Tagging', '--tag-isodate', "Use ISO8601 dates (YYYY-MM-DD) in album/show names and track titles"],
@@ -9640,7 +9640,7 @@ sub tag_file_mp4 {
 	}
 	if ( ! IS_WIN32 || $opt->{tag_nounicode} || $rc ) {
 		if ( IS_WIN32 ) {
-			tags_encode($tags, $opt->{tag_encoding} || "cp1252");
+			tags_encode($tags, $opt->{tag_encoding} || $opt->{encodinglocale} || "cp1252");
 		}
 		@cmd = tag_cmd( $meta, $tags );
 		$rc = main::run_cmd( $run_mode, @cmd );
