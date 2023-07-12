@@ -41,20 +41,17 @@ use IO::Handle;
 use IPC::Open3;
 use LWP::ConnCache;
 #use LWP::Debug qw(+);
+use Unicode::Normalize;
 use LWP::UserAgent;
 use PerlIO::encoding;
 use strict;
+use constant FB_EMPTY => sub { '' };
 use constant IS_WIN32 => $^O eq 'MSWin32' ? 1 : 0;
 use constant DEFAULT_THUMBNAIL => "https://ichef.bbci.co.uk/images/ic/480xn/p01tqv8z.png";
 $PerlIO::encoding::fallback = XMLCREF;
 # suppress Perl 5.22/CGI 4 warning
 $CGI::LIST_CONTEXT_WARN = 0;
 $| = 1;
-
-my $fh;
-# Send log messages to this fh
-my $se = *STDERR;
-binmode $se, ':utf8';
 
 my $opt_cmdline;
 $opt_cmdline->{debug} = 0;
@@ -67,9 +64,13 @@ GetOptions(
 	"port|p=n"			=> \$opt_cmdline->{port},
 	"getiplayer|get_iplayer|g=s"	=> \$opt_cmdline->{getiplayer},
 	"ffmpeg=s"			=> \$opt_cmdline->{ffmpeg},
-	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
 	"debug"				=> \$opt_cmdline->{debug},
 	"baseurl|base-url|b=s"		=> \$opt_cmdline->{baseurl},
+	"encodinglocale|encoding-locale=s"	=> \$opt_cmdline->{encodinglocale},
+	"encodinglocalefs|encoding-locale-fs=s"	=> \$opt_cmdline->{encodinglocalefs},
+	"encodingconsoleout|encoding-console-out=s"	=> \$opt_cmdline->{encodingconsoleout},
+	"encodingconsolein|encoding-console-in=s"	=> \$opt_cmdline->{encodingconsolein},
+	"encodingwebrequest|encoding-webrequest=s"	=> \$opt_cmdline->{encodingwebrequest},
 ) || die usage();
 
 # Display usage if old method of invocation is used or --help
@@ -86,23 +87,66 @@ Copyright (C) 2009-2010 Phil Lewis
   See the GPLv3 for details.
 
 Options:
- --listen,-l        Use the built-in web server and listen on this interface address (default: 0.0.0.0)
- --port,-p          Use the built-in web server and listen on this TCP port
- --getiplayer,-g    Path to the get_iplayer script
- --ffmpeg           Path to the ffmpeg binary
- --encodinglocalefs Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
- --debug            Debug mode
- --baseurl,-b       Base URL for link generation. Set to full proxy URL if running behind reverse proxy.
- --help,-h          This help text
+ --listen,-l          Use the built-in web server and listen on this interface address (default: 0.0.0.0)
+ --port,-p            Use the built-in web server and listen on this TCP port
+ --getiplayer,-g      Path to the get_iplayer script
+ --ffmpeg             Path to the ffmpeg binary (for streaming)
+ --debug              Debug mode
+ --baseurl,-b         Base URL for link generation. Set to full proxy URL if running behind reverse proxy.
+ --help,-h            This help text
+ --encodinglocale     Encoding for command line (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
+ --encodinglocalefs   Encoding for file names (default: Linux/Unix/OSX = UTF-8, Windows = cp1252)
+ --encodingconsoleout Encoding for STDOUT/STDERR (default: Linux/Unix/OSX = UTF-8, Windows = cp850)
+ --encodingconsolein  Encoding for STDIN (default: Linux/Unix/OSX = UTF-8, Windows = cp850)
+ --encodingwebrequest Encoding for requests to get_iplayer (default: Linux/Unix/OSX = UTF-8, Windows = UTF-8)
 EOF
 	print $text;
 	exit 1;
 }
 
 
+# fallback encodings
+$opt_cmdline->{encodinglocale} = $opt_cmdline->{encodinglocalefs} = default_encodinglocale();
+$opt_cmdline->{encodingconsoleout} = $opt_cmdline->{encodingconsolein} = default_encodingconsoleout();
+$opt_cmdline->{encodingwebrequest} = default_encodingwebrequest();
+# attempt to automatically determine encodings
+eval {
+	require Encode::Locale;
+};
+if (!$@) {
+	# set encodings unless already set by PERL_UNICODE or perl -C
+	$opt_cmdline->{encodinglocale} = $Encode::Locale::ENCODING_LOCALE unless (${^UNICODE} & 32);
+	$opt_cmdline->{encodinglocalefs} = $Encode::Locale::ENCODING_LOCALE_FS unless (${^UNICODE} & 32);
+	$opt_cmdline->{encodingconsoleout} = $Encode::Locale::ENCODING_CONSOLE_OUT unless (${^UNICODE} & 6);
+	$opt_cmdline->{encodingconsolein} = $Encode::Locale::ENCODING_CONSOLE_IN unless (${^UNICODE} & 1);
+}
+binmode(STDOUT, ":encoding($opt_cmdline->{encodingconsoleout})");
+binmode(STDERR, ":encoding($opt_cmdline->{encodingconsoleout})");
+binmode(STDIN, ":encoding($opt_cmdline->{encodingconsolein})");
+
+my $fh;
+# Send log messages to this fh
+my $se = *STDERR;
+binmode $se, ":encoding($opt_cmdline->{encodingconsoleout})";
+
+for my $key ( keys %{$opt_cmdline} ) {
+	# decode @ARGV unless already decoded by PERL_UNICODE or perl -C
+	unless ( ${^UNICODE} & 32 ) {
+		$opt_cmdline->{$key} = decode_cl($opt_cmdline->{$key});
+	}
+	# compose UTF-8 args if necessary
+	if ( $opt_cmdline->{encodinglocale} =~ /UTF-?8/i ) {
+		$opt_cmdline->{$key} = NFKC($opt_cmdline->{$key});
+	}
+}
+
 # Some defaults
 my $default_modes = 'default';
 $opt_cmdline->{listen} = '0.0.0.0' if ! $opt_cmdline->{listen};
+$opt_cmdline->{baseurl} .= "/" if $opt_cmdline->{baseurl} && $opt_cmdline->{baseurl} !~ m{/$};
+$opt_cmdline->{ffmpeg} = encode_fs($opt_cmdline->{ffmpeg}) || 'ffmpeg';
+$opt_cmdline->{getiplayer} = encode_fs($opt_cmdline->{getiplayer}) if $opt_cmdline->{getiplayer};
+
 # Search for get_iplayer
 if ( ! $opt_cmdline->{getiplayer} ) {
 	for ( './get_iplayer', './get_iplayer.cmd', './get_iplayer.pl', '/usr/bin/get_iplayer', '/usr/local/bin/get_iplayer' ) {
@@ -113,9 +157,6 @@ if ( ( ! $opt_cmdline->{getiplayer} ) || ! -f $opt_cmdline->{getiplayer} ) {
 	print "ERROR: Cannot find get_iplayer, please specify its location using the --getiplayer option.\n";
 	exit 2;
 }
-$opt_cmdline->{encodinglocalefs} ||= (IS_WIN32 ? 'cp1252' : 'utf8');
-$opt_cmdline->{ffmpeg} ||= 'ffmpeg';
-$opt_cmdline->{baseurl} .= "/" if $opt_cmdline->{baseurl} && $opt_cmdline->{baseurl} !~ m{/$};
 
 # Path to get_iplayer (+ set HOME env var cos apache seems to not set it)
 my $home = $ENV{HOME};
@@ -412,6 +453,44 @@ if ( $opt_cmdline->{port} > 0 ) {
 
 exit 0;
 
+
+sub default_encodinglocale {
+	return 'UTF-8' if (${^UNICODE} & 32);
+	return (IS_WIN32 ? 'cp1252' : 'UTF-8');
+}
+
+sub default_encodingconsoleout {
+	return 'UTF-8' if (${^UNICODE} & 6);
+	return (IS_WIN32 ? 'cp850' : 'UTF-8');
+}
+
+sub default_encodingwebrequest {
+	return 'UTF-8';
+}
+
+sub encode_fs {
+	return encode($opt_cmdline->{encodinglocalefs}, shift, FB_EMPTY);
+}
+
+sub decode_fs {
+	return decode($opt_cmdline->{encodinglocalefs}, shift, FB_EMPTY);
+}
+
+sub encode_cl {
+	return encode($opt_cmdline->{encodinglocale}, shift, FB_EMPTY);
+}
+
+sub decode_cl {
+	return decode($opt_cmdline->{encodinglocale}, shift, FB_EMPTY);
+}
+
+sub encode_wr {
+	return encode($opt_cmdline->{encodingwebrequest}, shift, FB_EMPTY);
+}
+
+sub decode_wr {
+	return decode($opt_cmdline->{encodingwebrequest}, shift, FB_EMPTY);
+}
 
 
 sub cleanup {

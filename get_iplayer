@@ -227,10 +227,11 @@ my $opt_format = {
 	# External Program
 
 	# Misc
-	encodingconsolein	=> [ 1, "encodingconsolein|encoding-console-in=s", 'Misc', '--encoding-console-in <name>', "Character encoding for standard input (currently unused).  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
-	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp850"],
+	encodingconsolein	=> [ 1, "encodingconsolein|encoding-console-in=s", 'Misc', '--encoding-console-in <name>', "Character encoding for standard input (currently unused).  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/macOS = UTF-8, Windows = cp850"],
+	encodingconsoleout	=> [ 1, "encodingconsoleout|encoding-console-out=s", 'Misc', '--encoding-console-out <name>', "Character encoding used to encode search results and other output.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/macOS = UTF-8, Windows = cp850"],
 	encodinglocale	=> [ 1, "encodinglocale|encoding-locale=s", 'Misc', '--encoding-locale <name>', "Character encoding used to decode command-line arguments.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
-	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/OSX = UTF-8, Windows = cp1252"],
+	encodinglocalefs	=> [ 1, "encodinglocalefs|encoding-locale-fs=s", 'Misc', '--encoding-locale-fs <name>', "Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto-detect fails): Linux/Unix/macOS = UTF-8, Windows = cp1252"],
+	encodingwebrequest	=> [ 1, "encodingwebrequest|encoding-webrequest=s", 'Misc', '--encoding-webrequest <name>', "Character encoding used to encode commands sent from Web PVR.  Encoding name must be known to Perl Encode module.  Default = UTF-8"],
 	indexmaxconn	=> [ 1, "indexmaxconn|index-maxconn=n", 'Misc', '--index-maxconn <number>', "Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10"],
 	noindexconcurrent	=> [ 1, "noindexconcurrent|no-index-concurrent!", 'Deprecated', '--no-index-concurrent', "Do not use concurrent indexing to update programme cache.  Cache updates will be very slow."],
 	releasecheck	=> [ 1, "releasecheck|release-check!", 'Misc', '--release-check', "Forces check for new release if used on command line. Checks for new release weekly if saved in preferences."],
@@ -278,6 +279,7 @@ sub logger(@) {
 # fallback encodings
 $opt->{encodinglocale} = $opt->{encodinglocalefs} = default_encodinglocale();
 $opt->{encodingconsoleout} = $opt->{encodingconsolein} = default_encodingconsoleout();
+$opt->{encodingwebrequest} = default_encodingwebrequest();
 # attempt to automatically determine encodings
 eval {
 	require Encode::Locale;
@@ -298,7 +300,7 @@ $opt_pre->parse( 1 );
 @ARGV = @argv_save;
 
 # set encodings ASAP
-my @encoding_opts = ('encodinglocale', 'encodinglocalefs', 'encodingconsoleout', 'encodingconsolein');
+my @encoding_opts = ('encodinglocale', 'encodinglocalefs', 'encodingconsoleout', 'encodingconsolein', 'encodingwebrequest');
 foreach ( @encoding_opts ) {
 	$opt->{$_} = $opt_pre->{$_} if $opt_pre->{$_};
 }
@@ -308,7 +310,7 @@ binmode(STDIN, ":encoding($opt->{encodingconsolein})");
 
 # decode @ARGV unless already decoded by PERL_UNICODE or perl -C
 unless ( ${^UNICODE} & 32 ) {
-	@ARGV = map { decode($opt->{encodinglocale}, $_) } @ARGV;
+	@ARGV = map { main::decode_cl($_) } @ARGV;
 }
 # compose UTF-8 args if necessary
 if ( $opt->{encodinglocale} =~ /UTF-?8/i ) {
@@ -517,7 +519,7 @@ if ( $opt->{webrequest} ) {
 	my @webopts = split /[\&\?]/, $opt->{webrequest};
 	for (@webopts) {
 		# URL decode it (value should then be decoded as UTF-8)
-		$_ = decode($opt->{encodinglocale}, main::url_decode( $_ ), FB_EMPTY);
+		$_ = main::decode_wr(main::url_decode( $_ ), FB_EMPTY);
 		my ( $optname, $value );
 		# opt val pair
 		if ( m{^\s*([\w\-]+?)[\s=](.+)$} ) {
@@ -2439,10 +2441,32 @@ sub default_encodingconsoleout {
 	return (IS_WIN32 ? 'cp850' : 'UTF-8');
 }
 
+sub default_encodingwebrequest {
+	return 'UTF-8';
+}
+
 sub encode_fs {
-	my $string = shift;
-	return $string if $opt->{encodinglocalefs} =~ /UTF-?8/i;
-	return encode($opt->{encodinglocalefs}, $string, FB_EMPTY);
+	return encode($opt->{encodinglocalefs}, shift, FB_EMPTY);
+}
+
+sub decode_fs {
+	return decode($opt->{encodinglocalefs}, shift, FB_EMPTY);
+}
+
+sub encode_cl {
+	return encode($opt->{encodinglocale}, shift, FB_EMPTY);
+}
+
+sub decode_cl {
+	return decode($opt->{encodinglocale}, shift, FB_EMPTY);
+}
+
+sub encode_wr {
+	return encode($opt->{encodingwebrequest}, shift, FB_EMPTY);
+}
+
+sub decode_wr {
+	return decode($opt->{encodingwebrequest}, shift, FB_EMPTY);
 }
 
 sub hide_progress {
