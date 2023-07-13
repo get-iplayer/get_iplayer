@@ -345,6 +345,7 @@ if ( $ENV{GETIPLAYER_PROFILE} ) {
 } elsif ( $ENV{HOME} ) {
 	$profile_dir = $opt_pre->{profiledir} || File::Spec->catfile($ENV{HOME}, '.get_iplayer');
 }
+$profile_dir = main::encode_fs(main::decode_cl($profile_dir));
 # This is where user options are specified
 my $optfile_default = File::Spec->catfile($profile_dir, 'options');
 
@@ -363,6 +364,7 @@ if ( $ENV{GETIPLAYER_DEFAULTS} ) {
 }
 # Make profile dir if it doesn't exist
 mkpath $profile_dir if ! -d $profile_dir;
+$optfile_system = main::encode_fs(main::decode_cl($optfile_system));
 
 $ENV{GETIPLAYER_OUTPUT} ||= $ENV{IPLAYER_OUTDIR};
 # default output directory on desktop for Windows/macOS
@@ -376,8 +378,9 @@ if ( ! $ENV{GETIPLAYER_OUTPUT} ) {
 	} elsif ( IS_MACOS ) {
 		$desktop = File::Spec->catfile($ENV{HOME}, "Desktop")
 	}
+	$desktop = main::encode_fs(main::decode_cl($desktop));
 	if ( $desktop && -d $desktop) {
-		$ENV{GETIPLAYER_OUTPUT} = File::Spec->catfile($desktop, "iPlayer Recordings");
+		$ENV{GETIPLAYER_OUTPUT} = main::encode_cl(main::decode_fs(File::Spec->catfile($desktop, "iPlayer Recordings")));
 	}
 }
 
@@ -499,8 +502,8 @@ for ( progclass() ) {
 $SIG{INT} = $SIG{PIPE} = \&cleanup;
 
 # Other Non option-dependent vars
-my $historyfile		= encode_fs(File::Spec->catfile($profile_dir, "download_history"));
-my $cookiejar		= encode_fs(File::Spec->catfile($profile_dir, "cookies."));
+my $historyfile		= File::Spec->catfile($profile_dir, "download_history");
+my $cookiejar		= File::Spec->catfile($profile_dir, "cookies.");
 my $lwp_request_timeout	= 20;
 my $info_limit		= 40;
 my $proxy_save;
@@ -577,7 +580,7 @@ if ( $opt->{pid} ) {
 }
 
 # PVR Lockfile location (keep global so that cleanup sub can unlink it)
-my $lockfile = encode_fs(File::Spec->catfile($profile_dir, 'pvr_lock'));
+my $lockfile = File::Spec->catfile($profile_dir, 'pvr_lock');
 
 # Delete cookies each session
 unlink($cookiejar.'desktop');
@@ -1982,7 +1985,7 @@ sub request_url_retry {
 # Checks if a particular program exists (or program.exe) in the $ENV{PATH} or if it has a path already check for existence of file
 sub exists_in_path {
 	my $name = shift;
-	my $bin = $bin->{$name};
+	my $bin = main::encode_fs($bin->{$name});
 	# Strip quotes around binary if any just for checking
 	$bin =~ s/^"(.+)"$/$1/g;
 	# If this has a path specified, does file exist
@@ -2064,11 +2067,9 @@ sub run_cmd {
 	#}
 	my $mode = shift;
 	$mode = 'QUIET' if ( $opt->{quiet} || $opt->{silent} ) && ! ($opt->{debug} || $opt->{verbose});
-	my @cmd;
-	if ( IS_WIN32 && @_ > 1 ) {
-		@cmd = map { quote_arg( $_ ); } @_;
-	} else {
-		@cmd = ( @_ );
+	my @cmd = map { main::encode_cl( $_ ); } @_;
+	if ( IS_WIN32 && @cmd > 1 ) {
+		@cmd = map { quote_arg( $_ ); } @cmd;
 	}
 	if ( $opt->{verbose} ) {
 		my $log_str;
@@ -2245,12 +2246,12 @@ sub StringUtils::remove_marks {
 	return $string;
 }
 
-# Convert unwanted punctuation to ASCII
+# Convert punctuation to ASCII
 sub StringUtils::convert_punctuation {
 	my $string = shift;
 	# die smart quotes die
 	$string =~ s/[\x{0060}\x{00B4}\x{2018}\x{2019}\x{201A}\x{2039}\x{203A}]/'/g;
-	$string =~ s/[\x{201C}\x{201D}\x{201E}]/"/g;
+	$string =~ s/[\x{00AB}\x{00BB}\x{201C}\x{201D}\x{201E}]/"/g;
 	$string =~ s/[\x{2010}\x{2013}\x{2014}]/-/g;
 	$string =~ s/[\x{2026}]/.../g;
 	return $string;
@@ -3070,7 +3071,7 @@ sub add {
 	# Update timestamp
 	$prog->{timeadded} = time();
 	# Write each field into a line in the history file
-	print HIST $prog->{$_}.'|' for @history_format;
+	print HIST ($_ =~ /^filename$/ ? main::decode_fs($prog->{$_}) : $prog->{$_}).'|' for @history_format;
 	print HIST "\n";
 	close HIST;
 
@@ -3505,8 +3506,8 @@ sub get_metadata_general {
 # Displays specified metadata from supplied object
 # Usage: $prog->display_metadata( <array of elements to display> )
 sub display_metadata {
-	my %data = %{$_[0]};
-	shift;
+	my $prog = shift;
+	my %data = %{$prog};
 	my @keys = @_;
 	@keys = keys %data if $#_ < 0;
 	my $now = time();
@@ -3557,6 +3558,8 @@ sub display_metadata {
 				(my $data_out = $data{$_}) =~ s|[\n\r]| |g;
 				main::logger sprintf "%-16s %s\n", $_.':', $data_out;
 			}
+		} elsif ( $prog->is_path_key($_) ) {
+				main::logger sprintf "%-16s %s\n", $_.':', main::decode_fs($data{$_});
 		# else just print out key value pair
 		} else {
 			main::logger sprintf "%-16s %s\n", $_.':', $data{$_} if $data{$_};
@@ -3971,6 +3974,7 @@ sub mode_ver_download_retry_loop {
 # Send a message to STDOUT so that cron can use this to email
 sub report {
 	my $prog = shift;
+	binmode(STDOUT, ":encoding($opt->{encodingconsoleout})");
 	print STDOUT "New $prog->{type} programme: '$prog->{name} - $prog->{episode}', '$prog->{desc}'\n";
 	return 0;
 }
@@ -4012,7 +4016,7 @@ sub create_metadata_file {
 	my $filename;
 
 	# Generic XML template for all info
-	$filename->{generic} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.xml"));
+	$filename->{generic} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.xml");
 	$template->{generic}  = '<?xml version="1.0" encoding="UTF-8" ?>'."\n";
 	$template->{generic} .= '<program_meta_data xmlns="http://linuxcentre.net/xmlstuff/get_iplayer" revision="1">'."\n";
 	my $version = $prog->{version} || 'unknown';
@@ -4025,7 +4029,7 @@ sub create_metadata_file {
 	}
 	$template->{generic} .= "</program_meta_data>\n";
 	# JSON template for all info (ignored)
-	$filename->{json} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.json"));
+	$filename->{json} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.json");
 	$template->{json} = '';
 
 	return if ! -d $prog->{dir};
@@ -4082,6 +4086,9 @@ sub json_metadata {
 		if ( ref$value eq 'ARRAY' ) {
 			$value = join ',', @{ $value };
 		}
+		if ( $self->is_path_key($key) ) {
+			$value = main::decode_fs($value);
+		}
 		$value = '' if not defined $value;
 		if ( $key =~ /^(expires|timeadded)$/ ) {
 			$value = strftime('%Y-%m-%dT%H:%M:%S+00:00', gmtime($value));
@@ -4133,6 +4140,10 @@ sub substitute {
 			$value = join ',', @{ $value };
 		}
 
+		if ( $self->is_path_key($key) ) {
+			$value = main::decode_fs($value);
+		}
+
 		$value = '' if not defined $value;
 		main::logger "DEBUG: Substitute ($version): '$key' => '$value'\n" if $opt->{debug};
 		# Remove/replace all non-nice-filename chars if required
@@ -4148,7 +4159,7 @@ sub substitute {
 		# escape these chars: ! ` \ "
 		} elsif ($sanitize_mode == 4) {
 			# Don't escape file paths
-			if ( $key =~ /(filename|filepart|thumbfile|tracklist|credits|cuesheet|subsfile|susbspart|subsraw|^dir)/ ) {
+			if ( $self->is_path_key($key) ) {
 				$replace = $value;
 			} else {
 				#$replace =~ s/([\!"\\`])/\\$1/g;
@@ -4179,6 +4190,11 @@ sub substitute {
 		$string =~ s/\s/_/g unless $opt->{whitespace};
 	}
 	return $string;
+}
+
+sub is_path_key {
+	my ($prog, $key) = @_;
+	return $key =~ /(filename|filepart|thumbfile|tracklist|credits|cuesheet|subsfile|subspart|subsraw|^dir|rawvideo|rawaudio|fileprefix)/;
 }
 
 # Determine the correct filenames for a recording
@@ -4228,12 +4244,11 @@ sub generate_filenames {
 	$prog->{descshort} = substr( $prog->{desc}, 0, 255 ) if ! $prog->{descshort};
 
 	# Determine directory and find its absolute path
-	$prog->{dir} = File::Spec->rel2abs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || $ENV{GETIPLAYER_OUTPUT} || '.' );
-	$prog->{dir} = main::encode_fs($prog->{dir});
+	$prog->{dir} = File::Spec->rel2abs( main::encode_fs( $opt->{ 'output'.$prog->{type} } || $opt->{output} || main::decode_cl($ENV{GETIPLAYER_OUTPUT}) ) || '.' );
 	# Create a subdir for programme
 	if ( $opt->{subdir} ) {
-		my $subdir = $prog->substitute( $opt->{subdirformat} || '<longname>' );
-		$prog->{dir} = main::encode_fs(File::Spec->catdir($prog->{dir}, $subdir));
+		my $subdir = main::encode_fs($prog->substitute( $opt->{subdirformat} || '<longname>' ));
+		$prog->{dir} = File::Spec->catdir($prog->{dir}, $subdir);
 		main::logger("INFO: Creating subdirectory $prog->{dir} for programme\n") if $opt->{verbose};
 	}
 
@@ -4242,8 +4257,7 @@ sub generate_filenames {
 	main::logger "DEBUG: Substituted '$prog->{fileprefix}' as " if $opt->{debug};
 	# Don't allow <mode> in fileprefix as it can break when resumes fallback on differently numbered modes of the same type change for <modeshort>
 	$prog->{fileprefix} =~ s/<mode>/<modeshort>/g;
-	$prog->{fileprefix} = $prog->substitute( $prog->{fileprefix} );
-	$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
+	$prog->{fileprefix} = main::encode_fs($prog->substitute( $prog->{fileprefix} ));
 	# Truncate filename to 240 chars (allows for extra stuff to keep it under system 256 limit)
 	# limitprefixlength allows this to be shortened
 	unless ( $opt->{limitprefixlength} ) {
@@ -4264,8 +4278,8 @@ sub generate_filenames {
 		} elsif ( $mode =~ /^dash/ && $prog->{type} eq "radio" ) {
 			$prog->{ext} = "raw.m4a";
 		} elsif ( $mode =~ /^dash/ && $prog->{type} eq "tv" ) {
-			$prog->{rawaudio} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4a"));
-			$prog->{rawvideo} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v"));
+			$prog->{rawaudio} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4a");
+			$prog->{rawvideo} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.raw.m4v");
 		}
 	}
 	# output files with --mpeg-ts
@@ -4275,14 +4289,13 @@ sub generate_filenames {
 
 	# force filename with --tag-only-filename
 	if ( $opt->{tagonly} && $opt->{tagonlyfilename} ) {
-		$prog->{filename} = $opt->{tagonlyfilename};
+		$prog->{filename} = main::encode_fs($opt->{tagonlyfilename});
 	}
 	# Special case for history/tag-only mode, parse the fileprefix and dir from filename if it is already defined
 	if ( ( $opt->{history} || $opt->{tagonly} ) && defined $prog->{filename} && $prog->{filename} ne '' ) {
 		( $prog->{fileprefix}, $prog->{dir}, $prog->{ext} ) = fileparse($prog->{filename}, qr/\.[^.]*/);
 		# Fix up file path components
-		$prog->{dir} = main::encode_fs(File::Spec->canonpath($prog->{dir}));
-		$prog->{fileprefix} = main::encode_fs($prog->{fileprefix});
+		$prog->{dir} = File::Spec->canonpath($prog->{dir});
 		$prog->{ext} =~ s/\.//;
 	}
 
@@ -4291,29 +4304,29 @@ sub generate_filenames {
 	}
 
 	# set final/partial file names
-	$prog->{filename} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}")) unless $prog->{filename};
-	$prog->{filepart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}")) unless $prog->{filepart};
+	$prog->{filename} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.$prog->{ext}") unless $prog->{filename};
+	$prog->{filepart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.$prog->{ext}") unless $prog->{filepart};
 
 	# Determine thumbnail filename
 	if ( $prog->{thumbnail} =~ /^http/i ) {
 		my $ext;
 		$ext = $1 if $prog->{thumbnail} =~ m{\.(\w+)$};
 		$ext = $opt->{thumbext} || $ext;
-		$prog->{thumbfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}") );
+		$prog->{thumbfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${ext}") ;
 	}
 
 	# Determine cue sheet filename
-	$prog->{cuesheet} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.cue") );
+	$prog->{cuesheet} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.cue") ;
 	# Determine tracklist filename
-	$prog->{tracklist} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.tracks.txt") );
+	$prog->{tracklist} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.tracks.txt") ;
 	# Determine credits filename
-	$prog->{credits} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.credits.txt") );
+	$prog->{credits} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.credits.txt") ;
 
 	# Determine subtitle filenames
 	if ( $prog->{type} eq "tv" ) {
-		$prog->{subsraw} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttml"));
-		$prog->{subspart} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.srt"));
-		$prog->{subsfile} = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.srt"));
+		$prog->{subsraw} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.ttml");
+		$prog->{subspart} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.partial.srt");
+		$prog->{subsfile} = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.srt");
 	}
 
 	# overwrite/error if the file already exists and is going to be written to
@@ -4387,13 +4400,23 @@ sub generate_filenames {
 		}
 	}
 
-	main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n" if $opt->{debug};
-	main::logger "DEBUG: File ext:           $prog->{ext}\n" if $opt->{debug};
-	main::logger "DEBUG: Directory:          $prog->{dir}\n" if $opt->{debug};
-	main::logger "DEBUG: Partial Filename:   $prog->{filepart}\n" if $opt->{debug};
-	main::logger "DEBUG: Final Filename:     $prog->{filename}\n" if $opt->{debug};
-	main::logger "DEBUG: Thumbnail Filename: $prog->{thumbfile}\n" if $opt->{debug};
-	main::logger "DEBUG: Raw Mode:           $opt->{raw}\n" if $opt->{debug};
+	if ( $opt->{debug} ) {
+		main::logger "DEBUG: Directory:          $prog->{dir}\n";
+		main::logger "DEBUG: File prefix:        $prog->{fileprefix}\n";
+		main::logger "DEBUG: File ext:           $prog->{ext}\n";
+		main::logger "DEBUG: Partial Filename:   $prog->{filepart}\n";
+		main::logger "DEBUG: Final Filename:     $prog->{filename}\n";
+		main::logger "DEBUG: Thumbnail:          $prog->{thumbfile}\n";
+		main::logger "DEBUG: Tracklist:          $prog->{tracklist}\n";
+		main::logger "DEBUG: Credits:            $prog->{credits}\n";
+		main::logger "DEBUG: Cuesheet:           $prog->{cuesheet}\n";
+		main::logger "DEBUG: Partial Subtitles:  $prog->{subspart}\n";
+		main::logger "DEBUG: Final Subtitles:    $prog->{subsfile}\n";
+		main::logger "DEBUG: Raw Subtitles:      $prog->{subsraw}\n";
+		main::logger "DEBUG: Raw Video:          $prog->{rawvideo}\n";
+		main::logger "DEBUG: Raw Audio:          $prog->{rawaudio}\n";
+		main::logger "DEBUG: Raw Mode:           $opt->{raw}\n";
+	}
 
 	# Check path length is < 256 chars (Windows only)
 	if ( length( $prog->{filepart} ) > 255 && IS_WIN32 ) {
@@ -4413,7 +4436,6 @@ sub run_user_command {
 
 	# Substitute the fields for the PID (and sanitize for double-quoted shell use)
 	$command = $prog->substitute( $command, 4 );
-	$command = main::encode_fs($command);
 
 	# run command
 	main::logger "INFO: Running user command\n";
@@ -4821,8 +4843,8 @@ sub ffmpeg_init {
 	}
 	# ffmpeg checks
 	my ($ffvs, $ffvn);
-	my $ffcmd = main::encode_fs("\"$bin->{ffmpeg}\" -version 2>&1");
-	my $ffout = `$ffcmd`;
+	my $ff_bin = main::encode_cl($bin->{ffmpeg});
+	my $ffout = `"$ff_bin" -version 2>&1`;
 	if ( $ffout =~ /ffmpeg version (\S+)/i ) {
 		$ffvs = $1;
 		if ( $ffvs =~ /^n?(\d+\.\d+)/i ) {
@@ -6762,8 +6784,8 @@ sub postproc {
 
 	my @global_opts = ( '-y' );
 	my @input_opts;
-	push @input_opts, ( '-i', $audio_file ) if $audio_ok;
-	push @input_opts, ( '-i', $video_file ) if $video_ok;
+	push @input_opts, ( '-i', main::decode_fs($audio_file) ) if $audio_ok;
+	push @input_opts, ( '-i', main::decode_fs($video_file) ) if $video_ok;
 	my @codec_opts;
 	if ( ! $opt->{ffmpegobsolete} ) {
 		push @codec_opts, ( '-c:v', 'copy', '-c:a', 'copy' );
@@ -6794,7 +6816,7 @@ sub postproc {
 		}
 		if ( ! $opt->{ffmpegobsolete} ) {
 			if ( -f $prog->{subsfile} ) {
-					push @input_opts, ( '-i', $prog->{subsfile} );
+					push @input_opts, ( '-i', main::decode_fs($prog->{subsfile}) );
 					push @codec_opts, ( '-c:s', 'mov_text' );
 					push @stream_opts, ( '-map', '2:s:0' ) if $audio_ok && $video_ok;
 					push @stream_opts, ( '-metadata:s:s:0', 'language=eng' );
@@ -6816,7 +6838,7 @@ sub postproc {
 		@stream_opts,
 		@filter_opts,
 		@other_opts,
-		$prog->{filepart},
+		main::decode_fs($prog->{filepart}),
 	);
 
 	main::logger "INFO: Converting to \U$prog->{ext}\E$embedding\n";
@@ -8153,9 +8175,8 @@ sub get {
 
 	# media file
 	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
-	my $media_prefix = $prog->{fileprefix};
-	my $media_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.${media_type}.ts"));
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${media_prefix}.hls.ts"));
+	my $media_tmp = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.${media_type}.ts");
+	my $media_file = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.hls.ts");
 	my $media_raw = $prog->{filename};
 
 	if ( $opt->{overwrite} ) {
@@ -8724,7 +8745,7 @@ sub get {
 	my ( $self, $ua, $url, $prog, $version, %streamdata ) = @_;
 	my $rc;
 
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts"));
+	my $media_file = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts");
 	my $media_type = $prog->{type} eq "tv" ? "video" : "audio";
 	if ( $opt->{overwrite} ) {
 		unlink $media_file;
@@ -8741,15 +8762,13 @@ sub get {
 	}
 
 	# audio files
-	my $audio_prefix = $prog->{fileprefix};
-	my $audio_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.audio.m4a"));
-	my $audio_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${audio_prefix}.dash.m4a"));
+	my $audio_tmp = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.audio.m4a");
+	my $audio_file = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.m4a");
 	my $audio_raw = $prog->{type} eq "tv" ? $prog->{rawaudio} : $prog->{filename};
 
 	# video files
-	my $video_prefix = $prog->{fileprefix};
-	my $video_tmp = main::encode_fs(File::Spec->catfile($prog->{dir}, "${video_prefix}.video.m4v"));
-	my $video_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "${video_prefix}.dash.m4v"));
+	my $video_tmp = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.video.m4v");
+	my $video_file = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.m4v");
 	my $video_raw = $prog->{rawvideo};
 
 	if ( $opt->{overwrite} ) {
@@ -8838,7 +8857,7 @@ sub postproc {
 	my ( $self, $prog, $audio_file, $video_file, $ua ) = @_;
 	my @cmd;
 	my $return;
-	my $media_file = main::encode_fs(File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts"));
+	my $media_file = File::Spec->catfile($prog->{dir}, "$prog->{fileprefix}.dash.ts");
 	$prog->ffmpeg_init();
 	if ( ! main::exists_in_path('ffmpeg') ) {
 		main::logger "WARNING: Required ffmpeg utility not found - cannot convert to MPEG-TS\n";
@@ -9556,7 +9575,8 @@ sub tag_init {
 		}
 	}
 	# determine AtomicParsley features
-	my $ap_help = `"$bin->{atomicparsley}" --help 2>&1`;
+	my $ap_bin = main::encode_cl($bin->{atomicparsley});
+	my $ap_help = `"$ap_bin" --help 2>&1`;
 	$opt->{myaphdvideo} = 1 if $ap_help =~ /--hdvideo/;
 	$opt->{myap1080p} = 1 if $opt->{myaphdvideo} && $ap_help =~ /1080p/;
 	$opt->{myaplongdesc} = 1 if $ap_help =~ /--longdesc/;
@@ -9573,7 +9593,7 @@ sub tag_cmd {
 	my ($meta, $tags, $desc_file) = @_;
 	my @cmd = (
 		$bin->{atomicparsley},
-		$meta->{filename},
+		main::decode_fs($meta->{filename}),
 		'--metaEnema',
 		'--freefree',
 		'--overWrite',
@@ -9623,13 +9643,13 @@ sub tag_cmd {
 	}
 	# add artwork if available
 	unless ( $opt->{noartwork} ) {
-		push @cmd, ( '--artwork', $meta->{thumbfile} ) if -f $meta->{thumbfile};
+		push @cmd, ( '--artwork', main::decode_fs($meta->{thumbfile}) ) if -f $meta->{thumbfile};
 	}
 	# add descriptions to audio podcasts and video
 	if ( $tags->{is_video} || $tags->{is_podcast} ) {
 		push @cmd, ( '--description', $tags->{description} );
 		if ( $opt->{myaplongdescfile} && -f $desc_file ) {
-				push @cmd, ( '--longdescFile', $desc_file );
+				push @cmd, ( '--longdescFile', main::decode_fs($desc_file) );
 		} else {
 			if ( $opt->{myaplongdescription} ) {
 				push @cmd, ( '--longDescription', $tags->{longDescription} );
@@ -9639,7 +9659,7 @@ sub tag_cmd {
 		}
 	}
 	if ( $opt->{myaplyricsfile} && -f $desc_file ) {
-		push @cmd, ( '--lyricsFile', $desc_file );
+		push @cmd, ( '--lyricsFile', main::decode_fs($desc_file) );
 	} else {
 		push @cmd, ( '--lyrics', $tags->{lyrics} );
 	}
@@ -9664,7 +9684,7 @@ sub tag_file_mp4 {
 	my $run_mode = main::hide_progress() || ! $opt->{verbose} ? 'QUIET_STDOUT' : 'STDERR';
 	if ( IS_WIN32 && ! $opt->{tag_nounicode} ) {
 		if ( $opt->{myaplongdescfile} && $opt->{myaplyricsfile} ) {
-			my $desc_file = main::encode_fs(File::Spec->catfile($meta->{dir}, "$meta->{fileprefix}.desc.txt") );
+			my $desc_file = File::Spec->catfile($meta->{dir}, "$meta->{fileprefix}.desc.txt");
 			unlink $desc_file;
 			if ( open( DESC, ">:raw:utf8", $desc_file ) ) {
 				print DESC $tags->{longDescription};
