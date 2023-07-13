@@ -4869,6 +4869,7 @@ use URI;
 use XML::LibXML 1.91;
 use XML::LibXML::XPathContext;
 use constant REGEX_PID => qr/^[b-df-hj-np-tv-z0-9]{8,}$/;
+use constant DEFAULT_THUMBNAIL => "https://ichef.bbci.co.uk/images/ic/1920xn/p01tqv8z.png";
 
 sub opt_format {
 	return {
@@ -4939,12 +4940,22 @@ sub get_verpids_json {
 		$prog->{guidance} = "Yes" if $guidance;
 	}
 	unless ( $prog->{thumbnail} ) {
-		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
-		$thumbnail =~ s/\\\//\//g;
 		my $recipe = $prog->thumb_url_recipe();
-		$thumbnail =~ s/\$recipe/$recipe/;
-		$prog->{thumbnail} = $thumbnail if $thumbnail;
-		$prog->{thumbnail} = "https:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
+		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
+		if ( $thumbnail ) {
+			$thumbnail =~ s/\\\//\//g;
+			$thumbnail =~ s/\$recipe/$recipe/;
+		} else {
+			$thumbnail = $1 if $versions =~ /"holdingImage":"(.*?)"/;
+			if ( $thumbnail ) {
+				$thumbnail =~ s/\\\//\//g;
+				$thumbnail =~ s/\b\d+x\d+\b/$recipe/;
+			}
+		}
+		if ( $thumbnail ) {
+			$thumbnail = "https:".$thumbnail unless $thumbnail =~ /^http/;
+			$prog->{thumbnail} = $thumbnail;
+		}
 	}
 	unless ( $prog->{title} ) {
 		my $title = $1 if $default =~ /"title":"(.*?)"/;
@@ -5047,12 +5058,14 @@ sub get_verpids_html {
 			$prog->{guidance} = "Yes" if $guidance;
 		}
 		unless ( $prog->{thumbnail} ) {
-			my $thumbnail = $1 if $config =~ /"image":"(.*?)"/;
-			$thumbnail =~ s/\\\//\//g;
 			my $recipe = $prog->thumb_url_recipe();
-			$thumbnail =~ s/{recipe}/$recipe/;
-			$prog->{thumbnail} = $thumbnail if $thumbnail;
-			$prog->{thumbnail} = "https:".$prog->{thumbnail} unless $prog->{thumbnail} =~ /^http/;
+			my $thumbnail = $1 if $config =~ /"image":"(.*?)"/;
+			if ( $thumbnail ) {
+				$thumbnail =~ s/\\\//\//g;
+				$thumbnail =~ s/{recipe}/$recipe/;
+				$thumbnail = "https:".$thumbnail unless $thumbnail =~ /^http/;
+				$prog->{thumbnail} = $thumbnail;
+			}
 		}
 		unless ( $prog->{episodenum} ) {
 			$prog->{episodenum} = $1 if $config =~ /"parent_position":(\d+)/;
@@ -5142,6 +5155,7 @@ sub get_metadata {
 	my $ua = shift;
 	my $prog_data_url = "https://www.bbc.co.uk/programmes/";
 	my @ignore_categories = ("Films", "Sign Zone", "Audio Described", "Northern Ireland", "Scotland", "Wales", "England");
+	my $recipe = $prog->thumb_url_recipe();
 	my ($title, $name, $brand, $series, $episode, $longname, $available, $channel, $expires, $meddesc, $longdesc, $summary, $guidance, $prog_type, $categories, $category, $web, $player, $thumbnail, $seriesnum, $episodenum, $episodepart, $firstbcast );
 	# This URL works for tv/radio prog types:
 	# https://www.bbc.co.uk/programmes/{pid}.json
@@ -5164,18 +5178,11 @@ sub get_metadata {
 				$meddesc = $doc->{medium_synopsis};
 				$summary = $doc->{short_synopsis};
 				$channel = $doc->{ownership}->{service}->{title};
-				my $image_pid = $doc->{image}->{pid};
-				my $series_image_pid = $doc->{parent}->{programme}->{image}->{pid};
-				my $brand_image_pid = $doc->{parent}->{programme}->{parent}->{programme}->{image}->{pid};
-				if ( $opt->{thumbseries} || ! $image_pid ) {
-					if ( $series_image_pid ) {
-						$image_pid = $series_image_pid;
-					} elsif ( $brand_image_pid ) {
-						$image_pid = $brand_image_pid;
-					}
+				my $parent_image_pid = $doc->{parent}->{programme}->{image}->{pid};
+				if ( $opt->{thumbseries} && $parent_image_pid ) {
+					# assume JPEG for series/brand images
+					$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${parent_image_pid}.jpg";
 				}
-				my $recipe = $prog->thumb_url_recipe();
-				$thumbnail = "https://ichef.bbci.co.uk/images/ic/${recipe}/${image_pid}.jpg";
 				# /programmes page
 				$web = "https://www.bbc.co.uk/programmes/$pid";
 				# player page
@@ -5295,7 +5302,7 @@ sub get_metadata {
 						}
 					}
 				}
-				$got_metadata = 1 if $pid;
+				$got_metadata = 1 if $pid && $thumbnail;
 			} else {
 				main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode or clip. Download may fail and metadata may be inaccurate.\n";
 			}
@@ -5311,6 +5318,10 @@ sub get_metadata {
 	if ( ! $got_metadata || keys %{ $prog->{verpids} } == 0 ) {
 		if ( $prog->get_verpids( $ua ) ) {
 			main::logger "ERROR: Could not get version PIDs and metadata\n" if $opt->{verbose};
+			unless ( $prog->{thumbnail} || $thumbnail ) {
+				$thumbnail = DEFAULT_THUMBNAIL;
+				$thumbnail =~ s!/\d+xn/!/$recipe/!;
+			}
 			# Return at this stage unless we want metadata/tags only for various reasons
 			return 1 if ! ( $opt->{info} || $opt->{metadataonly} || $opt->{thumbonly} || $opt->{cuesheetonly} || $opt->{tracklistonly} || $opt->{creditsonly} || $opt->{tagonly} )
 		}
@@ -7323,6 +7334,7 @@ sub get_links_schedule_html {
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
 		$thumbnail = DEFAULT_THUMBNAIL;
+		$thumbnail =~ s!/\d+xn/!/192xn/!;
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
@@ -7449,8 +7461,8 @@ sub get_links_schedule_json {
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
 		$thumbnail = $entry->{image} || $entry->{partOfSeries}->{image};
-		$thumbnail =~ s!/\d+xn/!/192xn/!;
 		$thumbnail ||= DEFAULT_THUMBNAIL;
+		$thumbnail =~ s!/\d+xn/!/192xn/!;
 		# build data structure
 		decode_entities($name);
 		decode_entities($episode);
