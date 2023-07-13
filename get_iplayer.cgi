@@ -3375,7 +3375,7 @@ sub process_params {
 		save	=> 1,
 	};
 
-	my %vsize_labels = ( ''=>'Native', '1280x720'=>'1280x720', '960x540'=>'960x540', '832x468'=>'832x468', '704x396'=>'704x396', '640x360'=>'640x360', '512x288'=>'512x288', '448x252'=>'448x252', '384x216'=>'384x216', '256x144'=>'256x144', '192x108'=>'192x108' );
+	my %vsize_labels = ( ''=>'Native', '1920x1080'=>'1920x1080', '1280x720'=>'1280x720', '960x540'=>'960x540', '832x468'=>'832x468', '704x396'=>'704x396', '640x360'=>'640x360', '512x288'=>'512x288', '448x252'=>'448x252', '384x216'=>'384x216', '256x144'=>'256x144', '192x108'=>'192x108' );
 	$opt->{VSIZE} = {
 		title	=> 'Remote Streaming Video Size', # Title
 		tooltip	=> "Video size '<width>x<height>' to transcode remotely played files - specify 'Native' for native size", # Tooltip
