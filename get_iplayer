@@ -81,7 +81,7 @@ STDERR->autoflush(1);
 # Entries with keys starting with '_' are not parsed only displayed as help and in man pages.
 my $opt_format = {
 	# Recording
-	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream, per-mode.  Many modes have two or more streams available."],
+	attempts	=> [ 1, "attempts=n", 'Recording', '--attempts <number>', "Number of attempts to make or resume a failed connection.  --attempts is applied per-stream. Programmes have multiple streams available for each recording quality."],
 	audioonly		=> [ 1, "audioonly|audio-only!", 'Recording', '--audio-only', "Only download audio stream for TV programme. Produces .m4a file. Implies --force."],
 	downloadabortonfail	=> [ 1, "downloadabortonfail|download-abort-onfail|download-abort-onfail!", 'Recording', '--download-abort-onfail', "Exit immediately if any stream fails to download. Use to avoid repeated failed download attempts if connection is dropped or access is blocked."],
 	excludeformat	=> [ 1, "excludeformat|exclude-format=s", 'Recording', '--exclude-format <format>,<format>,...', "Comma-separated list of media stream formats to ignore when recording. Valid values: hls,dash."],
@@ -188,9 +188,9 @@ my $opt_format = {
 	refreshincludegroups	=> [ 1, "refreshincludegroups|refresh-include-groups=s", 'Config', '--refresh-include-groups <group>,<group>,...', "Include channel groups when refreshing radio or TV cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshincludegroupsradio	=> [ 1, "refreshincludegroupsradio|refresh-include-groups-radio=s", 'Config', '--refresh-include-groups-radio <group>,<group>,...', "Include channel groups when refreshing radio cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
 	refreshincludegroupstv	=> [ 1, "refreshincludegroupstv|refresh-include-groups-tv=s", 'Config', '--refresh-include-groups-tv <group>,<group>,...', "Include channel groups when refreshing TV cache (comma-separated values).  Valid values: 'national', 'regional', 'local'"],
-	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <days>', "Minimum number of days of programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30"],
-	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <days>', "Number of days of radio programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30"],
-	refreshlimittv	=> [ 1, "refreshlimittv|refresh-limit-tv=n", 'Config', '--refresh-limit-tv <days>', "Number of days of TV programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30"],
+	refreshlimit	=> [ 1, "refreshlimit|refresh-limit=n", 'Config', '--refresh-limit <days>', "Minimum number of days of programmes to cache. Default: 7 Min: 1 Max: 30"],
+	refreshlimitradio	=> [ 1, "refreshlimitradio|refresh-limit-radio=n", 'Config', '--refresh-limit-radio <days>', "Number of days of radio programmes to cache. Default: 7 Min: 1 Max: 30"],
+	refreshlimittv	=> [ 1, "refreshlimittv|refresh-limit-tv=n", 'Config', '--refresh-limit-tv <days>', "Number of days of TV programmes to cache. Default: 7 Min: 1 Max: 30"],
 	skipdeleted	=> [ 1, "skipdeleted|skip-deleted!", 'Config', "--skipdeleted", "Skip the download of metadata/thumbs/subs if the media file no longer exists.  Use with --history & --metadataonly/subsonly/thumbonly."],
 	webrequest	=> [ 1, "webrequest|web-request=s", 'Config', '--webrequest <urlencoded string>', 'Specify all options as a urlencoded string of "name=val&name=val&..."' ],
 
@@ -202,7 +202,7 @@ my $opt_format = {
 	help		=> [ 2, "help|h!", 'Display', '--help, -h', "Intermediate help text"],
 	helplong	=> [ 2, "help-long|advanced|long-help|longhelp|lh|hl|helplong!", 'Display', '--helplong', "Advanced help text"],
 	hide		=> [ 1, "hide!", 'Display', '--hide', "Hide previously recorded programmes"],
-	info		=> [ 2, "i|info!", 'Display', '--info, -i', "Show full programme metadata and availability of modes and subtitles (max 40 matches)"],
+	info		=> [ 2, "i|info!", 'Display', '--info, -i', "Show full programme metadata and availability of streams and subtitles (max 40 matches)"],
 	list		=> [ 1, "list=s", 'Display', '--list <element>', "Show a list of distinct element values (with counts) for the selected programme type(s) and exit.  Valid elements are: 'channel'"],
 	listformat	=> [ 1, "listformat|list-format=s", 'Display', '--listformat <format>', "Display search results with a custom format. Use substitution parameters in format string (see docs for list)."],
 	_long		=> [ 0, "", 'Display', '--long, -l', "Show extended programme info"],
@@ -8908,7 +8908,7 @@ my $opt_cmdline;
 # Class cmdline Options
 sub opt_format {
 	return {
-		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr [pvr search name]', "Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command. Synonyms: --pvrrun, --pvr-run"],
+		pvr		=> [ 0, "pvr|pvrrun|pvr-run!", 'PVR', '--pvr <search name>', "Runs the PVR using all saved PVR searches (intended to be run periodically, e.g., from cron or Task Manager). The list can be limited by adding a regex to the command. Synonyms: --pvrrun, --pvr-run"],
 		pvrexclude	=> [ 0, "pvrexclude|pvr-exclude=s", 'PVR', '--pvr-exclude <string>', "Exclude the PVR searches to run by search name (comma-separated regex list). Defaults to substring match. Synonyms: --pvrexclude"],
 		pvrsingle	=> [ 0, "pvrsingle|pvr-single=s", 'PVR', '--pvr-single <search name>', "Runs a named PVR search. Synonyms: --pvrsingle"],
 		pvradd		=> [ 0, "pvradd|pvr-add=s", 'PVR', '--pvr-add <search name>', "Save the named PVR search with the specified search terms. Search terms required unless --pid specified. Synonyms: --pvradd"],
@@ -9356,7 +9356,7 @@ sub opt_format {
 		atomicparsley	=> [ 0, "atomicparsley|atomic-parsley=s", 'External Program', '--atomicparsley <path>', "Location of AtomicParsley binary"],
 		noartwork => [ 1, "noartwork|no-artwork!", 'Tagging', '--no-artwork', "Do not embed thumbnail image in output file. Also removes existing artwork. All other metadata values will be written."],
 		notag => [ 1, "notag|no-tag!", 'Tagging', '--no-tag', "Do not tag downloaded programmes."],
-		tag_credits => [ 1, "tagcredits|tag-credits!", 'Tagging', '--tag-credits', "Add programme credits (if available) to lyrics field."],
+		tag_credits => [ 1, "tagcredits|tag-credits!", 'Tagging', '--tag-credits', "Add programme credits (if available) to long description field."],
 		tag_encoding	=> [ 1, "tagencoding|tag-encoding=s", 'Tagging', '--tag-encoding <name>', "(Windows only) Single-byte character encoding for non-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: active code page or cp1252 (Windows code page 1252)"],
 		tag_formatshow		=> [ 1, "tagformatshow|tag-format-show=s", 'Tagging', '--tag-format-show', "Format template for programme name in tag metadata. Use substitution parameters in template (see docs for list). Default: <name>"],
 		tag_formattitle		=> [ 1, "tagformattitle|tag-format-title=s", 'Tagging', '--tag-format-title', "Format template for episode title in tag metadata. Use substitution parameters in template (see docs for list). Default: <episodeshort>"],
