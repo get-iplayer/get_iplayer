@@ -848,7 +848,7 @@ sub create_playlist_m3u_single {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'history=1', 'skipdeleted=1', 'nopurge=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm", "versionlist=$versionlist" ),
+		get_iplayer_webrequest_args( 'history=1', 'skipdeleted=1', "type=$type", 'listformat=ENTRY|<pid>|<name>|<episode>|<desc>|<filename>|<mode>', "fields=$searchfields", "search=$searchterm", "versionlist=$versionlist" ),
 	);
 
 	my @out = get_cmd_output( @cmd );
@@ -1740,7 +1740,7 @@ sub show_info {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$type", "future=$opt->{FUTURE}->{current}", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
+		get_iplayer_webrequest_args( "type=$type", "future=$opt->{FUTURE}->{current}", "history=$opt->{HISTORY}->{current}", "skipdeleted=$opt->{HIDEDELETED}->{current}", 'info=1', 'fields=pid', "search=$pid" ),
 	);
 	print $fh p("Command: ".( join ' ', @cmd ) ) if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
@@ -1802,7 +1802,7 @@ sub get_direct_filename {
 		'--nocopyright',
 		'--expiry=999999999',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "history=$history", 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <pid>|<filename>|<mode>' ),
+		get_iplayer_webrequest_args( "history=$history", 'fields=pid', "search=$pid", "type=$type", 'listformat=filename: <pid>|<filename>|<mode>' ),
 	);
 	print $se "Command: ".( join ' ', @cmd )."\n"; # if $opt_cmdline->{debug};
 	my @cmdout = get_cmd_output( @cmd );
@@ -2312,7 +2312,7 @@ sub refresh {
 		'--nocopyright',
 		'--refresh',
 		'--webrequest',
-		get_iplayer_webrequest_args( 'nopurge=1', "type=$typelist", "refreshfuture=$refreshfuture" ),
+		get_iplayer_webrequest_args( "type=$typelist", "refreshfuture=$refreshfuture" ),
 	);
 	print $fh '<pre>';
 	run_cmd_autorefresh( $fh, $se, 1, @cmd );
@@ -2882,7 +2882,7 @@ sub get_progs {
 	my $fields;
 	$fields .= "|<$_>" for @headings;
 
-	my ( @webrequest_args ) = ( build_cmd_options( grep !/^(PVRHOLDOFF)$/, @params ), 'nopurge=1', "listformat=ENTRY${fields}" );
+	my ( @webrequest_args ) = ( build_cmd_options( grep !/^(PVRHOLDOFF)$/, @params ), "listformat=ENTRY${fields}" );
 	# Page params
 	if ( $opt->{PAGENO}->{current} && $opt->{PAGESIZE}->{current} ) {
 		push @webrequest_args, ( "page=$opt->{PAGENO}->{current}", "pagesize=$opt->{PAGESIZE}->{current}" );
