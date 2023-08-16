@@ -3131,7 +3131,7 @@ sub process_params {
 
 	$opt->{MODES} = {
 		title	=> 'Recording Quality', # Title
-		tooltip	=> 'Comma separated list of recording quality settings which should be tried in order', # Tooltip
+		tooltip	=> 'Comma separated list of recording quality settings which should be tried in order. Must be one or more of: fhd,hd,sd,web,mobile,1080p,720p,540p,396p,288p,high,std,med,low,320k,128k,96k,48k,default', # Tooltip
 		webvar	=> 'MODES', # webvar
 		optkey	=> 'modes', # option
 		type	=> 'text', # type
