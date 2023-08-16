@@ -388,6 +388,8 @@ Options->get_class_options( "Streamer::$_" ) for qw( hls );
 # Parse the cmdline using the opt_format hash
 Options->usage( 2 ) if not $opt_cmdline->parse();
 
+validate_quality();
+
 # process --start and --stop if necessary
 foreach ('start', 'stop') {
 	if ($opt_cmdline->{$_} && $opt_cmdline->{$_} =~ /(\d\d):(\d\d)(:(\d\d))?/) {
@@ -731,6 +733,35 @@ sub validate_cmdline {
 		logger "\n";
 	}
 	exit 1 if $ren_found;
+}
+
+# check for invalid quality values on command ilne
+sub validate_quality {
+	my $regex_quality = {
+		tvquality => "fhd|hd|sd|web|mobile|1080p?|720p?|540p?|396p?|288p?",
+		radioquality => "high|std|med|low|320k?|128k?|96k?|48k?"
+	};
+	$regex_quality->{quality} = "$regex_quality->{tvquality}|$regex_quality->{radioquality}";
+	my $ok_quality;
+	for my $regex_key ( keys %$regex_quality ) {
+		$regex_quality->{$regex_key} .= "|default";
+		$ok_quality->{$regex_key} = $regex_quality->{$regex_key};
+		$ok_quality->{$regex_key} =~ s/[\?\|]+/,/g;
+	}
+	my $bad_quality;
+	for my $opt_quality ( "modes", "tvmode", "radiomode" ) {
+		(my $cmd_quality = $opt_quality) =~ s/modes?/quality/;
+		my @bad_quality;
+		if ( $opt_cmdline->{$opt_quality} ) {
+			@bad_quality = grep( !/^($regex_quality->{$cmd_quality})$/, split( /,/, $opt_cmdline->{$opt_quality} ) );
+			if ( @bad_quality ) {
+				$bad_quality = 1;
+				logger "ERROR: Invalid value(s) in --${cmd_quality}: '" . join(",", @bad_quality) . "'.";
+				logger " Must be one or more of: $ok_quality->{$cmd_quality}\n";
+			}
+		}
+	}
+	exit 1 if $bad_quality;
 }
 
 sub release_check {
