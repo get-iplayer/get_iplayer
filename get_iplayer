@@ -384,48 +384,7 @@ Options->get_class_options( progclass($_) ) for progclass();
 Options->get_class_options( "Streamer::$_" ) for qw( hls );
 
 # Parse the cmdline using the opt_format hash
-Options->usage( 0 ) if not $opt_cmdline->parse();
-
-# check obsolete options on command ilne
-my %nono_remap = (
-	"mode" => "quality",
-	"modes" => "quality",
-	"tvmode" => "tv-quality",
-	"radiomode" => "radio-quality",
-	"fps25" => "tv-lower-bitrate",
-);
-my $nono_regex = "(" . join("|", keys %nono_remap) . ")";
-my @nono_args = map { $_ =~ s/\-//g; $_ =~ s/=.*$//; $_;} grep(/--${nono_regex}/, @argv_save);
-my $nono_found;
-for my $nono_arg ( @nono_args ) {
-	$nono_found = 1;
-	logger "WARNING: --$nono_arg is deprecated and will be removed in a future release. Use --$nono_remap{$nono_arg}.\n";
-	# logger "ERROR: --$nono_arg is no longer supported. Use --$nono_remap{$nono_arg}.\n";
-}
-# exit 1 if $nono_found;
-
-# check invalid quality settings on command ilne
-my $regex_quality = {
-	tvmode => qr/(fhd|hd|sd|web|mobile|1080p?|720p?|540p?|396p?|288p?|default)/,
-	radiomode => qr/(high|std|med|low|320k?|128k?|96k?|48k?|default)/
-};
-$regex_quality->{modes} = "($regex_quality->{tvmode}|$regex_quality->{radiomode})";
-my $bad_quality;
-for my $qp ( "", "tv", "radio" ) {
-	my $qs = $qp ? "" : "s";
-	my $cmd_quality = "${qp}quality";
-	my $opt_quality = "${qp}mode${qs}";
-	my @bad_quality;
-	if ( $opt_cmdline->{$opt_quality} ) {
-		@bad_quality = grep(!/^$regex_quality->{$opt_quality}$/, split(/,/, $opt_cmdline->{$opt_quality}));
-		if ( @bad_quality ) {
-			$bad_quality = 1;
-			logger "WARNING: Invalid values in --${cmd_quality}/--${opt_quality}: '" . join(",", @bad_quality) . "'. This will be a fatal error in a future release.\n";
-			# logger "ERROR: Invalid values in --${cmd_quality}/--${opt_quality}: '" . join(",", @bad_quality) . "'\n";
-		}
-	}
-}
-# exit 1 if $bad_quality;
+Options->usage( 2 ) if not $opt_cmdline->parse();
 
 # process --start and --stop if necessary
 foreach ('start', 'stop') {
