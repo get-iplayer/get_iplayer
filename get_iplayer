@@ -2886,7 +2886,8 @@ sub get {
 	unless ( $suppress_warnings ) {
 		# Force error to go to STDERR (prevents PVR runs getting STDOUT warnings)
 		$opt->{stderr} = 1;
-		if ( @ignored ) {
+		my $show_ignored = @ignored && ( $opt->{verbose} || $entry->{verbose} ) ;
+		if ( $show_ignored ) {
 			main::logger "WARNING: Ignoring invalid option(s) in $optfile:\n";
 			for my $ignored ( @ignored ) {
 				main::logger "WARNING: $ignored\n";
@@ -2900,7 +2901,7 @@ sub get {
 			}
 			main::logger "WARNING: Deprecated options will be removed in a future release\n";
 		}
-		main::logger "INFO: Use --dump-options to display all valid options\n" if @deprecated or @ignored;
+		main::logger "INFO: Use --dump-options to display all valid options\n" if @deprecated or ( @ignored && $show_ignored );
 		delete $opt->{stderr};
 	}
 	return $entry;
