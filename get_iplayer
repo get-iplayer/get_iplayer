@@ -316,6 +316,8 @@ if ( $opt->{encodinglocale} =~ /UTF-?8/i ) {
 	@ARGV = map { NFKC($_) } @ARGV;
 }
 
+validate_cmdline(@ARGV);
+
 # Copy a few options over to opt so that logger works
 $opt->{debug} = $opt->{verbose} = 1 if $opt_pre->{debug};
 $opt->{verbose} = 1 if $opt_pre->{verbose};
@@ -705,6 +707,31 @@ if ( $opt->{markdownloaded} ) {
 	$retcode = download_matches( $hist, find_matches( $hist, @search_args ) );
 }
 exit $retcode;
+
+# check for renamed options on command ilne
+sub validate_cmdline {
+	my %ren_remap = (
+		"--modes?" => "--quality",
+		"--tv-?mode|--vmode" => "--tv-quality",
+		"--radio-?mode|--amode" => "--radio-quality",
+		"--fps25" => "--tv-lower-bitrate",
+	);
+	my $ren_regex = "(" . join("|", keys %ren_remap) . ")";
+	my @ren_opts = map { $_ =~ s/=.*$//; $_;} grep( /^${ren_regex}\b/, @_ );
+	my $ren_found;
+	for my $ren_opt ( @ren_opts ) {
+		$ren_found = 1;
+		logger "ERROR: $ren_opt is no longer valid.";
+		for my $ren_key ( keys %ren_remap ) {
+			if ( $ren_opt =~ m/$ren_key/ ) {
+				logger " Use $ren_remap{$ren_key}." if $ren_remap{$ren_key};
+				last;
+			}
+		}
+		logger "\n";
+	}
+	exit 1 if $ren_found;
+}
 
 sub release_check {
 	my $force_check;
