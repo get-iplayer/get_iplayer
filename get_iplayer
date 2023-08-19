@@ -109,7 +109,7 @@ my $opt_format = {
 	stop		=> [ 1, "stop=s", 'Recording', '--stop <secs|hh:mm:ss>', "Recording/streaming stop offset (actual stop may be several seconds later for HLS and DASH streams)"],
 	subsrequired	=> [ 1, "subsrequired|subtitlesrequired|subs-required|subtitles-required!", 'Recording', '--subtitles-required', "Do not download TV programme if subtitles are not available."],
 	test		=> [ 1, "test|t!", 'Recording', '--test, -t', "Test only - no recording (only shows search results with --pvr and --pid-recursive)"],
-	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available."],
+	versionlist	=> [ 1, "versionlist|versions|version-list=s", 'Recording', '--versions <versions>', "Version of programme to record. List is processed from left to right and first version found is downloaded. Example: '--versions=audiodescribed,default' will prefer audiodescribed programmes if available. Versions: 'default,audiodescribed,signed,combined'. Default: 'default'."],
 
 	# Search
 	availablebefore		=> [ 1, "availablebefore|available-before=n", 'Search', '--available-before <hours>', "Limit search to programmes that became available before <hours> hours ago"],
@@ -3576,7 +3576,7 @@ sub generate_version_list {
 	my @default_version_list = qw/original iplayer technical editorial legal lengthened shortened opensubtitles podcast/;
 	# append any unknown/unspecified versions found to default version list
  	for my $key ( sort keys %{$prog->{verpids}} ) {
-		next if $key =~ /(audiodescribed|signed)/;
+		next if $key =~ /(audiodescribed|signed|combined)/;
 		$key =~ s/\s+.*$//;
 		if ( ! grep(/^$key$/, @default_version_list) && $opt->{versionlist} !~ /\b$key\b/) {
 			push @default_version_list, lc($key);
@@ -3586,9 +3586,9 @@ sub generate_version_list {
 	# override with --versionlist
 	if ( $opt->{versionlist} ) {
 		@version_search_order = map { /^default$/i ? @default_version_list : $_ } split /,/, $opt->{versionlist};
-		# ignore audiodescribed/signed for radio programmes
+		# ignore audiodescribed/signed/combined for radio programmes
 		if ( $prog->{type} eq "radio" ) {
-			@version_search_order = grep !/(audiodescribed|signed)/, @version_search_order;
+			@version_search_order = grep !/(audiodescribed|signed|combined)/, @version_search_order;
 			@version_search_order = @default_version_list unless @version_search_order;
 		}
 	} else {
@@ -3596,7 +3596,7 @@ sub generate_version_list {
 	}
 	# splice related versions into version search list
  	for my $key ( sort keys %{$prog->{verpids}} ) {
-		next if $key =~ /(audiodescribed|signed)/;
+		next if $key =~ /(audiodescribed|signed|combined)/;
 		$key =~ s/\s+.*$//;
 		if ( ! grep /^$key$/, @version_search_order ) {
 			(my $base = $key) =~ s/\d+$//;
@@ -4913,6 +4913,48 @@ sub clean_pid {
 	}
 }
 
+sub parse_versions {
+	my $prog = shift;
+	my $doc_versions = shift;
+	my %found;
+	my @versions = sort { @{$a->{types}} <=> @{$b->{types}} } @{$doc_versions};
+	for my $ver ( @versions ) {
+		next if grep /$ver->{pid}/, values %{$prog->{verpids}};
+		my @ver_types = @{$ver->{types}};
+		next unless @ver_types;
+		my $is_ad = grep /(described|description)/i, @ver_types;
+		my $is_sl = grep /sign/i, @ver_types;
+		my $is_os = grep /open subtitles/i, @ver_types;
+		my @types;
+		if ( $is_ad && $is_sl) {
+			push @types, "combined";
+		} elsif ( $is_ad ) {
+			push @types, "audiodescribed";
+		} elsif ( $is_sl ) {
+			push @types, "signed";
+		} elsif ( $is_os ) {
+			push @types, "opensubtitles";
+		}
+		if ( ! @types ) {
+			my @other_types = grep !/(described|description|sign|open subtitles)/i, @ver_types;
+			if ( @other_types ) {
+				@other_types = map {(my $other_type = lc($_)) =~ s/\s+.*$//; $other_type;} @other_types;
+				push @types, @other_types;
+			}
+		}
+		if ( @types ) {
+			for my $type (@types) {
+				if ( $type ) {
+					my $version = $type;
+					$version .= $found{$type} if ++$found{$type} > 1;
+					$prog->{verpids}->{$version} = $ver->{pid};
+					$prog->{durations}->{$version} = $ver->{duration};
+				}
+			}
+		}
+	}
+}
+
 # Return hash of version => verpid given a PID
 # and fill in minimal metadata
 sub get_verpids {
@@ -4939,69 +4981,45 @@ sub get_verpids_json {
 	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3, undef, undef, undef, undef, 1 );
-	if ( ! $json ) {
-		main::logger "ERROR: Failed to get version PID metadata from iPlayer site (JSON)\n" if $opt->{verbose};
-		return 1;
-	}
-	my ( $default, $versions ) = split /"allAvailableVersions"/, $json;
-	unless ( $prog->{channel} ) {
-		$prog->{channel} = $1 if $default =~ /"masterBrandName":"(.*?)"/;
-	}
-	unless ( $prog->{descshort} ) {
-		$prog->{descshort} = $1 if $default =~ /"summary":"(.*?)"/;
-	}
-	unless ( $prog->{guidance} ) {
-		my $guidance = $2 if $default =~ /"guidance":(null|"(.*?)")/;
-		$prog->{guidance} = "Yes" if $guidance;
-	}
-	unless ( $prog->{thumbnail} ) {
-		my $recipe = $prog->thumb_url_recipe();
-		my $thumbnail = $1 if $default =~ /"holdingImageURL":"(.*?)"/;
-		if ( $thumbnail ) {
-			$thumbnail =~ s/\\\//\//g;
-			$thumbnail =~ s/\$recipe/$recipe/;
-		} else {
-			$thumbnail = $1 if $versions =~ /"holdingImage":"(.*?)"/;
-			if ( $thumbnail ) {
-				$thumbnail =~ s/\\\//\//g;
-				$thumbnail =~ s/\b\d+x\d+\b/$recipe/;
+	if ( $json ) {
+		my $doc = eval { decode_json($json) };
+		if ( ! $@ ) {
+			my $smp = $doc->{defaultAvailableVersion}->{smpConfig};
+			$prog->{title} ||= decode_entities($smp->{title});
+			$prog->{channel} ||= $smp->{masterBrandName};
+			$prog->{descshort} ||= $smp->{summary};
+			$prog->{guidance} ||= "Yes" if $prog->{guidance};
+			unless ( $prog->{thumbnail} ) {
+				my $recipe = $prog->thumb_url_recipe();
+				my $thumbnail = $smp->{holdingImageURL};
+				$thumbnail =~ s/\$recipe/$recipe/;
+				if ( ! $thumbnail ) {
+					$thumbnail = $doc->{holdingImage};
+					$thumbnail =~ s/\b\d+x\d+\b/$recipe/;
+				}
+				if ( $thumbnail ) {
+					$thumbnail = "https:".$thumbnail unless $thumbnail =~ /^http/;
+					$prog->{thumbnail} = $thumbnail;
+				}
 			}
-		}
-		if ( $thumbnail ) {
-			$thumbnail = "https:".$thumbnail unless $thumbnail =~ /^http/;
-			$prog->{thumbnail} = $thumbnail;
-		}
-	}
-	unless ( $prog->{title} ) {
-		my $title = $1 if $default =~ /"title":"(.*?)"/;
-		$title =~ s/\\\//\//g;
-		$prog->{title} = decode_entities($title) if $title;
-	}
-	$prog->{type} = 'radio' if $default =~ /"kind":"radioProgramme"/ && $prog->{type} ne 'radio';
-	unless ( $prog->{type} ) {
-		$prog->{type} = 'tv' if $default =~ /"kind":"programme"/;
-	}
-	my @versions = split /"markers"/, $versions;
-	pop @versions;
-	for ( @versions ) {
-		main::logger "DEBUG: Block (JSON): $_\n" if $opt->{debug};
-		my ($verpid, $version);
-		my $type = $1 if /"types":\["(.*?)"/;
-		if ( $type =~ /describe/i ) {
-			$version = "audiodescribed";
-		} elsif ($type =~ /sign/i ) {
-			$version = "signed";
+			my $kind = $smp->{items}->[0]->{kind};
+			if ( $kind eq "radioProgramme" && $prog->{type} ne 'radio') {
+				$prog->{type} = 'radio';
+			}
+			unless ( $prog->{type} ) {
+				if ( $kind eq "programme" ) {
+					$prog->{type} = 'tv';
+				}
+			}
+			$prog->parse_versions($doc->{allAvailableVersions});
 		} else {
-			($version = lc($type)) =~ s/\s+.*$//;
+			main::logger "WARNING: Could not parse version PID metadata from $url ($@)\n";
 		}
-		next if $prog->{verpids}->{$version};
-		$verpid = $1 if /{"vpid":"(\w+)","kind":"(programme|radioProgramme)"/i;
-		next if ! ($verpid && $version);
-		$prog->{verpids}->{$version} = $verpid;
-		$prog->{durations}->{$version} = $1 if /"duration":(\d+)/;
+	} else {
+		main::logger "WARNING: Could not download version PID metadata from $url\n";
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
+	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign", "combined" => "" };
 	my $version_list = $opt->{versionlist} || $prog->{versions};
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
@@ -5034,8 +5052,8 @@ sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
 	my $pid = $prog->{pid};
 	my $version_list = $opt->{versionlist} || 'default';
-	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign"};
-	for my $version ( "default", "audiodescribed", "signed" ) {
+	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign", "combined" => "" };
+	for my $version ( "default", "audiodescribed", "signed", "combined" ) {
 		next if $prog->{verpids}->{$version};
 		my $html;
 		my $url = "https://www.bbc.co.uk/iplayer/episode/$pid/$version_map->{$version}";
@@ -5293,30 +5311,7 @@ sub get_metadata {
 				# minimum series number = 1 if episode number != 0
 				$seriesnum = 1 if ( $seriesnum == 0 && $episodenum != 0 );
 				# programme versions
-				my %found;
-				for my $ver ( @{$doc->{versions}} ) {
-					my @ver_types = @{$ver->{types}};
-					next unless @ver_types;
-					for my $ver_type (@ver_types) {
-						my $type;
-						if ( $ver_type =~ /(described|description)/i ) {
-							$type = "audiodescribed";
-						} elsif ( $ver_type =~ /sign/i ) {
-							$type = "signed";
-						} elsif ( $ver_type =~ /open subtitles/i ) {
-							$type = "opensubtitles";
-						} else {
-							($type = lc($ver_type)) =~ s/\s+.*$//;
-							$type =~ s/\W//g;
-						}
-						if ( $type ) {
-							my $version = $type;
-							$version .= $found{$type} if ++$found{$type} > 1;
-							$prog->{verpids}->{$version} = $ver->{pid};
-							$prog->{durations}->{$version} = $ver->{duration};
-						}
-					}
-				}
+				$prog->parse_versions($doc->{versions});
 				$got_metadata = 1 if $pid && $thumbnail;
 			} else {
 				main::logger "WARNING: PID $prog->{pid} does not refer to an iPlayer programme episode or clip. Download may fail and metadata may be inaccurate.\n";
@@ -6655,8 +6650,8 @@ sub modelist {
 		} else {
 			$mlist =~ s/default/hd,sd,web,mobile/g;
 		}
-		# ensure valid mode for audiodescribed
-		if ( $prog->{version} eq "audiodescribed" && $mlist !~ /(sd|web|mobile)/ ) {
+		# ensure valid mode for audiodescribed/combined
+		if ( ( $prog->{version} eq "audiodescribed" || $prog->{version} eq "combined" ) && $mlist !~ /(sd|web|mobile)/ ) {
 			if ( $opt->{audioonly} ) {
 				# for 128k audio
 				$mlist .= ",web,sd,mobile";
