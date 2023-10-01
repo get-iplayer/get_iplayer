@@ -3731,6 +3731,13 @@ sub download_retry_loop {
 		return 1;
 	}
 
+	if ( $prog->{type} eq "tv" && ! $opt->{nowarntvlicence} ) {
+		$opt->{nowarntvlicence} = 1;
+		main::logger "WARNING: A UK TV licence is required to access BBC iPlayer TV content legally\n";
+	}
+
+	main::logger "INFO: Processing $prog->{type}: '$prog->{name} - $prog->{episode} ($prog->{pid})'\n";
+
 	# Setup user-agent
 	my $ua = main::create_ua( 'desktop' );
 
@@ -3765,11 +3772,6 @@ sub download_retry_loop {
 
 	my @version_search_list = $prog->generate_version_list;
 	return 1 if $#version_search_list < 0;
-
-	if ( $prog->{type} eq "tv" && ! $opt->{nowarntvlicence} ) {
-		$opt->{nowarntvlicence} = 1;
-		main::logger "WARNING: A UK TV licence is required to access BBC iPlayer TV content legally\n";
-	}
 
 	######## version loop #######
 	# Do this for each version tried in this order (if they appeared in the content)
