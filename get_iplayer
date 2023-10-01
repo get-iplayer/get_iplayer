@@ -5644,17 +5644,22 @@ sub fetch_episodes_recursive {
 			$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
 			$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
 		}
-		my @episodes = $dom->findnodes('//div[@data-pid]');
+		my @episodes = $dom->findnodes('//*[@data-pid]');
 		if ( @episodes ) {
 			for my $episode ( @episodes ) {
 				my $pid = $episode->findvalue('@data-pid');
 				next unless $pid;
 				next if $seen{$pid};
 				$seen{$pid} = 1;
-				my $prog_episode = $episode->findvalue('.//span[contains(@class,"programme__title")]/span');
-				my $name2 = $episode->findvalue('.//span[contains(@class,"programme__subtitle")]');
+				my $prog_episode;
+				my $name2;
+				my @prog_titles = $episode->findnodes('.//*[contains(@class,"programme__titles")]');
+				for my $prog_title ( @prog_titles ) {
+					$prog_episode = $prog_title->findvalue('.//*[contains(@class,"programme__title")]');
+					$name2 = $prog_title->findvalue('.//*[contains(@class,"programme__subtitle")]');
+				}
 				my $prog_name = $name2 ? "$title: $name2" : $title;
-				my $prog_desc = $episode->findvalue('.//p[contains(@class,"programme__synopsis")]/span');
+				my $prog_desc = $episode->findvalue('.//*[contains(@class,"programme__synopsis")]/*');
 				unless ( $name2 ) {
 					if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
 						$prog_name .= ": $1";
@@ -5664,7 +5669,7 @@ sub fetch_episodes_recursive {
 			}
 		}
 		unless ( $last_page ) {
-			$last_page = $dom->findvalue('//li[contains(@class,"pagination__page--last")]/a');
+			$last_page = $dom->findvalue('//*[contains(@class,"pagination__page--last")]//a');
 		}
 		last unless $last_page;
 		$last_page =~ s/(^\s+|\s+$)//g;
@@ -5687,16 +5692,16 @@ sub fetch_episodes_recursive {
 				last unless $html;
 				my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 				if ( ! $check_series_nav ) {
-					my @hrefs = $dom->findnodes('//nav[contains(@class,"series-nav")]/ul/li/a/@href');
+					my @hrefs = $dom->findnodes('//*[contains(@class,"series-nav")]//a/@href');
 					push @urls, "https://www.bbc.co.uk".$_->findvalue('.') for @hrefs;
 					$has_series_nav = @hrefs;
 					$check_series_nav = 1;
 				}
 				unless ( $channel ) {
-					$channel = $dom->findvalue('//div[contains(@class,"hero-header__label")]');
+					$channel = $dom->findvalue('//*[contains(@class,"hero-header__label")]');
 				}
 				unless ( $title ) {
-					$title = $dom->findvalue('//h1[contains(@class,"hero-header__title")]');
+					$title = $dom->findvalue('//*[contains(@class,"hero-header__title")]');
 					unless ( $title ) {
 						$title = $dom->findvalue('//title');
 					}
@@ -5705,18 +5710,18 @@ sub fetch_episodes_recursive {
 					$title =~ s/^BBC[-\s]+[^-]+[-\s]+//g;
 					$title =~ s/[-\s]+[^-]+[-\s]+BBC$//g;
 				}
-				my @episodes = $dom->findnodes('//div[contains(@class,"list__grid")]/ul/li');
+				my $name2 = $dom->findvalue('//*[contains(@class,"series-nav")]//*[contains(@class,"series-nav__button--active")]/*');
+				my @episodes = $dom->findnodes('//*[contains(@class,"list__grid")]//*[contains(@class,"grid__item")]');
 				if ( @episodes ){
 					for my $episode ( @episodes ) {
-						my $item = $episode->findvalue('.//div[contains(@class,"content-item")]/a/@href');
+						my $item = $episode->findvalue('.//a[contains(@class,"content-item-root")]/@href');
 						my $pid = $1 if $item =~ m{/episode/([a-z0-9]+)};
 						next unless $pid;
 						next if $seen{$pid};
 						$seen{$pid} = 1;
-						my $prog_episode = $episode->findvalue('.//div[contains(@class,"content-item__title")]');
-						my $name2 = $episode->findvalue('.//div[contains(@class,"content-item__title")]/span[1]');
+						my $prog_episode = $episode->findvalue('.//*[contains(@class,"content-item-root__meta--with-label")]');
 						my $prog_name = $name2 ? "$title: $name2" : $title;
-						my $prog_desc = $episode->findvalue('.//div[contains(@class,"content-item__info__secondary")]/div[contains(@class,"content-item__description")]');
+						my $prog_desc = $episode->findvalue('.//*[contains(@class,"content-item-root__meta-label")][1]');
 						unless ( $name2 ) {
 							if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
 								$prog_name .= ": $1";
@@ -5726,7 +5731,7 @@ sub fetch_episodes_recursive {
 					}
 				}
 				unless ( $last_page ) {
-					$last_page = $dom->findvalue('//div[contains(@class,"list__pagination")]//ol[contains(@class,"pagination__list")]/li[contains(@class,"pagination__number")][last()]//a/span/span[1]');
+					$last_page = $dom->findvalue('//*[contains(@class,"list__pagination")]//*[contains(@class,"pagination__list")]//*[contains(@class,"pagination__number")][last()]//*[contains(@class,"button__text")]/*[1]');
 				}
 				last unless $last_page;
 				$last_page =~ s/(^\s+|\s+$)//g;
