@@ -1,4 +1,4 @@
-.TH GET_IPLAYER "1" "January 2023" "Phil Lewis" "get_iplayer Manual"
+.TH GET_IPLAYER "1" "October 2023" "Phil Lewis" "get_iplayer Manual"
 .SH NAME
 get_iplayer \- Stream Recording tool and PVR for BBC iPlayer and BBC Sounds
 .SH SYNOPSIS
@@ -101,7 +101,7 @@ Advanced help text
 Hide previously recorded programmes
 .TP
 \fB\-\-info, \-i
-Show full programme metadata and availability of modes and subtitles (max 40 matches)
+Show full programme metadata and availability of streams and subtitles (max 40 matches)
 .TP
 \fB\-\-list <element>
 Show a list of distinct element values (with counts) for the selected programme type(s) and exit.  Valid elements are: 'channel'
@@ -165,7 +165,7 @@ Show get_iplayer version and exit.
 .SS "Recording Options:"
 .TP
 \fB\-\-attempts <number>
-Number of attempts to make or resume a failed connection.  \-\-attempts is applied per\-stream, per\-mode.  Many modes have two or more streams available.
+Number of attempts to make or resume a failed connection.  \-\-attempts is applied per\-stream. Programmes have multiple streams available for each recording quality.
 .TP
 \fB\-\-audio\-only
 Only download audio stream for TV programme. Produces .m4a file. Implies \-\-force.
@@ -264,7 +264,7 @@ TV recording quality preference (overrides \-\-quality): fhd,hd,sd,web,mobile,de
 Record the PIDs contained in the specified iPlayer episode URLs. Alias for \-\-pid.
 .TP
 \fB\-\-versions <versions>
-Version of programme to record. List is processed from left to right and first version found is downloaded.  Example: '\-\-versions=audiodescribed,default' will prefer audiodescribed programmes if available.
+Version of programme to record. List is processed from left to right and first version found is downloaded. Example: '\-\-versions=audiodescribed,default' will prefer audiodescribed programmes if available. Versions: 'default,audiodescribed,signed,combined'. Default: 'default'.
 .SS "Output Options:"
 .TP
 \fB\-\-command, \-c <command>
@@ -385,8 +385,8 @@ Keep whitespace in file and directory names.  Default behaviour is to replace wh
 \fB\-\-comment <string>
 Adds a comment to a PVR search
 .TP
-\fB\-\-pvr [pvr search name]
-Runs the PVR using all saved PVR searches (intended to be run every hour from cron etc). The list can be limited by adding a regex to the command. Synonyms: \-\-pvrrun, \-\-pvr\-run
+\fB\-\-pvr <search name>
+Runs the PVR using all saved PVR searches (intended to be run periodically, e.g., from cron or Task Manager). The list can be limited by adding a regex to the command. Synonyms: \-\-pvrrun, \-\-pvr\-run
 .TP
 \fB\-\-pvr\-add <search name>
 Save the named PVR search with the specified search terms. Search terms required unless \-\-pid specified. Synonyms: \-\-pvradd
@@ -483,13 +483,13 @@ Include channel groups when refreshing radio cache (comma\-separated values).  V
 Include channel groups when refreshing TV cache (comma\-separated values).  Valid values: 'national', 'regional', 'local'
 .TP
 \fB\-\-refresh\-limit <days>
-Minimum number of days of programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30
+Minimum number of days of programmes to cache. Default: 7 Min: 1 Max: 30
 .TP
 \fB\-\-refresh\-limit\-radio <days>
-Number of days of radio programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30
+Number of days of radio programmes to cache. Default: 7 Min: 1 Max: 30
 .TP
 \fB\-\-refresh\-limit\-tv <days>
-Number of days of TV programmes to cache.  Makes cache updates slow.  Default: 7 Min: 1 Max: 30
+Number of days of TV programmes to cache. Default: 7 Min: 1 Max: 30
 .TP
 \fB\-\-skipdeleted
 Skip the download of metadata/thumbs/subs if the media file no longer exists.  Use with \-\-history & \-\-metadataonly/subsonly/thumbonly.
@@ -521,10 +521,10 @@ Do not embed thumbnail image in output file. Also removes existing artwork. All 
 Do not tag downloaded programmes.
 .TP
 \fB\-\-tag\-credits
-Add programme credits (if available) to lyrics field.
+Add programme credits (if available) to long description field.
 .TP
 \fB\-\-tag\-encoding <name>
-(Windows only) Single\-byte character encoding for non\-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: cp1252 (Windows code page 1252)
+(Windows only) Single\-byte character encoding for non\-ASCII characters in metadata tags. Encoding name must be known to Perl Encode module. Unicode (UTF* or UCS*) character encodings are not supported. Default: active code page or cp1252 (Windows code page 1252)
 .TP
 \fB\-\-tag\-format\-show
 Format template for programme name in tag metadata. Use substitution parameters in template (see docs for list). Default: <name>
@@ -552,16 +552,19 @@ Add track list of music played in programme (if available) to lyrics field.
 .SS "Misc Options:"
 .TP
 \fB\-\-encoding\-console\-in <name>
-Character encoding for standard input (currently unused).  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/OSX = UTF\-8, Windows = cp850
+Character encoding for standard input (currently unused).  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/macOS = UTF\-8, Windows = cp850
 .TP
 \fB\-\-encoding\-console\-out <name>
-Character encoding used to encode search results and other output.  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/OSX = UTF\-8, Windows = cp850
+Character encoding used to encode search results and other output.  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/macOS = UTF\-8, Windows = cp850
 .TP
 \fB\-\-encoding\-locale <name>
 Character encoding used to decode command\-line arguments.  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/OSX = UTF\-8, Windows = cp1252
 .TP
 \fB\-\-encoding\-locale\-fs <name>
-Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/OSX = UTF\-8, Windows = cp1252
+Character encoding used to encode file and directory names.  Encoding name must be known to Perl Encode module.  Default (only if auto\-detect fails): Linux/Unix/macOS = UTF\-8, Windows = cp1252
+.TP
+\fB\-\-encoding\-webrequest <name>
+Character encoding used to encode commands sent from Web PVR.  Encoding name must be known to Perl Encode module.  Default = UTF\-8
 .TP
 \fB\-\-index\-maxconn <number>
 Maximum number of connections to use for concurrent programme indexing.  Default: 5 Min: 1 Max: 10
@@ -580,7 +583,8 @@ get_iplayer was written by Phil Lewis <iplayer2 (at sign) linuxcentre.net> and i
 .PP
 This manual page was originally written by Jonathan Wiltshire <jmw@debian.org> for the Debian project (but may be used by others).
 .SH COPYRIGHT NOTICE
-get_iplayer v3.31, Copyright (C) 2008\-2010 Phil Lewis
+get_iplayer v3.32
+  Copyright (C) 2008\-2010 Phil Lewis, 2010\- get_iplayer contributors
   This program comes with ABSOLUTELY NO WARRANTY; for details use \-\-warranty.
   This is free software, and you are welcome to redistribute it under certain
   conditions; use \-\-conditions for details.
