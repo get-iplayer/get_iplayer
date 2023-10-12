@@ -2920,23 +2920,23 @@ sub get {
 		next unless (/^\s*([\w\-_]+)\s+(.*)\s*$/);
 		# Error if the option is not valid
 		if ( not defined $optname->{$1} ) {
-			push @ignored, "$1 $2";
+			push @ignored, "$1 = $2";
 			next;
 		}
 		# Warn if it is listed as an ignored internal option name
 		if ( defined @{ $opt_format_ref->{$1} }[2] ) {
 			if ( @{ $opt_format_ref->{$1} }[2] eq 'Ignored' ) {
-				push @ignored, "$1 $2";
+				push @ignored, "$1 = $2";
 			}
 		}
 		# Warn if it is listed as a deprecated internal option name
 		if ( defined @{ $opt_format_ref->{$1} }[2] ) {
 			if ( @{ $opt_format_ref->{$1} }[2] eq 'Deprecated' ) {
-				push @deprecated, "$1 $2";
+				push @deprecated, "$1 = $2";
 			}
 		}
 		chomp( $entry->{ $optname->{$1} } = $2 );
-		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) $2\n" if $opt->{debug};
+		main::logger "DEBUG: Loaded option $1 ($optname->{$1}) = $2\n" if $opt->{debug};
 	}
 	close OPT;
 	unless ( $suppress_warnings ) {
@@ -2979,7 +2979,7 @@ sub load {
 			for my $key ( 'search', 'force', 'overwrite', 'pid' ) {
 				if ( defined $entry->{$key}  ) {
 					main::logger "WARNING: '$key' option is invalid in default options file: $optfile\n";
-					main::logger "WARNING: '$key $entry->{$key}' will be ignored\n";
+					main::logger "WARNING: '$key = $entry->{$key}' will be ignored\n";
 					delete $entry->{$key};
 				}
 			}
@@ -3002,9 +3002,9 @@ sub display {
 	for ( sort keys %{$this} ) {
 		if ( defined $this->{$_} && $this->{$_} ) {
 			if ( ref($this->{$_}) eq 'ARRAY' ) {
-				main::logger "\t$_ ".(join(',', @{$this->{$_}}))."\n";
+				main::logger "\t$_ = ".(join(',', @{$this->{$_}}))."\n";
 			} else {
-				main::logger "\t$_ $this->{$_}\n";
+				main::logger "\t$_ = $this->{$_}\n";
 			}
 		}
 	}
@@ -9196,13 +9196,13 @@ sub add {
 	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
-				main::logger "DEBUG: Adding option $_ $opt_cmdline->{$_}\n" if $opt->{debug};
+				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
 		}
 	}
 	# Add search args to array
 	for ( my $count = 0; $count <= $#search_args; $count++ ) {
 		push @options, "search${count} $search_args[$count]";
-		main::logger "DEBUG: Adding search${count} $search_args[$count]\n" if $opt->{debug};
+		main::logger "DEBUG: Adding search${count} = $search_args[$count]\n" if $opt->{debug};
 	}
 	# Save search to file
 	$pvr->save( $name, @options );
@@ -9245,7 +9245,7 @@ sub display_list {
 			main::logger "pvrsearch = $name\n";
 		}
 		for ( sort keys %{ $pvr->{$name} } ) {
-			main::logger "\t$_ $pvr->{$name}->{$_}\n";
+			main::logger "\t$_ = $pvr->{$name}->{$_}\n";
 		}
 		main::logger "\n";
 	}
@@ -9284,7 +9284,7 @@ sub load_list {
 		close PVR;
 		for (@options) {
 			/^\s*([\w\-_]+?)\s+(.*)\s*$/;
-			main::logger "DEBUG: PVR search '$name': option $1 $2\n" if $opt->{debug};
+			main::logger "DEBUG: PVR search '$name': option $1 = $2\n" if $opt->{debug};
 			$pvr->{$name}->{$1} = $2;
 		}
 		main::logger "INFO: Loaded PVR search '$name'\n" if $opt->{verbose};
@@ -9356,11 +9356,11 @@ sub load_options {
 	for ( sort {$a cmp $b} keys %{ $pvr->{$name} } ) {
 		# Add to list of search args if this is not an option
 		if ( /^search\d+$/ ) {
-			main::logger "INFO: $_ $pvr->{$name}->{$_}\n" if $opt->{verbose};
+			main::logger "INFO: $_ = $pvr->{$name}->{$_}\n" if $opt->{verbose};
 			push @search_args, $pvr->{$name}->{$_};
 		# Else populate options, ignore disable option
 		} elsif ( $_ ne 'disable' ) {
-			main::logger "INFO: Option: $_ $pvr->{$name}->{$_}\n" if $opt->{verbose};
+			main::logger "INFO: Option: $_ = $pvr->{$name}->{$_}\n" if $opt->{verbose};
 			$opt->{$_} = $pvr->{$name}->{$_};
 		}
 	}
