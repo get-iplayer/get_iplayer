@@ -3,7 +3,7 @@
 # The world's most insecure web-based PVR manager and streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
 #
-#    Copyright (C) 2009-2010 Phil Lewis
+#    Copyright (C) 2008-2010 Phil Lewis, 2010- get_iplayer contributors
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -18,8 +18,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Author: Phil Lewis
-# Email: iplayer2 (at sign) linuxcentre.net
+# Authors: Phil Lewis, get_iplayer contributors
 # Web: https://github.com/get-iplayer/get_iplayer/wiki
 # License: GPLv3 (see LICENSE.txt)
 #
@@ -79,9 +78,9 @@ usage() if $opt_cmdline->{help} || @ARGV;
 
 # Usage
 sub usage {
-	my $text = "get_iplayer Web PVR Manager $VERSION_TEXT, ";
+	my $text = "get_iplayer Web PVR Manager $VERSION_TEXT\n";
 	$text .= <<'EOF';
-Copyright (C) 2009-2010 Phil Lewis
+  Copyright (C) 2008-2010 Phil Lewis, 2010- get_iplayer contributors
   This program comes with ABSOLUTELY NO WARRANTY; This is free software,
   and you are welcome to redistribute it under certain conditions;
   See the GPLv3 for details.
