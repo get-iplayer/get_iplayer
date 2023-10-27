@@ -5031,6 +5031,7 @@ sub get_verpids_json {
 	my ( $prog, $ua ) = @_;
 	my $pid = $prog->{pid};
 	my $url = "https://www.bbc.co.uk/programmes/$pid/playlist.json";
+	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign", "combined" => "" };
 	main::logger "INFO: iPlayer metadata URL (JSON) = $url\n" if $opt->{verbose};
 	my $json = main::request_url_retry( $ua, $url, 3, undef, undef, undef, undef, 1 );
 	if ( $json ) {
@@ -5071,7 +5072,6 @@ sub get_verpids_json {
 		main::logger "WARNING: Could not download version PID metadata from $url\n";
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
-	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign", "combined" => "" };
 	my $version_list = $opt->{versionlist} || $prog->{versions};
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
@@ -5087,11 +5087,7 @@ sub get_verpids_json {
 			}
 		}
 	}
-	my $found;
-	for ( keys %{ $prog->{verpids} } ) {
-		$found = 1 if $version_list =~ /$_/ && $prog->{verpids}->{$_};
-		last if $found;
-	}
+	my $found = keys %{ $prog->{verpids} } > 0;
 	return 1 if ! $found;
 	return 0;
 }
@@ -5119,7 +5115,6 @@ sub get_verpids_html_radio {
 sub get_verpids_html {
 	my ( $prog, $ua ) = @_;
 	my $pid = $prog->{pid};
-	my $version_list = $opt->{versionlist} || 'default';
 	my $version_map = { "default" => "", "audiodescribed" => "ad", "signed" => "sign", "combined" => "" };
 	for my $version ( "default", "audiodescribed", "signed", "combined" ) {
 		next if $prog->{verpids}->{$version};
@@ -5189,6 +5184,7 @@ sub get_verpids_html {
 		$prog->{durations}->{$version} = $1 if $config =~ /"duration":(\d+)/;
 	}
 	$prog->{versions} = join ',', keys %{ $prog->{verpids} };
+	my $version_list = $opt->{versionlist} || $prog->{versions};
 	for ( split /,/, $version_list ) {
 		if ( $prog->{verpids}->{$_} ) {
 			my $episode_url;
@@ -5203,11 +5199,7 @@ sub get_verpids_html {
 			}
 		}
 	}
-	my $found;
-	for ( keys %{ $prog->{verpids} } ) {
-		$found = 1 if $version_list =~ /$_/ && $prog->{verpids}->{$_};
-		last if $found;
-	}
+	my $found = keys %{ $prog->{verpids} } > 0;
 	return 1 if ! $found;
 	return 0;
 }
