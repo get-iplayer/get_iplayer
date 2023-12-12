@@ -5685,7 +5685,12 @@ sub fetch_episodes_recursive {
 				my $dom = XML::LibXML->load_html(string => $html, recover => 1, suppress_errors => 1);
 				if ( ! $check_series_nav ) {
 					my @hrefs = $dom->findnodes('//*[contains(@class,"series-nav")]//a/@href');
-					push @urls, "https://www.bbc.co.uk".$_->findvalue('.') for @hrefs;
+					for my $href (@hrefs) {
+						my $href_path = $href->findvalue('.');
+						my ($sid) = $href_path =~ /seriesId=([^\&]+)/i;
+						next if $sid && $sid !~ REGEX_PID;
+						push @urls, "https://www.bbc.co.uk".$href_path;
+					}
 					$has_series_nav = @hrefs;
 					$check_series_nav = 1;
 				}
