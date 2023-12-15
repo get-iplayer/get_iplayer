@@ -93,6 +93,7 @@ my $opt_format = {
 	hash		=> [ 1, "hash!", 'Recording', '--hash', "Show recording progress as hashes"],
 	logprogress		=> [ 1, "log-progress|logprogress!", 'Recording', '--log-progress', "Force HLS/DASH download progress display to be captured when screen output is redirected to file.  Progress display is normally omitted unless writing to terminal."],
 	markdownloaded	=> [ 1, "markdownloaded|mark-downloaded!", 'Recording', '--mark-downloaded', "Mark programmes in search results or specified with --pid/--url as downloaded by inserting records in download history."],
+	markexistingdownloaded	=> [ 1, "markexistingdownloaded|mark-existing-downloaded!", 'Recording', '--mark-existing-downloaded', "Programmes that are skipped due to existing files are inserted into download history to prevent future attempts."],
 	modes		=> [ 0, "quality=s", 'Recording', '--quality <quality>,<quality>,...', "TV and radio recording quality preference.  See --tv-quality and --radio-quality for available values and defaults. Default: default for programme type."],
 	nomergeversions	=> [ 1, "nomergeversions|no-merge-versions!", 'Recording', '--no-merge-versions', "Do not merge programme versions with same name and duration."],
 	noproxy	=> [ 1, "noproxy|no-proxy!", 'Recording', '--no-proxy', "Ignore --proxy setting in preferences and/or http_proxy environment variable."],
@@ -3896,7 +3897,14 @@ sub mode_ver_download_retry_loop {
 
 		# don't try any more prog versions
 		} elsif ( $retcode eq 'stop' ) {
-			main::logger "INFO: Skipping all versions of this programme\n";
+			if ( $opt->{markexistingdownloaded} ) {
+				main::logger "INFO: Skipping all versions of this programme and marking as downloaded.\n";
+				$hist->add( $prog )
+			}
+			else
+			{
+				main::logger "INFO: Skipping all versions of this programme\n";
+			}
 			return 3;
 
 		# Try Next version
@@ -4398,7 +4406,9 @@ sub generate_filenames {
 			}
 		}
 		if ( $skip ) {
-			main::logger "WARNING: Use --overwrite to replace\n";
+			if (! $opt->{markexistingdownloaded} ) {
+				main::logger "WARNING: Use --overwrite to replace or --mark-existing-downloaded to mark downloaded\n";
+			}
 			return 3;
 		}
 	}
@@ -9185,7 +9195,7 @@ sub add {
 		return 1;
 	}
 	# Parse valid options and create array (ignore options from the options files that have not been overriden on the cmdline)
-	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|markdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
+	for ( grep !/(^cache|profiledir|encoding.*|silent|webrequest|future|nocopyright|^test|metadataonly|subsonly|thumbonly|cuesheetonly|tracklistonly|creditsonly|tagonly|^get|refresh|^save|^prefs|help|expiry|tree|terse|streaminfo|listformat|^list|showoptions|hide|info|pvr.*|markdownloaded|markexistingdownloaded)$/, sort {lc $a cmp lc $b} keys %{$opt_cmdline} ) {
 		if ( defined $opt_cmdline->{$_} ) {
 				push @options, "$_ $opt_cmdline->{$_}";
 				main::logger "DEBUG: Adding option $_ = $opt_cmdline->{$_}\n" if $opt->{debug};
