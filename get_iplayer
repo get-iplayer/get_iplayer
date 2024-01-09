@@ -5208,11 +5208,11 @@ sub parse_title {
 	my $prog = shift;
 	return unless $prog->{title};
 	my ( $name, $episode );
-	$prog->{title} =~ s/,\s+(Series.+?),/: $1:/;
-	$prog->{title} =~ s/,\s+(Episode.+?)/: $1/;
-	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: Series/;
-	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: Episode/;
-	if ( $prog->{title} =~ m{^(.+?Series.*?):\s+(.+?)$} ) {
+	$prog->{title} =~ s/,\s+((Series|Cyfres|Season).+?),/: $1:/;
+	$prog->{title} =~ s/,\s+((Episode|Pennod).+?)/: $1/;
+	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: (Series|Cyfres|Season)/;
+	$prog->{title} =~ s/^(.+?),\s+(.+)$/$1: $2/ unless $prog->{title} =~ /: (Episode|Pennod)/;
+	if ( $prog->{title} =~ m{^(.+?(Series|Cyfres|Season).*?):\s+(.+?)$} ) {
 		( $name, $episode ) = ( $1, $2 );
 	} elsif ( $prog->{title} =~ m{^(.+):\s+(.+)$} ) {
 		( $name, $episode ) = ( $1, $2 );
@@ -5221,12 +5221,12 @@ sub parse_title {
 	}
 	my ($seriesnum, $episodenum);
 	# Extract the seriesnum
-	my $regex = 'Series\s+'.main::regex_numbers();
+	my $regex = '(Series|Cyfres|Season)\s+'.main::regex_numbers();
 	if ( "$name $episode" =~ m{$regex}i ) {
 		$seriesnum = main::convert_words_to_number( $1 );
 	}
 	# Extract the episode num
-	my $regex_1 = 'Episode\s+'.main::regex_numbers();
+	my $regex_1 = '(Episode|Pennod)\s+'.main::regex_numbers();
 	my $regex_2 = '^'.main::regex_numbers().'\.\s+';
 	if ( "$name $episode" =~ m{$regex_1}i ) {
 		$episodenum = main::convert_words_to_number( $1 );
@@ -5354,7 +5354,7 @@ sub get_metadata {
 				# the Doctor Who fudge
 				my ($seriesnum2, $episodenum2);
 				# Extract the seriesnum
-				my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
+				my $regex = '(?:Series|Cyfres|Season)\s+'.main::regex_numbers();
 				if ( "$name $episode" =~ m{$regex}i ) {
 					$seriesnum2 = main::convert_words_to_number( $1 );
 				}
@@ -5433,10 +5433,10 @@ sub get_metadata {
 	$prog->{episodeshort} =~ s/(^|:(\s+))\d+[a-z]?\.\s+/$1/i;
 	my $no_number = $prog->{episodeshort};
 	$prog->{episodeshort} =~ s/:?\s*(Episode|Pennod)\s+.+?(:\s*|$)//i;
-	$prog->{episodeshort} =~ s/:?\s*(Series|Cyfres)\s+.+?(:\s*|$)//i;
+	$prog->{episodeshort} =~ s/:?\s*(Series|Cyfres|Season)\s+.+?(:\s*|$)//i;
 	$prog->{episodeshort} = $no_number if $prog->{episodeshort} eq '';
 	$prog->{nameshort} = $prog->{brand};
-	$prog->{nameshort} =~ s/:?\s*(Series|Cyfres)\s+\d.*?(:\s*|$)//i;
+	$prog->{nameshort} =~ s/:?\s*(Series|Cyfres|Season)\s+\d.*?(:\s*|$)//i;
 	$prog->{firstbcast} = $firstbcast;
 	$prog->{firstbcastrel} = Programme::get_time_string( $firstbcast, time() );
 	($prog->{firstbcastdate} = $firstbcast) =~ s/T.*$//;
@@ -5590,7 +5590,7 @@ sub fetch_pid_info {
 			$prog_episode = $doc->{display_title}->{subtitle};
 			$prog_channel = $doc->{ownership}->{service}->{title};
 			$prog_desc = $doc->{short_synopsis};
-			if ( $prog_episode =~ s/((?:Series|Cyfres) \d+)[, :]+// ) {
+			if ( $prog_episode =~ s/((?:Series|Cyfres|Season) \d+)[, :]+// ) {
 				$prog_name .= ": $1";
 			}
 			for my $ancestor ($parent, $grandparent, $greatgrandparent) {
@@ -5653,7 +5653,7 @@ sub fetch_episodes_recursive {
 				my $prog_name = $name2 ? "$title: $name2" : $title;
 				my $prog_desc = $episode->findvalue('.//*[contains(@class,"programme__synopsis")]/*');
 				unless ( $name2 ) {
-					if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
+					if ( $prog_episode =~ s/((?:Series|Cyfres|Season) \d+(\s+Reversions)?)[, :]+// ) {
 						$prog_name .= ": $1";
 					}
 				}
@@ -5720,7 +5720,7 @@ sub fetch_episodes_recursive {
 						my $prog_name = $name2 ? "$title: $name2" : $title;
 						my $prog_desc = $episode->findvalue('.//*[contains(@class,"content-item-root__meta-label")][1]');
 						unless ( $name2 ) {
-							if ( $prog_episode =~ s/((?:Series|Cyfres) \d+(\s+Reversions)?)[, :]+// ) {
+							if ( $prog_episode =~ s/((?:Series|Cyfres|Season) \d+(\s+Reversions)?)[, :]+// ) {
 								$prog_name .= ": $1";
 							}
 						}
@@ -7413,7 +7413,7 @@ sub get_links_schedule_html {
 			}
 		}
 		# Extract the seriesnum
-		my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
+		my $regex = '(?:Series|Cyfres|Season)\s+'.main::regex_numbers();
 		$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		# /programmes page
 		$web = "https://www.bbc.co.uk/programmes/${pid}";
@@ -7539,7 +7539,7 @@ sub get_links_schedule_json {
 		# Extract the seriesnum
 		$seriesnum = $entry->{partOfSeason}->{position};
 		if ( ! $seriesnum ) {
-			my $regex = '(?:Series|Cyfres)\s+'.main::regex_numbers();
+			my $regex = '(?:Series|Cyfres|Season)\s+'.main::regex_numbers();
 			$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
 		}
 		# /programmes page
