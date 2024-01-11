@@ -52,7 +52,7 @@ use IO::Socket;
 use IPC::Open3;
 use LWP::ConnCache;
 use LWP::UserAgent;
-use open IN => ':crlf:utf8', OUT => ':utf8';
+use open IN => ':crlf :utf8', OUT => ':utf8';
 use PerlIO::encoding;
 use POSIX qw(strftime);
 use POSIX qw(:termios_h);
@@ -818,12 +818,12 @@ sub release_check {
 		} else {
 			main::logger "INFO: You have the latest release ($version_text)\n";
 		}
-		if (! open (relchk, "> $relchk_file") ) {
+		if (! open (RELCHK, "> $relchk_file") ) {
 			main::logger "ERROR: Cannot write to release check file: $relchk_file\n";
 			return 1;
 		}
-		print relchk "$relchk_msg\n";
-		close relchk;
+		print RELCHK "$relchk_msg\n";
+		close RELCHK;
 	}
 }
 
@@ -7312,7 +7312,7 @@ sub get_links_schedule_lwp {
 	my $limit = shift;
 	my $now = shift || time();
 	my $rc_lwp;
-	main::logger "\INFO: Downloading $channel schedule page: $url\n" if $opt->{verbose};
+	main::logger "\nINFO: Downloading $channel schedule page: $url\n" if $opt->{verbose};
 	my $html = main::request_url_retry($ua, $url, 3, '.', "Failed to download $channel schedule page");
 	return 1 unless $html;
 	my $rc = $self->get_links_schedule_json($html, $prog, $prog_type, $channel_id, $channel, $future, $limit, $now, $url);
