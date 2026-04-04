@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/bin/perl
 #
 # The world's most insecure web-based PVR manager and streaming proxy for get_iplayer
 # ** WARNING ** Never run this in an untrusted environment or facing the internet
@@ -262,6 +262,14 @@ my %nextpages = (
 	'record_now'		=> \&record_now,
 	'show_info'		=> \&show_info,
 	'refresh'		=> \&refresh,
+	# Setup Wizard pages
+	'setup_wizard'		=> \&setup_wizard,	# Setup Wizard Main
+	'setup_check_deps'	=> \&setup_check_deps,	# Check Dependencies
+	'setup_install_deps'	=> \&setup_install_deps,	# Install Missing Dependencies
+	'setup_network'		=> \&setup_network,	# Network/VPN Configuration
+	'setup_cache'		=> \&setup_cache,	# Cache Management
+	'setup_output'		=> \&setup_output,	# Output Configuration
+	'setup_complete'	=> \&setup_complete,	# Setup Complete
 );
 
 
@@ -289,7 +297,7 @@ $layout->{COLUMNSTAB}->{order} = [ qw/ COLS / ];
 
 $layout->{RECORDINGTAB}->{title} = 'Recording';
 $layout->{RECORDINGTAB}->{heading} = 'Recording Options:';
-$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT VERSIONLIST MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE FPS25 / ];
+$layout->{RECORDINGTAB}->{order} = [ qw/ OUTPUT VERSIONLIST MODES PROXY SUBTITLES METADATA THUMB PVRHOLDOFF FORCE AUTOWEBREFRESH AUTOPVRRUN REFRESHFUTURE REFRESH_LIMIT_RADIO REFRESH_LIMIT_TV FPS25 / ];
 
 $layout->{STREAMINGTAB}->{title} = 'Streaming';
 $layout->{STREAMINGTAB}->{heading} = 'Streaming Options:';
@@ -557,7 +565,7 @@ sub run_cgi {
 	$cgi = new CGI( $query_string );
 
 	# Get next page
-	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'search_progs';
+	$nextpage = $cgi->param( 'NEXTPAGE' ) || 'setup_wizard';
 
 	# Process All options
 	process_params();
@@ -2345,6 +2353,8 @@ sub build_option_html {
 sub refresh {
 	my $typelist = join(",", $cgi->param( 'PROGTYPES' )) || 'tv';
 	my $refreshfuture = $cgi->param( 'REFRESHFUTURE' ) || 0;
+	my $refreshlimitradio = $cgi->param( 'REFRESH_LIMIT_RADIO' ) || $opt->{REFRESH_LIMIT_RADIO}->{current} || 30;
+	my $refreshlimittv = $cgi->param( 'REFRESH_LIMIT_TV' ) || $opt->{REFRESH_LIMIT_TV}->{current} || 30;
 	print $fh "<strong><p>The cache will auto-refresh every $opt->{AUTOWEBREFRESH}->{current} hour(s) if you leave this page open</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
 	if ( IS_WIN32 ) {
 		print $fh "<strong><p>Windows users: You may encounter errors if you perform other tasks in the Web PVR Manager while this page is reloading</p></strong>" if $opt->{AUTOWEBREFRESH}->{current};
@@ -2355,7 +2365,7 @@ sub refresh {
 		@gip_cmd_refresh,
 		'--refresh',
 		'--webrequest',
-		get_iplayer_webrequest_args( "type=$typelist", "refreshfuture=$refreshfuture" ),
+		get_iplayer_webrequest_args( "type=$typelist", "refreshfuture=$refreshfuture", "refreshlimitradio=$refreshlimitradio", "refreshlimittv=$refreshlimittv" ),
 	);
 	print $fh '<pre>';
 	run_cmd_autorefresh( $fh, $se, 1, @cmd );
@@ -2790,6 +2800,8 @@ sub search_progs {
 		'Add Search to PVR'
 	);
 	#my $autorefresh = $cgi->cookie( 'AUTOWEBREFRESH' ) || $cgi->param( 'AUTOWEBREFRESH' );
+	# Get currently selected programme types for refresh
+	my $refresh_types = join(",", $cgi->param( 'PROGTYPES' )) || $opt->{PROGTYPES}->{current} || 'tv';
 	$action_button{'Refresh Cache'} = a(
 		{
 			-class => 'action',
@@ -2798,6 +2810,18 @@ sub search_progs {
 			#-onClick => "window.frames['dataframe'].window.location.replace('?NEXTPAGE=refresh&AUTOWEBREFRESH=$autorefresh')",
 		},
 		'Refresh Cache'
+	);
+	# Add a separate button for refreshing all types
+	my $refreshlimitradio = $opt->{REFRESH_LIMIT_RADIO}->{current} || 30;
+	my $refreshlimittv = $opt->{REFRESH_LIMIT_TV}->{current} || 30;
+	$action_button{'Refresh All'} = a(
+		{
+			-class => 'action',
+			-title => 'Refresh both TV and Radio caches with cache limit settings',
+			-target => '_newtab_refresh_all',
+			-href => '?NEXTPAGE=refresh&PROGTYPES=tv,radio&REFRESH_LIMIT_RADIO='.$refreshlimitradio.'&REFRESH_LIMIT_TV='.$refreshlimittv,
+		},
+		'Refresh All'
 	);
 
 	# Render action bar
@@ -2822,6 +2846,7 @@ sub search_progs {
 					$action_button{'Queue'},
 					$action_button{'Add Search to PVR'},
 					$action_button{'Refresh Cache'},
+					$action_button{'Refresh All'},
 				]),
 			),
 		);
@@ -3042,16 +3067,19 @@ sub form_header {
 	$class->{recordings}	= 'nav_tab';
 	$class->{pvrlist}	= 'nav_tab';
 	$class->{pvrrun}	= 'nav_tab';
+	$class->{setup}		= 'nav_tab';
 	$class->{search}	= 'nav_tab_sel' if ( $nextpage eq 'search_progs' || ! $nextpage ) && ! $opt->{HISTORY}->{current};
 	$class->{recordings}	= 'nav_tab_sel' if $nextpage eq 'search_history' || $opt->{HISTORY}->{current};
 	$class->{pvrrun}	= 'nav_tab_sel' if $nextpage eq 'pvr_run';
 	$class->{pvrlist}	= 'nav_tab_sel' if $nextpage =~ m{^(pvr_list|pvr_queue|pvr_del)$};
+	$class->{setup}		= 'nav_tab_sel' if $nextpage =~ m{^setup_};
 
 	print $fh div( { -class=>'nav', -role=>'navigation' },
 		ul( { -class=>'nav' },
 			li( { -id=>'logo', -class=>'nav_tab' },
 				span( { -class=>'logotext' }, 'get_iplayer' )
 			).
+			li( { -class=>$class->{setup} }, a( { -class=>'nav', -title=>'Setup wizard for dependencies and configuration', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='setup_wizard'; formheader.submit(); RestoreFormVars(formheader);" }, 'Setup' ) ).
 			li( { -class=>$class->{search} }, a( { -class=>'nav', -title=>'Main search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_progs'; formheader.submit(); RestoreFormVars(formheader);" }, 'Search' ) ).
 			li( { -class=>$class->{recordings} }, a( { -class=>'nav', -title=>'History search page', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='search_history'; formheader.submit(); RestoreFormVars(formheader);" }, 'Recordings' ) ).
 			li( { -class=>$class->{pvrlist} }, a( { -class=>'nav', -title=>'List all saved PVR searches', -onClick => "BackupFormVars(formheader); formheader.NEXTPAGE.value='pvr_list'; formheader.submit(); RestoreFormVars(formheader);" }, 'PVR List' ) ).
@@ -3295,6 +3323,28 @@ sub process_params {
 		optkey	=> 'refreshfuture', # option
 		type	=> 'radioboolean', # type
 		default	=> '0', # value
+		save	=> 1,
+	};
+
+	$opt->{REFRESH_LIMIT_RADIO} = {
+		title	=> 'Radio Cache Days', # Title
+		tooltip	=> "Number of days of radio programmes to cache. Default: 7 Max: 30", # Tooltip
+		webvar	=> 'REFRESH_LIMIT_RADIO', # webvar
+		optkey	=> 'refreshlimitradio', # option
+		type	=> 'text', # type
+		default	=> '30', # value
+		value	=> 3, # width
+		save	=> 1,
+	};
+
+	$opt->{REFRESH_LIMIT_TV} = {
+		title	=> 'TV Cache Days', # Title
+		tooltip	=> "Number of days of TV programmes to cache. Default: 7 Max: 30", # Tooltip
+		webvar	=> 'REFRESH_LIMIT_TV', # webvar
+		optkey	=> 'refreshlimittv', # option
+		type	=> 'text', # type
+		default	=> '30', # value
+		value	=> 3, # width
 		save	=> 1,
 	};
 
@@ -3558,6 +3608,562 @@ sub process_params {
 	}
 }
 
+
+######################################################################
+#
+#   Setup Wizard Functions
+#
+######################################################################
+
+# Main Setup Wizard Entry Point
+sub setup_wizard {
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard</h1>';
+	print $fh '<p>Configure get_iplayer for first-time use</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step active"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Welcome to get_iplayer Setup</h2>';
+	print $fh '<p>This wizard will help you configure get_iplayer for downloading BBC programmes.</p>';
+	print $fh '<div class="setup-alert setup-alert-info">';
+	print $fh '<strong>What we will check:</strong>';
+	print $fh '<ul>';
+	print $fh '<li>Required dependencies (Perl modules, ffmpeg, AtomicParsley)</li>';
+	print $fh '<li>Network connectivity and UK access (VPN/Proxy)</li>';
+	print $fh '<li>Programme cache refresh</li>';
+	print $fh '<li>Output directory and quality settings</li>';
+	print $fh '</ul>';
+	print $fh '</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'search_progs\'; formheader.submit(); RestoreFormVars(formheader);">Skip Setup</a>';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_check_deps\'; formheader.submit(); RestoreFormVars(formheader);">Start Setup</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Check Dependencies
+sub setup_check_deps {
+	my %deps;
+	
+	# Check Perl version
+	my $perl_version = $];
+	$deps{perl} = {
+		name => 'Perl',
+		required => '5.16+',
+		found => $perl_version,
+		status => $perl_version >= 5.016 ? 'ok' : 'fail',
+		detail => "Version $perl_version"
+	};
+	
+	# Check Perl modules
+	my @modules = (
+		['HTML::Entities', 'HTML::Entities'],
+		['XML::LibXML', 'XML::LibXML'],
+		['LWP::UserAgent', 'LWP::UserAgent'],
+		['LWP::Protocol::https', 'LWP::Protocol::https'],
+		['CGI', 'CGI'],
+		['Encode', 'Encode'],
+	);
+	
+	for my $mod (@modules) {
+		my ($name, $module) = @$mod;
+		eval "require $module";
+		if ($@) {
+			$deps{$module} = {
+				name => $name,
+				required => 'Required',
+				found => 'Not installed',
+				status => 'fail',
+				detail => 'Module not found'
+			};
+		} else {
+			my $version = $module->VERSION || 'installed';
+			$deps{$module} = {
+				name => $name,
+				required => 'Required',
+				found => $version,
+				status => 'ok',
+				detail => "Version $version"
+			};
+		}
+	}
+	
+	# Check external programs
+	my @programs = (
+		['ffmpeg', 'ffmpeg', '-version'],
+		['AtomicParsley', 'AtomicParsley', '--version'],
+	);
+	
+	for my $prog (@programs) {
+		my ($name, $cmd, $arg) = @$prog;
+		my $result = `which $cmd 2>/dev/null`;
+		if ($result) {
+			$deps{$cmd} = {
+				name => $name,
+				required => 'Required',
+				found => 'Installed',
+				status => 'ok',
+				detail => $result
+			};
+		} else {
+			$deps{$cmd} = {
+				name => $name,
+				required => 'Required',
+				found => 'Not found',
+				status => 'fail',
+				detail => 'Program not in PATH'
+			};
+		}
+	}
+	
+	# Check get_iplayer itself
+	my $get_iplayer_path = `which get_iplayer 2>/dev/null` || $opt_cmdline->{getiplayer} || './get_iplayer';
+	chomp($get_iplayer_path);
+	if (-x $get_iplayer_path) {
+		$deps{get_iplayer} = {
+			name => 'get_iplayer',
+			required => 'Required',
+			found => $get_iplayer_path,
+			status => 'ok',
+			detail => $get_iplayer_path
+		};
+	} else {
+		$deps{get_iplayer} = {
+			name => 'get_iplayer',
+			required => 'Required',
+			found => 'Not found',
+			status => 'fail',
+			detail => 'Specify with --getiplayer option'
+		};
+	}
+	
+	# Count failures
+	my $failures = grep { $deps{$_}->{status} eq 'fail' } keys %deps;
+	
+	# Render page
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Step 1</h1>';
+	print $fh '<p>Checking dependencies</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Dependency Check</h2>';
+	
+	# Show each dependency
+	for my $key (sort keys %deps) {
+		my $dep = $deps{$key};
+		my $status_class = $dep->{status};
+		my $status_icon = $dep->{status} eq 'ok' ? '✓' : '✗';
+		print $fh '<div class="dep-check">';
+		print $fh qq{<div class="dep-status $status_class">$status_icon</div>};
+		print $fh '<div class="dep-info">';
+		print $fh qq{<div class="dep-name">$dep->{name}</div>};
+		print $fh qq{<div class="dep-detail">$dep->{detail}</div>};
+		print $fh '</div></div>';
+	}
+	
+	# Show installation help if failures
+	if ($failures > 0) {
+		print $fh '<div class="setup-alert setup-alert-warning">';
+		print $fh '<strong>Missing dependencies detected!</strong><br>';
+		print $fh 'Install missing dependencies and refresh this page.';
+		print $fh '</div>';
+		
+		print $fh '<h3>Installation Commands</h3>';
+		print $fh '<div class="setup-code">';
+		if ($^O eq 'darwin') {
+			print $fh '# macOS (Homebrew)<br>';
+			print $fh 'brew install ffmpeg atomicparsley get_iplayer<br>';
+			print $fh 'cpanm HTML::Entities XML::LibXML LWP CGI';
+		} elsif ($^O eq 'linux') {
+			print $fh '# Ubuntu/Debian<br>';
+			print $fh 'sudo apt install ffmpeg atomicparsley get_iplayer<br>';
+			print $fh 'sudo cpan HTML::Entities XML::LibXML LWP CGI';
+		} else {
+			print $fh '# Windows - use Strawberry Perl and install dependencies manually';
+		}
+		print $fh '</div>';
+	}
+	
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_wizard\'; formheader.submit(); RestoreFormVars(formheader);">Back</a>';
+	if ($failures > 0) {
+		print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_install_deps\'; formheader.submit(); RestoreFormVars(formheader);">Install Missing</a>';
+	} else {
+		print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_network\'; formheader.submit(); RestoreFormVars(formheader);">Continue</a>';
+	}
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Install Missing Dependencies
+sub setup_install_deps {
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Installing Dependencies</h1>';
+	print $fh '<p>Please wait while dependencies are installed...</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step active"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Installation Progress</h2>';
+	print $fh '<pre style="background: #111; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 400px;">';
+	
+	# Check which modules are missing and install them
+	my @missing_modules;
+	my @modules = (
+		['HTML::Entities', 'HTML::Entities'],
+		['XML::LibXML', 'XML::LibXML'],
+		['LWP::UserAgent', 'LWP::UserAgent'],
+		['LWP::Protocol::https', 'LWP::Protocol::https'],
+		['CGI', 'CGI'],
+		['Encode', 'Encode'],
+	);
+	
+	for my $mod (@modules) {
+		my ($name, $module) = @$mod;
+		eval "require $module";
+		if ($@) {
+			push @missing_modules, $module;
+		}
+	}
+	
+	# Check for cpanm
+	my $has_cpanm = `which cpanm 2>/dev/null`;
+	chomp($has_cpanm);
+	
+	if (!$has_cpanm) {
+		print $fh "Installing cpanm first...\n";
+		my $result = `cpan App::cpanminus 2>&1`;
+		print $fh $result;
+		$has_cpanm = `which cpanm 2>/dev/null`;
+		chomp($has_cpanm);
+	}
+	
+	if (@missing_modules && $has_cpanm) {
+		print $fh "Found cpanm at: $has_cpanm\n\n";
+		print $fh "Installing missing modules: " . join(', ', @missing_modules) . "\n\n";
+		
+		for my $module (@missing_modules) {
+			print $fh "--- Installing $module ---\n";
+			my $result = `cpanm --notest $module 2>&1`;
+			print $fh $result;
+			print $fh "\n";
+		}
+	} elsif (@missing_modules) {
+		print $fh "ERROR: cpanm not found. Please install cpanm first:\n";
+		print $fh "  curl -L https://cpanmin.us | perl - App::cpanminus\n";
+		print $fh "\nOr install modules manually:\n";
+		for my $module (@missing_modules) {
+			print $fh "  cpan $module\n";
+		}
+	} else {
+		print $fh "All Perl modules are already installed!\n";
+	}
+	
+	# Check external programs
+	print $fh "\n--- Checking external programs ---\n";
+	
+	my $ffmpeg = `which ffmpeg 2>/dev/null`;
+	chomp($ffmpeg);
+	if (!$ffmpeg) {
+		print $fh "ffmpeg not found. Installing via Homebrew...\n";
+		if ($^O eq 'darwin') {
+			my $result = `brew install ffmpeg 2>&1`;
+			print $fh $result;
+		} else {
+			print $fh "Please install ffmpeg manually for your platform.\n";
+		}
+	} else {
+		print $fh "ffmpeg found at: $ffmpeg\n";
+	}
+	
+	my $atomicparsley = `which AtomicParsley 2>/dev/null`;
+	chomp($atomicparsley);
+	if (!$atomicparsley) {
+		print $fh "AtomicParsley not found. Installing via Homebrew...\n";
+		if ($^O eq 'darwin') {
+			my $result = `brew install atomicparsley 2>&1`;
+			print $fh $result;
+		} else {
+			print $fh "Please install AtomicParsley manually for your platform.\n";
+		}
+	} else {
+		print $fh "AtomicParsley found at: $atomicparsley\n";
+	}
+	
+	print $fh "</pre>";
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_check_deps\'; formheader.submit(); RestoreFormVars(formheader);">Recheck Dependencies</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Network/VPN Configuration
+sub setup_network {
+	# Check current IP
+	my $ip = 'Unknown';
+	my $country = 'Unknown';
+	my $is_uk = 0;
+	
+	eval {
+		$ip = `curl -s --max-time 5 ifconfig.co 2>/dev/null` || 'Unknown';
+		chomp($ip);
+	};
+	
+	# Check if UK (simplified check)
+	if ($ip ne 'Unknown') {
+		eval {
+			my $geo = `curl -s --max-time 5 ipinfo.io/$ip/country 2>/dev/null`;
+			chomp($geo);
+			$country = $geo if $geo;
+			$is_uk = ($country eq 'GB');
+		};
+	}
+	
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Step 2</h1>';
+	print $fh '<p>Network configuration</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step active"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Network Configuration</h2>';
+	
+	# IP Status
+	print $fh '<div class="dep-check">';
+	print $fh qq{<div class="dep-status } . ($is_uk ? 'ok' : 'warn') . qq{">} . ($is_uk ? '✓' : '!') . '</div>';
+	print $fh '<div class="dep-info">';
+	print $fh '<div class="dep-name">Current IP Address</div>';
+	print $fh qq{<div class="dep-detail">$ip ($country)</div>};
+	print $fh '</div></div>';
+	
+	if ($is_uk) {
+		print $fh '<div class="setup-alert setup-alert-success">';
+		print $fh '<strong>UK Access Detected!</strong><br>';
+		print $fh 'Your IP address appears to be in the UK. You should be able to access BBC programmes.';
+		print $fh '</div>';
+	} else {
+		print $fh '<div class="setup-alert setup-alert-warning">';
+		print $fh '<strong>Non-UK IP Detected</strong><br>';
+		print $fh 'BBC programmes are only available in the UK. You need a VPN or proxy to access content.';
+		print $fh '</div>';
+		
+		print $fh '<h3>Proxy Configuration</h3>';
+		print $fh '<p>Enter your proxy settings below:</p>';
+		print $fh '<div class="setup-code">';
+		print $fh 'Proxy URL format: http://[user:pass@]host:port';
+		print $fh '</div>';
+	}
+	
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_check_deps\'; formheader.submit(); RestoreFormVars(formheader);">Back</a>';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_cache\'; formheader.submit(); RestoreFormVars(formheader);">Continue</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Cache Management
+sub setup_cache {
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Step 3</h1>';
+	print $fh '<p>Cache management</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step active"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Programme Cache</h2>';
+	
+	print $fh '<div class="setup-alert setup-alert-info">';
+	print $fh '<strong>About the Programme Cache</strong><br>';
+	print $fh 'get_iplayer maintains a local cache of available programmes. ';
+	print $fh 'This cache needs to be refreshed periodically to see new programmes.';
+	print $fh '</div>';
+	
+	# Check cache status
+	my $cache_dir = $ENV{HOME} . '/.get_iplayer';
+	my $tv_cache = "$cache_dir/tv.cache";
+	my $radio_cache = "$cache_dir/radio.cache";
+	
+	my $tv_age = -f $tv_cache ? -M $tv_cache : 999;
+	my $radio_age = -f $radio_cache ? -M $radio_cache : 999;
+	
+	print $fh '<div class="dep-check">';
+	print $fh qq{<div class="dep-status } . ($tv_age < 1 ? 'ok' : 'warn') . qq{">} . ($tv_age < 1 ? '✓' : '!') . '</div>';
+	print $fh '<div class="dep-info">';
+	print $fh '<div class="dep-name">TV Cache</div>';
+	print $fh qq{<div class="dep-detail">} . ($tv_age < 999 ? sprintf("%.1f hours old", $tv_age * 24) : "Not found") . '</div>';
+	print $fh '</div></div>';
+	
+	print $fh '<div class="dep-check">';
+	print $fh qq{<div class="dep-status } . ($radio_age < 1 ? 'ok' : 'warn') . qq{">} . ($radio_age < 1 ? '✓' : '!') . '</div>';
+	print $fh '<div class="dep-info">';
+	print $fh '<div class="dep-name">Radio Cache</div>';
+	print $fh qq{<div class="dep-detail">} . ($radio_age < 999 ? sprintf("%.1f hours old", $radio_age * 24) : "Not found") . '</div>';
+	print $fh '</div></div>';
+	
+	print $fh '<p>You can refresh the cache now or do it later from the Search tab.</p>';
+	
+	# Add refresh buttons - use direct URL instead of form submission
+	my $setup_refreshlimitradio = $opt->{REFRESH_LIMIT_RADIO}->{current} || 30;
+	my $setup_refreshlimittv = $opt->{REFRESH_LIMIT_TV}->{current} || 30;
+	print $fh '<div style="margin-top: 20px;">';
+	print $fh '<a class="setup-btn setup-btn-secondary" style="margin-right: 10px;" target="_newtab_refresh" href="?NEXTPAGE=refresh&PROGTYPES=tv,radio&REFRESH_LIMIT_RADIO='.$setup_refreshlimitradio.'&REFRESH_LIMIT_TV='.$setup_refreshlimittv.'">Refresh All Caches (TV + Radio)</a>';
+	print $fh '</div>';
+	
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_network\'; formheader.submit(); RestoreFormVars(formheader);">Back</a>';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_output\'; formheader.submit(); RestoreFormVars(formheader);">Continue</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Output Configuration
+sub setup_output {
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Step 4</h1>';
+	print $fh '<p>Output configuration</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step active"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Output Settings</h2>';
+	
+	print $fh '<div class="setup-alert setup-alert-info">';
+	print $fh '<strong>Default Output Location</strong><br>';
+	print $fh 'Recordings are saved to the output directory configured in get_iplayer options. ';
+	print $fh 'You can change this later in the Recording Options tab.';
+	print $fh '</div>';
+	
+	# Show current output setting
+	my $output = $opt->{OUTPUT}->{current} || 'Default (current directory)';
+	print $fh '<div class="dep-check">';
+	print $fh '<div class="dep-status ok">✓</div>';
+	print $fh '<div class="dep-info">';
+	print $fh '<div class="dep-name">Output Directory</div>';
+	print $fh qq{<div class="dep-detail">$output</div>};
+	print $fh '</div></div>';
+	
+	print $fh '<p>Additional settings can be configured from the Recording Options tab in the Search page.</p>';
+	
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_cache\'; formheader.submit(); RestoreFormVars(formheader);">Back</a>';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_complete\'; formheader.submit(); RestoreFormVars(formheader);">Continue</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
+
+# Setup Complete
+sub setup_complete {
+	print $fh '<div class="setup-wizard">';
+	print $fh '<div class="setup-header">';
+	print $fh '<h1>Setup Wizard - Complete!</h1>';
+	print $fh '<p>Ready to download</p>';
+	print $fh '</div>';
+	
+	# Step indicator
+	print $fh '<div class="setup-steps">';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">1</span><br>Dependencies</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">2</span><br>Network</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">3</span><br>Cache</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">4</span><br>Output</div>';
+	print $fh '<div class="setup-step completed"><span class="setup-step-number">5</span><br>Complete</div>';
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-content">';
+	print $fh '<h2>Setup Complete!</h2>';
+	
+	print $fh '<div class="setup-alert setup-alert-success">';
+	print $fh '<strong>Congratulations!</strong><br>';
+	print $fh 'get_iplayer is configured and ready to use.';
+	print $fh '</div>';
+	
+	print $fh '<h3>Next Steps</h3>';
+	print $fh '<ul>';
+	print $fh '<li>Go to the <strong>Search</strong> tab to find programmes</li>';
+	print $fh '<li>Use <strong>Refresh Cache</strong> to update the programme list</li>';
+	print $fh '<li>Click <strong>Record</strong> or <strong>Queue</strong> to download programmes</li>';
+	print $fh '<li>Use <strong>PVR List</strong> to manage scheduled recordings</li>';
+	print $fh '</ul>';
+	
+	print $fh '<h3>Need Help?</h3>';
+	print $fh '<p>Visit the <a href="https://github.com/get-iplayer/get_iplayer/wiki/webpvr" target="_blank">get_iplayer Wiki</a> for documentation and troubleshooting.</p>';
+	
+	print $fh '</div>';
+	
+	print $fh '<div class="setup-actions">';
+	print $fh '<a class="setup-btn setup-btn-secondary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'setup_output\'; formheader.submit(); RestoreFormVars(formheader);">Back</a>';
+	print $fh '<a class="setup-btn setup-btn-primary" onClick="BackupFormVars(formheader); formheader.NEXTPAGE.value=\'search_progs\'; formheader.submit(); RestoreFormVars(formheader);">Start Searching</a>';
+	print $fh '</div>';
+	print $fh '</div>';
+}
 
 
 ######################################################################
@@ -4003,6 +4609,195 @@ sub insert_stylesheet {
 
 	.darker {
 		color: #7D7D7D;
+	}
+
+	/* Setup Wizard Styles */
+	.setup-wizard {
+		max-width: 900px;
+		margin: 20px auto;
+		padding: 20px;
+		background: #222;
+		border-radius: 8px;
+	}
+
+	.setup-header {
+		text-align: center;
+		margin-bottom: 30px;
+	}
+
+	.setup-header h1 {
+		color: #F54997;
+		margin-bottom: 10px;
+	}
+
+	.setup-steps {
+		display: flex;
+		justify-content: space-between;
+		margin-bottom: 30px;
+		padding: 10px 0;
+		border-bottom: 2px solid #444;
+	}
+
+	.setup-step {
+		text-align: center;
+		flex: 1;
+		padding: 10px;
+		color: #888;
+	}
+
+	.setup-step.active {
+		color: #F54997;
+		font-weight: bold;
+	}
+
+	.setup-step.completed {
+		color: #4CAF50;
+	}
+
+	.setup-step-number {
+		display: inline-block;
+		width: 30px;
+		height: 30px;
+		line-height: 30px;
+		border-radius: 50%;
+		background: #444;
+		margin-bottom: 5px;
+	}
+
+	.setup-step.active .setup-step-number {
+		background: #F54997;
+		color: #000;
+	}
+
+	.setup-step.completed .setup-step-number {
+		background: #4CAF50;
+		color: #000;
+	}
+
+	.setup-content {
+		background: #333;
+		padding: 20px;
+		border-radius: 8px;
+		margin-bottom: 20px;
+	}
+
+	.setup-content h2 {
+		color: #F54997;
+		margin-top: 0;
+	}
+
+	.dep-check {
+		display: flex;
+		align-items: center;
+		padding: 10px;
+		margin: 5px 0;
+		background: #444;
+		border-radius: 4px;
+	}
+
+	.dep-status {
+		width: 30px;
+		height: 30px;
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		margin-right: 15px;
+		font-weight: bold;
+	}
+
+	.dep-status.ok {
+		background: #4CAF50;
+		color: #000;
+	}
+
+	.dep-status.fail {
+		background: #f44336;
+		color: #fff;
+	}
+
+	.dep-status.warn {
+		background: #ff9800;
+		color: #000;
+	}
+
+	.dep-info {
+		flex: 1;
+	}
+
+	.dep-name {
+		font-weight: bold;
+		color: #fff;
+	}
+
+	.dep-detail {
+		font-size: 0.9em;
+		color: #888;
+	}
+
+	.setup-actions {
+		display: flex;
+		justify-content: space-between;
+		margin-top: 20px;
+	}
+
+	.setup-btn {
+		padding: 10px 20px;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 1em;
+		font-weight: bold;
+	}
+
+	.setup-btn-primary {
+		background: #F54997;
+		color: #000;
+	}
+
+	.setup-btn-secondary {
+		background: #666;
+		color: #fff;
+	}
+
+	.setup-btn:hover {
+		opacity: 0.9;
+	}
+
+	.setup-code {
+		background: #111;
+		padding: 15px;
+		border-radius: 4px;
+		font-family: monospace;
+		overflow-x: auto;
+		margin: 10px 0;
+		border-left: 3px solid #F54997;
+	}
+
+	.setup-alert {
+		padding: 15px;
+		border-radius: 4px;
+		margin: 10px 0;
+	}
+
+	.setup-alert-info {
+		background: #1a3a4a;
+		border-left: 4px solid #2196F3;
+	}
+
+	.setup-alert-warning {
+		background: #3a3a1a;
+		border-left: 4px solid #ff9800;
+	}
+
+	.setup-alert-success {
+		background: #1a3a1a;
+		border-left: 4px solid #4CAF50;
+	}
+
+	.setup-alert-error {
+		background: #3a1a1a;
+		border-left: 4px solid #f44336;
 	}
 
 	</STYLE>
