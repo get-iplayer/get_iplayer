@@ -5448,6 +5448,59 @@ sub get_metadata {
 		main::logger "WARNING: Could not download programme metadata from $url\n";
 	}
 
+	# fallback to BBC Sounds RMS API (radio)
+	if ( ! $got_metadata ) {
+		my $doc = fetch_rms_episode($ua, $prog->{pid});
+		if ( $doc && $doc->{availability}->{id} ) {
+			main::logger "INFO: Using BBC Sounds API metadata for $prog->{pid}\n";
+			my $pid = $doc->{id};
+			$prog_type = $doc->{media_type} eq 'audio' ? 'radio' : 'tv';
+			$longdesc = $doc->{synopses}->{long};
+			$meddesc = $doc->{synopses}->{medium};
+			$summary = $doc->{synopses}->{short};
+			$channel = $doc->{network}->{long_title};
+			$web = "https://www.bbc.co.uk/sounds/play/$pid";
+			$player = $web;
+			for my $ancestor ( @{$doc->{ancestors}} ) {
+				$brand = $ancestor->{title} if $ancestor->{type} eq 'brand';
+				$series = $ancestor->{title} if $ancestor->{type} eq 'series';
+			}
+			# entity_title is the episode title; secondary is the series title for series episodes
+			$episode = $doc->{titles}->{entity_title} || $doc->{titles}->{tertiary} || $doc->{titles}->{secondary};
+			$name = $brand ? ( $series && $series ne $brand ? "$brand: $series" : $brand ) : ( $series || $doc->{titles}->{primary} );
+			unless ( $name ) {
+				$name = $brand = $episode;
+				$episode = "-";
+				$title = $name;
+			} else {
+				$episode ||= "-";
+				$title = "$name: $episode";
+			}
+			# release_date carries the UK broadcast date only (time is always midnight)
+			$firstbcast = $doc->{release_date} || $doc->{availability}->{available_from_date};
+			my $regex_1 = '(?:Episode|Pennod)\s+'.main::regex_numbers();
+			my $regex_2 = '^'.main::regex_numbers().'\.\s+';
+			if ( "$name $episode" =~ m{$regex_1}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			} elsif ( $episode =~ m{$regex_2}i ) {
+				$episodenum = main::convert_words_to_number( $1 );
+			}
+			my $regex = '(?:Series|Cyfres|Season)\s+'.main::regex_numbers();
+			$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+			$seriesnum = 1 if ( ! $seriesnum && $episodenum );
+			my @categories = map { $_->{title} } grep { $_->{type} eq 'genre' } @{$doc->{categories}};
+			$categories = join(',', @categories) || "get_iplayer";
+			$category = $categories[0] || "get_iplayer";
+			my ($image) = grep { $_->{type} eq 'standard' } @{$doc->{images}};
+			if ( $image && $image->{url} ) {
+				($thumbnail = $image->{url}) =~ s/\{recipe\}/$recipe/;
+			}
+			$prog->{verpids}->{default} = $doc->{availability}->{id};
+			$prog->{durations}->{default} = $doc->{availability}->{duration};
+			$got_metadata = 1;
+		}
+	}
+
 	# Get list of available modes for each version available
 	# populate version PIDs and metadata if we don't have them already
 	if ( ! $got_metadata || keys %{ $prog->{verpids} } == 0 ) {
@@ -5622,6 +5675,78 @@ sub get_metadata {
 	return 0;
 }
 
+# BBC Sounds RMS API - fallback for radio metadata since /programmes was withdrawn (Oct 2026)
+sub fetch_rms_json {
+	my $ua = shift;
+	my $path = shift;
+	my $url = "https://rms.api.bbc.co.uk/v2/$path";
+	main::logger "INFO: RMS URL = $url\n" if $opt->{verbose};
+	my $json = main::request_url_retry($ua, $url, 3, '', '', undef, undef, 1);
+	return unless $json;
+	my $dec = eval { decode_json($json) };
+	if ( $@ ) {
+		main::logger "WARNING: Could not parse RMS JSON: $url\n";
+		return;
+	}
+	return $dec;
+}
+
+# Return RMS episode record for an episode/clip PID
+sub fetch_rms_episode {
+	my $ua = shift;
+	my $pid = shift;
+	my $dec = fetch_rms_json($ua, "programmes/$pid");
+	return unless $dec && $dec->{data};
+	my ($doc) = grep { $_->{id} eq $pid } @{$dec->{data}};
+	return $doc;
+}
+
+# Return list of RMS playable items for a brand/series PID, newest first
+# $type is 'episode' or 'clip' (optional - default all)
+sub fetch_rms_playables {
+	my $ua = shift;
+	my $pid = shift;
+	my $type = shift;
+	my $max = shift;
+	my @items;
+	my $offset = 0;
+	my $limit = 100;
+	my $type_param = $type ? "&type=$type" : "";
+	while ( 1 ) {
+		my $dec = fetch_rms_json($ua, "programmes/playable?container=$pid$type_param&offset=$offset&limit=$limit");
+		last unless $dec && $dec->{data} && @{$dec->{data}};
+		push @items, @{$dec->{data}};
+		$offset += $limit;
+		last if $offset >= $dec->{total} || ( $max && @items >= $max );
+	}
+	my %release;
+	for my $item ( @items ) {
+		$release{$item} = Programme::get_time_string( $item->{release}->{date} || $item->{availability}->{from} ) || 0;
+	}
+	return sort { $release{$b} <=> $release{$a} } @items;
+}
+
+# PID of the episode/clip in an RMS item (its id is the version PID)
+sub rms_episode_pid {
+	my $item = shift;
+	my ($pid) = $item->{urn} =~ /:([a-z0-9]{8,})$/;
+	return $pid;
+}
+
+# Programme name and episode title from RMS titles
+# Series episodes: primary = brand, secondary = series, tertiary = episode
+sub rms_name_episode {
+	my $titles = shift;
+	my $name = $titles->{primary};
+	my $episode = $titles->{secondary};
+	if ( $titles->{tertiary} ) {
+		$name .= ": $titles->{secondary}" if $titles->{secondary};
+		$episode = $titles->{tertiary};
+	}
+	$episode ||= $titles->{entity_title} || '-';
+	return ( $name, $episode );
+}
+
 sub fetch_pid_info {
 	my $ua = shift;
 	my $pid = shift;
@@ -5663,6 +5788,40 @@ sub fetch_pid_info {
 		}
 	} else {
 		main::logger "WARNING: Failed to download JSON PID info: $url\n";
+	}
+	# fallback to BBC Sounds RMS API (radio) and iBL API (tv)
+	unless ( $pid_type ) {
+		my $source;
+		if ( my $doc = fetch_rms_episode($ua, $pid) ) {
+			$source = "BBC Sounds";
+			$pid_type = $doc->{type};
+			$prog_type = $doc->{media_type} eq 'audio' ? 'radio' : 'tv';
+			($prog_name, $prog_episode) = rms_name_episode($doc->{titles});
+			$prog_channel = $doc->{network}->{long_title};
+			$prog_desc = $doc->{synopses}->{short};
+		} elsif ( my ($item) = fetch_rms_playables($ua, $pid, undef, 1) ) {
+			# RMS reports container type 'brand' even for series PIDs - both handled the same
+			$source = "BBC Sounds";
+			$pid_type = 'brand';
+			$prog_type = 'radio';
+			$prog_name = $item->{container}->{title};
+			$prog_channel = $item->{network}->{short_title};
+			$prog_channel = "BBC $prog_channel" if $prog_channel && $prog_channel !~ /^BBC/;
+		} else {
+			my ($ibl, $dec, $doc);
+			$ibl = main::request_url_retry($ua, "https://ibl.api.bbc.co.uk/ibl/v1/programmes/$pid", 3, '', '', undef, undef, 1);
+			$dec = eval { decode_json($ibl) } if $ibl;
+			$doc = $dec->{programmes}->[0] if $dec;
+			if ( $doc && $doc->{id} eq $pid ) {
+				$source = "iBL";
+				$pid_type = $doc->{tleo_type} eq 'series' ? 'series' : 'brand';
+				$prog_type = 'tv';
+				$prog_name = $doc->{title};
+				$prog_channel = $doc->{master_brand}->{titles}->{small};
+				$prog_desc = $doc->{synopses}->{small};
+			}
+		}
+		main::logger "INFO: PID info from $source API ($pid): $pid_type\n" if $pid_type && $opt->{verbose};
 	}
 	return ($pid_type, $prog_type, $prog_name, $prog_episode, $prog_channel, $prog_desc);
 }
@@ -5730,6 +5889,19 @@ sub fetch_episodes_recursive {
 		$max_page = $last_page if $last_page > $max_page;
 		$curr_page++;
 	} while ( $curr_page <= $max_page ) };
+	if ( ! ( $eps && @$eps ) && $prog_type eq 'radio' ) {
+		main::logger "INFO: No episodes found, checking BBC Sounds API...\n" if $opt->{verbose};
+		# episodes only - /programmes/<pid>/episodes/player did not list clips
+		for my $item ( fetch_rms_playables($ua, $parent_pid, 'episode') ) {
+			my $pid = rms_episode_pid($item);
+			next unless $pid;
+			next if $seen{$pid}++;
+			my ($item_name, $item_episode) = rms_name_episode($item->{titles});
+			my $item_channel = $item->{network}->{short_title};
+			$item_channel = "BBC $item_channel" if $item_channel && $item_channel !~ /^BBC/;
+			push @$eps, main::progclass($prog_type)->new( pid => $pid, type => $prog_type, name => $item_name, episode => $item_episode, channel => $item_channel, desc => $item->{synopses}->{short} );
+		}
+	}
 	unless ( $eps && @$eps ) {
 		main::logger "INFO: No episodes found, checking alternate location...\n" if $opt->{verbose};
 		%seen = undef;
@@ -7146,6 +7318,7 @@ sub get_links_schedule {
 		$timepiece = Time::Piece::gmtime($limit);
 		$stop = Time::Piece::gmtime($now + $one_week);
 	}
+	my ($rms_start, $rms_stop) = ($timepiece, $stop);
 	my $iso8601_year_diff;
 	while ( $timepiece->week != $stop->week ) {
 		$iso8601_year_diff = int($timepiece->mon == 12 && $timepiece->week == 1);
@@ -7175,6 +7348,9 @@ sub get_links_schedule {
 				}
 			}
 			my $rc = $self->get_links_schedule_mojo($prog, $prog_type, $future, $limit, $now, \@mojo_urls, \%mojo_channel_ids, \%mojo_channels);
+			if ( $rc && $prog_type eq 'radio' ) {
+				$rc = $self->get_links_schedule_rms($prog, $prog_type, $future, $limit, $now, $rms_start, $rms_stop);
+			}
 			if ( $rc ) {
 				return 1 if $opt->{refreshabortonerror};
 			}
@@ -7185,17 +7361,187 @@ sub get_links_schedule {
 	my $ua = main::create_ua( 'desktop', 1 );
 	$ua->timeout(60);
 	main::logger "\nINFO: Indexing $prog_type programme schedules (fallback)".($future ? " [future]\n" : "\n");
+	my $rc_lwp;
 	for my $channel_id ( @channel_list ) {
 		for my $schedule_date ( @schedule_dates ) {
 			my ($url, $rc);
 			$url = "https://www.bbc.co.uk/schedules/${channel_id}/${schedule_date}";
 			$rc = $self->get_links_schedule_lwp($ua, $prog, $prog_type, $channel_id, $channels{$channel_id}, $future, $url, $limit, $now);
 			if ( $rc ) {
-				return 1 if $opt->{refreshabortonerror};
+				$rc_lwp = 1;
+				return 1 if $opt->{refreshabortonerror} && $prog_type ne 'radio';
 				next;
 			}
 		}
 	}
+	if ( $rc_lwp && $prog_type eq 'radio' ) {
+		my $rc = $self->get_links_schedule_rms($prog, $prog_type, $future, $limit, $now, $rms_start, $rms_stop);
+		return 1 if $rc && $opt->{refreshabortonerror};
+	}
+}
+
+# BBC Sounds RMS service ids for radio schedule channel ids
+sub rms_service_ids {
+	return {
+		'p00fzl64' => 'bbc_1xtra',
+		'p00fzl7g' => 'bbc_radio_five_live',
+		'p00fzl7h' => 'bbc_radio_five_live_sports_extra',
+		'p00fzl65' => 'bbc_6music',
+		'p00fzl68' => 'bbc_asian_network',
+		'p00fzl86' => 'bbc_radio_one',
+		'p00fzl8v' => 'bbc_radio_two',
+		'p00fzl8t' => 'bbc_radio_three',
+		'p00fzl7j' => 'bbc_radio_fourfm',
+		'p00fzl7l' => 'bbc_radio_four_extra',
+		'p02zbmb3' => 'bbc_world_service',
+		'p02jf21y' => 'cbeebies_radio',
+		'p00fzl7b' => 'bbc_radio_cymru',
+		'p00fzl7m' => 'bbc_radio_foyle',
+		'p00fzl81' => 'bbc_radio_nan_gaidheal',
+		'p00fzl8d' => 'bbc_radio_scotland_fm',
+		'p00fzl8g' => 'bbc_radio_scotland_mw',
+		'p00fzl8b' => 'bbc_radio_orkney',
+		'p00fzl8j' => 'bbc_radio_shetland',
+		'p00fzl8w' => 'bbc_radio_ulster',
+		'p00fzl8y' => 'bbc_radio_wales_fm',
+		'p00fzl8x' => 'bbc_radio_wales_am',
+		'p00fzl6f' => 'bbc_london',
+		'p00fzl74' => 'bbc_radio_berkshire',
+		'p00fzl75' => 'bbc_radio_bristol',
+		'p00fzl76' => 'bbc_radio_cambridge',
+		'p00fzl77' => 'bbc_radio_cornwall',
+		'p00fzl78' => 'bbc_radio_coventry_warwickshire',
+		'p00fzl79' => 'bbc_radio_cumbria',
+		'p00fzl7c' => 'bbc_radio_derby',
+		'p00fzl7d' => 'bbc_radio_devon',
+		'p00fzl7f' => 'bbc_radio_essex',
+		'p00fzl7n' => 'bbc_radio_gloucestershire',
+		'p00fzl7p' => 'bbc_radio_guernsey',
+		'p00fzl7q' => 'bbc_radio_hereford_worcester',
+		'p00fzl7r' => 'bbc_radio_humberside',
+		'p00fzl7s' => 'bbc_radio_jersey',
+		'p00fzl7t' => 'bbc_radio_kent',
+		'p00fzl7v' => 'bbc_radio_lancashire',
+		'p00fzl7w' => 'bbc_radio_leeds',
+		'p00fzl7x' => 'bbc_radio_leicester',
+		'p00fzl7y' => 'bbc_radio_lincolnshire',
+		'p00fzl7z' => 'bbc_radio_manchester',
+		'p00fzl80' => 'bbc_radio_merseyside',
+		'p00fzl82' => 'bbc_radio_newcastle',
+		'p00fzl83' => 'bbc_radio_norfolk',
+		'p00fzl84' => 'bbc_radio_northampton',
+		'p00fzl85' => 'bbc_radio_nottingham',
+		'p00fzl8c' => 'bbc_radio_oxford',
+		'p00fzl8h' => 'bbc_radio_sheffield',
+		'p00fzl8k' => 'bbc_radio_shropshire',
+		'p00fzl8l' => 'bbc_radio_solent',
+		'p00fzl8m' => 'bbc_radio_somerset_sound',
+		'p00fzl8n' => 'bbc_radio_stoke',
+		'p00fzl8p' => 'bbc_radio_suffolk',
+		'p00fzl8q' => 'bbc_radio_surrey',
+		'p00fzl8r' => 'bbc_radio_sussex',
+		'p00fzl8z' => 'bbc_radio_wiltshire',
+		'p00fzl90' => 'bbc_radio_york',
+		'p00fzl93' => 'bbc_tees',
+		'p00fzl96' => 'bbc_three_counties_radio',
+		'p00fzl9f' => 'bbc_wm',
+	};
+}
+
+# get radio cache info from BBC Sounds RMS daily schedules (/schedules was withdrawn Oct 2026)
+sub get_links_schedule_rms {
+	my $self = shift;
+	my $prog = shift;
+	my $prog_type = shift;
+	my $future = shift;
+	my $limit = shift;
+	my $now = shift;
+	my $timepiece = shift;
+	my $stop = shift;
+	my $one_day = 86400;
+	my $thirty_days = 30 * $one_day;
+	my $min_available = $limit || ( $now - $thirty_days );
+	my %channels = %{ main::progclass($prog_type)->channels_filtered( main::progclass($prog_type)->channels_schedule() ) };
+	my $service_ids = rms_service_ids();
+	my $ua = main::create_ua( 'desktop', 1 );
+	$ua->timeout(60);
+	my $rc_all;
+	main::logger "\nINFO: Indexing $prog_type programme schedules (BBC Sounds)".($future ? " [future]\n" : "\n");
+	for my $channel_id ( sort keys %channels ) {
+		my $service_id = $service_ids->{$channel_id};
+		unless ( $service_id ) {
+			main::logger "WARNING: No BBC Sounds schedule mapping for $channels{$channel_id} ($channel_id) - skipping\n";
+			next;
+		}
+		my $channel = $channels{$channel_id};
+		# schedules are per UK day, so include the day either side of the range
+		my $last_date = Time::Piece::gmtime( ( $future ? $stop->epoch : $now ) + $one_day )->strftime('%Y-%m-%d');
+		for ( my $day = $timepiece - $one_day; $day->strftime('%Y-%m-%d') le $last_date; $day += $one_day ) {
+			my $date = $day->strftime('%Y-%m-%d');
+			my $url = "https://rms.api.bbc.co.uk/v2/broadcasts/schedules/$service_id/$date";
+			my $json = main::request_url_retry($ua, $url, 3, '', '', undef, undef, 1);
+			my $dec;
+			$dec = eval { decode_json($json) } if $json;
+			unless ( $dec && $dec->{data} ) {
+				main::logger "\nWARNING: Failed to get $channel schedule: $url\n";
+				$rc_all = 1;
+				next;
+			}
+			main::logger ".";
+			for my $entry ( @{$dec->{data}} ) {
+				my ($pid) = $entry->{urn} =~ /:([a-z0-9]{8,})$/;
+				next unless $pid;
+				my $available_str = $entry->{end} || $entry->{start};
+				next unless $available_str;
+				my $available = Programme::get_time_string( $available_str );
+				next if $available < $min_available;
+				next if ! $future && $available > $now;
+				next if $future && $available <= $now;
+				my $expires = $available + $thirty_days;
+				if ( defined $prog->{$pid} ) {
+					if ( $prog->{$pid}->{available} && $available_str lt $prog->{$pid}->{available} ) {
+						$prog->{$pid}->{available} = $available_str;
+					}
+					if ( $prog->{$pid}->{expires} && $expires > $prog->{$pid}->{expires} ) {
+						$prog->{$pid}->{expires} = $expires;
+					}
+					next;
+				}
+				my ($name, $episode) = Programme::bbciplayer::rms_name_episode($entry->{titles});
+				my $desc = $entry->{synopses}->{short};
+				my $episodenum;
+				my $regex_1 = '(?:Episode|Pennod)\s+'.main::regex_numbers();
+				$episodenum = main::convert_words_to_number( $1 ) if $episode =~ m{$regex_1}i;
+				my $seriesnum;
+				my $regex = '(?:Series|Cyfres|Season)\s+'.main::regex_numbers();
+				$seriesnum = main::convert_words_to_number( $1 ) if "$name $episode" =~ m{$regex}i;
+				my $thumbnail = $entry->{image_url} || DEFAULT_THUMBNAIL;
+				$thumbnail =~ s!\{recipe\}!192xn!;
+				$thumbnail =~ s!/\d+xn/!/192xn/!;
+				for ( $name, $episode, $desc ) {
+					$_ =~ s/[\r\n]/ /g;
+					$_ =~ s/\|/-/g;
+				}
+				$prog->{$pid} = main::progclass($prog_type)->new(
+					'pid'		=> $pid,
+					'name'		=> $name,
+					'episode'	=> $episode,
+					'seriesnum'	=> $seriesnum,
+					'episodenum'	=> $episodenum,
+					'desc'		=> $desc,
+					'duration'	=> $entry->{duration},
+					'channel'	=> $channel,
+					'type'		=> $prog_type,
+					'web'		=> "https://www.bbc.co.uk/sounds/play/$pid",
+					'available' => $available_str,
+					'expires' => $expires,
+					'thumbnail'	=> $thumbnail,
+				);
+			}
+		}
+	}
+	return 1 if $rc_all && $opt->{refreshabortonerror};
+	return;
 }
 
 # get cache info from schedule html with Mojolicious
