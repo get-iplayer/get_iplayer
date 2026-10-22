@@ -4657,6 +4657,44 @@ sub download_thumbnail {
 	return 0;
 }
 
+# Track times from BBC Sounds RMS API in /programmes segments.json format
+sub get_segments_rms {
+	my ( $prog, $ua ) = @_;
+	my $rms = "https://rms.api.bbc.co.uk/v2";
+	my ($json, $dec);
+	my $verpid = $prog->{verpids}->{$prog->{version} || 'default'};
+	($verpid) = values %{$prog->{verpids}} unless $verpid || ! $prog->{verpids};
+	unless ( $verpid ) {
+		# version PID of the available episode
+		$json = main::request_url_retry($ua, "$rms/programmes/$prog->{pid}", 3, undef, undef, undef, undef, 1);
+		$dec = $json ? eval { decode_json($json) } : undef;
+		if ( $dec && ref $dec->{data} eq 'ARRAY' ) {
+			my ($doc) = grep { $_->{id} eq $prog->{pid} } @{$dec->{data}};
+			$verpid = $doc->{availability}->{id} if $doc;
+		}
+	}
+	return unless $verpid;
+	$json = main::request_url_retry($ua, "$rms/versions/$verpid/segments", 3, undef, undef, undef, undef, 1);
+	$dec = $json ? eval { decode_json($json) } : undef;
+	return unless $dec && ref $dec->{data} eq 'ARRAY' && @{$dec->{data}};
+	main::logger "INFO: Using BBC Sounds API track data for $prog->{pid}\n";
+	my @events;
+	for my $seg ( @{$dec->{data}} ) {
+		my $offset = $seg->{offset} || {};
+		my $duration;
+		$duration = $offset->{end} - $offset->{start} if defined($offset->{start}) && $offset->{end} > $offset->{start};
+		push @events, {
+			version_offset => $offset->{start},
+			segment => {
+				artist => $seg->{titles}->{primary},
+				title => $seg->{titles}->{secondary},
+				duration => $duration,
+			},
+		};
+	}
+	return { segment_events => \@events };
+}
+
 sub download_tracklist {
 	my $prog = shift;
 	my ($times_trk, $durations_trk, $times_cue, $durations_cue);
@@ -4691,13 +4729,19 @@ sub download_tracklist {
 		}
 		undef $json;
 	}
-	unless ( $json =~ /\w/ ) {
+	my $jom;
+	if ( $json =~ /\w/ ) {
+		$jom = eval { decode_json($json) };
+		undef $jom if ( $@ );
+	}
+	unless ( $jom && ref $jom->{segment_events} eq 'ARRAY' && @{$jom->{segment_events}} ) {
+		$jom = $prog->get_segments_rms($ua);
+	}
+	unless ( $jom ) {
 		main::logger "WARNING: Track times not defined\n";
 		return 1;
 	}
-	my $jom = eval { decode_json($json) };
-	undef $jom if ( $@ );
-	unless ( $jom && @{$jom->{segment_events}} ) {
+	unless ( ref $jom->{segment_events} eq 'ARRAY' && @{$jom->{segment_events}} ) {
 		main::logger "WARNING: Track times invalid\n";
 		return 1;
 	}
