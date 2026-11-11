@@ -6252,7 +6252,20 @@ sub parse_dash_connection {
 			if ( ! $template ) {
 				($template) = $xpc->findnodes('mpd:SegmentTemplate', $repr);
 			}
-			my $segment_duration = $template->findvalue('@duration') / $template->findvalue('@timescale');
+			# segment length is either SegmentTemplate@duration or the S@d values of a SegmentTimeline
+			my $segment_ticks = $template->findvalue('@duration');
+			if ( ! $segment_ticks ) {
+				# only uniform segments are supported (the last may be shorter)
+				my @lengths = map { $_->findvalue('@d') } $xpc->findnodes('mpd:SegmentTimeline/mpd:S', $template);
+				pop @lengths if @lengths > 1;
+				$segment_ticks = $lengths[0] if @lengths && ! grep { $_ != $lengths[0] } @lengths;
+			}
+			my $segment_timescale = $template->findvalue('@timescale');
+			if ( ! $segment_ticks || ! $segment_timescale ) {
+				main::logger "WARNING: Cannot determine DASH segment duration - skipping manifest ($conn->{href})\n";
+				return;
+			}
+			my $segment_duration = $segment_ticks / $segment_timescale;
 			my $num_segments = int($programme_duration / $segment_duration);
 			$num_segments++ if $segment_duration * $num_segments < $programme_duration;
 			my $repr_media = {};
